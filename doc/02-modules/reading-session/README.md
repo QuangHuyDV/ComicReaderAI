@@ -1,308 +1,308 @@
 # Reading Session Module
 
-The Reading Session Module is the orchestration center of CRAI.
-
-It manages the lifecycle of a reading activity and coordinates the execution of every processing module.
-
-Unlike other modules, Reading Session does not perform any business processing. Its responsibility is to decide **what should run, when it should run, and whether the produced results are still valid**.
+- Module: Reading Session
+- Identifier: reading-session
+- Layer: Business Orchestration
+- Version: 2.0.0
+- Status: Draft
+- Owner: CRAI Architecture
 
 ---
 
-# Responsibilities
+# 1. Overview
 
-The Reading Session Module is responsible for:
+The Reading Session Module is the business orchestrator of the CRAI reading domain.
 
-- Creating reading sessions.
-- Maintaining session lifecycle.
-- Managing processing revisions.
-- Coordinating processing modules.
-- Cancelling obsolete work.
-- Restarting processing when necessary.
-- Tracking pipeline progress.
-- Publishing session lifecycle events.
+Its responsibility is to maintain a consistent understanding of an active reading activity.
 
-It is **not** responsible for:
+Reading Session owns:
 
-- Screen capture
+- business lifecycle
+- reading context
+- content revisions
+- processing intentions
+- session configuration
+
+Reading Session does **not** execute processing.
+
+Execution belongs to Runtime.
+
+---
+
+# 2. Responsibilities
+
+Reading Session is responsible for:
+
+- creating Reading Sessions;
+- maintaining Session lifecycle;
+- managing Reading Context;
+- creating immutable Content Revisions;
+- generating Processing Intent;
+- maintaining business consistency;
+- publishing business events;
+- protecting business history.
+
+Reading Session is **not** responsible for:
+
 - OCR
-- Text normalization
-- Translation
-- Presentation rendering
-- Persistent storage
-
----
-
-# Position in Architecture
-
-```text
-                User
-                  │
-                  ▼
-          Reading Session
-                  │
-      ┌───────────┼───────────┐
-      ▼           ▼           ▼
-   Capture   Session Events   Configuration
-      │
-      ▼
- Recognition
-      │
-      ▼
-Text Processing
-      │
-      ▼
- Translation
-      │
-      ▼
- Presentation
-      │
-      ▼
- UI Adapter
-```
-
-Reading Session is the only module responsible for coordinating the processing pipeline.
-
-Processing modules never invoke each other directly.
-
----
-
-# Session Lifecycle
-
-A typical session follows this lifecycle:
-
-```text
-Create Session
-       │
-       ▼
-Initialize
-       │
-       ▼
-Running
-       │
-       ▼
-Processing Pipeline
-       │
-       ▼
-Completed
-```
-
-The session may also:
-
-- Pause
-- Resume
-- Restart
-- Cancel
-- Fail
-
-depending on user actions or processing results.
-
----
-
-# Processing Pipeline
-
-The Reading Session Module coordinates the following pipeline:
-
-```text
-Capture
-    │
-    ▼
-Recognition
-    │
-    ▼
-Text Processing
-    │
-    ▼
-Translation
-    │
-    ▼
-Presentation
-```
-
-Each stage executes independently.
-
-Reading Session determines when each stage begins.
-
----
-
-# Session Context
-
-Each Reading Session maintains:
-
-- Session Identifier
-- Source Identifier
-- Source Type
-- Session Revision
-- Processing Revision
-- Current State
-- Active Pipeline
-- Session Configuration
-
-The session context is shared across the processing pipeline.
-
----
-
-# Revision Management
-
-Reading Session owns all revisions.
-
-Whenever the reading context changes, a new revision is created.
-
-Examples include:
-
-- browser navigation
-- chapter change
-- page change
-- viewport change
-- configuration update
-
-Older revisions become obsolete and must never overwrite newer results.
-
----
-
-# Scheduling
-
-Reading Session decides when processing should:
-
-- Start
-- Continue
-- Restart
-- Retry
-- Stop
-
-Processing modules never schedule themselves.
-
----
-
-# Cancellation
-
-Reading Session is responsible for cancelling obsolete work.
-
-Typical scenarios include:
-
-- User changes chapter.
-- User navigates to another page.
-- Reading source changes.
-- Session is cancelled.
-- A newer revision becomes active.
-
-Cancellation prevents unnecessary computation and stale results.
-
----
-
-# Event Model
-
-Reading Session consumes events from:
-
-- User Interface
-- Browser Adapter
-- Capture
-- Recognition
-- Text Processing
 - Translation
 - Presentation
+- Scheduling
+- Worker execution
+- Queue management
+- Provider selection
+- Runtime retry
+- Infrastructure monitoring
 
-It publishes events describing:
-
-- Session lifecycle
-- Pipeline lifecycle
-- Revision lifecycle
-
-Processing modules publish only processing events.
-
----
-
-# State Management
-
-Reading Session owns the overall execution state.
-
-Typical states include:
-
-- Initialized
-- Running
-- Paused
-- Restarting
-- Completed
-- Cancelled
-- Failed
-
-Processing modules manage only their own internal states.
+Those responsibilities belong to other modules.
 
 ---
 
-# Error Handling
+# 3. Business Concepts
 
-Reading Session is responsible for deciding how the system reacts to failures.
+Reading Session owns five business concepts.
 
-Possible actions include:
+```text
+Reading Session
 
-- Retry
-- Restart pipeline
-- Cancel session
-- Ignore obsolete results
-- Enter Failed state
+├── ReadingSession
+├── ReadingContext
+├── ContentRevision
+├── ProcessingIntent
+└── SessionConfiguration
+```
 
-Processing modules report failures but do not decide recovery strategies.
+Each concept has:
+
+- lifecycle
+- ownership
+- business identity
+- immutable history where applicable
+
+No other module owns these concepts.
 
 ---
 
-# Design Principles
+# 4. Module Position
 
-## Single Orchestrator
+Reading Session occupies the center of the business architecture.
 
-Only Reading Session coordinates the processing pipeline.
+```text
+                 User
+                   │
+                   ▼
+           Reading Session
+          (Business State)
+                   │
+     ┌─────────────┼─────────────┐
+     ▼             ▼             ▼
+
+ Business      Runtime      Analytics
+ Events
+```
+
+Reading Session communicates through business contracts.
+
+It never coordinates implementation details.
 
 ---
 
-## Revision-Based Execution
+# 5. Public Contracts
 
-Every processing task belongs to exactly one processing revision.
+Reading Session exposes business contracts to the rest of the system.
+
+These contracts are documented separately.
+
+```text
+MODULE.md
+
+↓
+
+CONTRACT.md
+
+↓
+
+STATES.md
+
+↓
+
+EVENTS.md
+
+↓
+
+ERRORS.md
+```
+
+Each document owns one architectural concern.
+
+---
+
+# 6. Internal Documents
+
+The Reading Session specification consists of the following documents.
+
+| Document | Purpose |
+|----------|---------|
+| README.md | Module overview |
+| MODULE.md | Responsibilities and ownership |
+| CONTRACT.md | Public business contracts |
+| STATES.md | Business lifecycle |
+| EVENTS.md | Business events |
+| ERRORS.md | Business failure model |
+
+Together they define the complete business behavior of Reading Session.
+
+---
+
+# 7. Design Principles
+
+Reading Session follows several architectural principles.
+
+---
+
+## Business First
+
+Reading Session models business concepts.
+
+It never models Runtime execution.
+
+---
+
+## Single Ownership
+
+Every business concept has exactly one owner.
+
+Ownership is never shared.
 
 ---
 
 ## Immutable History
 
-Previous revisions are never modified.
+Business history is append-only.
+
+Previous revisions remain historically correct.
 
 ---
 
-## Loose Coupling
+## Explicit State
 
-Modules communicate through events rather than direct dependencies.
+Every lifecycle transition is documented.
 
----
-
-## Deterministic Scheduling
-
-Given the same session state and events, scheduling decisions are deterministic.
+No hidden business state exists.
 
 ---
 
-# Performance Goals
+## Event-Driven
 
-The module should:
+Business communication occurs through immutable events.
 
-- Avoid duplicate processing.
-- Cancel obsolete work immediately.
-- Maximize cache reuse.
-- Minimize unnecessary pipeline restarts.
-- Support future concurrent sessions.
+Events describe completed facts,
+
+never requested work.
 
 ---
 
-# Related Documents
+## Runtime Independence
 
-| Document | Description |
-|----------|-------------|
-| MODULE.md | Module responsibilities and boundaries |
-| CONTRACT.md | Public contracts |
-| EVENTS.md | Published and consumed events |
-| STATES.md | Session state machine |
-| ERRORS.md | Error definitions |
+Reading Session is independent of execution technology.
+
+The same business model remains valid regardless of:
+
+- OCR engine
+- translation provider
+- presentation engine
+- execution strategy
 
 ---
 
-# Summary
+# 8. Module Dependencies
 
-The Reading Session Module is the orchestration layer of CRAI.
+Reading Session depends only on business contracts.
 
-It owns the lifecycle of every reading activity, coordinates the processing pipeline, manages revisions, and ensures that only the latest valid results are propagated through the system. By centralizing orchestration, the architecture remains deterministic, loosely coupled, and easier to extend as new processing modules are introduced.
+Conceptually:
+
+```text
+Reading Session
+
+↓
+
+Business Contracts
+
+↓
+
+Runtime
+```
+
+Reading Session never depends directly upon:
+
+```text
+OCR
+
+Translation
+
+Presentation
+
+Worker
+
+Scheduler
+
+Queue
+```
+
+Implementation modules evolve independently.
+
+---
+
+# 9. Future Evolution
+
+The Reading Session business model is designed for extension.
+
+Future capabilities may include:
+
+- multiple simultaneous Reading Sessions;
+- collaborative reading;
+- synchronized devices;
+- cloud session recovery;
+- shared annotations;
+- intelligent reading assistance.
+
+These additions should extend existing business concepts rather than replace them.
+
+---
+
+# 10. Summary
+
+Reading Session is the business orchestrator of the CRAI reading domain.
+
+It owns the lifecycle of reading activities,
+
+maintains business consistency,
+
+creates immutable Content Revisions,
+
+generates Processing Intent,
+
+and publishes business events describing changes to the reading world.
+
+Reading Session deliberately avoids Runtime concerns.
+
+This separation ensures:
+
+- deterministic business behavior;
+- stable public contracts;
+- append-only business history;
+- clear ownership;
+- independent Runtime evolution;
+- long-term architectural maintainability.
+
+For detailed behavior, refer to the accompanying documents:
+
+- `MODULE.md`
+- `CONTRACT.md`
+- `STATES.md`
+- `EVENTS.md`
+- `ERRORS.md`
+
+---
+
+# End of Document

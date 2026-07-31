@@ -1,106 +1,204 @@
 # CRAI — Project Status
 
-**Date:** 2026-07-30  
+**Updated:** 2026-07-31  
 **Project key:** `CRAI`  
-**Architecture Status:**
-- Core Architecture        ✅ Complete
-- Runtime Architecture     ✅ Complete (Refinement Remaining)
-- Business Modules         🟡 In Progress
-- Implementation           ❌ Not Started
+**Document role:** Current project entry point and architecture status summary  
+**Approach:** Documentation First · Capability First · User Experience First · Provider Independent
 
-**Approach:** Documentation First · Capability First · UX First · Provider Independent
-
+> This document records the current architectural truth of CRAI and the history that led to it.  
+> Detailed module and architecture documents remain the authoritative source for their own scope.
 
 ---
 
-## Current Progress
+# 1. Executive Summary
 
-| Area                  | Status        |
-Project Foundation       ✅ Complete
+## 1.1 Project Overview
 
-Product Analysis         ✅ Complete
+CRAI is a desktop-first application that helps users read and translate foreign-language novels, comics, documents and on-screen content with minimal interruption to the reading experience.
 
-Capability Analysis      ✅ Complete
+The initial product focus is:
 
-Core Architecture        ✅ Complete
+- source languages: Simplified Chinese, Traditional Chinese and English
+- initial target language: Vietnamese
+- direct structured-text acquisition whenever available
+- OCR only when structured text cannot be obtained reliably
+- Side Panel as the primary MVP presentation mode
+- Overlay supported through a separate architectural boundary
+- local-first and privacy-aware processing where practical
+- replaceable OCR, translation and platform implementations
 
-Runtime Architecture     ✅ Complete
-
-Capture Module           ✅ Complete
-
-Recognition Module       ✅ Complete
-
-Text Processing Module   ✅ Complete
-
-Translation Module       ✅ Complete
-
-Presentation Module      🟡 In Progress
-
-Reading Module           ⏳ Planned
-
-Storage Module           ⏳ Planned
-
-Event Standard           🟡 In Progress
-
-Implementation           ❌ Not Started
+CRAI is not designed as a single OCR-to-translation script. It is designed as a modular reading system that separates content acquisition, recognition, text preparation, translation, presentation, session control and persistence responsibilities.
 
 ---
 
-## 20. Cập nhật kiến trúc (2026-07-29)
+## 1.2 Product and Architecture Principles
 
-### Module Architecture
+The project currently follows these principles:
 
-Đã thống nhất chuyển sang Business Modules:
+- **Documentation First** — architecture and contracts are clarified before implementation.
+- **Capability First** — system capabilities are analyzed before deciding module boundaries.
+- **User Experience First** — technical choices must minimize interruption while reading.
+- **Provider Independent** — business architecture does not depend on a specific OCR or translation provider.
+- **Explicit Ownership** — every state, model, command, event and persisted record has a defined owner.
+- **Serializable Boundaries** — public contracts must be serializable and implementation-neutral.
+- **Immutable Results** — cross-module results and artifacts are treated as immutable values or references.
+- **Current Revision Authority** — only the current valid content revision may commit user-visible results.
+- **Privacy by Default** — screenshots, clipboard content, OCR text and translated text are not logged or persisted by default.
+- **Reversible Design** — implementation choices should remain replaceable until real constraints justify commitment.
+
+The analysis order remains:
+
+```text
+Product Goal
+    ↓
+Capabilities
+    ↓
+User Journeys
+    ↓
+Use Cases and Workflows
+    ↓
+State, Event and Data Models
+    ↓
+Business Modules
+    ↓
+Runtime and Infrastructure
+    ↓
+Implementation
+```
+
+---
+
+## 1.3 Current Architecture Status
+
+| Architecture Area | Status | Current Meaning |
+|---|---|---|
+| Project Foundation | ✅ Complete | AI, project and module rules are established. |
+| Product Analysis | ✅ Complete | Product goal, scope and primary user journeys are defined. |
+| Capability Analysis | ✅ Complete | Core capabilities and their boundaries are documented. |
+| Core Architecture | ✅ Complete | State, event, dependency and data-flow foundations are defined. |
+| Runtime Architecture | ✅ Complete | Scheduling, queues, cancellation, retry, memory, lifecycle, errors and observability are documented; cross-document refinement may still occur. |
+| Business Module Architecture | 🟡 Finalization | Core business modules have been designed; remaining work is synchronization and final review of the latest module documents. |
+| Technology Selection | ⏳ Not Started | Frameworks, languages, providers and process topology have not been finalized. |
+| Implementation | ❌ Not Started | No production implementation has begun. |
+
+The current business-module set is:
 
 ```text
 Reading
 Capture
 Recognition
+Text Processing
 Translation
 Presentation
 Storage
 ```
 
-Observation, Classification, Layout Analysis, OCR, Text Extraction và Context Preparation trở thành thành phần nội bộ của Recognition Module.
+Capabilities such as OCR, layout analysis, reading-order detection, normalization, context preparation, rendering and persistence mechanics are responsibilities inside these business or supporting boundaries; they are not automatically standalone modules.
 
-### Capture Module
+---
 
-Đã hoàn thành:
+## 1.4 Current Module Progress
+
+| Module | Status | Notes |
+|---|---|---|
+| Capture | ✅ Complete | Module overview, contract, events and states are documented. |
+| Recognition | ✅ Complete | Recognition covers OCR-related interpretation, layout, reading order, region mapping and traceability. |
+| Text Processing | ✅ Complete | Produces normalized and structured `SourceDocument` data for Translation. |
+| Translation | ✅ Complete | Owns translation decisions and translation results, not presentation layout. |
+| Presentation | ✅ Complete | Module documentation and architecture review have been completed. |
+| Reading | ✅ Complete | Reading/session responsibilities have been designed before Storage finalization. |
+| Storage | 🟡 Final review | Detailed Storage documents are substantially complete; the module README and project-wide status synchronization are the remaining focus. |
+
+Storage is now treated as a **Persistence Capability**, not as the owner of business data and not as a generic Repository, Cache or Backend module.
+
+The owning business module defines the meaning and lifecycle of its data. Storage provides implementation-independent persistence mechanisms such as versioned entries, metadata, snapshots, retention instructions, archival records, recovery points and schema evolution support.
+
+Runtime `Artifact Store`, runtime cache and persistent Storage are separate concepts and must not be merged implicitly.
+
+---
+
+## 1.5 Current Focus
+
+The immediate work is documentation consolidation rather than new architecture design.
+
+Current priorities are:
+
+1. refactor this project-status document so its opening sections represent the current truth
+2. synchronize module progress and architecture terminology
+3. finish and review `modules/storage/README.md`
+4. reconcile old history and backlog entries that still describe Reading or Storage as merely planned
+5. perform a final cross-document review before technology selection
+
+No technology stack, provider or implementation decision should be inferred from the current architecture documents unless it has been explicitly recorded.
+
+---
+
+## 1.6 Architecture Snapshot
+
+The current high-level processing model is:
 
 ```text
-capture/
-├── README.md
-├── MODULE.md
-├── CONTRACT.md
-├── EVENTS.md
-└── STATES.md
+Reading Session
+    ↓
+Capture or Structured Text Acquisition
+    ↓
+Recognition
+    ↓
+Text Processing
+    ↓
+Translation
+    ↓
+Presentation
 ```
 
-### Event Standard
-
-Đã thống nhất tạo:
+Supporting responsibilities operate across that flow:
 
 ```text
-docs/architecture/core/EVENT_STANDARD.md
+Runtime Control
+    ├── revision authority
+    ├── scheduling and bounded queues
+    ├── cancellation and retry
+    ├── artifact and resource lifecycle
+    └── observability
+
+Storage
+    ├── implementation-independent persistence
+    ├── versioning and snapshots
+    ├── retention and archival
+    ├── recovery
+    └── schema evolution
 ```
 
-### Naming Convention
+The architecture preserves two main input flows:
 
 ```text
-README.md
-MODULE.md
-CONTRACT.md
-EVENTS.md
-STATES.md
+Text Flow  → prefer structured text and avoid unnecessary OCR
+Image Flow → capture, recognize, structure, translate and present image-based content
 ```
 
-### Điểm tiếp tục
+Pipeline stages do not independently decide the next business stage. Runtime Control and the owning orchestration boundary validate authority before accepting results and admitting downstream work.
 
-```text
-docs/architecture/core/EVENT_STANDARD.md
-↓
-modules/recognition/
-```
+---
+
+## 1.7 How to Resume the Project
+
+For a new AI session or a new contributor, use this reading order:
+
+1. read this Executive Summary
+2. read the current architecture snapshot and module progress sections
+3. read the specific module or architecture document relevant to the assigned task
+4. read Development History only when the reason behind a decision is needed
+5. verify the current-focus and next-task sections before proposing new work
+
+Do not rely on an older progress entry when it conflicts with the current summary or the latest detailed module documents.
+
+When updating this file:
+
+- keep the Executive Summary limited to current truth
+- move chronological changes into Development History
+- avoid duplicating detailed contracts already owned by module documents
+- update status, current focus and next task together
+- mark uncertainty explicitly instead of guessing
 
 ---
 

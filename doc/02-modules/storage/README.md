@@ -1,233 +1,589 @@
 # Storage Module
 
-The Storage Module is the persistence layer of the CRAI architecture.
-
-It provides a unified abstraction for storing and retrieving application data while hiding the underlying storage technology from the rest of the system. Business modules interact only with repository contracts and never communicate directly with databases or files.
+- Module: Storage
+- Identifier: storage
+- Layer: Persistence Capability
+- Version: 2.0.0
+- Status: Draft
+- Owner: CRAI Architecture
 
 ---
 
-# Responsibilities
+# Overview
+
+The Storage Module is the persistence capability of CRAI.
+
+It provides implementation-independent mechanisms for preserving and retrieving application state without exposing databases, filesystems, browser storage or object stores to business modules.
+
+Storage owns persistence behavior.
+
+It does not own the business meaning of the data it stores.
+
+```text
+Business Module
+      │
+      │ Persistence Contract
+      ▼
+    Storage
+      │
+      │ Storage Adapter
+      ▼
+Persistence Implementation
+```
+
+---
+
+# Why Storage Exists
+
+CRAI produces and maintains data across multiple capabilities, including:
+
+- Reading Session
+- OCR
+- Translation
+- Presentation
+- Preferences
+- AI memory and context
+- Diagnostics
+- Application configuration
+
+These modules must be able to persist state without depending on a physical storage technology.
+
+Storage provides that boundary.
+
+It ensures that:
+
+- business modules remain independent from persistence engines;
+- persistence behavior is explicit and consistent;
+- stored representations can evolve safely;
+- failures are reported through stable contracts;
+- recovery does not become mixed with business execution.
+
+---
+
+# Ownership Boundary
+
+Storage never becomes the owner of the application objects it persists.
+
+Examples:
+
+```text
+ReadingSession      → owned by Reading Session
+TranslationResult   → owned by Translation
+OCRResult           → owned by OCR
+UserPreference      → owned by Preferences
+PresentationState   → owned by Presentation
+```
+
+The originating module owns:
+
+- business identity;
+- business state;
+- business validation;
+- business lifecycle;
+- business invariants;
+- retention intent;
+- cache invalidation policy.
+
+Storage owns:
+
+- durable persistence;
+- persistence identity;
+- persistence versions;
+- persistence metadata;
+- atomic persistence behavior;
+- snapshots and recovery points;
+- archival and deletion execution;
+- schema compatibility;
+- persistence failure reporting.
+
+Persistence does not transfer business ownership.
+
+---
+
+# Core Responsibilities
 
 The Storage Module is responsible for:
 
-- Persisting application data.
-- Providing repository interfaces.
-- Managing transactions.
-- Managing schema versions.
-- Handling data migrations.
-- Managing caches.
-- Coordinating backup and restore operations.
-- Supporting multiple storage backends.
-- Preserving data integrity.
+- persisting application-owned data;
+- loading persisted data;
+- preserving persistence identity;
+- maintaining persistence versions;
+- supporting atomic persistence operations;
+- maintaining persistence metadata;
+- creating and restoring snapshots;
+- applying externally defined retention instructions;
+- supporting archival and deletion;
+- detecting persistence conflicts;
+- supporting schema evolution;
+- publishing persistence lifecycle events;
+- reporting persistence failures through stable contracts;
+- hiding implementation-specific storage details.
 
-It is **not** responsible for:
+Storage protects persistence consistency.
 
-- Business rule evaluation.
-- OCR execution.
-- Translation.
-- Reading Session orchestration.
-- UI rendering.
-- AI processing.
+It does not determine whether stored data is business-correct.
 
 ---
 
-# Position in Architecture
+# Out of Scope
+
+Storage is not responsible for:
+
+- creating business objects;
+- validating business rules;
+- controlling business lifecycles;
+- interpreting persisted content;
+- determining when application processing should run;
+- coordinating Runtime execution;
+- executing OCR;
+- translating content;
+- rendering presentation output;
+- selecting AI behavior;
+- resolving user preferences;
+- deciding cache invalidation policy;
+- defining retention policy;
+- defining application workflows;
+- exposing backend-specific behavior to business modules.
+
+Storage applies explicit persistence instructions.
+
+It does not invent business decisions.
+
+---
+
+# Core Persistence Concepts
+
+Storage defines a small set of persistence-specific concepts.
 
 ```text
-Application Modules
-        │
-        ▼
- Repository Contracts
-        │
-        ▼
-   Storage Module
-        │
- ┌──────┼─────────────┐
- ▼      ▼             ▼
-SQLite PostgreSQL  In-Memory
-        │
-        ▼
- Local Files / Cloud Storage
+Storage
+├── PersistenceEntry
+├── PersistenceVersion
+├── PersistenceSnapshot
+├── PersistenceMetadata
+├── RetentionInstruction
+├── ArchivalRecord
+└── RecoveryPoint
 ```
 
-All persistence flows through the Storage Module.
+## PersistenceEntry
 
----
+Represents one durably stored application object.
 
-# Repository Model
+It identifies persisted content without interpreting its business meaning.
 
-The Storage Module exposes repositories such as:
+## PersistenceVersion
 
-- PreferenceRepository
-- SessionRepository
-- OCRRepository
-- TranslationRepository
-- PresentationRepository
-- ImageRepository
-- AIMemoryRepository
-- DiagnosticsRepository
-- MetadataRepository
-
-Repositories hide implementation details and provide a stable persistence API.
-
----
-
-# Schema Management
-
-The Storage Module owns the logical data schema.
+Identifies a specific persisted representation of an object.
 
 It supports:
 
-- Schema versioning
-- Compatibility validation
-- Incremental migrations
-- Rollback strategies
-- Metadata management
+- stale-write detection;
+- optimistic concurrency;
+- migration;
+- recovery;
+- historical compatibility.
 
-Schema definitions remain independent of any database engine.
+A PersistenceVersion is not the same as a business revision.
+
+## PersistenceSnapshot
+
+Represents a consistent captured persistence state that may be used for backup, migration protection or recovery.
+
+## PersistenceMetadata
+
+Contains persistence-specific information such as:
+
+- object type;
+- object identifier;
+- schema version;
+- persistence version;
+- timestamps;
+- integrity metadata;
+- storage status.
+
+## RetentionInstruction
+
+Describes how long persisted data should remain available.
+
+The instruction originates outside Storage.
+
+Storage only enforces it.
+
+## ArchivalRecord
+
+Represents persisted data that has moved out of active use while remaining available under an applicable retention policy.
+
+## RecoveryPoint
+
+Identifies a persistence state that may be restored safely after failure or migration.
+
+Detailed structures are defined in `MODELS.md`.
 
 ---
 
-# Cache Architecture
-
-The module supports multiple cache layers:
+# Persistence Flow
 
 ```text
-Memory Cache
-      ↓
-Persistent Cache
-      ↓
-Authoritative Storage
+Business Object
+      │
+      ▼
+Persistence Request
+      │
+      ▼
+Contract Validation
+      │
+      ▼
+Version / Conflict Check
+      │
+      ▼
+Atomic Persistence Operation
+      │
+      ▼
+Persistence Metadata Update
+      │
+      ▼
+Persistence Outcome Event
 ```
 
-Typical cache types include:
+Storage validates persistence structure and contract requirements.
 
-- OCR Cache
-- Translation Cache
-- Presentation Cache
-- Image Cache
+The originating module remains responsible for validating business meaning before requesting persistence.
 
 ---
 
-# Transactions
+# Consistency Model
 
-The Storage Module provides:
+Storage guarantees persistence consistency within the limits of its public contract.
 
-- Atomic operations
-- Commit
-- Rollback
-- Batch persistence
-- Consistency guarantees
+Depending on the operation, this may include:
 
-Business modules never manage backend transactions directly.
+- atomic writes;
+- complete rollback;
+- deterministic retrieval;
+- stale-write detection;
+- version-aware replacement;
+- snapshot integrity;
+- durable deletion markers;
+- declared referential consistency.
+
+A persistence operation must either:
+
+```text
+Complete Fully
+```
+
+or:
+
+```text
+Leave the Previous Consistent State Unchanged
+```
+
+Partially committed persistence state is not allowed where atomicity is promised.
 
 ---
 
-# Supported Backends
+# Versioning and Conflict Handling
 
-Potential storage backends include:
+Mutable persisted representations use explicit persistence versions.
 
-- SQLite
-- PostgreSQL
-- In-Memory
-- Local Files
-- Cloud Object Storage
+When a write is based on an obsolete PersistenceVersion, Storage reports a conflict.
 
-Applications can switch backend implementations without changing business logic.
+The owning module decides whether to:
+
+- reload;
+- merge;
+- retry;
+- discard;
+- create a new business operation.
+
+Storage detects persistence conflicts.
+
+It does not resolve business conflicts.
+
+---
+
+# Retention, Archival and Deletion
+
+Retention policy is defined by the owning module or system policy.
+
+Storage executes the supplied instruction.
+
+```text
+Active
+  │
+  ▼
+Retained
+  │
+  ▼
+Archived
+  │
+  ▼
+Deleted
+```
+
+Not every object must pass through every stage.
+
+Deletion may be:
+
+- logical;
+- physical;
+- secure when supported by a specific implementation.
+
+Implementation-specific deletion guarantees remain outside the abstract Storage contract.
+
+---
+
+# Snapshot and Recovery
+
+Storage supports recovery through snapshots and recovery points.
+
+Recovery may restore:
+
+- persisted application state;
+- configuration state;
+- indexed metadata;
+- persistence relationships;
+- version metadata.
+
+Recovery ends when persisted data has been restored consistently.
+
+It does not automatically resume business execution.
+
+Example:
+
+```text
+Storage restores ReadingSession data
+                │
+                ▼
+Reading Session evaluates restored session state
+                │
+                ▼
+Runtime decides whether execution should resume
+```
+
+---
+
+# Schema Evolution
+
+Persisted representations may evolve independently from business behavior.
+
+Storage supports:
+
+- schema version metadata;
+- compatibility validation;
+- forward migration;
+- controlled fallback;
+- snapshot protection;
+- migration history;
+- rollback on failed migration.
+
+Schema migration changes persistence representation.
+
+It must never silently change business meaning.
+
+Detailed migration behavior is defined in `MIGRATION.md`.
+
+---
+
+# Implementation Independence
+
+Storage contracts are independent from physical persistence technologies.
+
+Possible implementations may use:
+
+- relational databases;
+- document databases;
+- key-value stores;
+- browser storage;
+- local files;
+- object storage;
+- in-memory persistence.
+
+These are implementation choices.
+
+They are not part of the business-facing Storage architecture.
+
+Business modules must not:
+
+- access physical backends directly;
+- depend on database-specific types;
+- handle backend-specific transactions;
+- interpret backend-specific failures;
+- assume a particular serialization format.
+
+Backend-specific errors must be mapped to stable Storage errors.
 
 ---
 
 # Event Model
 
-Typical consumed events:
+Storage publishes completed persistence outcomes.
 
-- BackupRequested
-- RestoreRequested
-- MigrationRequested
+Representative events include:
 
-Typical published events:
-
-- StorageReady
-- ObjectStored
-- ObjectUpdated
-- TransactionCommitted
-- BackupCompleted
+- ObjectPersisted
+- ObjectReplaced
+- ObjectDeleted
+- ObjectArchived
+- SnapshotCreated
+- SnapshotRestored
 - MigrationCompleted
 - StorageFailed
+
+Storage events describe persistence outcomes.
+
+They must not describe business decisions.
+
+Detailed definitions are provided in `EVENTS.md`.
 
 ---
 
 # State Model
 
-Typical internal states:
+Storage owns its operational lifecycle.
 
+Representative states include:
+
+- Uninitialized
 - Initializing
 - Ready
-- Transaction
+- Degraded
 - Migrating
-- Maintenance
 - Recovering
-- Failed
-- Shutdown
+- Unavailable
+- ShuttingDown
+- Stopped
+
+These are Storage capability states.
+
+They are not states of persisted business objects.
+
+Detailed definitions are provided in `STATES.md`.
 
 ---
 
 # Error Model
 
+Storage owns persistence-related failures.
+
 Representative errors include:
 
 - StorageUnavailable
-- RepositoryNotFound
-- TransactionFailed
-- MigrationFailed
+- PersistenceEntryNotFound
+- PersistenceVersionConflict
+- AtomicOperationFailed
 - SerializationFailed
-- IntegrityViolation
-- BackupFailed
-- InternalStorageError
+- SnapshotInvalid
+- MigrationFailed
+- RetentionViolation
+- RecoveryFailed
+- PersistenceConsistencyViolation
+
+Backend-specific errors must never escape directly through public Storage contracts.
+
+Detailed definitions are provided in `ERRORS.md`.
 
 ---
 
 # Design Principles
 
-## Backend Independence
+## Business Ownership Remains External
 
-Storage consumers depend on contracts, not implementations.
+Storage never becomes the owner of persisted business objects.
 
-## Repository Pattern
+## Persistence Is Explicit
 
-Repositories own persistence access.
+Application state is persisted only through explicit Storage contracts.
 
-## Transaction Safety
+Hidden persistence side effects are not allowed.
 
-Operations are atomic whenever possible.
+## Business Logic Free
 
-## Schema Evolution
+Storage does not interpret business meaning.
 
-Data structures evolve through versioned migrations.
+## Implementation Independence
 
-## Data Integrity
+Business modules never depend on a physical storage engine.
 
-Consistency is maintained across supported backends.
+## Version Awareness
+
+Mutable persisted representations support deterministic version handling.
+
+## Consistency Before Optimization
+
+Persistence correctness takes precedence over performance optimization.
+
+## Recoverability
+
+Storage preserves enough metadata to support safe recovery where required.
+
+## Observable Failure
+
+Persistence failures are explicit.
+
+Storage must never silently lose or partially persist data.
+
+---
+
+# Architecture Invariants
+
+1. Storage never owns business objects.
+2. Storage never creates business meaning.
+3. Storage never validates business rules.
+4. Storage never controls business lifecycle.
+5. Storage never coordinates Runtime execution.
+6. Storage persists only through explicit contracts.
+7. Persistence operations are atomic where promised by contract.
+8. PersistenceVersion is distinct from business revision.
+9. Backend-specific errors never escape public Storage contracts.
+10. Persistence implementations remain replaceable.
+11. Storage never performs undocumented semantic transformations.
+12. Schema migration never silently changes business meaning.
+13. Retention instructions originate outside Storage.
+14. Recovery restores persistence state, not business execution.
+15. Persisted history is never rewritten without an explicit versioned operation.
 
 ---
 
 # Related Documents
 
-| Document | Description |
-|----------|-------------|
-| MODULE.md | Module responsibilities |
-| CONTRACT.md | Public storage contracts |
-| EVENTS.md | Storage events |
-| STATES.md | State machine |
-| ERRORS.md | Error model |
-| REPOSITORIES.md | Repository architecture |
-| SCHEMA.md | Logical schema |
-| CACHE.md | Cache architecture |
-| MIGRATION.md | Migration strategy |
-| BACKENDS.md | Backend abstraction |
+| Document | Responsibility |
+|----------|----------------|
+| `MODULE.md` | Ownership, responsibilities and architectural boundaries |
+| `CONTRACT.md` | Public persistence commands, queries and guarantees |
+| `MODELS.md` | Persistence concepts and data structures |
+| `STATES.md` | Storage capability lifecycle |
+| `EVENTS.md` | Persistence lifecycle events |
+| `ERRORS.md` | Persistence failure model |
+| `MIGRATION.md` | Schema evolution and compatibility |
+
+Implementation-specific backend documentation remains outside the core Storage specification.
 
 ---
 
 # Summary
 
-The Storage Module provides a backend-independent persistence layer built around repositories, transactions, schema evolution and cache management. It enables every CRAI module to store and retrieve data consistently while remaining isolated from database technologies and storage implementations.
+Storage is the persistence capability of CRAI.
+
+It provides implementation-independent mechanisms for:
+
+- durable persistence;
+- retrieval;
+- versioning;
+- snapshots;
+- retention;
+- archival;
+- deletion;
+- recovery;
+- schema evolution.
+
+Business modules own meaning and correctness.
+
+Storage owns durability and persistence consistency.
+
+This boundary keeps CRAI independent from storage technologies while preserving explicit ownership, stable failure contracts and safe schema evolution.
+
+---
+
+# End of Document

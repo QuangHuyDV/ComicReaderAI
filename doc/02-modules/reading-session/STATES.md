@@ -1,2561 +1,1779 @@
-# Recognition Module States
+# Reading Session States
 
-> **Project:** CRAI
-> **Module:** Recognition
-> **Path:** `doc/02-modules/recognition/STATES.md`
-> **Version:** 0.1
-> **Status:** Architecture Draft
-> **Last Updated:** 2026-07-22
+- Module: Reading Session
+- Identifier: reading-session
+- Layer: Business Orchestration
+- Version: 2.0.0
+- Status: Draft
+- Owner: CRAI Architecture
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-This document defines the state model of the Recognition module.
+This document defines the complete state model of the Reading Session Module.
 
-It specifies:
+Unlike MODULE.md, which defines architectural responsibilities, and CONTRACT.md, which defines public interfaces, this document specifies how business state evolves during the lifetime of a reading activity.
 
-* request lifecycle states;
-* provider lifecycle states;
-* module-level availability states;
-* valid state transitions;
-* transition triggers;
-* transition guards;
-* terminal states;
-* cancellation behavior;
-* timeout behavior;
-* retry behavior;
-* fallback behavior;
-* concurrency constraints;
-* state invariants.
+This specification defines:
 
-This document focuses on state ownership and state transitions.
+- Session lifecycle states
+- Reading Context states
+- Content Revision states
+- Processing Intent states
+- valid transitions
+- transition guards
+- transition triggers
+- terminal states
+- persistence behavior
+- recovery behavior
+- state ownership
+- architectural invariants
 
-Related contracts are defined in:
+This document intentionally excludes execution state.
+
+Execution belongs to Runtime Architecture.
+
+---
+
+# 2. State Ownership
+
+Reading Session owns only business state.
+
+It never owns runtime state.
+
+---
+
+## 2.1 Reading Session Owns
 
 ```text
-doc/02-modules/recognition/CONTRACT.md
-doc/02-modules/recognition/EVENTS.md
-doc/02-modules/recognition/MODULE.md
+ReadingSessionState
+
+ReadingContextState
+
+ContentRevisionState
+
+ProcessingIntentState
 ```
 
 ---
 
-## 2. State Ownership
-
-Recognition owns the following state categories:
+## 2.2 Reading Session Does Not Own
 
 ```text
-Recognition Module State
-Recognition Provider State
-Recognition Request State
-Recognition Attempt State
-Recognition Result State
-```
+Worker State
 
-Recognition does not own:
+Scheduler State
 
-```text
-Reading Session State
-Source Lifecycle State
-Observation State
-Current Frame Selection
+Execution Queue State
+
+Capture State
+
+Recognition State
+
 Translation State
+
 Presentation State
-Storage Retention State
+
+Provider State
+
+Retry State
+
+Cache State
 ```
 
-Recognition may react to external state changes but must not become their source of truth.
+Those states belong to their respective modules.
+
+Reading Session may react to them through events or contracts but never becomes their source of truth.
 
 ---
 
-## 3. State Model Overview
+# 3. State Model Overview
+
+The Reading Session state model consists of four independent state machines.
 
 ```text
-Recognition Module
-├── Module Availability State
-├── Provider Registry State
-│   └── Provider Lifecycle State
-├── Active Request Registry
-│   └── Recognition Request State
-│       └── Recognition Attempt State
-└── Completed Result Registry
-    └── Recognition Result State
+Reading Session
+
+├── Session Lifecycle
+│
+├── Reading Context
+│
+├── Content Revision
+│
+└── Processing Intent
 ```
 
-Each request is isolated by:
+Each state machine owns one business concept.
+
+Each evolves independently while remaining consistent with the others.
+
+---
+
+## 3.1 Why Multiple State Machines
+
+Reading is not represented by a single lifecycle.
+
+For example,
+
+the session may remain Active while:
+
+- Reading Context changes
+
+or
+
+- several Content Revisions become obsolete
+
+or
+
+- multiple Processing Intents are published.
+
+Representing all of these using one giant state machine would create unnecessary coupling.
+
+Therefore each concept owns its own lifecycle.
+
+---
+
+# 4. State Machine Principles
+
+---
+
+## 4.1 One Owner Per State
+
+Every state belongs to exactly one business concept.
+
+No state may belong to multiple concepts.
+
+---
+
+## 4.2 Explicit Transitions
+
+Every transition must be documented.
+
+Business state may never change implicitly.
+
+---
+
+## 4.3 Immutable History
+
+Previous state transitions remain historically valid.
+
+Business history is never rewritten.
+
+---
+
+## 4.4 Deterministic Evolution
+
+Given the same:
+
+- session
+- context
+- revision
+- configuration
+
+Reading Session must always produce identical state transitions.
+
+---
+
+## 4.5 Runtime Independence
+
+Business states never describe execution.
+
+Examples of invalid business states:
 
 ```text
-request_id
+OCRRunning
+
+TranslationQueued
+
+WorkerBusy
+
+GPUUnavailable
 ```
 
-Each completed immutable result is isolated by:
+Those belong to Runtime.
+
+---
+
+## 4.6 Independent Lifecycles
+
+Each state machine progresses independently.
+
+For example,
+
+Session may remain Active while Context changes multiple times.
+
+Likewise,
+
+ContentRevision may become Superseded without affecting Session state.
+
+---
+
+# 5. Session Lifecycle State
+
+The Session Lifecycle describes the lifetime of a reading activity.
+
+It represents the highest-level business state inside the module.
+
+---
+
+## 5.1 Lifecycle States
 
 ```text
-recognition_id
-```
+ReadingSessionState
 
----
-
-## 4. State Machine Principles
-
-### 4.1 State Transitions Are Explicit
-
-State changes must occur through documented transitions.
-
-Implementation code must not mutate request state arbitrarily.
-
----
-
-### 4.2 Terminal States Are Final
-
-Terminal request states are:
-
-```text
-Completed
-Failed
-Cancelled
-```
-
-A request cannot leave a terminal state.
-
----
-
-### 4.3 Exactly One Terminal State
-
-Every accepted request must end in exactly one terminal state.
-
----
-
-### 4.4 Provider State and Request State Are Separate
-
-A provider can become degraded while an existing request remains active.
-
-A request failure does not automatically make the provider unavailable.
-
----
-
-### 4.5 Session Relevance Is External
-
-A completed Recognition result may be stale for the current session.
-
-That does not change its Recognition state from `Completed`.
-
----
-
-### 4.6 Results Are Immutable
-
-A completed result cannot transition back into processing.
-
-A retry creates a new request and later a new result.
-
----
-
-## 5. Module Availability State
-
-The Recognition module has one top-level availability state.
-
-```text
-RecognitionModuleState
-├── Uninitialized
+├── Created
 ├── Initializing
-├── Ready
-├── Degraded
-├── Unavailable
-├── ShuttingDown
-└── Stopped
+├── Active
+├── Paused
+├── Completing
+├── Completed
+├── Cancelled
+└── Disposed
 ```
 
 ---
 
-## 6. Module State Definitions
+## 5.2 Created
 
-### 6.1 `Uninitialized`
+A Reading Session has been created.
 
-Recognition has not started initialization.
+Business identity exists.
+
+No business evaluation has begun.
 
 Characteristics:
 
-* no providers loaded;
-* no requests accepted;
-* configuration may not yet be validated;
-* active-request registry is unavailable.
+- SessionId assigned
+- configuration accepted
+- context not initialized
+- no ProcessingIntent published
 
 Allowed next states:
 
 ```text
 Initializing
-Stopped
+
+Disposed
 ```
 
 ---
 
-### 6.2 `Initializing`
+## 5.3 Initializing
 
-Recognition is validating configuration and preparing provider infrastructure.
+Reading Session prepares business state.
 
 Possible activities:
 
-* loading configuration;
-* building provider registry;
-* checking provider capabilities;
-* loading local models;
-* checking runtime dependencies;
-* initializing cancellation registry;
-* initializing schedulers.
+- loading source metadata
+- building ReadingContext
+- validating configuration
+- creating initial ContentRevision
 
 Allowed next states:
 
 ```text
-Ready
-Degraded
-Unavailable
-ShuttingDown
+Active
+
+Cancelled
+
+Disposed
 ```
 
 ---
 
-### 6.3 `Ready`
+## 5.4 Active
 
-Recognition can accept normal requests.
-
-Requirements:
-
-* configuration is valid;
-* scheduler is available;
-* at least one eligible provider is ready;
-* request registry is operational;
-* result publication path is operational.
-
-Allowed next states:
-
-```text
-Degraded
-Unavailable
-ShuttingDown
-```
-
----
-
-### 6.4 `Degraded`
-
-Recognition can accept only some requests or must use reduced capability.
-
-Examples:
-
-* GPU provider unavailable but CPU provider available;
-* vertical-text provider unavailable;
-* remote provider unavailable but local provider ready;
-* result store unavailable for asynchronous large results;
-* provider latency exceeds threshold;
-* only one provider remains healthy.
-
-Allowed next states:
-
-```text
-Ready
-Unavailable
-ShuttingDown
-```
-
-Request acceptance depends on capability-specific guards.
-
----
-
-### 6.5 `Unavailable`
-
-Recognition cannot accept useful requests.
-
-Examples:
-
-* no eligible provider available;
-* critical configuration invalid;
-* scheduler failed;
-* result registration unavailable;
-* provider registry failed;
-* required local runtime unavailable.
-
-Allowed next states:
-
-```text
-Initializing
-Degraded
-Ready
-ShuttingDown
-```
-
-New requests must be rejected with a normalized error.
-
----
-
-### 6.6 `ShuttingDown`
-
-Recognition is stopping.
-
-Behavior:
-
-* rejects new requests;
-* requests cancellation of active work;
-* releases providers;
-* flushes terminal events where practical;
-* performs bounded cleanup.
-
-Allowed next state:
-
-```text
-Stopped
-```
-
-No transition back to `Ready` is allowed during the same shutdown sequence.
-
----
-
-### 6.7 `Stopped`
-
-Recognition has released runtime resources.
+The session is actively representing a reading activity.
 
 Characteristics:
 
-* no requests accepted;
-* providers stopped;
-* schedulers stopped;
-* active request registry empty;
-* transient buffers released.
+- accepts business updates
+- evaluates ReadingContext
+- produces ContentRevision
+- publishes ProcessingIntent
+
+This is the normal operating state.
+
+Allowed next states:
+
+```text
+Paused
+
+Completing
+
+Cancelled
+```
+
+---
+
+## 5.5 Paused
+
+Business progression is temporarily suspended.
+
+Characteristics:
+
+- no new ProcessingIntent
+- no new ContentRevision
+- context remains unchanged
+
+Runtime execution may continue independently.
+
+Allowed next states:
+
+```text
+Active
+
+Cancelled
+
+Completing
+```
+
+---
+
+## 5.6 Completing
+
+The reading activity is naturally ending.
+
+Examples:
+
+- browser tab closed
+- user exits reading
+- source finished
+
+The module prepares for completion.
+
+Allowed next states:
+
+```text
+Completed
+```
+
+---
+
+## 5.7 Completed
+
+The reading activity finished normally.
+
+Characteristics:
+
+- immutable
+- no new context
+- no new revision
+- no new intent
 
 Allowed next state:
 
 ```text
-Initializing
+Disposed
 ```
-
-only through a new startup sequence.
 
 ---
 
-## 7. Module State Diagram
+## 5.8 Cancelled
+
+Business activity terminated unexpectedly.
+
+Examples:
+
+- user cancelled
+- source removed
+- unrecoverable business failure
+
+Cancelled sessions cannot become Active again.
+
+Allowed next state:
 
 ```text
-Uninitialized
+Disposed
+```
+
+---
+
+## 5.9 Disposed
+
+All business resources have been released.
+
+Terminal state.
+
+No transition is allowed.
+
+---
+
+# 6. Session Lifecycle Diagram
+
+```text
+Created
+    ↓
+Initializing
+    ↓
+Active
+ ┌──┴─────┐
+ │        │
+ ↓        ↓
+Paused  Completing
+ │        │
+ └──↓─────┘
+   Active
       ↓
-Initializing
-   ┌──┼───────────────┐
-   ↓  ↓               ↓
-Ready Degraded    Unavailable
-  ↕      ↕            ↕
-  └──────┴────────────┘
-          ↓
-    ShuttingDown
-          ↓
-       Stopped
+Completed
+      ↓
+Disposed
 ```
 
-More precisely:
+Cancellation:
 
 ```text
-Uninitialized → Initializing
+Created
+Initializing
+Active
+Paused
+Completing
 
-Initializing → Ready
-Initializing → Degraded
-Initializing → Unavailable
-Initializing → ShuttingDown
+↓
 
-Ready → Degraded
-Ready → Unavailable
-Ready → ShuttingDown
+Cancelled
 
-Degraded → Ready
-Degraded → Unavailable
-Degraded → ShuttingDown
+↓
 
-Unavailable → Initializing
-Unavailable → Degraded
-Unavailable → Ready
-Unavailable → ShuttingDown
-
-ShuttingDown → Stopped
-
-Stopped → Initializing
+Disposed
 ```
 
 ---
 
-# Provider State
+# 7. Session Transition Rules
 
-## 8. Provider Lifecycle State
-
-Each Recognition provider has an independent state.
+The following transitions are valid.
 
 ```text
-RecognitionProviderState
-├── Unregistered
-├── Registered
-├── Initializing
+Created → Initializing
+
+Initializing → Active
+
+Initializing → Cancelled
+
+Initializing → Disposed
+
+Active → Paused
+
+Paused → Active
+
+Active → Completing
+
+Paused → Completing
+
+Completing → Completed
+
+Created → Disposed
+
+Completed → Disposed
+
+Cancelled → Disposed
+
+Active → Cancelled
+
+Paused → Cancelled
+```
+
+Any transition not listed above is invalid.
+
+---
+
+# 8. Reading Context State
+
+ReadingContext represents the current business understanding of what the user is reading.
+
+Unlike Session Lifecycle,
+
+ReadingContext changes much more frequently.
+
+---
+
+## 8.1 ReadingContext States
+
+```text
+ReadingContextState
+
+├── Empty
+├── Loading
 ├── Ready
-├── Degraded
-├── Unavailable
-├── Misconfigured
-├── ShuttingDown
-└── Stopped
+├── Updating
+├── Invalid
+└── Disposed
 ```
 
 ---
 
-## 9. Provider State Definitions
+## 8.2 Empty
 
-### 9.1 `Unregistered`
+No ReadingContext exists.
 
-The provider is not present in the active registry.
-
-No request may select it.
+Occurs before initialization.
 
 ---
 
-### 9.2 `Registered`
+## 8.3 Loading
 
-The provider adapter has been discovered and registered but is not initialized.
+ReadingContext is being established.
 
-Allowed next states:
+Possible activities:
 
-```text
-Initializing
-Misconfigured
-Stopped
-```
+- resolve source
+- resolve page
+- resolve chapter
+- resolve viewport
 
 ---
 
-### 9.3 `Initializing`
+## 8.4 Ready
 
-The provider is preparing required resources.
+The ReadingContext accurately represents the current reading world.
+
+Exactly one Ready context exists.
+
+---
+
+## 8.5 Updating
+
+A business change is occurring.
 
 Examples:
 
-* loading model files;
-* creating API clients;
-* allocating GPU memory;
-* checking credentials;
-* performing health checks.
+- page changed
 
-Allowed next states:
+- chapter changed
+
+- viewport changed
+
+- language changed
+
+- reading mode changed
+
+Updating eventually produces either:
+
+- Ready
+
+or
+
+- Invalid
+
+---
+
+## 8.6 Invalid
+
+ReadingContext can no longer represent reality.
+
+Examples:
+
+- source disappeared
+
+- unsupported document
+
+- corrupted metadata
+
+Invalid contexts cannot produce new ProcessingIntent.
+
+---
+
+## 8.7 Disposed
+
+Context permanently removed.
+
+Terminal state.
+
+---
+
+# 9. ReadingContext Diagram
 
 ```text
+Empty
+
+↓
+
+Loading
+
+↓
+
 Ready
-Degraded
-Unavailable
-Misconfigured
-ShuttingDown
+
+↓
+
+Updating
+
+↓
+
+Ready
+```
+
+Failure:
+
+```text
+Updating
+
+↓
+
+Invalid
+
+↓
+
+Disposed
 ```
 
 ---
 
-### 9.4 `Ready`
+# 10. Content Revision State
 
-The provider is operational for its declared capabilities.
+ContentRevision represents an immutable snapshot of the Reading Context.
 
-This does not guarantee it is suitable for every request.
+Unlike ReadingContext,
 
-Selection still depends on:
+which continuously evolves,
 
-* language;
-* script;
-* orientation;
-* mode;
-* privacy policy;
-* execution device;
-* image limits.
+a ContentRevision never changes after creation.
+
+Instead,
+
+new revisions replace old business authority.
 
 ---
 
-### 9.5 `Degraded`
-
-The provider remains usable with reduced capability or quality of service.
-
-Examples:
-
-* GPU fallback to CPU;
-* increased latency;
-* line geometry unavailable;
-* language model partially unavailable;
-* cancellation unsupported;
-* remote rate limit approaching.
-
-The degraded capabilities must be exposed separately.
-
----
-
-### 9.6 `Unavailable`
-
-The provider cannot process requests at the moment.
-
-Possible causes:
-
-* service outage;
-* local runtime crash;
-* model loading failure;
-* network unavailable;
-* resource exhaustion;
-* unhealthy process.
-
-The provider may later recover.
-
----
-
-### 9.7 `Misconfigured`
-
-The provider configuration is invalid.
-
-Examples:
-
-* missing model path;
-* invalid API credentials;
-* unsupported device setting;
-* incompatible runtime version;
-* missing dependency.
-
-Automatic retries should be limited.
-
-Configuration change is normally required.
-
----
-
-### 9.8 `ShuttingDown`
-
-The provider is releasing resources.
-
-New requests must not select it.
-
-Existing requests may:
-
-* finish within a bounded deadline;
-* be cancelled;
-* have their late output discarded.
-
----
-
-### 9.9 `Stopped`
-
-The provider has released runtime resources.
-
-It cannot process requests until reinitialized.
-
----
-
-## 10. Provider State Diagram
+## 10.1 Revision States
 
 ```text
-Unregistered
-     ↓
-Registered
-     ↓
-Initializing
- ┌────┼──────────────┬────────────────┐
- ↓    ↓              ↓                ↓
-Ready Degraded   Unavailable     Misconfigured
- ↕      ↕            ↕                │
- └──────┴────────────┘                │
-          ↓                           │
-     ShuttingDown ←───────────────────┘
-          ↓
-        Stopped
-```
-
----
-
-## 11. Provider Selection Guards
-
-A provider may be selected only when:
-
-```text
-provider.state ∈ {Ready, Degraded}
-```
-
-and all request requirements are satisfied.
-
-Additional guards:
-
-```text
-provider supports requested media type
-provider supports requested mode
-provider supports required language or script
-provider supports required orientation
-provider satisfies local-only policy
-provider is not excluded
-provider image limits are not exceeded
-provider concurrency capacity is available
-provider is not shutting down
-```
-
-A degraded provider may be selected only if its degraded capabilities still satisfy the request.
-
----
-
-# Request State
-
-## 12. Recognition Request Lifecycle
-
-Each request has the following state model:
-
-```text
-RecognitionRequestState
-├── Received
-├── Validating
-├── Rejected
-├── Queued
-├── SelectingProvider
-├── Preparing
-├── Preprocessing
-├── Detecting
-├── Recognizing
-├── PostProcessing
-├── ResolvingReadingOrder
-├── MappingCoordinates
-├── AssemblingResult
-├── PublishingResult
-├── Cancelling
-├── Completed
-├── Failed
-└── Cancelled
-```
-
----
-
-## 13. Request State Categories
-
-### Pre-Execution
-
-```text
-Received
-Validating
-Rejected
-Queued
-SelectingProvider
-```
-
-### Active Processing
-
-```text
-Preparing
-Preprocessing
-Detecting
-Recognizing
-PostProcessing
-ResolvingReadingOrder
-MappingCoordinates
-AssemblingResult
-PublishingResult
-```
-
-### Cancellation
-
-```text
-Cancelling
-Cancelled
-```
-
-### Terminal
-
-```text
-Rejected
-Completed
-Failed
-Cancelled
-```
-
-`Rejected` is terminal but represents a request that was never accepted for execution.
-
-For event semantics, a rejected asynchronous request may still publish `recognition.failed`.
-
----
-
-## 14. `Received`
-
-The request has entered the Recognition boundary.
-
-No processing guarantee exists yet.
-
-Stored state may include:
-
-```text
-request_id
-received_at
-request_context
-image_reference
-options
-```
-
-Allowed next state:
-
-```text
-Validating
-```
-
----
-
-## 15. `Validating`
-
-Recognition validates:
-
-* contract version;
-* identifiers;
-* image reference;
-* image dimensions;
-* coordinate space;
-* region bounds;
-* timeout;
-* provider policy;
-* privacy policy;
-* module availability.
-
-Allowed next states:
-
-```text
-Rejected
-Queued
-SelectingProvider
-Cancelling
-```
-
-Direct transition to `SelectingProvider` is allowed when queueing is unnecessary.
-
----
-
-## 16. `Rejected`
-
-The request cannot be accepted.
-
-Examples:
-
-* invalid contract;
-* invalid image;
-* unsupported major version;
-* invalid region;
-* contradictory privacy policy;
-* module unavailable;
-* duplicate active request ID.
-
-Properties:
-
-* no provider execution occurred;
-* no recognition result exists;
-* rejection reason is normalized;
-* state is terminal.
-
----
-
-## 17. `Queued`
-
-The request has been accepted but is waiting for execution capacity.
-
-Possible reasons:
-
-* provider concurrency limit;
-* scheduler priority;
-* GPU serialization;
-* memory pressure;
-* earlier interactive request;
-* model initialization.
-
-Allowed next states:
-
-```text
-SelectingProvider
-Preparing
-Cancelling
-Failed
-```
-
-Timeout policy must define whether queue time counts toward request timeout.
-
----
-
-## 18. `SelectingProvider`
-
-Recognition evaluates provider eligibility.
-
-Activities:
-
-* filter providers;
-* evaluate required capabilities;
-* evaluate privacy constraints;
-* evaluate execution device;
-* evaluate provider health;
-* evaluate fallback policy;
-* reserve capacity.
-
-Allowed next states:
-
-```text
-Preparing
-Queued
-Failed
-Cancelling
-```
-
-If no provider is eligible:
-
-```text
-Failed
-```
-
-with:
-
-```text
-NoEligibleProvider
-```
-
----
-
-## 19. `Preparing`
-
-Recognition resolves and normalizes image input.
-
-Activities:
-
-* resolve image reference;
-* validate image checksum;
-* decode image;
-* create request-scoped buffers;
-* initialize transform chain;
-* build preprocessing plan.
-
-Allowed next states:
-
-```text
-Preprocessing
-Detecting
-Recognizing
-Failed
-Cancelling
-```
-
-Direct transition to `Detecting` or `Recognizing` is allowed when preprocessing is unnecessary.
-
----
-
-## 20. `Preprocessing`
-
-Recognition applies configured image transformations.
-
-Examples:
-
-* resize;
-* upscale;
-* grayscale;
-* contrast adjustment;
-* denoise;
-* deskew;
-* rotation;
-* threshold.
-
-Allowed next states:
-
-```text
-Detecting
-Recognizing
-Failed
-Cancelling
-```
-
-Every geometry-changing operation must update the transform chain before leaving this state.
-
----
-
-## 21. `Detecting`
-
-Recognition detects text regions.
-
-This state may be skipped when:
-
-* the request is a direct single-region request;
-* the provider performs combined detection and recognition;
-* the provider accepts the whole image directly.
-
-Allowed next states:
-
-```text
-Recognizing
-PostProcessing
-Failed
-Cancelling
-```
-
-`PostProcessing` may follow when combined OCR already returned text.
-
----
-
-## 22. `Recognizing`
-
-Recognition converts image regions into text.
-
-Possible execution models:
-
-```text
-single combined OCR call
-multiple region OCR calls
-batched region OCR
-provider streaming
-provider ensemble
-```
-
-Allowed next states:
-
-```text
-PostProcessing
-Failed
-Cancelling
-```
-
-Cancellation must be checked between region operations where practical.
-
----
-
-## 23. `PostProcessing`
-
-Recognition normalizes provider output.
-
-Activities may include:
-
-* provider type conversion;
-* deterministic surface cleanup;
-* duplicate suppression;
-* invalid-region filtering;
-* region merging when non-semantic;
-* confidence normalization;
-* warning generation.
-
-Allowed next states:
-
-```text
-ResolvingReadingOrder
-MappingCoordinates
-AssemblingResult
-Failed
-Cancelling
-```
-
-Semantic text correction is forbidden in this state.
-
----
-
-## 24. `ResolvingReadingOrder`
-
-Recognition computes initial reading order.
-
-Activities:
-
-* preserve provider order;
-* apply spatial rules;
-* apply orientation rules;
-* create explicit order entries;
-* generate uncertainty warnings.
-
-Allowed next states:
-
-```text
-MappingCoordinates
-AssemblingResult
-Failed
-Cancelling
-```
-
-This state may be skipped only when:
-
-* no regions exist; or
-* order is already valid and explicitly supplied.
-
----
-
-## 25. `MappingCoordinates`
-
-Recognition maps processed geometry back to source coordinate space.
-
-Activities:
-
-* apply inverse transforms;
-* validate geometry bounds;
-* map line geometry;
-* map polygon geometry;
-* record inferred geometry.
-
-Allowed next states:
-
-```text
-AssemblingResult
-Failed
-Cancelling
-```
-
-A mapping failure must not publish a result with untrusted public geometry.
-
----
-
-## 26. `AssemblingResult`
-
-Recognition builds the immutable result object.
-
-Activities:
-
-* assign `recognition_id`;
-* assemble provider identity;
-* attach warnings;
-* attach metrics;
-* validate identifiers;
-* validate reading order;
-* validate geometry;
-* calculate counts;
-* finalize timestamps.
-
-Allowed next states:
-
-```text
-PublishingResult
-Completed
-Failed
-Cancelling
-```
-
-Direct `Completed` is allowed for synchronous in-process execution without result registration or Event Bus publication.
-
----
-
-## 27. `PublishingResult`
-
-Recognition registers or stores the result and publishes the terminal completion event.
-
-Activities:
-
-* register result reference;
-* persist temporary result when needed;
-* publish `recognition.completed`;
-* record publication outcome.
-
-Allowed next states:
-
-```text
-Completed
-Failed
-Cancelling
-```
-
-If terminal publication fails transiently, the state may remain here while retrying publication with the same event identity.
-
-OCR must not be rerun solely because publication failed.
-
----
-
-## 28. `Cancelling`
-
-Cancellation has been accepted and termination is in progress.
-
-Activities:
-
-* set cancellation flag;
-* stop scheduler work;
-* invoke provider cancellation if supported;
-* discard late provider output;
-* release request resources;
-* publish cancellation terminal event.
-
-Allowed next states:
-
-```text
-Cancelled
-```
-
-A request in `Cancelling` must not transition to:
-
-```text
-Completed
-Failed
-```
-
-unless cancellation acceptance itself is rolled back before becoming effective, which is not recommended.
-
----
-
-## 29. `Completed`
-
-Recognition successfully produced and exposed an immutable result.
-
-Properties:
-
-* `recognition_id` exists;
-* exactly one completion terminal outcome exists;
-* result is immutable;
-* request resources are released;
-* provider reservation is released;
-* late cancellation has no effect.
-
-Terminal state.
-
----
-
-## 30. `Failed`
-
-Recognition could not produce an acceptable result.
-
-Properties:
-
-* normalized error exists;
-* exactly one failure terminal outcome exists;
-* no valid completed result is exposed;
-* request resources are released;
-* retry may create a new request.
-
-Terminal state.
-
----
-
-## 31. `Cancelled`
-
-Recognition work is no longer active and no completion will be published.
-
-Properties:
-
-* cancellation reason exists;
-* request resources are released or scheduled for bounded cleanup;
-* provider may have been interrupted or merely detached;
-* late provider output is ignored;
-* retry requires a new request.
-
-Terminal state.
-
----
-
-# Request Transition Model
-
-## 32. Primary Successful Path
-
-```text
-Received
-    ↓
-Validating
-    ↓
-Queued
-    ↓
-SelectingProvider
-    ↓
-Preparing
-    ↓
-Preprocessing
-    ↓
-Detecting
-    ↓
-Recognizing
-    ↓
-PostProcessing
-    ↓
-ResolvingReadingOrder
-    ↓
-MappingCoordinates
-    ↓
-AssemblingResult
-    ↓
-PublishingResult
-    ↓
-Completed
-```
-
----
-
-## 33. Simplified Combined OCR Path
-
-```text
-Received
-    ↓
-Validating
-    ↓
-SelectingProvider
-    ↓
-Preparing
-    ↓
-Preprocessing
-    ↓
-Recognizing
-    ↓
-PostProcessing
-    ↓
-ResolvingReadingOrder
-    ↓
-MappingCoordinates
-    ↓
-AssemblingResult
-    ↓
-Completed
-```
-
-`Detecting` is skipped because the provider performs combined OCR.
-
----
-
-## 34. Single Region Path
-
-```text
-Received
-    ↓
-Validating
-    ↓
-SelectingProvider
-    ↓
-Preparing
-    ↓
-Preprocessing
-    ↓
-Recognizing
-    ↓
-PostProcessing
-    ↓
-MappingCoordinates
-    ↓
-AssemblingResult
-    ↓
-Completed
-```
-
-Page-level detection and reading-order resolution may be unnecessary.
-
----
-
-## 35. Empty Result Path
-
-```text
-Received
-    ↓
-Validating
-    ↓
-SelectingProvider
-    ↓
-Preparing
-    ↓
-Preprocessing
-    ↓
-Detecting
-    ↓
-PostProcessing
-    ↓
-AssemblingResult
-    ↓
-Completed
-```
-
-Final result:
-
-```text
-regions = []
-reading_order = []
-warning = NoReadableTextDetected
-```
-
-This is not a failure.
-
----
-
-## 36. Validation Failure Path
-
-```text
-Received
-    ↓
-Validating
-    ↓
-Rejected
-```
-
-Possible reasons:
-
-```text
-InvalidRequest
-DuplicateRequestId
-InvalidImageReference
-InvalidCoordinateSpace
-InvalidRegion
-Unsupported contract version
-Invalid provider policy
-```
-
----
-
-## 37. Processing Failure Path
-
-Any active processing state may transition to `Failed`.
-
-Example:
-
-```text
-Recognizing
-    ↓ ProviderTimeout
-Failed
-```
-
-General failure transitions:
-
-```text
-Queued → Failed
-SelectingProvider → Failed
-Preparing → Failed
-Preprocessing → Failed
-Detecting → Failed
-Recognizing → Failed
-PostProcessing → Failed
-ResolvingReadingOrder → Failed
-MappingCoordinates → Failed
-AssemblingResult → Failed
-PublishingResult → Failed
-```
-
----
-
-## 38. Cancellation Path
-
-Cancellation may be requested from any non-terminal state.
-
-```text
-Received → Cancelling
-Validating → Cancelling
-Queued → Cancelling
-SelectingProvider → Cancelling
-Preparing → Cancelling
-Preprocessing → Cancelling
-Detecting → Cancelling
-Recognizing → Cancelling
-PostProcessing → Cancelling
-ResolvingReadingOrder → Cancelling
-MappingCoordinates → Cancelling
-AssemblingResult → Cancelling
-PublishingResult → Cancelling
-```
-
-Then:
-
-```text
-Cancelling → Cancelled
-```
-
-Cancellation during terminal publication requires atomic terminal-state coordination.
-
----
-
-## 39. Terminal Race Rules
-
-Possible races:
-
-```text
-Completion vs Cancellation
-Failure vs Cancellation
-Timeout vs Provider Completion
-Shutdown vs Completion
-```
-
-The first successfully committed terminal transition wins.
-
-Conceptual operation:
-
-```text
-compare_and_set(
-    current_state ∈ non_terminal_states,
-    target_terminal_state
-)
-```
-
-Once committed:
-
-```text
-Completed
-Failed
-Cancelled
-```
-
-all competing terminal transitions must be rejected.
-
----
-
-## 40. Completion and Cancellation Race
-
-Example:
-
-```text
-Provider returns result
-Cancellation request arrives
-```
-
-Rule:
-
-* if completion terminal transition commits first, request becomes `Completed`;
-* if cancellation commits first, request becomes `Cancelled`;
-* no second terminal event may be published.
-
-The state commit and terminal event intent should be recorded atomically where practical.
-
----
-
-# Attempt State
-
-## 41. Recognition Attempt Model
-
-One request may contain multiple provider attempts when fallback is allowed.
-
-```text
-RecognitionAttemptState
-├── Pending
-├── Starting
-├── Running
-├── Succeeded
-├── Failed
-├── Cancelled
+ContentRevisionState
+
+├── Created
+├── Current
+├── Superseded
+├── Archived
 └── Discarded
 ```
 
-Each attempt is identified by:
+Each ContentRevision progresses independently.
+
+Multiple revisions may exist simultaneously.
+
+Only one revision may be Current.
+
+---
+
+## 10.2 Created
+
+A new ContentRevision has been generated.
+
+Characteristics:
+
+- immutable
+- validated
+- uniquely identified
+- not yet authoritative
+
+Allowed next states:
 
 ```text
-request_id + attempt_number
+Current
+
+Discarded
 ```
 
 ---
 
-## 42. Attempt State Definitions
+## 10.3 Current
 
-### `Pending`
+The revision represents the current reading world.
 
-Attempt is planned but has not started.
+Characteristics:
 
-### `Starting`
+- business authority
+- ProcessingIntent may reference it
+- newest accepted revision
 
-Provider capacity is reserved and execution is being prepared.
+Exactly one Current revision exists per Reading Session.
 
-### `Running`
+Allowed next states:
 
-Provider processing is active.
+```text
+Superseded
 
-### `Succeeded`
+Archived
+```
 
-Provider produced a valid candidate output.
+---
 
-This does not necessarily mean the full request is completed.
+## 10.4 Superseded
 
-### `Failed`
+A newer revision has replaced this revision.
 
-Provider attempt failed.
+Characteristics:
 
-Fallback may still continue.
+- immutable
+- historically valid
+- no longer authoritative
 
-### `Cancelled`
+Superseded revisions never regain authority.
 
-Provider execution was interrupted.
+Allowed next states:
 
-### `Discarded`
+```text
+Archived
 
-Provider produced or may later produce output that must not be used.
+Discarded
+```
+
+---
+
+## 10.5 Archived
+
+The revision remains available for history.
+
+It no longer participates in business evaluation.
+
+Archived revisions may be used for:
+
+- diagnostics
+- debugging
+- timeline reconstruction
+- analytics
+
+Allowed next state:
+
+```text
+Discarded
+```
+
+---
+
+## 10.6 Discarded
+
+The revision has been permanently removed.
+
+Terminal state.
+
+---
+
+# 11. Content Revision Diagram
+
+```text
+Created
+
+↓
+
+Current
+
+↓
+
+Superseded
+
+↓
+
+Archived
+
+↓
+
+Discarded
+```
+
+Early discard:
+
+```text
+Created
+
+↓
+
+Discarded
+```
+
+This may occur when a revision becomes invalid before becoming authoritative.
+
+---
+
+# 12. Revision Transition Rules
+
+Valid transitions include:
+
+```text
+Created → Current
+
+Created → Discarded
+
+Current → Superseded
+
+Current → Archived
+
+Superseded → Archived
+
+Superseded → Discarded
+
+Archived → Discarded
+```
+
+All other transitions are forbidden.
+
+Examples of invalid transitions:
+
+```text
+Superseded → Current
+
+Archived → Current
+
+Discarded → Current
+
+Discarded → Created
+```
+
+---
+
+# 13. Processing Intent State
+
+ProcessingIntent represents business requirements generated from a ContentRevision.
+
+It is not executable work.
+
+Execution belongs to Runtime.
+
+ProcessingIntent exists only to express what business outcomes are required.
+
+---
+
+## 13.1 ProcessingIntent States
+
+```text
+ProcessingIntentState
+
+├── Created
+├── Published
+├── Accepted
+├── Fulfilled
+├── Obsolete
+└── Discarded
+```
+
+The lifecycle of ProcessingIntent is intentionally independent from Runtime execution.
+
+---
+
+## 13.2 Created
+
+The business requirement has been generated.
+
+It has not yet been published.
+
+Characteristics:
+
+- immutable
+- linked to one ContentRevision
+- not visible outside Reading Session
+
+Allowed next state:
+
+```text
+Published
+```
+
+---
+
+## 13.3 Published
+
+The ProcessingIntent has been published through the Runtime contract.
+
+Characteristics:
+
+- visible to Runtime
+- immutable
+- awaiting Runtime ownership
+
+Reading Session performs no scheduling.
+
+Allowed next states:
+
+```text
+Accepted
+
+Obsolete
+```
+
+---
+
+## 13.4 Accepted
+
+Runtime has accepted responsibility for execution.
+
+Reading Session no longer controls execution.
+
+Business ownership remains unchanged.
+
+Reading Session does not know:
+
+- execution order
+- worker assignment
+- processing progress
+
+Allowed next states:
+
+```text
+Fulfilled
+
+Obsolete
+```
+
+---
+
+## 13.5 Fulfilled
+
+The business intent has been satisfied.
+
+Reading Session has accepted that the requested business outcome exists.
+
+Fulfilled does not imply successful execution of every intermediate stage.
+
+It means the business objective represented by this ProcessingIntent is complete.
+
+Terminal state.
+
+---
+
+## 13.6 Obsolete
+
+The intent is no longer relevant.
+
+Typical causes:
+
+- newer ContentRevision
+- newer ProcessingIntent
+- session cancelled
+- session completed
+
+Obsolete intents never become Fulfilled.
+
+Allowed next state:
+
+```text
+Discarded
+```
+
+---
+
+## 13.7 Discarded
+
+The intent has been removed permanently.
+
+Terminal state.
+
+---
+
+# 14. Processing Intent Diagram
+
+```text
+Created
+
+↓
+
+Published
+
+↓
+
+Accepted
+
+↓
+
+Fulfilled
+```
+
+Replacement path:
+
+```text
+Published
+
+↓
+
+Obsolete
+
+↓
+
+Discarded
+```
+
+or
+
+```text
+Accepted
+
+↓
+
+Obsolete
+
+↓
+
+Discarded
+```
+
+---
+
+# 15. Processing Intent Rules
+
+ProcessingIntent follows several mandatory rules.
+
+1. Every ProcessingIntent belongs to exactly one ContentRevision.
+
+2. Every ContentRevision may produce zero or more ProcessingIntent objects.
+
+3. Only one ProcessingIntent may be considered active for a particular business objective.
+
+4. Obsolete intents never become Fulfilled.
+
+5. Fulfilled intents never become Obsolete.
+
+6. ProcessingIntent never changes after publication.
+
+7. Runtime execution never mutates ProcessingIntent.
+
+---
+
+# 16. State Transition Guards
+
+Every state transition must satisfy explicit business guards.
+
+Transitions are never implicit.
+
+---
+
+## 16.1 Session Guards
 
 Examples:
 
-* request already cancelled;
-* newer fallback attempt already won;
-* timeout terminal state already committed;
-* provider output arrived too late.
-
----
-
-## 43. Attempt Transition Diagram
-
 ```text
-Pending
-   ↓
-Starting
-   ↓
-Running
- ┌─┼───────────────┐
- ↓ ↓               ↓
-Succeeded        Failed
-                  ↓
-             next attempt
+Create Session
 
-Running → Cancelled
-Running → Discarded
-Succeeded → Discarded
+↓
+
+No existing active session
 ```
 
-A successful attempt may still be discarded when the request terminal state was already committed elsewhere.
-
----
-
-## 44. Provider Fallback State Flow
-
 ```text
-Request: SelectingProvider
-        ↓
-Attempt 1: Running
-        ↓
-Attempt 1: Failed
-        ↓
-Fallback Allowed?
-   ┌────┴─────┐
-   │          │
-  No         Yes
-   │          │
-Request     Attempt 2
-Failed       Running
-                ↓
-             Succeeded
-                ↓
-         Request continues
+Pause Session
+
+↓
+
+Current state = Active
 ```
 
-Internal attempt failures must not emit public terminal failure when fallback remains active.
-
----
-
-## 45. Fallback Guards
-
-Fallback is allowed only when:
-
 ```text
-fallback_allowed = true
-attempt_count <= maximum_fallback_count
-error.retryable = true
-another eligible provider exists
-privacy policy remains satisfied
-timeout budget remains
-request is not cancelling
-module is not shutting down
+Resume Session
+
+↓
+
+Current state = Paused
 ```
 
-Fallback must not silently change:
-
-* local-only requirement;
-* remote-processing permission;
-* required language;
-* required orientation;
-* requested mode.
-
----
-
-# Result State
-
-## 46. Recognition Result Lifecycle
-
-Recognition results have a simpler state model.
-
 ```text
-RecognitionResultState
-├── Building
-├── Validating
-├── Registered
-├── Available
-├── Expired
-├── Evicted
-└── Invalid
+Complete Session
+
+↓
+
+Current state ∈ {Active, Paused}
 ```
 
 ---
 
-## 47. Result State Definitions
+## 16.2 Reading Context Guards
 
-### 47.1 `Building`
+Context updates require:
 
-The result object is being assembled.
+- valid ReadingSession
+- supported source
+- valid configuration
+- successful context evaluation
 
-It is not visible to consumers.
-
----
-
-### 47.2 `Validating`
-
-The result is undergoing contract validation.
-
-Checks include:
-
-* geometry;
-* IDs;
-* reading order;
-* confidence;
-* metrics;
-* provider identity;
-* timestamps.
+Invalid context must not become Ready.
 
 ---
 
-### 47.3 `Registered`
+## 16.3 Revision Guards
 
-The immutable result has been accepted by the result registry or temporary store.
+A new ContentRevision may be created only when business state changes.
 
-A completion event may now safely reference it.
+Examples:
 
----
+- page changed
+- chapter changed
+- viewport changed
+- language changed
+- configuration changed
 
-### 47.4 `Available`
-
-The result can be retrieved by authorized consumers.
-
-Recognition does not define how long availability lasts.
-
----
-
-### 47.5 `Expired`
-
-The result reference has passed its lifetime.
-
-The immutable result may have been removed.
-
-Consumers should not assume it remains retrievable.
+Repeated evaluation of identical business state must not create duplicate revisions.
 
 ---
 
-### 47.6 `Evicted`
+## 16.4 Processing Intent Guards
 
-The result was removed before normal expiry.
+ProcessingIntent may be published only when:
 
-Possible causes:
+- ContentRevision is Current
+- ReadingContext is Ready
+- Session is Active
 
-* cache pressure;
-* storage policy;
-* session cleanup;
-* privacy cleanup;
-* explicit invalidation.
+Otherwise,
 
----
-
-### 47.7 `Invalid`
-
-Result validation failed.
-
-An invalid result must never be published as completed.
+no ProcessingIntent is produced.
 
 ---
 
-## 48. Result State Diagram
+# 17. Transition Triggers
+
+Transitions occur because business events change the reading domain.
+
+Typical triggers include:
 
 ```text
-Building
-   ↓
-Validating
- ┌─┴────────┐
- ↓          ↓
-Registered Invalid
-   ↓
-Available
- ┌─┴───────┐
- ↓         ↓
-Expired  Evicted
+SessionCreated
+
+SourceChanged
+
+ViewportChanged
+
+PageChanged
+
+ChapterChanged
+
+ConfigurationChanged
+
+LanguageChanged
+
+ReadingModeChanged
+
+SessionPaused
+
+SessionResumed
+
+SessionCompleted
+
+SessionCancelled
 ```
 
-`Invalid`, `Expired`, and `Evicted` are terminal for that result instance.
+Runtime events do not directly trigger business state transitions.
+
+Instead,
+
+Runtime publishes completion through its own contracts,
+
+which Reading Session evaluates as business facts.
 
 ---
 
-## 49. Result Availability and Request Completion
+# 18. Transition Actions
 
-A request may transition to `Completed` only when:
+Every transition may execute business actions.
 
-```text
-result.state ∈ {Registered, Available}
-```
-
-for reference-based asynchronous workflows.
-
-A request must not become `Completed` when:
+Examples include:
 
 ```text
-result.state = Invalid
+Create ReadingContext
+
+Create ContentRevision
+
+Publish ProcessingIntent
+
+Update Session Metadata
+
+Record Business Timeline
+
+Publish Business Event
+
+Update Statistics
+
+Invalidate Previous Revision
 ```
 
-or when no valid result reference can be produced.
+Actions must remain deterministic.
+
+They must never invoke processing modules directly.
 
 ---
 
-# Transition Guards and Actions
+# 19. State Persistence
 
-## 50. State Transition Record
+Reading Session distinguishes between business state that must survive over time and transient state that exists only during the current runtime.
 
-Every meaningful request transition should produce an internal transition record.
-
-```text
-RecognitionStateTransition
-├── request_id
-├── previous_state
-├── next_state
-├── trigger
-├── occurred_at
-├── attempt?
-├── provider_id?
-├── trace_id
-└── metadata?
-```
-
-These records are internal diagnostics.
-
-They are not necessarily public events.
+Business persistence is determined by business value rather than implementation convenience.
 
 ---
 
-## 51. Transition Triggers
+## 19.1 Persistent State
 
-Possible triggers:
+The following business objects may be persisted.
 
 ```text
-RequestReceived
-ValidationPassed
-ValidationFailed
-SchedulerQueued
-ExecutionCapacityAvailable
-ProviderSelected
-ImageResolved
-PreprocessingCompleted
-RegionsDetected
-RecognitionCompleted
-PostProcessingCompleted
-ReadingOrderResolved
-CoordinatesMapped
-ResultAssembled
-ResultRegistered
-CompletionPublished
-FailureOccurred
-CancellationRequested
-CancellationAccepted
-ProviderCancelled
-TimeoutExpired
-ShutdownRequested
-ProviderUnavailable
-FallbackSelected
+ReadingSession
+
+ReadingContext
+
+ContentRevision
+
+SessionConfiguration
+
+Business Timeline
+
+Session Metadata
 ```
+
+Persistence strategy is implementation-dependent.
+
+The contract only defines what may survive beyond the current runtime.
 
 ---
 
-## 52. Transition Actions
+## 19.2 Ephemeral State
 
-State transitions may execute actions such as:
+The following information is transient.
 
 ```text
-reserve provider capacity
-register cancellation token
-start stage timer
-publish lifecycle event
-release image buffer
-release provider capacity
-discard late provider output
-register result reference
-normalize error
-record metrics
-schedule fallback
+Current Event
+
+Temporary Evaluation Data
+
+Internal Comparison Buffers
+
+Derived Intermediate Objects
+
+Validation Cache
 ```
 
-Actions must be idempotent where transition retries are possible.
+These objects are internal implementation details.
+
+They are not business state.
 
 ---
 
-## 53. Stage Entry Rules
+## 19.3 Runtime State Is Never Persisted Here
 
-On entering an active processing state:
+Reading Session must never persist Runtime execution state.
 
-1. check cancellation;
-2. check request timeout;
-3. record stage start time;
-4. validate required previous outputs;
-5. verify request remains non-terminal.
+Examples:
+
+```text
+Running Worker
+
+Current OCR Progress
+
+Queued Task
+
+Retry Counter
+
+Execution Pipeline
+
+Processing Queue
+```
+
+Those belong exclusively to Runtime.
 
 ---
 
-## 54. Stage Exit Rules
+## 19.4 State Snapshot
 
-Before leaving an active processing state:
+At any moment the Reading Session can be represented by a complete business snapshot.
 
-1. store stage output;
-2. record duration;
-3. validate stage output;
-4. check cancellation;
-5. release stage-local resources when no longer needed;
-6. determine the next state explicitly.
+Conceptually:
+
+```text
+ReadingSessionSnapshot
+
+├── Session
+├── ReadingContext
+├── CurrentRevision
+├── SessionConfiguration
+├── ActiveProcessingIntent
+└── Metadata
+```
+
+A snapshot must represent one consistent business moment.
+
+Partial snapshots are not allowed.
 
 ---
 
-# Timeouts
+# 20. Recovery
 
-## 55. Timeout State Behavior
+Recovery reconstructs business state after interruption.
 
-Timeout is not a dedicated request state.
+Recovery never reconstructs execution.
 
-It is a trigger that normally causes:
-
-```text
-Current Non-Terminal State
-        ↓
-Cancelling
-        ↓
-Cancelled
-```
-
-or:
-
-```text
-Current Non-Terminal State
-        ↓
-Failed
-```
-
-depending on timeout policy.
-
-Recommended behavior:
-
-```text
-provider timeout → Failed
-request supersession timeout → Cancelled
-shutdown deadline → Cancelled
-```
+Execution restarts independently.
 
 ---
 
-## 56. Timeout Sources
+## 20.1 Recovery Philosophy
 
-```text
-QueueTimeout
-RequestDeadline
-ProviderTimeout
-StageTimeout
-ShutdownDeadline
-ResourceWaitTimeout
-```
+Reading Session restores business authority.
 
-Each timeout must record its source.
+Runtime restores execution capability.
+
+These are separate responsibilities.
 
 ---
 
-## 57. Timeout Guards
+## 20.2 Session Recovery
 
-Before every expensive stage:
+When a persisted Reading Session exists,
 
-```text
-remaining_timeout_budget > minimum_stage_budget
-```
+the module attempts to restore:
 
-If insufficient:
+- Session Lifecycle
+- Reading Context
+- Current Revision
+- Configuration
 
-```text
-Failed(RequestExpired)
-```
-
-or:
-
-```text
-Cancelled(Timeout)
-```
-
-must occur before starting the stage.
+The module does not attempt to resume unfinished worker execution.
 
 ---
 
-# Retry State
+## 20.3 Revision Recovery
 
-## 58. Retry Is Not a State Transition
+Only one ContentRevision may become Current.
 
-A retry does not move a terminal request back to an active state.
+If multiple candidate revisions exist,
 
-Incorrect:
+business rules determine the newest authoritative revision.
 
-```text
-Failed → Recognizing
-```
-
-Correct:
+All remaining revisions become:
 
 ```text
-Request A: Failed
+Superseded
 
-Request B:
-Received
-    ↓
-Validating
-    ↓
-...
-```
+or
 
-A retry must create:
-
-```text
-new request_id
-new terminal lifecycle
-new recognition_id on success
+Archived
 ```
 
 ---
 
-## 59. Retry Relationship
+## 20.4 Intent Recovery
 
-A retry request may reference:
+Previously fulfilled ProcessingIntent objects remain historical facts.
+
+Published but unfinished intents are re-evaluated.
+
+Possible outcomes:
 
 ```text
-previous_request_id
-previous_recognition_id
-retry_reason
-retry_scope
+Republish
+
+Obsolete
+
+Discard
 ```
 
-The original request and result remain unchanged.
+Reading Session does not assume Runtime completed previous execution.
 
 ---
 
-# Concurrency State
+## 20.5 Recovery Constraints
 
-## 60. Active Request Registry
+Recovery must preserve:
 
-Recognition maintains a bounded registry.
+- Session identity
+- Revision identity
+- business ordering
+- historical correctness
+
+Recovery must never create duplicate business history.
+
+---
+
+# 21. Invalid Transitions
+
+Only documented transitions are valid.
+
+Every other transition is considered a contract violation.
+
+---
+
+## 21.1 Invalid Session Transitions
+
+Forbidden examples:
 
 ```text
-ActiveRecognitionRequest
-├── request_id
-├── current_state
-├── current_attempt
-├── provider_id?
-├── cancellation_status
-├── deadline?
-├── priority
-├── acquired_resources[]
-└── transition_version
-```
+Completed → Active
 
----
+Disposed → Active
 
-## 61. Transition Version
+Cancelled → Active
 
-Each request may maintain a monotonic transition version.
+Paused → Created
 
-```text
-transition_version = integer
-```
-
-It supports:
-
-* compare-and-set transitions;
-* race detection;
-* duplicate callback suppression;
-* terminal-state protection.
-
----
-
-## 62. Concurrency Rules
-
-1. State changes for one request must be serialized logically.
-2. Provider callbacks must verify current request state.
-3. Late callbacks must not overwrite terminal state.
-4. One request may own only one active terminal transition.
-5. Fallback attempts may overlap only when explicitly designed.
-6. Result assembly must use one winning attempt.
-7. Cancellation must be visible to all active stages.
-8. Provider capacity must be released exactly once.
-9. Image buffers must be released exactly once.
-10. Terminal events must be emitted exactly once.
-
----
-
-## 63. Duplicate Callback Handling
-
-Provider SDKs may invoke callbacks more than once.
-
-Recognition must ignore duplicate callbacks after:
-
-```text
-attempt.state ∈ {
-    Succeeded,
-    Failed,
-    Cancelled,
-    Discarded
-}
-```
-
-A duplicate callback must not change request state.
-
----
-
-# State and Events
-
-## 64. State-to-Event Mapping
-
-| State transition                        | Public event                       |
-| --------------------------------------- | ---------------------------------- |
-| Accepted execution → first active stage | `recognition.started`              |
-| Any non-terminal state → `Completed`    | `recognition.completed`            |
-| Any non-terminal state → `Failed`       | `recognition.failed`               |
-| Any non-terminal state → `Cancelled`    | `recognition.cancelled`            |
-| Provider → `Ready`                      | `recognition.provider_ready`       |
-| Provider → `Degraded`                   | `recognition.provider_degraded`    |
-| Provider → `Unavailable`                | `recognition.provider_unavailable` |
-
-Internal stage transitions do not require public events.
-
----
-
-## 65. Event Publication Does Not Define State Alone
-
-State must be committed before or atomically with terminal event intent.
-
-Incorrect:
-
-```text
-publish recognition.completed
-then set state = Completed
-```
-
-Risk:
-
-* cancellation may win between publication and state mutation.
-
-Preferred:
-
-```text
-commit terminal state and event record
-then publish event idempotently
+Completed → Initializing
 ```
 
 ---
 
-## 66. Progress Events and State
+## 21.2 Invalid ReadingContext Transitions
 
-Progress events may correspond to stage exits:
-
-```text
-Preprocessing → recognition.preprocessing_completed
-Detecting → recognition.regions_detected
-Recognizing region → recognition.region_recognized
-ResolvingReadingOrder → recognition.reading_order_resolved
-```
-
-These events are optional and do not alter the public lifecycle guarantees.
-
----
-
-# Recovery
-
-## 67. Process Recovery
-
-After an application crash, in-memory requests may be lost.
-
-Recovery policy depends on deployment mode.
-
-For desktop MVP:
+Forbidden examples:
 
 ```text
-active in-memory request → considered interrupted
-temporary image buffer → cleaned on startup
-temporary result → validated or removed
-provider model → reinitialized
-```
+Disposed → Ready
 
-Recognition should not automatically recreate old requests unless orchestration explicitly resubmits them.
+Invalid → Loading
 
----
-
-## 68. Orphan Request Detection
-
-On startup, persisted request records in non-terminal states may be marked:
-
-```text
-Failed
-```
-
-with:
-
-```text
-InternalError
-ProcessInterrupted
-```
-
-if persistent request tracking is later introduced.
-
-For MVP, persistent active-request state is not required.
-
----
-
-## 69. Orphan Result Detection
-
-A stored result without a valid completion record may be:
-
-* retained temporarily for diagnostics;
-* registered during recovery if validation succeeds;
-* removed according to cleanup policy.
-
-Recognition must not publish a new completion event without an idempotent recovery design.
-
----
-
-# State Persistence
-
-## 70. Persistent Versus Ephemeral State
-
-### Ephemeral
-
-```text
-current request stage
-image buffers
-provider request handle
-cancellation token
-stage-local output
-GPU resource handle
-active timer
-```
-
-### Potentially Persistent
-
-```text
-completed RecognitionResult
-terminal outcome record
-event publication record
-provider configuration version
-benchmark results
-diagnostic references
-```
-
-The MVP should keep active processing state ephemeral.
-
----
-
-## 71. State Snapshot
-
-An internal request snapshot may be represented as:
-
-```text
-RecognitionRequestSnapshot
-├── request_id
-├── state
-├── state_version
-├── attempt
-├── provider_id?
-├── started_at?
-├── deadline?
-├── cancellation_requested
-├── terminal_outcome?
-├── result_id?
-├── error_code?
-└── updated_at
-```
-
-Snapshots must not contain raw image bytes or complete recognized text.
-
----
-
-# Invalid Transitions
-
-## 72. Invalid Transition Examples
-
-The following transitions are forbidden:
-
-```text
-Completed → Recognizing
-Completed → Cancelled
-Failed → Completed
-Failed → Recognizing
-Cancelled → Completed
-Cancelled → Failed
-Rejected → Queued
-PublishingResult → Recognizing
-Stopped → Ready
-ShuttingDown → Ready
-Provider Stopped → Ready without initialization
-Result Invalid → Available
-Result Expired → Available
+Ready → Empty
 ```
 
 ---
 
-## 73. Invalid Transition Handling
+## 21.3 Invalid Revision Transitions
 
-When invalid transition is attempted:
+Forbidden examples:
+
+```text
+Superseded → Current
+
+Archived → Current
+
+Discarded → Current
+
+Discarded → Created
+```
+
+Business authority always moves forward.
+
+It never returns.
+
+---
+
+## 21.4 Invalid ProcessingIntent Transitions
+
+Forbidden examples:
+
+```text
+Fulfilled → Published
+
+Obsolete → Fulfilled
+
+Discarded → Published
+
+Discarded → Accepted
+```
+
+Once an intent reaches a terminal outcome,
+
+it remains immutable forever.
+
+---
+
+## 21.5 Invalid Transition Handling
+
+When an invalid transition is attempted,
+
+Reading Session must:
 
 1. reject the transition;
-2. preserve current state;
-3. record a contract violation;
-4. avoid publishing an event;
-5. release duplicate callback resources if needed;
-6. surface diagnostics.
+2. preserve the current state;
+3. record diagnostics;
+4. avoid publishing business events;
+5. preserve business consistency.
 
-An invalid transition must not crash the entire application unless state corruption is unrecoverable.
-
----
-
-# State Invariants
-
-## 74. Module Invariants
-
-1. `Ready` requires at least one usable provider.
-2. `Stopped` has no active requests.
-3. `ShuttingDown` accepts no new requests.
-4. `Unavailable` rejects normal requests.
-5. Module state does not depend on one individual request result.
+Invalid transitions must never corrupt business history.
 
 ---
 
-## 75. Provider Invariants
+# 22. State Invariants
 
-1. Only `Ready` or eligible `Degraded` providers may receive new work.
-2. `ShuttingDown` providers receive no new work.
-3. `Misconfigured` providers are not selected.
-4. Provider capabilities remain versioned.
-5. Provider state changes do not mutate completed results.
-6. Provider state must not expose credentials.
+The following invariants must always remain true.
 
 ---
 
-## 76. Request Invariants
+## 22.1 Session Invariants
 
-1. Every request has exactly one current state.
-2. Every request has a monotonic state version.
-3. Every accepted request reaches exactly one terminal state.
-4. Terminal states are immutable.
-5. A cancelled request never publishes completion.
-6. A failed request never publishes completion under the same request ID.
-7. A completed request has a valid immutable result.
-8. A request never executes two winning provider attempts.
-9. Request state is isolated by `request_id`.
-10. Request hints remain unchanged during one execution unless explicitly copied into an internal derived plan.
-11. Privacy policy cannot be weakened during fallback.
-12. The original source identity remains stable throughout processing.
-13. Frame identity remains stable throughout processing.
-14. Stage output must be validated before the next dependent state.
-15. Every acquired resource is released exactly once.
+1. Every Reading Session has exactly one current lifecycle state.
+
+2. Completed sessions never become Active.
+
+3. Disposed sessions never change again.
+
+4. Cancelled sessions never resume.
+
+5. Only Active sessions may produce new business activity.
 
 ---
 
-## 77. Result Invariants
+## 22.2 ReadingContext Invariants
 
-1. A published result passed contract validation.
-2. A result has exactly one `recognition_id`.
-3. Result state never returns to `Building`.
-4. Raw recognized text is immutable.
-5. Public geometry remains in source coordinate space.
-6. An invalid result is never exposed as completed.
-7. Expiry does not mutate historical event meaning.
-8. User correction creates a separate object.
+1. Every Reading Session owns at most one active ReadingContext.
 
----
+2. Ready contexts represent the latest accepted reading world.
 
-## 78. Event-State Invariants
+3. Invalid contexts never produce ProcessingIntent.
 
-1. `recognition.started` is emitted at most once per execution lifecycle.
-2. Exactly one terminal lifecycle event is emitted.
-3. Terminal event type matches terminal request state.
-4. Terminal event publication is idempotent.
-5. Progress events never change terminal state.
-6. Late progress events are ignored by terminal consumers.
-7. Public events contain no raw image bytes.
-8. Public events contain no complete OCR text.
+4. Disposed contexts never reappear.
 
 ---
 
-# MVP State Model
+## 22.3 ContentRevision Invariants
 
-## 79. Required MVP Module States
+1. Every revision belongs to one Reading Session.
+
+2. Revisions are immutable.
+
+3. Exactly one revision is Current.
+
+4. Superseded revisions never regain authority.
+
+5. Archived revisions remain historically valid.
+
+6. Discarded revisions never reappear.
+
+---
+
+## 22.4 ProcessingIntent Invariants
+
+1. Every ProcessingIntent belongs to one ContentRevision.
+
+2. Published intents are immutable.
+
+3. Obsolete intents never become Fulfilled.
+
+4. Fulfilled intents remain historical facts.
+
+5. Runtime never changes ProcessingIntent ownership.
+
+---
+
+## 22.5 Business Invariants
+
+1. Business authority always moves forward.
+
+2. Business history is append-only.
+
+3. Previous revisions remain historically correct.
+
+4. Business state is deterministic.
+
+5. Reading Session never owns Runtime execution.
+
+6. Every business object has exactly one owner.
+
+---
+
+# 23. MVP State Model
+
+The initial implementation may use a simplified state model while preserving the architectural guarantees.
+
+---
+
+## 23.1 MVP Session States
 
 ```text
-Uninitialized
-Initializing
-Ready
-Degraded
-Unavailable
-ShuttingDown
-Stopped
-```
+Created
 
----
+Active
 
-## 80. Required MVP Provider States
+Paused
 
-```text
-Registered
-Initializing
-Ready
-Unavailable
-Misconfigured
-Stopped
-```
-
-`Degraded` may initially be represented only through capability status if implementation simplicity requires it.
-
----
-
-## 81. Required MVP Request States
-
-The MVP may implement the following simplified state set:
-
-```text
-Received
-Validating
-Queued
-Processing
-AssemblingResult
-Cancelling
 Completed
-Failed
+
 Cancelled
+
+Disposed
 ```
 
-Where:
-
-```text
-Processing
-=
-Preparing
-+ Preprocessing
-+ Detecting
-+ Recognizing
-+ PostProcessing
-+ ResolvingReadingOrder
-+ MappingCoordinates
-```
-
-Detailed internal stages should still be recorded in metrics even if they are not modeled as separate runtime enum values.
+The `Initializing` and `Completing` states may be implemented internally without public exposure.
 
 ---
 
-## 82. Recommended MVP Request Diagram
+## 23.2 MVP ReadingContext States
 
 ```text
-Received
-    ↓
-Validating
- ┌──┴──────────┐
- ↓             ↓
-Failed       Queued
-               ↓
-           Processing
-         ┌─────┼─────────┐
-         ↓     ↓         ↓
- Assembling  Failed   Cancelling
-     ↓                    ↓
- Completed            Cancelled
+Loading
+
+Ready
+
+Updating
+
+Invalid
 ```
+
+This provides sufficient expressiveness for the first implementation.
 
 ---
 
-## 83. When to Expand MVP States
+## 23.3 MVP Revision States
 
-Split `Processing` into detailed states when at least one of these becomes necessary:
+```text
+Current
 
-* stage-specific cancellation;
-* progress UI;
-* provider fallback by stage;
-* stage-specific timeout;
-* detailed recovery;
-* stage-specific metrics;
-* independent detector and OCR providers;
-* long-page chunking;
-* distributed processing;
-* debugging state corruption.
+Superseded
+```
+
+Archiving and discarding policies may be added later.
 
 ---
 
-# Testing
+## 23.4 MVP ProcessingIntent States
 
-## 84. State Transition Tests
+```text
+Created
 
-Required tests:
+Published
 
-### Module State
+Fulfilled
 
-* startup reaches `Ready`;
-* startup with partial provider availability reaches `Degraded`;
-* startup without providers reaches `Unavailable`;
-* shutdown rejects new requests;
-* shutdown reaches `Stopped`;
-* stopped module can reinitialize.
+Obsolete
+```
 
-### Provider State
-
-* registered provider initializes;
-* valid provider becomes ready;
-* invalid credentials produce misconfigured;
-* provider outage produces unavailable;
-* provider recovery returns to ready;
-* shutting-down provider receives no new work.
-
-### Request State
-
-* successful full lifecycle;
-* validation rejection;
-* queue then execution;
-* no-text completion;
-* provider failure;
-* preprocessing failure;
-* result validation failure;
-* cancellation before execution;
-* cancellation during provider execution;
-* cancellation during result assembly;
-* timeout;
-* fallback success;
-* fallback exhaustion;
-* duplicate callback;
-* late provider response;
-* duplicate cancellation;
-* completion/cancellation race.
-
-### Result State
-
-* building to available;
-* invalid result rejected;
-* completion requires valid reference;
-* expiry;
-* eviction;
-* immutable result behavior.
+The `Accepted` state may initially be omitted if Runtime acknowledgment is not yet implemented.
 
 ---
 
-## 85. Property Tests
+# 24. Testing
 
-Useful state-machine properties:
-
-```text
-terminal_state_count(request) <= 1
-```
-
-```text
-state_version always increases
-```
-
-```text
-Completed implies valid recognition_id
-```
-
-```text
-Cancelled implies no completed event
-```
-
-```text
-Failed implies no completed result
-```
-
-```text
-provider selected implies provider was eligible
-```
-
-```text
-public geometry always fits source coordinate space
-```
-
-```text
-active request resources released at terminal state
-```
+The Reading Session state machine must be validated through deterministic state transition tests.
 
 ---
 
-## 86. Race Tests
+## 24.1 Session Tests
 
-Concurrency tests must cover:
+Required scenarios include:
 
-```text
-cancel vs provider success
-cancel vs provider failure
-timeout vs provider success
-shutdown vs result publication
-fallback success vs first provider late success
-duplicate provider callback
-duplicate terminal publication
-result storage success vs cancellation
-```
-
-Each race must produce one deterministic terminal outcome.
+- create session
+- activate session
+- pause session
+- resume session
+- complete session
+- cancel session
+- dispose session
+- invalid lifecycle transition
 
 ---
 
-# Open Decisions
+## 24.2 ReadingContext Tests
 
-## 87. Unresolved State Decisions
+Required scenarios include:
 
-The following remain open:
-
-* whether `Rejected` is a separate state or a subtype of `Failed`;
-* whether queue time counts toward request timeout;
-* whether cancellation transitions through `Cancelling` in all implementations;
-* whether result publication state must be persisted;
-* whether provider degradation requires a dedicated state in MVP;
-* whether provider attempts may overlap;
-* whether progress states are runtime enums or diagnostic labels;
-* whether active request snapshots should survive process restart;
-* whether timeout ends in `Failed` or `Cancelled`;
-* whether result expiry events are required;
-* how long terminal request state remains in memory;
-* how provider recovery backoff is represented;
-* whether model loading has separate provider substates;
-* whether GPU resource pressure changes module state or scheduler state.
-
-These should be resolved through implementation needs and prototype behavior.
+- initial context creation
+- page navigation
+- chapter navigation
+- viewport update
+- invalid source
+- context disposal
 
 ---
 
-## 88. Recommended Decisions for MVP
+## 24.3 Revision Tests
 
-Recommended initial choices:
+Required scenarios include:
 
-```text
-Rejected = Failed before execution
-queue time counts toward total request timeout
-all accepted cancellations pass through Cancelling
-provider attempts do not overlap
-active request state remains in memory only
-timeout during OCR ends in Failed
-superseded frame ends in Cancelled
-terminal request records remain briefly for deduplication
-provider model loading stays inside Initializing
-```
-
-These choices minimize complexity while preserving correctness.
+- create first revision
+- create replacement revision
+- supersede previous revision
+- archive revision
+- discard revision
+- reject duplicate revision
 
 ---
 
-## 89. Related Documents
+## 24.4 ProcessingIntent Tests
 
-```text
-doc/02-modules/recognition/README.md
-doc/02-modules/recognition/MODULE.md
-doc/02-modules/recognition/CONTRACT.md
-doc/02-modules/recognition/EVENTS.md
-docs/architecture/STATE_MACHINE.md
-docs/architecture/EVENT_BUS.md
-docs/architecture/DATA_FLOW.md
-docs/architecture/MODULE_DEPENDENCY.md
-```
+Required scenarios include:
+
+- publish intent
+- obsolete previous intent
+- fulfill current intent
+- reject obsolete fulfillment
+- discard obsolete intent
 
 ---
 
-## 90. Summary
+## 24.5 Recovery Tests
 
-The Recognition state model separates:
+Recovery testing should verify:
+
+- session restoration
+- context restoration
+- revision restoration
+- historical consistency
+- duplicate prevention
+- business ordering
+
+---
+
+# 25. Open Decisions
+
+The following architectural decisions remain intentionally open.
+
+- Should Completed sessions be recoverable after application restart?
+
+- Should historical ReadingContexts be persisted or regenerated?
+
+- Should archived revisions remain indefinitely?
+
+- How long should obsolete ProcessingIntent objects be retained?
+
+- Should business history support time-travel debugging?
+
+- Should multiple Reading Sessions be supported in parallel?
+
+These questions do not affect the correctness of the current state model.
+
+They may be resolved as implementation requirements evolve.
+
+---
+
+# 26. Related Documents
+
+This specification complements the remaining Reading Session documentation.
 
 ```text
-module availability
-provider availability
-request processing
-provider attempts
-result availability
+README.md
+
+MODULE.md
+
+CONTRACT.md
+
+EVENTS.md
+
+ERRORS.md
 ```
 
-The central request lifecycle is:
+Responsibilities are divided as follows.
+
+| Document | Responsibility |
+|-----------|----------------|
+| README | Module overview |
+| MODULE | Architectural responsibilities |
+| CONTRACT | Public interfaces |
+| STATES | Business lifecycle |
+| EVENTS | Business event definitions |
+| ERRORS | Business failure model |
+
+No document should redefine concepts owned by another document.
+
+---
+
+# 27. Summary
+
+The Reading Session state model separates four independent business lifecycles.
 
 ```text
-Received
-    ↓
-Validating
-    ↓
-Queued
-    ↓
-Processing
-    ↓
-AssemblingResult
-    ↓
-Completed
+Reading Session
+
+├── Session Lifecycle
+├── Reading Context
+├── Content Revision
+└── Processing Intent
 ```
 
-with alternative terminal outcomes:
+The key guarantees are:
 
-```text
-Failed
-Cancelled
-```
+- business state is deterministic;
+- lifecycle transitions are explicit;
+- business ownership is unambiguous;
+- ContentRevision is immutable;
+- ProcessingIntent expresses business intent rather than execution;
+- Runtime execution is completely independent of business state;
+- historical business information is append-only;
+- business authority always moves forward.
 
-The most important guarantees are:
+Together, these guarantees ensure that Reading Session remains the single source of truth for the reading domain while remaining fully decoupled from Runtime execution.
 
-* exactly one terminal state per accepted request;
-* terminal states never change;
-* retries create new requests;
-* cancellation suppresses late completion;
-* provider state is separate from request state;
-* stale session relevance is decided outside Recognition;
-* completed results are immutable;
-* state commits and terminal event publication are coordinated;
-* late callbacks cannot overwrite terminal outcomes;
-* resource ownership ends at terminal state.
+---
+
+# End of Document
