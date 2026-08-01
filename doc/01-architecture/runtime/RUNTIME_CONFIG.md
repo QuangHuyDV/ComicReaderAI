@@ -1,216 +1,69 @@
+# runtime/RUNTIME_CONFIG.md
+
 # CRAI Runtime Configuration
 
-> **Project:** CRAI
-> **Document:** Runtime Configuration Architecture
-> **Path:** `runtime/RUNTIME_CONFIG.md`
-> **Version:** 0.1
-> **Status:** Architecture Draft
-> **Last Updated:** 2026-07-21
+> Project: CRAI  
+> Version: 1.0  
+> Status: Architecture Draft
 
 ---
 
 ## 1. Purpose
 
-This document defines how CRAI loads, validates, exposes, changes, and persists runtime configuration.
+Tài liệu này định nghĩa cách CRAI tải, hợp nhất, xác thực, snapshot, kích hoạt, thay đổi và persist configuration của Runtime.
 
-Runtime configuration controls how an installed CRAI application behaves without requiring source-code changes or rebuilding the application.
+Runtime Configuration kiểm soát behavior mà không cần sửa source code hoặc rebuild application.
 
-Examples include:
+Ví dụ:
 
-* source and target languages;
-* OCR and translation provider selection;
-* provider timeout and retry limits;
-* capture frequency;
-* stable-frame detection thresholds;
-* worker concurrency;
-* cache limits;
-* presentation mode;
-* logging level;
-* privacy settings;
-* experimental feature flags.
+- source/target language;
+- capture/observation policy;
+- Business Module policy;
+- provider selection;
+- execution timeout;
+- Scheduler admission;
+- Work Queue capacity;
+- retry budget;
+- cancellation grace period;
+- authority validation;
+- Artifact publication;
+- Resource Lease;
+- retention/cache;
+- memory/GPU/native budget;
+- presentation;
+- Storage;
+- privacy;
+- diagnostics;
+- feature flags.
 
-This document does not define the final user-interface layout for settings.
+Tài liệu này không định nghĩa UI layout cuối cùng của Settings.
 
-It also does not define provider-specific implementation details. Provider-specific fields must remain isolated behind provider configuration contracts.
-
----
-
-## 2. Related Documents
-
-Runtime configuration must remain consistent with:
-
-```text
-.meta/AI_BOOT.md
-.meta/PROJECT_RULE.md
-.meta/MODULES_RULE.md
-.meta/MODULES.md
-
-docs/architecture/STATE_MACHINE.md
-docs/architecture/EVENT_BUS.md
-docs/architecture/MODULE_DEPENDENCY.md
-docs/architecture/DATA_FLOW.md
-docs/architecture/CAPABILITY_MAP.md
-```
-
-The main relationships are:
-
-```text
-RUNTIME_CONFIG
-    ↓
-controls runtime policies
-
-STATE_MACHINE
-    ↓
-determines when a configuration change may take effect
-
-EVENT_BUS
-    ↓
-distributes validated configuration changes
-
-MODULE_DEPENDENCY
-    ↓
-restricts which modules may read which configuration sections
-
-DATA_FLOW
-    ↓
-shows how configuration affects processing behavior
-```
+Provider-specific option vẫn phải cô lập sau provider configuration contract.
 
 ---
 
-## 3. Configuration Goals
+## 2. Core Principles
 
-The CRAI configuration system should provide:
-
-1. predictable startup behavior;
-2. safe default values;
-3. schema-based validation;
-4. clear separation between user preferences and system policies;
-5. secure handling of credentials;
-6. module-scoped configuration access;
-7. controlled runtime updates;
-8. support for temporary session overrides;
-9. compatibility across configuration versions;
-10. diagnostics without exposing secrets.
-
----
-
-## 4. Non-Goals
-
-The initial configuration system will not provide:
-
-* arbitrary user-authored scripts;
-* dynamic code execution;
-* unrestricted provider plugins;
-* remote cloud-controlled configuration;
-* organization-wide policy management;
-* automatic synchronization across devices;
-* direct configuration mutation by arbitrary modules;
-* storage of credentials as plain text;
-* immediate hot reload for every setting.
-
-These capabilities may be reconsidered after the desktop MVP is validated.
+1. Configuration là data, không phải executable code.
+2. Defaults phải tạo được một Runtime hợp lệ.
+3. Configuration phải validate trước activation.
+4. Active configuration luôn là immutable snapshot.
+5. Module chỉ nhận typed view cần thiết.
+6. Secret chỉ tồn tại dưới dạng reference trong normal config.
+7. Activation boundary phải explicit.
+8. Existing Attempt không bị mutation bởi config mới.
+9. Runtime authority không được tự thay đổi bởi config file.
+10. Config change có thể yêu cầu admission freeze, drain hoặc restart.
+11. Persistence phải atomic.
+12. Migration phải deterministic.
+13. Invalid config không được partially activate.
+14. Privacy restriction có precedence cao hơn provider preference.
+15. Configuration event không chứa secret.
+16. Config diagnostics không chứa reading content mặc định.
 
 ---
 
-## 5. Configuration Principles
-
-### 5.1 Configuration Is Data
-
-Configuration must be represented as structured data.
-
-It must not contain executable application code.
-
-Invalid configuration must not be interpreted partially unless the schema explicitly supports partial overrides.
-
----
-
-### 5.2 Defaults Must Be Usable
-
-CRAI should be able to start with built-in defaults even when no user configuration file exists.
-
-Provider-dependent capabilities may remain unavailable until a valid provider is configured.
-
-A missing provider credential must not prevent unrelated local capabilities from starting.
-
----
-
-### 5.3 Validation Before Activation
-
-Configuration must be validated before it becomes active.
-
-The active runtime configuration must always satisfy the current configuration schema.
-
-Modules must never observe an intermediate or partially merged configuration state.
-
----
-
-### 5.4 Configuration Must Be Scoped
-
-Modules should receive only the configuration sections they own or require.
-
-For example:
-
-```text
-Capture Module
-    → capture, observation and resource limits
-
-OCR Module
-    → OCR provider and OCR processing policies
-
-Translation Module
-    → translation provider and translation policies
-
-Presentation Module
-    → side-panel, overlay and typography preferences
-```
-
-A module must not read the complete configuration object merely for convenience.
-
----
-
-### 5.5 Secrets Are References
-
-Sensitive credentials should not be stored directly in normal configuration files.
-
-Configuration should contain a reference to secure credential storage.
-
-Example:
-
-```yaml
-translation:
-  provider: openai
-  credentialRef: secret://translation/openai-primary
-```
-
-The referenced secret may be stored through:
-
-* operating-system credential storage;
-* an encrypted local secret store;
-* a development-only environment variable;
-* a secure provider credential service in a future version.
-
----
-
-### 5.6 Explicit Restart Semantics
-
-Every configuration field must define one of these activation modes:
-
-| Mode                | Meaning                                                  |
-| ------------------- | -------------------------------------------------------- |
-| Immediate           | May be applied to new work without restarting a session. |
-| Session restart     | Requires the active reading session to stop and restart. |
-| Module restart      | Requires recreation of one or more runtime modules.      |
-| Application restart | Takes effect only after CRAI restarts.                   |
-| Immutable           | Cannot be changed through normal runtime settings.       |
-
-The configuration system must not imply that all settings can be hot-reloaded safely.
-
----
-
-## 6. Configuration Categories
-
-CRAI configuration is divided into six categories.
+## 3. Configuration Categories
 
 ```text
 Runtime Configuration
@@ -222,276 +75,94 @@ Runtime Configuration
 └── Diagnostic Configuration
 ```
 
----
+### Bootstrap Configuration
 
-## 7. Bootstrap Configuration
+Giá trị cần trước khi main Runtime container được tạo.
 
-Bootstrap configuration contains values required before the main runtime container is created.
+### Application Configuration
 
-Examples:
+System-wide Runtime policy.
 
-* application environment;
-* application data directory;
-* configuration file location;
-* secure storage backend;
-* runtime profile;
-* crash recovery behavior;
-* startup logging destination.
+### User Preferences
 
-Example:
+User-facing preferences không làm thay đổi architecture.
 
-```yaml
-bootstrap:
-  environment: production
-  profile: desktop-default
-  dataDirectory: auto
-  configFile: auto
-  secretStore: operating-system
-  recoveryMode: safe
-```
+### Session Configuration
 
-Bootstrap values usually require an application restart.
+Temporary configuration cho một Reading Session.
 
-Bootstrap configuration must remain small because it is loaded before the normal configuration infrastructure is available.
+### Provider Configuration
+
+Selection, capability và provider-specific options.
+
+### Diagnostic Configuration
+
+Logs, metrics, traces, snapshots và development diagnostics.
 
 ---
 
-## 8. Application Configuration
+## 4. Activation Modes
 
-Application configuration defines relatively stable system-wide behavior.
-
-Examples:
-
-* enabled modules;
-* queue capacity;
-* worker limits;
-* cache policies;
-* provider registry;
-* event-bus limits;
-* storage backends;
-* feature flags.
-
-Example:
-
-```yaml
-application:
-  modules:
-    capture: true
-    observation: true
-    ocr: true
-    translation: true
-    presentation: true
-
-  runtime:
-    maxWorkerCount: 4
-    maxQueuedJobs: 64
-    shutdownTimeoutMs: 5000
-```
-
-Application configuration is normally persisted between application runs.
-
----
-
-## 9. User Preferences
-
-User preferences represent user-facing choices that do not fundamentally redefine the application architecture.
-
-Examples:
-
-* source language;
-* target language;
-* preferred reading mode;
-* translation style;
-* font size;
-* side-panel location;
-* overlay opacity;
-* automatic processing preference;
-* notification preference.
-
-Example:
-
-```yaml
-preferences:
-  language:
-    source: auto
-    target: vi
-
-  reading:
-    contentMode: auto
-    translationStyle: natural
-    autoProcessStableContent: true
-
-  presentation:
-    mode: side-panel
-    fontSize: 18
-    lineHeight: 1.6
-    showSourceText: true
-    showRegionNumbers: true
-```
-
-User preferences should be editable through the application settings interface.
-
----
-
-## 10. Session Configuration
-
-Session configuration applies only to one active reading session.
-
-It may be derived from:
-
-* persisted user preferences;
-* detected content properties;
-* user actions;
-* source-specific metadata;
-* temporary overrides.
-
-Examples:
-
-* currently selected capture region;
-* selected source window;
-* detected source language;
-* active provider override;
-* current comic reading direction;
-* temporary privacy mode;
-* temporary quality profile.
-
-Example:
-
-```yaml
-session:
-  sessionId: generated
-  sourceType: screen-region
-  sourceLanguage: zh-Hans
-  targetLanguage: vi
-  readingDirection: top-to-bottom
-  privacyMode: temporary
-  providerProfile: balanced
-```
-
-Session configuration must not automatically overwrite persisted user preferences.
-
-At session termination, session-only values are discarded unless a field is explicitly marked as persistable.
-
----
-
-## 11. Provider Configuration
-
-Provider configuration defines how CRAI selects and invokes OCR, translation, detection, or optional AI implementations.
-
-Provider configuration must be divided into:
+Mỗi field phải định nghĩa một activation mode:
 
 ```text
-Provider Selection
-Provider Capability Requirements
-Provider Execution Policy
-Provider-Specific Options
-Credential Reference
+IMMEDIATE
+NEW_WORK_ONLY
+SESSION_RESTART
+COMPONENT_RESTART
+APPLICATION_RESTART
+IMMUTABLE
 ```
 
-Example:
+### IMMEDIATE
 
-```yaml
-providers:
-  ocr:
-    primary: paddle-ocr-local
-    fallback: null
+Có thể apply ngay mà không phá active work.
 
-    requirements:
-      languages:
-        - zh-Hans
-        - en
-      verticalText: preferred
-      regionDetection: required
+### NEW_WORK_ONLY
 
-    execution:
-      timeoutMs: 10000
-      maxRetries: 1
-      concurrency: 2
+Chỉ WorkItem/Attempt tạo sau activation dùng snapshot mới.
 
-    instances:
-      paddle-ocr-local:
-        type: local
-        credentialRef: null
-        options:
-          useGpu: auto
-          modelProfile: chinese-comic
+### SESSION_RESTART
 
-  translation:
-    primary: remote-translation-primary
-    fallback: remote-translation-secondary
+Session hiện tại giữ snapshot cũ; config mới dùng cho Session sau.
 
-    requirements:
-      targetLanguages:
-        - vi
-      batchTranslation: required
-      cancellation: preferred
+### COMPONENT_RESTART
 
-    execution:
-      timeoutMs: 20000
-      maxRetries: 1
-      concurrency: 2
+Cần drain và recreate Runtime Component.
 
-    instances:
-      remote-translation-primary:
-        type: remote
-        credentialRef: secret://translation/primary
-        options:
-          model: configured-provider-model
-```
+### APPLICATION_RESTART
 
-Provider-specific options must be validated by the owning provider adapter.
+Chỉ có hiệu lực sau application restart.
 
-Core modules must not interpret arbitrary provider-specific fields.
+### IMMUTABLE
+
+Không thay đổi qua normal runtime settings.
 
 ---
 
-## 12. Diagnostic Configuration
-
-Diagnostic configuration controls observability and development behavior.
-
-Examples:
-
-* log level;
-* metrics collection;
-* processing trace retention;
-* debug overlay;
-* event tracing;
-* configuration dump;
-* performance timing;
-* provider request diagnostics.
-
-Example:
-
-```yaml
-diagnostics:
-  logLevel: info
-  structuredLogging: true
-  performanceTiming: true
-  processingTrace: true
-  eventTrace: false
-  debugOverlay: false
-  includeSourceContentInLogs: false
-```
-
-Raw source text, captured images, translated text, provider tokens, and credential values must not appear in standard logs by default.
-
----
-
-## 13. Recommended Top-Level Schema
-
-The initial configuration should follow this conceptual structure:
+## 5. Top-Level Schema
 
 ```yaml
 schemaVersion: 1
 
 bootstrap:
   environment: production
-  profile: desktop-default
+  profile: desktop-mvp
+  dataDirectory: auto
+  secretStore: operating-system
+  recoveryMode: safe
 
 application:
-  runtime: {}
   modules: {}
+  runtime: {}
   scheduling: {}
+  queues: {}
+  retry: {}
+  cancellation: {}
+  authority: {}
+  publication: {}
+  resources: {}
+  leases: {}
   cache: {}
   storage: {}
   security: {}
@@ -505,203 +176,618 @@ preferences:
   accessibility: {}
 
 providers:
-  ocr: {}
-  translation: {}
-  detection: {}
+  profiles: {}
+  instances: {}
 
 diagnostics:
   logging: {}
   tracing: {}
   metrics: {}
+  snapshots: {}
   debug: {}
 ```
 
-Session configuration should be stored separately from the persisted application configuration:
+Session config được giữ riêng:
 
 ```yaml
 session:
   sessionId: generated
+  configurationSnapshotId: generated
   source: {}
   language: {}
   reading: {}
   providers: {}
   presentation: {}
   privacy: {}
+  quality: {}
 ```
 
 ---
 
-## 14. Example Initial MVP Configuration
+## 6. Bootstrap Configuration
+
+Ví dụ:
 
 ```yaml
-schemaVersion: 1
-
 bootstrap:
   environment: production
   profile: desktop-mvp
   dataDirectory: auto
+  configFile: auto
   secretStore: operating-system
   recoveryMode: safe
+```
 
+Bootstrap config phải:
+
+- nhỏ;
+- valid trước Runtime creation;
+- không chứa secret value;
+- không phụ thuộc Business Module;
+- phần lớn yêu cầu application restart.
+
+---
+
+## 7. Application Runtime Configuration
+
+```yaml
+application:
+  runtime:
+    execution:
+      defaultExecutionClass: auto
+      maxCpuWorkers: auto
+      maxGpuExecutions: 1
+      maxNativeSerialExecutions: 1
+      maxProviderRequests: 4
+
+    control:
+      commandQueueCapacity: 256
+      commandWarningThreshold: 128
+      maxCommandProcessingMs: 50
+
+    shutdown:
+      totalTimeoutMs: 10000
+      drainTimeoutMs: 5000
+      telemetryFlushTimeoutMs: 1000
+```
+
+`auto` nghĩa là Runtime chọn giá trị từ device capability và runtime profile.
+
+---
+
+## 8. Module Configuration
+
+```yaml
 application:
   modules:
     capture: true
     observation: true
     classification: true
-    extraction: true
-    textUnderstanding: true
+    recognition: true
+    structuring: true
     translation: true
     presentation: true
     knowledge: true
+    storage: true
     diagnostics: true
+```
 
-  runtime:
-    maxWorkerCount: auto
-    maxQueuedJobs: 64
-    shutdownTimeoutMs: 5000
+Feature flag không thay module dependency rule.
 
+Module disabled phải được semantic validation với dependent capability.
+
+---
+
+## 9. Scheduler Configuration
+
+```yaml
+application:
   scheduling:
-    visibleWorkPriority: 100
-    retryWorkPriority: 50
-    backgroundWorkPriority: 10
-    cancelObsoleteWork: true
+    currentRevisionFirst: true
 
+    priority:
+      control: 1000
+      interactive: 100
+      retry: 50
+      background: 10
+      maintenance: 1
+
+    admission:
+      enabled: true
+      rejectWhenCriticalPressure: true
+      deferWhenProviderUnavailable: true
+      preserveControlCapacity: true
+
+    replacement:
+      removeObsoleteQueuedWork: true
+      replacePendingEquivalentWork: true
+
+    fairness:
+      enabled: true
+      maxInteractiveBurst: 16
+
+    aging:
+      enabled: false
+```
+
+Scheduler config không được cấp authority.
+
+Nó chỉ định admission policy.
+
+---
+
+## 10. Work Queue Configuration
+
+```yaml
+application:
+  queues:
+    control:
+      capacity: 128
+      overflow: reject
+
+    interactive:
+      capacity: 64
+      overflow: replace-obsolete
+
+    background:
+      capacity: 32
+      overflow: reject
+
+    maintenance:
+      capacity: 16
+      overflow: reject
+
+    dispatch:
+      validateAuthorityBeforeDispatch: true
+      validateDeadlineBeforeDispatch: true
+
+    drain:
+      removeCanceledWork: true
+      removeObsoleteWork: true
+```
+
+Không dùng một `maxQueuedJobs` duy nhất cho mọi workload class.
+
+---
+
+## 11. Retry Configuration
+
+Retry là Runtime policy độc lập, không nằm hoàn toàn trong provider config.
+
+```yaml
+application:
+  retry:
+    enabled: true
+
+    attempts:
+      maxAttemptsPerWorkItem: 2
+      maxConcurrentRetries: 2
+      maxDelayedRetries: 16
+
+    strategies:
+      immediate: true
+      delayed: true
+      providerFallback: true
+      resourceWait: true
+
+    backoff:
+      initialDelayMs: 500
+      maximumDelayMs: 5000
+      multiplier: 2.0
+      jitter: true
+
+    budgets:
+      perRevision: 8
+      perSession: 32
+      globalRuntime: 64
+
+    behavior:
+      recheckArtifactReuse: true
+      cancelWhenAuthorityRevoked: true
+      respectRetryAfter: true
+```
+
+Exact values phải được benchmark.
+
+---
+
+## 12. Cancellation Configuration
+
+```yaml
+application:
+  cancellation:
+    cooperative: true
+    revokeAuthorityImmediately: true
+    removeQueuedWork: true
+
+    grace:
+      defaultMs: 1000
+      providerMs: 2000
+      shutdownMs: 5000
+
+    abandoned:
+      trackPhysicalExecution: true
+      retainProviderCapacity: true
+
+    checkpoints:
+      beforeExpensiveExecution: true
+      afterExternalCall: true
+      beforeCompletion: true
+      beforeUiCommit: true
+```
+
+Config không được cho phép hard thread kill trong primary process.
+
+---
+
+## 13. Authority Configuration
+
+```yaml
+application:
+  authority:
+    validation:
+      completion: required
+      publication: required
+      uiCommit: required
+
+    staleCompletion:
+      accept: false
+      recordDiagnostics: true
+
+    duplicateCompletion:
+      firstAcceptedWins: true
+      recordDiagnostics: true
+
+    revokedScope:
+      denyNewLease: true
+      denyPublication: true
+      denyDownstreamScheduling: true
+```
+
+Authority rule là safety invariant.
+
+User settings không được disable các validation bắt buộc.
+
+---
+
+## 14. Publication Configuration
+
+```yaml
+application:
+  publication:
+    requireAcceptedCandidate: true
+    requireOwnershipTransfer: true
+    atomicPublication: true
+    rejectDuplicatePublication: true
+    cleanupRejectedCandidates: true
+
+    partialArtifact:
+      enabled: false
+      requireExplicitContract: true
+
+    latePublication:
+      allowed: false
+```
+
+Publication config không cho phép Worker publish trực tiếp.
+
+---
+
+## 15. Resource Configuration
+
+```yaml
+application:
+  resources:
+    budgets:
+      managedMemoryMb: auto
+      nativeMemoryMb: auto
+      gpuMemoryMb: auto
+      artifactMemoryMb: auto
+      diagnosticsMemoryMb: 32
+
+    pressure:
+      elevatedRatio: 0.70
+      highRatio: 0.85
+      criticalRatio: 0.95
+      hysteresisRatio: 0.05
+
+    disposal:
+      logicalDisposalImmediate: true
+      physicalDisposalTimeoutMs: 5000
+      cleanupRetryCount: 2
+
+    draining:
+      warningAfterMs: 5000
+      leakSuspectAfterMs: 30000
+```
+
+User-provided values phải bị clamp vào supported safe range.
+
+---
+
+## 16. Lease Configuration
+
+```yaml
+application:
+  leases:
+    enabled: true
+    defaultMaximumHoldMs: diagnostic
+    denyAfterLogicalDisposal: true
+    trackAcquisitionSite: development-only
+
+    leakDetection:
+      enabled: true
+      warningAfterMs: 10000
+      criticalAfterMs: 60000
+
+    shutdown:
+      waitForRelease: true
+      timeoutMs: 3000
+```
+
+`diagnostic` nghĩa là không hard-expire resource đang dùng; chỉ phát hiện và báo.
+
+---
+
+## 17. Cache Configuration
+
+Cache theo Artifact reuse/retention, không theo architecture stage cố định.
+
+```yaml
+application:
   cache:
-    ocr:
+    runtimeMemory:
       enabled: true
-      maxEntries: 500
-      retentionHours: 24
+      maximumEntries: 2000
+      maximumMemoryMb: auto
+      policy: weighted-lru
 
-    translation:
-      enabled: true
-      maxEntries: 2000
-      retentionHours: 168
+    scopes:
+      revisionLocal: true
+      session: true
+      runtime: true
+      durable: false
 
-    rawCapture:
-      persistToDisk: false
+    promotion:
+      acceptedArtifactOnly: true
+      allowPartialArtifact: false
+      allowStaleArtifact: false
+      allowCanceledArtifact: false
 
+    privacy:
+      partitionByProfile: true
+      disableDurableInEphemeralMode: true
+
+    inflightReuse:
+      enabled: false
+```
+
+Business Module định nghĩa compatibility dependency.
+
+Cache Policy định nghĩa reuse/retention behavior.
+
+---
+
+## 18. Storage Configuration
+
+```yaml
+application:
   storage:
-    engine: local
+    backend: local
+    configurationPersistence: true
     historyEnabled: false
     glossaryEnabled: true
     correctionMemoryEnabled: true
+    durableCacheEnabled: false
 
+    recovery:
+      enabled: true
+      retainRecoveryPoints: 3
+```
+
+Storage config không tự thay business ownership.
+
+---
+
+## 19. Security and Privacy Configuration
+
+```yaml
+application:
   security:
-    redactSensitiveLogs: true
-    allowRemoteImageProcessing: false
     allowRemoteTextProcessing: true
+    allowRemoteImageProcessing: false
 
-  features:
-    screenRegionCapture: true
-    windowCapture: true
-    sidePanel: true
-    simpleOverlay: false
-    browserConnector: false
-    importedLibrary: false
-    cloudSync: false
-    runtimePlugins: false
+    persistence:
+      persistRawCapture: false
+      persistRecognizedText: false
+      persistTranslationCache: false
 
+    diagnostics:
+      includeReadingContent: false
+      exportContentFingerprint: false
+
+    cleanup:
+      clearTemporaryDataOnExit: true
+```
+
+Provider config không được override global privacy restriction.
+
+---
+
+## 20. Provider Configuration
+
+Provider config chia thành:
+
+```text
+Provider Selection
+Provider Capability Requirement
+Provider Execution Declaration
+Provider-Specific Options
+Credential Reference
+```
+
+Ví dụ:
+
+```yaml
+providers:
+  profiles:
+    recognition-default:
+      primary: local-recognition
+      fallback: null
+
+      requirements:
+        languages: [zh-Hans, en]
+        verticalText: preferred
+        regionDetection: required
+
+      execution:
+        timeoutMs: 10000
+        concurrency: 1
+        executionClass: CPU
+        cancellationSupport: cooperative
+        processIsolation: false
+
+    translation-default:
+      primary: remote-translator
+      fallback: remote-translator-secondary
+
+      requirements:
+        targetLanguages: [vi]
+        batchTranslation: required
+        cancellation: preferred
+
+      execution:
+        timeoutMs: 20000
+        concurrency: 2
+        executionClass: REMOTE_IO
+        cancellationSupport: provider-dependent
+
+  instances:
+    local-recognition:
+      type: local
+      credentialRef: null
+      options:
+        device: auto
+        modelProfile: chinese-comic
+
+    remote-translator:
+      type: remote
+      credentialRef: secret://translation/primary
+      options:
+        model: configured-provider-model
+```
+
+Retry count không nên được lặp ở từng provider nếu Runtime Retry Policy đã sở hữu nó, trừ provider-specific hard limit.
+
+---
+
+## 21. User Preferences
+
+```yaml
 preferences:
   language:
     source: auto
     target: vi
-    preferredSources:
-      - zh-Hans
-      - zh-Hant
-      - en
+    preferredSources: [zh-Hans, zh-Hant, en]
 
   reading:
     contentMode: auto
     translationStyle: natural
-    autoStartProcessing: false
     autoProcessStableContent: true
 
   capture:
+    mode: selected-region
     frameIntervalMs: 250
-    stableDurationMs: 450
-    minimumChangeRatio: 0.03
-    duplicateDetection: true
     captureCursor: false
 
   presentation:
     mode: side-panel
-    sidePanelPosition: right
     fontSize: 18
     lineHeight: 1.6
     showSourceText: true
-    showRegionNumbers: true
-    preserveRegionOrder: true
-
-providers:
-  ocr:
-    primary: local-ocr
-    fallback: null
-
-    execution:
-      timeoutMs: 10000
-      maxRetries: 1
-      concurrency: 2
-
-    instances:
-      local-ocr:
-        type: local
-        credentialRef: null
-        options:
-          device: auto
-          verticalText: true
-
-  translation:
-    primary: primary-translator
-    fallback: null
-
-    execution:
-      timeoutMs: 20000
-      maxRetries: 1
-      concurrency: 2
-      batchSize: 12
-
-    instances:
-      primary-translator:
-        type: remote
-        credentialRef: secret://translation/primary
-        options:
-          contextMode: neighboring-regions
-
-diagnostics:
-  logging:
-    level: info
-    structured: true
-    includeSourceContent: false
-    includeTranslatedContent: false
-
-  tracing:
-    processingTrace: true
-    eventTrace: false
-    retentionHours: 24
-
-  metrics:
-    stageTiming: true
-    queueMetrics: true
-    providerMetrics: true
-
-  debug:
-    overlay: false
-    regionBounds: false
-    readingOrder: false
 ```
 
-This example is illustrative. Exact values must be verified through prototypes.
+User Preferences không chứa Runtime identity hoặc internal lifecycle state.
 
 ---
 
-## 15. Configuration Sources
+## 22. Session Configuration
 
-CRAI may receive configuration from several sources.
+```yaml
+session:
+  sessionId: generated
+  configurationSnapshotId: config-snapshot-42
 
-Recommended precedence, from lowest to highest:
+  source:
+    type: screen-region
+    sourceRef: runtime-managed
+
+  language:
+    source: zh-Hans
+    target: vi
+
+  providers:
+    profile: balanced
+
+  privacy:
+    mode: EPHEMERAL
+
+  quality:
+    profile: interactive
+```
+
+Session-only value không tự overwrite persisted preference.
+
+---
+
+## 23. Diagnostic Configuration
+
+```yaml
+diagnostics:
+  mode: LOCAL_ONLY
+
+  logging:
+    level: info
+    structured: true
+    includeReadingContent: false
+
+  tracing:
+    enabled: true
+    revisionTrace: true
+    sampleRate: 1.0
+
+  metrics:
+    enabled: true
+    authority: true
+    publication: true
+    queue: true
+    provider: true
+    lease: true
+    resourceLifecycle: true
+    resourcePressure: true
+
+  snapshots:
+    enabled: true
+    recentEventBufferSize: 512
+
+  debug:
+    overlay: false
+    showAuthority: false
+    showPublication: false
+    showLeases: false
+    showRetention: false
+```
+
+Remote export disabled mặc định trong MVP.
+
+---
+
+## 24. Configuration Sources
+
+Precedence thấp đến cao:
 
 ```text
-Built-in Defaults
+Built-In Defaults
     ↓
 Runtime Profile
     ↓
@@ -716,757 +802,341 @@ Session Overrides
 Temporary User Actions
 ```
 
-The higher-precedence source overrides only the explicitly supplied fields.
+Higher layer chỉ override field được cung cấp rõ ràng.
 
 ---
 
-## 16. Built-In Defaults
+## 25. Merge Rules
 
-Built-in defaults are distributed with the application.
+### Scalar
 
-Their purpose is to guarantee a valid baseline configuration.
+Higher precedence replaces lower.
 
-Built-in defaults must:
+### Object
 
-* satisfy the current schema;
-* avoid requiring credentials;
-* avoid remote processing by accident;
-* use conservative resource limits;
-* disable unfinished features;
-* prevent permanent raw capture storage;
-* permit CRAI to open its settings and diagnostics screens.
+Recursive merge trừ object `replace-only`.
 
-Built-in defaults are immutable at runtime.
+### Array
 
----
-
-## 17. Runtime Profiles
-
-A runtime profile is a named configuration layer.
-
-Possible profiles include:
+Mỗi array phải khai báo:
 
 ```text
-desktop-mvp
-desktop-low-resource
-desktop-balanced
-desktop-high-quality
-development
-test
-benchmark
+REPLACE
+APPEND
+UNIQUE_APPEND
+MERGE_BY_ID
 ```
 
-Profiles provide coherent groups of defaults.
+Default là `REPLACE`.
 
-They must not contain credentials.
+### Null
 
-Example:
-
-```yaml
-profile: desktop-low-resource
-
-application:
-  runtime:
-    maxWorkerCount: 2
-
-providers:
-  ocr:
-    execution:
-      concurrency: 1
-
-  translation:
-    execution:
-      concurrency: 1
-
-preferences:
-  capture:
-    frameIntervalMs: 500
-```
-
-Users may select a profile, but explicit user preferences should override profile defaults.
-
----
-
-## 18. Environment Variables
-
-Environment variables may be supported for:
-
-* development;
-* testing;
-* CI;
-* portable deployments;
-* secure credential references;
-* advanced troubleshooting.
-
-Recommended naming convention:
+Phân biệt:
 
 ```text
-CRAI_<SECTION>_<FIELD>
+ABSENT
+EXPLICIT_NULL
+CONCRETE_VALUE
 ```
 
-Examples:
+Meaning của `null` phải định nghĩa theo field.
+
+---
+
+## 26. Validation Levels
 
 ```text
-CRAI_BOOTSTRAP_ENVIRONMENT=development
-CRAI_DIAGNOSTICS_LOG_LEVEL=debug
-CRAI_RUNTIME_MAX_WORKER_COUNT=4
-CRAI_TRANSLATION_CREDENTIAL_REF=env://CRAI_TRANSLATION_API_KEY
+Syntax Validation
+    ↓
+Schema Validation
+    ↓
+Semantic Validation
+    ↓
+Capability Validation
+    ↓
+Runtime Validation
 ```
 
-Environment variables should not become the primary configuration mechanism for normal desktop users.
+### Syntax
 
-Environment variable values must pass through the same validation process as file-based configuration.
+Parse và document structure.
+
+### Schema
+
+Type, required, range, unknown fields.
+
+### Semantic
+
+Cross-field relationship.
+
+### Capability
+
+Provider/module có đáp ứng yêu cầu không.
+
+### Runtime
+
+Resource, permission, model, secret store, endpoint.
 
 ---
 
-## 19. Command-Line Overrides
+## 27. Runtime v2 Semantic Validation
 
-Command-line arguments may override selected bootstrap or diagnostic values.
-
-Examples:
+Ví dụ:
 
 ```text
-crai --profile development
-crai --log-level debug
-crai --safe-mode
-crai --disable-remote-providers
-crai --config /path/to/config.yaml
-```
+Publication requires ownership transfer
+    → ownership transfer cannot be disabled
 
-Command-line arguments must not expose provider secrets in process listings or shell history.
+Stale completion acceptance enabled
+    → validation error
 
-Secret values should be supplied through secure references rather than direct command-line parameters.
+Durable cache enabled
+    → Storage durable-cache capability required
 
----
+EPHEMERAL privacy
+    → durable Artifact retention disabled
 
-## 20. Configuration Merge Rules
+Provider executionClass = GPU
+    → GPU capability required
 
-Configuration layers should be merged deterministically.
+Lease tracking disabled
+    → shared Artifact processing rejected
 
-### 20.1 Scalar Values
+Current-revision-first disabled
+    → allowed only in test profile
 
-Higher-precedence scalar values replace lower-precedence values.
-
-```yaml
-# Lower layer
-presentation:
-  fontSize: 16
-
-# Higher layer
-presentation:
-  fontSize: 18
-
-# Effective value
-presentation:
-  fontSize: 18
+Remote image processing enabled
+    → explicit security policy required
 ```
 
 ---
 
-### 20.2 Objects
-
-Objects are merged recursively unless the schema marks the object as replace-only.
-
----
-
-### 20.3 Arrays
-
-Arrays must not be merged implicitly.
-
-Each array field must define one explicit strategy:
-
-| Strategy            | Meaning                                       |
-| ------------------- | --------------------------------------------- |
-| Replace             | The higher layer replaces the complete array. |
-| Append              | New values are appended.                      |
-| Unique append       | New unique values are appended.               |
-| Merge by identifier | Entries are merged using a stable identifier. |
-
-Default array behavior should be `Replace`.
-
-Ambiguous array merging can create unsafe provider or module configurations.
-
----
-
-### 20.4 Null Values
-
-The schema must distinguish between:
-
-```text
-field absent
-field explicitly null
-field assigned a concrete value
-```
-
-A `null` value may mean:
-
-* disable the optional value;
-* remove an inherited value;
-* use automatic selection.
-
-Its meaning must be defined per field.
-
----
-
-## 21. Configuration Loading Flow
-
-```text
-Application starts
-    ↓
-Bootstrap loader reads bootstrap inputs
-    ↓
-Built-in defaults are loaded
-    ↓
-Selected runtime profile is loaded
-    ↓
-Persisted configuration is loaded
-    ↓
-Environment overrides are applied
-    ↓
-Command-line overrides are applied
-    ↓
-Configuration schema validation runs
-    ↓
-Semantic validation runs
-    ↓
-Secret references are checked
-    ↓
-Effective configuration is frozen
-    ↓
-Runtime modules are created
-```
-
-The application must not initialize normal processing modules before configuration validation succeeds.
-
----
-
-## 22. Validation Levels
-
-Configuration validation should occur in several stages.
-
-### 22.1 Syntax Validation
-
-Checks whether configuration data can be parsed.
-
-Examples:
-
-* malformed YAML or JSON;
-* invalid encoding;
-* duplicated keys where unsupported;
-* unexpected document structure.
-
----
-
-### 22.2 Schema Validation
-
-Checks field names, types, ranges, and required values.
-
-Examples:
-
-* `fontSize` must be a positive number;
-* `timeoutMs` must be within a supported range;
-* `targetLanguage` must be a supported language code;
-* unknown top-level sections are rejected or reported.
-
----
-
-### 22.3 Semantic Validation
-
-Checks relationships between fields.
-
-Examples:
-
-```text
-remote provider selected
-    → credential reference must exist
-
-overlay mode enabled
-    → presentation module must be enabled
-
-continuous capture enabled
-    → observation module must be enabled
-
-translation fallback selected
-    → fallback provider must be registered
-
-history disabled
-    → history retention settings are ignored or rejected
-```
-
----
-
-### 22.4 Capability Validation
-
-Checks whether the selected provider can satisfy required capabilities.
-
-Example:
-
-```text
-Session requires vertical Chinese text
-    ↓
-Selected OCR provider reports no vertical-text support
-    ↓
-Configuration warning or provider rejection
-```
-
-Capability validation may occur during startup or when a session is created.
-
----
-
-### 22.5 Runtime Validation
-
-Some settings can only be verified when runtime resources are available.
-
-Examples:
-
-* selected GPU backend is unavailable;
-* capture permission is denied;
-* secure storage cannot be opened;
-* provider endpoint is unreachable;
-* configured model is not installed.
-
-Runtime validation failures should produce structured diagnostics.
-
-They must not silently alter configuration unless an explicit fallback policy exists.
-
----
-
-## 23. Invalid Configuration Handling
-
-Invalid persisted configuration must not cause uncontrolled startup failure.
-
-Recommended behavior:
-
-```text
-Load persisted configuration
-    ↓
-Validation fails
-    ↓
-Record a sanitized diagnostic
-    ↓
-Preserve invalid configuration for recovery
-    ↓
-Start in configuration-safe mode
-    ↓
-Use built-in defaults for non-sensitive fields
-    ↓
-Disable affected providers or features
-    ↓
-Show configuration errors to the user
-```
-
-CRAI must not overwrite the invalid configuration automatically before the user can inspect or recover it.
-
----
-
-## 24. Safe Mode
-
-Safe mode starts CRAI with minimal capabilities.
-
-Safe mode should:
-
-* use built-in defaults;
-* disable remote providers;
-* disable experimental features;
-* disable automatic continuous capture;
-* avoid loading third-party provider extensions;
-* use conservative resource limits;
-* expose configuration recovery and diagnostics.
-
-Safe mode may be triggered by:
-
-* explicit command-line argument;
-* repeated startup failure;
-* configuration migration failure;
-* module initialization failure;
-* corrupted persistent state.
-
----
-
-## 25. Runtime Configuration Access
-
-Modules must access configuration through typed configuration views.
-
-Conceptual interfaces:
-
-```text
-RuntimeConfigService
-├── getBootstrapConfig()
-├── getCaptureConfig()
-├── getObservationConfig()
-├── getOcrConfig()
-├── getTranslationConfig()
-├── getPresentationConfig()
-├── getStorageConfig()
-├── getSecurityConfig()
-└── getDiagnosticsConfig()
-```
-
-A module must not:
-
-* parse the configuration file directly;
-* read environment variables directly;
-* access another module's configuration section;
-* mutate the effective configuration object;
-* resolve arbitrary secrets without authorization.
-
----
-
-## 26. Immutable Configuration Snapshots
-
-The active configuration should be represented as an immutable snapshot.
-
-Example:
+## 28. Immutable Configuration Snapshot
 
 ```text
 EffectiveConfigurationSnapshot
-├── snapshotId
-├── schemaVersion
-├── createdAt
-├── sourceVersions
-├── validatedConfiguration
-└── sanitizedSummary
+├── ConfigurationSnapshotId
+├── SchemaVersion
+├── CreatedAt
+├── SourceVersions
+├── ValidatedConfiguration
+├── ActivationMetadata
+└── SanitizedSummary
 ```
 
-Every session should retain the identifier of the configuration snapshot under which it started.
+Mỗi Session, WorkItem và Attempt phải reference snapshot phù hợp.
 
-This allows diagnostics to answer:
-
-* which provider was selected;
-* which timeout policy was active;
-* which capture threshold was used;
-* whether the configuration changed during processing.
-
-Secrets must not be copied into trace snapshots.
+Snapshot không chứa resolved secret.
 
 ---
 
-## 27. Runtime Configuration Changes
+## 29. Configuration and Work Identity
 
-A user may change configuration while CRAI is running.
+Mỗi asynchronous execution reference:
 
-The change flow should be:
+```text
+ApplicationInstanceId
+SessionId
+RevisionId
+WorkItemId
+AttemptId
+ConfigurationSnapshotId
+```
+
+Không dùng `JobId` làm vocabulary chuẩn.
+
+Existing Attempt tiếp tục dùng original snapshot.
+
+---
+
+## 30. Configuration Change Flow
 
 ```text
 User submits proposed changes
-    ↓
-Configuration service creates a candidate snapshot
-    ↓
-Schema validation runs
-    ↓
-Semantic validation runs
-    ↓
-Affected modules are calculated
-    ↓
-Activation requirements are calculated
-    ↓
-User is informed of restart implications
-    ↓
-Configuration is persisted
-    ↓
-Change is activated at the allowed boundary
-    ↓
-Configuration events are published
+        ↓
+Candidate Snapshot created
+        ↓
+Syntax / Schema / Semantic validation
+        ↓
+Capability and Runtime validation
+        ↓
+Impact Analysis
+        ↓
+Affected Runtime Components identified
+        ↓
+Activation Mode calculated
+        ↓
+User informed
+        ↓
+Configuration persisted
+        ↓
+Optional Admission Freeze
+        ↓
+Optional Authority Revocation / Drain
+        ↓
+Component replacement if needed
+        ↓
+Snapshot activated
+        ↓
+Events published
 ```
 
-The existing active snapshot must remain unchanged until validation succeeds.
+Active snapshot giữ nguyên cho đến khi activation thành công.
 
 ---
 
-## 28. Configuration Change Events
+## 31. Impact Analysis
 
-Configuration events should be distributed through the event bus.
+Impact Analysis phải xác định:
 
-Suggested event names:
+- changed sections;
+- affected components;
+- affected Session;
+- current WorkItem compatibility;
+- authority impact;
+- publication compatibility;
+- provider replacement;
+- queue/admission impact;
+- resource drain requirement;
+- restart requirement;
+- rollback strategy.
+
+---
+
+## 32. Immediate and New-Work Changes
+
+Immediate examples:
+
+- font size;
+- side-panel visibility;
+- logging level;
+- local diagnostic UI.
+
+New-work-only examples:
+
+- timeout;
+- Retry Policy;
+- queue priority;
+- context size;
+- provider batching.
+
+Existing WorkItem/Attempt không bị mutate.
+
+---
+
+## 33. Session-Restart Changes
+
+Ví dụ:
+
+- source;
+- source language override;
+- reading direction;
+- privacy mode;
+- provider profile;
+- processing mode.
+
+New config được persist nhưng pending cho Session mới.
+
+---
+
+## 34. Component-Restart Changes
+
+Ví dụ:
+
+- local model;
+- provider endpoint;
+- CPU pool size;
+- capture backend;
+- GPU backend;
+- Artifact Store implementation.
+
+Flow:
 
 ```text
-runtime.config.change-requested
-runtime.config.validation-succeeded
-runtime.config.validation-failed
-runtime.config.persisted
-runtime.config.activated
-runtime.config.activation-deferred
-runtime.config.rollback-completed
+Stop Admission for affected capability
+    ↓
+Revoke or preserve authority according to policy
+    ↓
+Drain Attempts
+    ↓
+Release Leases
+    ↓
+Dispose Component Resources
+    ↓
+Create Replacement
+    ↓
+Health/Capability Validation
+    ↓
+Activate New Snapshot
+    ↓
+Resume Admission
 ```
-
-Example event:
-
-```yaml
-eventType: runtime.config.activated
-eventVersion: 1
-eventId: generated
-occurredAt: timestamp
-
-payload:
-  previousSnapshotId: config-snapshot-41
-  activeSnapshotId: config-snapshot-42
-
-  changedSections:
-    - preferences.presentation
-    - diagnostics.logging
-
-  activation:
-    mode: immediate
-
-metadata:
-  correlationId: generated
-  causationId: generated
-```
-
-Configuration events must not contain credential values.
 
 ---
 
-## 29. Immediate Changes
+## 35. Application-Restart Changes
 
-Immediate settings may affect newly created work while existing work continues with its original configuration snapshot.
+Ví dụ:
 
-Examples may include:
+- data directory;
+- bootstrap profile;
+- secure storage implementation;
+- graphics backend;
+- Event Bus implementation;
+- process topology.
 
-* UI font size;
-* side-panel visibility;
-* normal logging level;
-* whether source text is shown;
-* whether region numbers are displayed.
-
-Immediate changes must not mutate data already owned by active jobs.
+Settings UI phải ghi rõ pending restart.
 
 ---
 
-## 30. Session-Restart Changes
+## 36. Configuration Events
 
-Some settings require the active reading session to restart.
-
-Examples:
-
-* selected capture source;
-* source language override;
-* reading direction;
-* session privacy mode;
-* OCR provider;
-* translation provider;
-* content-processing mode.
-
-Recommended behavior:
+Conceptual events:
 
 ```text
-Persist new configuration
-    ↓
-Mark change as pending
-    ↓
-Allow current session to continue unchanged
-    ↓
-Apply new configuration to the next session
+CONFIG_CHANGE_REQUESTED
+CONFIG_VALIDATION_SUCCEEDED
+CONFIG_VALIDATION_FAILED
+CONFIG_PERSISTED
+CONFIG_ACTIVATION_DEFERRED
+CONFIG_ACTIVATION_STARTED
+CONFIG_ACTIVATED
+CONFIG_ACTIVATION_FAILED
+CONFIG_ROLLBACK_STARTED
+CONFIG_ROLLBACK_COMPLETED
 ```
 
-Alternatively, the user may explicitly stop and recreate the current session.
+Event payload không chứa secret hoặc reading content.
 
 ---
 
-## 31. Module-Restart Changes
+## 37. Configuration Persistence
 
-Some settings require recreating one or more modules.
+Config persistence đi qua Storage capability.
 
-Examples:
-
-* OCR model device selection;
-* provider endpoint;
-* worker pool size;
-* secure storage backend;
-* capture backend;
-* local model path.
-
-Module restart must follow the runtime dependency graph.
-
-Example:
+Conceptual flow:
 
 ```text
-OCR provider changes
+Serialize Validated Snapshot
     ↓
-Stop accepting new OCR jobs
+Write Temporary Record
     ↓
-Cancel or drain current OCR jobs
+Flush
     ↓
-Dispose current OCR provider
+Validate Serialized Result
     ↓
-Create replacement provider
+Atomic Replace
     ↓
-Run health and capability checks
-    ↓
-Resume OCR scheduling
+Retain Bounded Backup
 ```
 
-A failed module restart should trigger rollback when possible.
+Storage implementation chi tiết không thuộc Runtime Config.
 
 ---
 
-## 32. Application-Restart Changes
+## 38. Secrets
 
-Application restart may be required for:
-
-* application data directory;
-* bootstrap profile;
-* native capture backend;
-* graphics backend;
-* secure storage implementation;
-* event-bus implementation;
-* application-wide experimental runtime features.
-
-The settings interface must clearly report:
-
-```text
-Saved
-Takes effect after application restart
-```
-
----
-
-## 33. Configuration and State Machine
-
-Configuration activation must respect application and session states.
-
-Example constraints:
-
-| Runtime State  | Allowed Changes                                                    |
-| -------------- | ------------------------------------------------------------------ |
-| Starting       | Bootstrap loading only.                                            |
-| Ready          | Most validated changes may be prepared.                            |
-| Session active | Immediate changes and deferred session changes.                    |
-| Processing     | No destructive provider replacement without cancellation or drain. |
-| Paused         | Selected session changes may be applied safely.                    |
-| Stopping       | No new configuration activation.                                   |
-| Failed         | Recovery and safe-mode configuration only.                         |
-
-The configuration service may reject or defer changes that conflict with the current state.
-
----
-
-## 34. Configuration and Work Items
-
-Every asynchronous work item should reference the configuration snapshot used to create it.
-
-Example:
-
-```yaml
-job:
-  jobId: translation-job-1024
-  sessionId: reading-session-17
-  configSnapshotId: config-snapshot-42
-```
-
-A configuration change must not unexpectedly alter a job already in progress.
-
-New jobs may use the new snapshot after activation.
-
----
-
-## 35. Configuration and Cancellation
-
-When a configuration change invalidates active work, the runtime must determine whether to:
-
-* allow the work to finish;
-* cancel the work;
-* discard its output;
-* restart the processing stage;
-* defer activation.
-
-Example:
-
-```text
-Translation provider changes
-    ↓
-Active translation request uses old snapshot
-    ↓
-Request may finish
-    ↓
-Result is accepted only if session generation remains current
-```
-
-Provider replacement alone must not bypass normal stale-result protection.
-
----
-
-## 36. Configuration Persistence
-
-Configuration persistence should use an atomic-write strategy.
-
-Recommended flow:
-
-```text
-Serialize validated configuration
-    ↓
-Write temporary file
-    ↓
-Flush file contents
-    ↓
-Validate serialized result
-    ↓
-Atomically replace active configuration file
-    ↓
-Retain bounded backup
-```
-
-A crash during persistence must not leave the only configuration copy partially written.
-
----
-
-## 37. Configuration Storage Layout
-
-Conceptual local layout:
-
-```text
-<CRAI_DATA_DIR>/
-├── config/
-│   ├── application.yaml
-│   ├── application.yaml.backup
-│   ├── profiles/
-│   └── migrations/
-│
-├── secrets/
-│   └── managed-by-secure-store
-│
-├── state/
-│   ├── recovery.json
-│   └── pending-config.json
-│
-└── logs/
-```
-
-The exact operating-system paths will be decided by the desktop platform implementation.
-
-Secret storage must not be treated as a normal subdirectory when an operating-system credential store is available.
-
----
-
-## 38. Secrets and Credential Resolution
-
-Credential resolution should be performed through a dedicated secret service.
-
-Conceptual interface:
-
-```text
-SecretResolver
-├── resolve(reference)
-├── exists(reference)
-├── store(alias, secret)
-├── remove(reference)
-└── describe(reference)
-```
-
-`describe` may return safe metadata such as:
-
-* provider alias;
-* creation time;
-* last validation time;
-* credential source.
-
-It must never return the secret value for display.
-
----
-
-## 39. Supported Secret Reference Forms
-
-Possible reference forms:
+Configuration chỉ chứa reference:
 
 ```text
 secret://translation/primary
@@ -1475,459 +1145,429 @@ env://CRAI_TRANSLATION_API_KEY
 memory://session/provider-token
 ```
 
-Recommended policy:
+Plain secret trong persisted config phải bị reject.
 
-| Reference        |   Production | Development |            Persistence |
-| ---------------- | -----------: | ----------: | ---------------------: |
-| `secret://`      |          Yes |         Yes |     Secure local store |
-| `os-keychain://` |          Yes |         Yes | Operating-system store |
-| `env://`         |      Limited |         Yes |               External |
-| `memory://`      | Session only |         Yes |                     No |
-
-Plain values such as the following should be rejected in normal persisted configuration:
-
-```yaml
-apiKey: sk-example-secret
-```
+Secret Resolution qua dedicated service.
 
 ---
 
-## 40. Configuration Redaction
+## 39. Redaction
 
-Any configuration output used for logs, diagnostics, bug reports, or UI previews must pass through redaction.
+Mọi config output cho:
 
-Example:
+- logs;
+- events;
+- snapshots;
+- diagnostics;
+- UI preview;
+- support bundle;
 
-```yaml
-credentialRef: secret://translation/primary
-credentialStatus: configured
-credentialValue: "[REDACTED]"
-```
+phải redact:
 
-Redaction should also cover:
-
-* authorization headers;
-* API tokens;
-* cookies;
-* signed URLs;
-* private endpoints containing embedded credentials;
-* raw imported content where privacy mode forbids disclosure.
-
----
-
-## 41. Privacy-Related Configuration
-
-Privacy settings require conservative defaults.
-
-Recommended fields:
-
-```yaml
-security:
-  allowRemoteTextProcessing: true
-  allowRemoteImageProcessing: false
-  persistRawCapture: false
-  persistOcrText: false
-  persistTranslationCache: true
-  includeContentInDiagnostics: false
-  clearTemporaryDataOnExit: true
-```
-
-When a remote provider is selected, CRAI should make the data transfer behavior visible to the user.
-
-A provider configuration must not silently override global privacy restrictions.
+- credential value;
+- token;
+- authorization header;
+- signed URL;
+- embedded credential;
+- reading content;
+- private path khi cần.
 
 ---
 
-## 42. Resource Configuration
+## 40. Versioning and Migration
 
-Runtime resource limits should be configurable but bounded.
-
-Suggested fields:
-
-```yaml
-application:
-  runtime:
-    maxWorkerCount: auto
-    maximumMemoryMb: auto
-    maxQueuedJobs: 64
-
-  network:
-    maxConcurrentRequests: 4
-
-  capture:
-    maxFramesPerSecond: 4
-
-  cache:
-    maximumDiskMb: 512
-```
-
-User-configured values must be constrained to safe supported ranges.
-
-`auto` should mean that CRAI selects a value based on device capability and runtime profile.
-
----
-
-## 43. Capture Configuration
-
-Suggested capture settings:
-
-```yaml
-preferences:
-  capture:
-    mode: selected-region
-    frameIntervalMs: 250
-    captureCursor: false
-    includeWindowShadow: false
-    scaleMode: native
-```
-
-Suggested observation settings:
-
-```yaml
-application:
-  observation:
-    stableDurationMs: 450
-    minimumChangeRatio: 0.03
-    duplicateDetection: true
-    scrollDebounceMs: 300
-    ignoreCursorChanges: true
-    ignoreSmallAnimations: true
-```
-
-Exact thresholds must be validated through representative comic-reading tests.
-
----
-
-## 44. OCR Configuration
-
-Suggested OCR settings:
-
-```yaml
-providers:
-  ocr:
-    primary: local-ocr
-
-    execution:
-      timeoutMs: 10000
-      maxRetries: 1
-      concurrency: 2
-
-    policy:
-      detectRegions: true
-      recognizeVerticalText: true
-      preserveBoundingBoxes: true
-      minimumConfidence: 0.45
-      lowConfidenceBehavior: include-with-warning
-```
-
-OCR confidence thresholds should not silently delete text unless the configured policy explicitly requires it.
-
----
-
-## 45. Translation Configuration
-
-Suggested translation settings:
-
-```yaml
-providers:
-  translation:
-    primary: primary-translator
-
-    execution:
-      timeoutMs: 20000
-      maxRetries: 1
-      concurrency: 2
-      batchSize: 12
-
-    policy:
-      contextMode: neighboring-regions
-      preserveSegmentAlignment: true
-      glossaryEnabled: true
-      translationMemoryEnabled: true
-      fallbackOnTimeout: true
-      fallbackOnRateLimit: true
-      fallbackOnInvalidRequest: false
-```
-
-Fallback behavior must distinguish recoverable and non-recoverable failures.
-
-A configuration error must not cause repeated fallback loops.
-
----
-
-## 46. Presentation Configuration
-
-Text reading and image reading have different presentation requirements.
-
-Suggested shared settings:
-
-```yaml
-preferences:
-  presentation:
-    mode: side-panel
-    fontFamily: system
-    fontSize: 18
-    lineHeight: 1.6
-    showSourceText: true
-    showTranslation: true
-```
-
-Suggested comic-specific settings:
-
-```yaml
-preferences:
-  presentation:
-    comic:
-      showRegionNumbers: true
-      highlightActiveRegion: true
-      preserveReadingOrder: true
-      overlayEnabled: false
-      overlayOpacity: 0.90
-      maximumOverlayFontReduction: 0.25
-```
-
-Suggested novel-specific settings:
-
-```yaml
-preferences:
-  presentation:
-    novel:
-      paragraphWidth: comfortable
-      paragraphSpacing: 1.0
-      dialogueIndentation: true
-      preserveOriginalParagraphs: true
-```
-
-Comic and novel presentation policies should not be forced into one undifferentiated field set.
-
----
-
-## 47. Feature Flags
-
-Feature flags allow incomplete or experimental functionality to remain isolated.
-
-Example:
-
-```yaml
-application:
-  features:
-    simpleOverlay: false
-    browserConnector: false
-    browserDomObservation: false
-    translatedLibrary: false
-    cloudSync: false
-    localTranslationModel: false
-```
-
-Feature flags must not replace architectural module boundaries.
-
-A feature flag may control whether a capability is exposed, but disabled code must still obey dependency and security rules.
-
----
-
-## 48. Feature Flag Categories
-
-Recommended categories:
-
-| Category     | Purpose                                   |
-| ------------ | ----------------------------------------- |
-| Stable       | Production capability, normally enabled.  |
-| Optional     | Supported feature selected by the user.   |
-| Experimental | Under validation and disabled by default. |
-| Internal     | Development or diagnostics only.          |
-| Removed      | No longer accepted by current schema.     |
-
-Experimental flags should display an explicit warning where they affect stored data, privacy, or provider cost.
-
----
-
-## 49. Configuration Versioning
-
-The root configuration must include a schema version.
+Root:
 
 ```yaml
 schemaVersion: 1
 ```
 
-Schema versioning supports:
-
-* field renames;
-* field relocation;
-* new required defaults;
-* removed settings;
-* provider option changes;
-* changed validation rules.
-
-The schema version is not the application version.
-
----
-
-## 50. Configuration Migration
-
-When CRAI opens an older configuration:
+Migration:
 
 ```text
-Read schema version
+Read Version
     ↓
-Find supported migration path
+Find Supported Path
     ↓
-Create a backup
+Create Backup
     ↓
-Migrate in memory
+Migrate In Memory
     ↓
-Validate migrated configuration
+Validate
     ↓
-Persist new version atomically
+Persist Atomically
     ↓
-Record migration diagnostics
+Record Diagnostics
 ```
 
-Migration must be deterministic.
+Unsupported future version:
 
-A migration must not require access to provider secrets beyond checking that references remain valid.
+- không overwrite;
+- không đoán semantic;
+- safe mode hoặc stop activation;
+- yêu cầu application version phù hợp.
 
 ---
 
-## 51. Unsupported Future Configuration
+## 41. Rollback
 
-When an older CRAI version encounters a newer unsupported schema:
+Rollback khi:
 
-```text
-Detected schema version > supported version
-    ↓
-Do not overwrite the configuration
-    ↓
-Start in safe mode or stop configuration activation
-    ↓
-Inform the user that a newer CRAI version is required
-```
-
-The application must not guess how to interpret unknown security or provider fields.
-
----
-
-## 52. Unknown Fields
-
-Recommended initial policy:
-
-```text
-Unknown top-level field
-    → validation error
-
-Unknown core section field
-    → validation error
-
-Unknown provider-specific option
-    → delegated to provider schema
-
-Unknown experimental field
-    → warning or error according to feature schema
-```
-
-Strict handling helps detect misspelled settings.
-
-For forward compatibility, migration tools may preserve unknown fields separately, but runtime modules must not use them.
-
----
-
-## 53. Configuration Rollback
-
-CRAI should retain a bounded number of valid configuration snapshots or backups.
-
-Rollback may occur when:
-
-* module initialization fails;
-* provider validation fails;
-* a new configuration prevents session creation;
-* the application crashes repeatedly after a change;
-* the user explicitly selects a previous configuration.
-
-Rollback flow:
+- component init fail;
+- provider validation fail;
+- Session không khởi tạo;
+- repeated crash;
+- explicit user request.
 
 ```text
 Activation fails
     ↓
-Affected modules are stopped
+Stop affected admission
     ↓
-Previous valid snapshot is restored
+Drain replacement attempt
     ↓
-Modules are recreated
+Restore previous valid snapshot
     ↓
-Rollback event is published
+Recreate affected components
     ↓
-Failure diagnostics are preserved
+Publish rollback event
 ```
-
-Secrets referenced by the previous snapshot must still exist for full rollback to succeed.
 
 ---
 
-## 54. Pending Configuration
+## 42. Safe Mode
 
-A configuration may be valid but not yet active.
+Safe Mode:
 
-Example:
-
-```yaml
-pendingConfiguration:
-  snapshotId: config-snapshot-43
-  requiredActivation: application-restart
-  changedSections:
-    - bootstrap.secretStore
-```
-
-The settings UI should distinguish:
-
-* current active value;
-* saved pending value;
-* required action;
-* validation status.
+- built-in defaults;
+- remote providers disabled;
+- experimental feature disabled;
+- automatic continuous capture disabled;
+- conservative budget;
+- no runtime plugins;
+- diagnostics and config recovery available;
+- raw persistence disabled;
+- strict authority/publication validation vẫn bật.
 
 ---
 
-## 55. Configuration Diagnostics
+## 43. Typed Configuration Views
 
-Configuration diagnostics should report:
+Conceptual API:
 
-* active schema version;
-* active snapshot ID;
-* selected profile;
-* loaded configuration sources;
-* ignored or overridden fields;
-* validation warnings;
-* disabled modules;
-* unavailable providers;
-* pending changes;
-* restart requirements;
-* redacted provider configuration;
-* latest migration result.
+```text
+RuntimeConfigService
+├── getBootstrapConfig()
+├── getRuntimeExecutionConfig()
+├── getSchedulerConfig()
+├── getQueueConfig()
+├── getRetryConfig()
+├── getCancellationConfig()
+├── getAuthorityConfig()
+├── getPublicationConfig()
+├── getResourceConfig()
+├── getLeaseConfig()
+├── getCacheConfig()
+├── getStorageConfig()
+├── getSecurityConfig()
+├── getProviderProfile()
+├── getPresentationConfig()
+└── getDiagnosticsConfig()
+```
 
-Example:
+Business Module nhận typed view riêng của mình.
+
+Module không:
+
+- parse file;
+- read env trực tiếp;
+- mutate snapshot;
+- read all config vì convenience;
+- resolve arbitrary secret.
+
+---
+
+## 44. Configuration Ownership
+
+| Section | Owner |
+|---|---|
+| `bootstrap` | Application Bootstrap |
+| `application.runtime` | Runtime Control / Infrastructure |
+| `application.scheduling` | Scheduler |
+| `application.queues` | Work Queue |
+| `application.retry` | Retry Policy |
+| `application.cancellation` | Cancellation Coordinator |
+| `application.authority` | Runtime Control |
+| `application.publication` | Artifact Store / Runtime Control |
+| `application.resources` | Resource Manager |
+| `application.leases` | Resource Manager / Artifact Store |
+| `application.cache` | Cache Policy |
+| `application.storage` | Storage |
+| `application.security` | Security/Privacy |
+| `application.features` | Feature Registry |
+| `preferences.*` | Owning Business Module |
+| `providers.*` | Provider Manager/Adapter |
+| `diagnostics` | Runtime Observability |
+
+Configuration Service sở hữu load, merge, validation, persistence, snapshot và activation coordination.
+
+---
+
+## 45. Observability
+
+Config diagnostics phải report:
+
+- schema version;
+- active snapshot;
+- pending snapshot;
+- selected profile;
+- loaded sources;
+- overridden field;
+- validation warning;
+- disabled component;
+- provider availability;
+- activation mode;
+- authority-impacting change;
+- drain requirement;
+- rollback result.
+
+Không report resolved secret.
+
+---
+
+## 46. MVP Configuration
+
+MVP quyết định:
+
+1. Một persisted local config.
+2. Built-in defaults + user overrides.
+3. OS credential store nếu có.
+4. Immutable typed snapshot.
+5. Validation trước activation.
+6. Current Session giữ snapshot cũ.
+7. Provider/source/privacy change yêu cầu Session restart.
+8. Bootstrap change yêu cầu application restart.
+9. Remote configuration disabled.
+10. Runtime plugin loading disabled.
+11. Raw capture memory-only mặc định.
+12. Durable Artifact cache disabled mặc định.
+13. Authority validation bắt buộc.
+14. Atomic publication bắt buộc.
+15. Resource Lease enabled.
+16. Conservative resource budget.
+17. Local diagnostics, no content.
+18. Bounded config backups.
+19. Safe Mode supported.
+
+---
+
+## 47. Example MVP Configuration
 
 ```yaml
-configurationStatus:
-  schemaVersion: 1
-  activeSnapshotId: config-snapshot-42
+schemaVersion: 1
+
+bootstrap:
+  environment: production
   profile: desktop-mvp
-  valid: true
-  pendingRestart: false
+  dataDirectory: auto
+  secretStore: operating-system
+  recoveryMode: safe
 
-  providers:
-    ocr:
-      selected: local-ocr
-      available: true
+application:
+  modules:
+    capture: true
+    observation: true
+    recognition: true
+    translation: true
+    presentation: true
+    storage: true
+    diagnostics: true
 
-    translation:
-      selected: primary-translator
-      available: false
-      reason: credential-reference-not-found
+  runtime:
+    execution:
+      maxCpuWorkers: auto
+      maxGpuExecutions: 1
+      maxProviderRequests: 2
+
+    shutdown:
+      totalTimeoutMs: 10000
+      drainTimeoutMs: 5000
+
+  scheduling:
+    currentRevisionFirst: true
+    priority:
+      control: 1000
+      interactive: 100
+      retry: 50
+      background: 10
+
+  queues:
+    control:
+      capacity: 128
+      overflow: reject
+    interactive:
+      capacity: 64
+      overflow: replace-obsolete
+    background:
+      capacity: 32
+      overflow: reject
+
+  retry:
+    enabled: true
+    attempts:
+      maxAttemptsPerWorkItem: 2
+      maxConcurrentRetries: 2
+    backoff:
+      initialDelayMs: 500
+      maximumDelayMs: 5000
+
+  cancellation:
+    revokeAuthorityImmediately: true
+    grace:
+      defaultMs: 1000
+      providerMs: 2000
+
+  authority:
+    validation:
+      completion: required
+      publication: required
+      uiCommit: required
+    staleCompletion:
+      accept: false
+
+  publication:
+    requireAcceptedCandidate: true
+    requireOwnershipTransfer: true
+    atomicPublication: true
+    allowLatePublication: false
+
+  resources:
+    budgets:
+      managedMemoryMb: auto
+      nativeMemoryMb: auto
+      gpuMemoryMb: auto
+    pressure:
+      elevatedRatio: 0.70
+      highRatio: 0.85
+      criticalRatio: 0.95
+
+  leases:
+    enabled: true
+    denyAfterLogicalDisposal: true
+    leakDetection:
+      enabled: true
+      warningAfterMs: 10000
+
+  cache:
+    runtimeMemory:
+      enabled: true
+      maximumEntries: 2000
+      policy: weighted-lru
+    scopes:
+      revisionLocal: true
+      session: true
+      runtime: true
+      durable: false
+
+  storage:
+    backend: local
+    configurationPersistence: true
+    glossaryEnabled: true
+    correctionMemoryEnabled: true
+    durableCacheEnabled: false
+
+  security:
+    allowRemoteTextProcessing: true
+    allowRemoteImageProcessing: false
+    persistence:
+      persistRawCapture: false
+      persistRecognizedText: false
+      persistTranslationCache: false
+    diagnostics:
+      includeReadingContent: false
+
+preferences:
+  language:
+    source: auto
+    target: vi
+    preferredSources: [zh-Hans, zh-Hant, en]
+
+  reading:
+    contentMode: auto
+    translationStyle: natural
+    autoProcessStableContent: true
+
+  capture:
+    frameIntervalMs: 250
+    stableDurationMs: 450
+    minimumChangeRatio: 0.03
+
+  presentation:
+    mode: side-panel
+    fontSize: 18
+    lineHeight: 1.6
+    showSourceText: true
+
+providers:
+  profiles:
+    recognition-default:
+      primary: local-recognition
+      fallback: null
+      execution:
+        timeoutMs: 10000
+        concurrency: 1
+        executionClass: CPU
+
+    translation-default:
+      primary: primary-translator
+      fallback: null
+      execution:
+        timeoutMs: 20000
+        concurrency: 2
+        executionClass: REMOTE_IO
+
+  instances:
+    local-recognition:
+      type: local
+      credentialRef: null
+      options:
+        device: auto
+
+    primary-translator:
+      type: remote
+      credentialRef: secret://translation/primary
+      options:
+        model: configured-provider-model
+
+diagnostics:
+  mode: LOCAL_ONLY
+
+  logging:
+    level: info
+    structured: true
+    includeReadingContent: false
+
+  tracing:
+    enabled: true
+    revisionTrace: true
+
+  metrics:
+    enabled: true
+    authority: true
+    publication: true
+    queue: true
+    provider: true
+    lease: true
+    resourceLifecycle: true
+
+  snapshots:
+    enabled: true
+    recentEventBufferSize: 512
 ```
 
 ---
 
-## 56. Configuration Error Model
-
-Suggested error codes:
+## 48. Error Codes
 
 ```text
 CONFIG_PARSE_FAILED
@@ -1936,312 +1576,219 @@ CONFIG_FIELD_UNKNOWN
 CONFIG_FIELD_REQUIRED
 CONFIG_VALUE_INVALID
 CONFIG_RELATION_INVALID
+CONFIG_CAPABILITY_MISSING
 CONFIG_PROVIDER_NOT_REGISTERED
-CONFIG_PROVIDER_CAPABILITY_MISSING
 CONFIG_SECRET_REFERENCE_INVALID
 CONFIG_SECRET_NOT_FOUND
 CONFIG_PERSIST_FAILED
 CONFIG_MIGRATION_FAILED
+CONFIG_ACTIVATION_DEFERRED
 CONFIG_ACTIVATION_FAILED
-CONFIG_RESTART_REQUIRED
+CONFIG_DRAIN_FAILED
 CONFIG_ROLLBACK_FAILED
+CONFIG_RESTART_REQUIRED
 ```
 
-Errors should include:
-
-* error code;
-* affected field path;
-* sanitized message;
-* recoverability;
-* recommended user action;
-* correlation ID.
+Errors normalize theo `ERROR_MODEL.md`.
 
 ---
 
-## 57. Testing Requirements
+## 49. Testing Requirements
 
-The configuration system should have automated tests for:
+Tests phải bao phủ:
 
-### 57.1 Default Configuration
+### Defaults
 
-* defaults satisfy the schema;
-* defaults start without credentials;
-* unfinished features are disabled;
-* sensitive persistence is disabled by default.
+- valid schema;
+- no credential required;
+- safe privacy;
+- authority/publication validation enabled;
+- durable raw cache disabled.
 
-### 57.2 Merge Behavior
+### Merge
 
-* precedence is deterministic;
-* nested object merge is correct;
-* arrays follow their declared strategy;
-* `null` behavior is correct;
-* session overrides do not mutate persisted preferences.
+- deterministic precedence;
+- array strategy;
+- null semantics;
+- Session override isolation.
 
-### 57.3 Validation
+### Validation
 
-* invalid types are rejected;
-* out-of-range values are rejected;
-* conflicting settings are rejected;
-* unavailable capabilities are reported;
-* secret values are never included in validation output.
+- type/range;
+- semantic relation;
+- provider capability;
+- authority invariant;
+- publication invariant;
+- Lease requirement;
+- privacy precedence.
 
-### 57.4 Persistence
+### Activation
 
-* writes are atomic;
-* corrupted files are recoverable;
-* backups are bounded;
-* failed persistence leaves the old valid file intact.
+- immediate;
+- new-work-only;
+- Session restart;
+- Component restart;
+- Application restart;
+- admission freeze;
+- drain;
+- rollback.
 
-### 57.5 Migration
+### Persistence
 
-* each supported version migrates correctly;
-* migrations are repeatable;
-* unsupported future versions are preserved;
-* migration failure enters safe mode.
+- atomic write;
+- bounded backup;
+- corrupt file recovery;
+- old valid snapshot retained.
 
-### 57.6 Runtime Activation
+### Security
 
-* immediate changes affect only permitted behavior;
-* session changes remain pending when required;
-* module restart follows dependency order;
-* activation failure performs rollback;
-* active jobs retain their configuration snapshot.
+- secret reference only;
+- no secret in event/log/snapshot;
+- remote provider cannot bypass privacy.
 
-### 57.7 Security
+### Runtime v2
 
-* credentials are stored only through secure references;
-* diagnostics redact secrets;
-* command-line output does not expose secrets;
-* configuration export excludes secret values;
-* remote provider settings cannot bypass privacy policy.
-
----
-
-## 58. Initial MVP Decisions
-
-For the first CRAI desktop MVP:
-
-1. use one persisted local configuration file;
-2. use built-in defaults plus user overrides;
-3. store secrets through an operating-system credential store where available;
-4. use typed module configuration views;
-5. validate configuration before runtime activation;
-6. use immutable effective configuration snapshots;
-7. permit immediate UI preference updates;
-8. require session restart for provider or source changes;
-9. require application restart for bootstrap changes;
-10. disable cloud-controlled configuration;
-11. disable runtime provider plugin loading;
-12. default raw screen captures to memory-only;
-13. default diagnostics to exclude source and translated content;
-14. retain one or more recent valid configuration backups;
-15. support safe mode after configuration failure.
+- existing Attempt keeps old snapshot;
+- new Attempt uses activated snapshot;
+- authority-impacting config revokes correctly;
+- publication config cannot disable safety;
+- Lease config leak detection;
+- resource drain timeout;
+- Scheduler/Queue config consistency;
+- retry budget validation.
 
 ---
 
-## 59. Deferred Decisions
+## 50. Architecture Invariants
 
-The following decisions remain open:
-
-* YAML versus JSON as the persisted human-readable format;
-* exact operating-system secret storage implementation;
-* whether environment overrides are supported in production builds;
-* how many valid backups should be retained;
-* whether provider health checks run at startup or on first use;
-* whether provider changes should drain or cancel active requests;
-* whether session configurations can be exported;
-* whether users may create custom runtime profiles;
-* whether configuration files may be imported from another device;
-* whether different websites or series may have dedicated preference profiles;
-* whether adaptive performance tuning may update temporary configuration automatically.
-
-These decisions should be based on implementation prototypes and user-testing evidence.
-
----
-
-## 60. Recommended Configuration Ownership
-
-Suggested ownership boundaries:
-
-| Configuration Section      | Owning Runtime Area           |
-| -------------------------- | ----------------------------- |
-| `bootstrap`                | Application Bootstrap         |
-| `application.runtime`      | Runtime Coordinator           |
-| `application.scheduling`   | Scheduler                     |
-| `application.cache`        | Cache Manager                 |
-| `application.storage`      | Storage Module                |
-| `application.security`     | Security and Privacy          |
-| `application.features`     | Feature Registry              |
-| `preferences.language`     | Reading Session               |
-| `preferences.capture`      | Capture and Observation       |
-| `preferences.reading`      | Reading Session               |
-| `preferences.presentation` | Presentation                  |
-| `providers.ocr`            | OCR Provider Registry         |
-| `providers.translation`    | Translation Provider Registry |
-| `diagnostics`              | Diagnostics Module            |
-
-The configuration service owns loading, merging, validation, persistence, snapshotting, and activation coordination.
-
-It does not own the business interpretation of every setting.
+1. Active configuration immutable.
+2. Invalid configuration không activate.
+3. Existing Attempt không bị mutation.
+4. Every WorkItem/Attempt references ConfigurationSnapshotId.
+5. Config không cấp runtime authority.
+6. Authority safety validation không disable trong production.
+7. Publication yêu cầu ownership transfer.
+8. Worker không được configured để publish trực tiếp.
+9. Retry config tách provider config.
+10. Queue capacity bounded.
+11. Scheduler preserves control capacity.
+12. Cancellation revoke authority trước drain.
+13. Resource budget bounded.
+14. Lease tracking required cho shared resource.
+15. Cache optional cho correctness.
+16. Durable cache đi qua Storage.
+17. Privacy restriction thắng provider preference.
+18. Secret không nằm trong persisted normal config.
+19. Secret không nằm trong event/log/snapshot.
+20. Component restart theo dependency graph.
+21. Config activation có rollback path khi cần.
+22. Migration deterministic.
+23. Unsupported future schema không overwrite.
+24. Persistence atomic.
+25. Safe Mode giữ authority/publication safety.
+26. Module chỉ nhận typed config view.
+27. Configuration Service không sở hữu business semantics.
+28. Config event content-free.
+29. Runtime diagnostics dùng sanitized snapshot.
+30. Config change during shutdown không activate.
 
 ---
 
-## 61. Module Dependency Rules
+## 51. Open Questions
 
-The runtime configuration module may depend on:
+- YAML hay JSON?
+- OS secret store implementation nào?
+- Số backup config?
+- Provider health check startup hay first use?
+- Component change nên cancel hay drain?
+- User có tạo custom runtime profile không?
+- Website/series-specific preference profile?
+- Adaptive tuning có được tạo temporary override không?
+- Hard Lease timeout hay diagnostic-only?
+- Resource budget tính theo device profile thế nào?
+- Durable cache encryption policy?
+- Config rollback có rollback Storage migration không?
+- Authority-impacting config nào được phép NEW_WORK_ONLY?
 
-* schema definitions;
-* configuration storage abstraction;
-* secret-reference abstraction;
-* diagnostics abstraction;
-* runtime lifecycle contracts.
+---
 
-Feature modules may depend on typed configuration contracts.
+## 52. Related Documents
 
-Feature modules must not depend on:
+| Document | Relationship |
+|---|---|
+| `PIPELINE_RUNTIME.md` | WorkItem, Attempt, authority and snapshot identity |
+| `RUNTIME_COMPONENTS.md` | Config consumers and owners |
+| `SCHEDULER.md` | Admission configuration |
+| `WORK_QUEUE.md` | Queue classes and capacity |
+| `CANCELLATION.md` | Grace and revocation settings |
+| `RETRY_POLICY.md` | Retry budgets and strategy |
+| `ERROR_MODEL.md` | Config error normalization |
+| `MEMORY_MODEL.md` | Resource budgets |
+| `CACHE_POLICY.md` | Reuse and retention settings |
+| `RESOURCE_LIFECYCLE.md` | Lease, drain and disposal |
+| `THREADING_MODEL.md` | Execution contexts and pools |
+| `PERFORMANCE_MODEL.md` | Budget targets |
+| `RUNTIME_OBSERVABILITY.md` | Diagnostic settings |
+| `BOOT_SEQUENCE.md` | Startup, activation and shutdown |
+| `../../modules/storage/README.md` | Configuration persistence |
+| `../core/EVENT_BUS.md` | Configuration events |
 
-* the concrete configuration file parser;
-* the physical configuration file path;
-* environment variable readers;
-* command-line parsers;
-* configuration migration internals;
-* secret storage implementation.
+---
 
-Conceptual dependency direction:
+## 53. Completion Criteria
+
+`RUNTIME_CONFIG.md` được xem là đồng bộ khi:
+
+- categories và activation modes rõ;
+- immutable snapshot được giữ;
+- WorkItem/Attempt dùng ConfigurationSnapshotId;
+- Scheduler và Queue config tách riêng;
+- Retry không còn chỉ nằm trong provider;
+- Authority và Publication safety config tồn tại;
+- Resource/Lease/Retention config đầy đủ;
+- cache theo Artifact reuse;
+- config persistence đi qua Storage;
+- component restart có admission freeze và drain;
+- events theo Runtime Event Standard;
+- typed views khớp Runtime v2;
+- MVP config và tests đầy đủ.
+
+---
+
+## 54. Summary
+
+CRAI Runtime Configuration dùng flow:
 
 ```text
-Feature Module
+Sources
     ↓
-Typed Configuration Contract
-    ↑
-Runtime Configuration Service
+Merge
     ↓
-Parser / Persistence / Migration / Secret References
-```
-
----
-
-## 62. Data Flow Summary
-
-```text
-Configuration Sources
+Validate
     ↓
-Configuration Loader
-    ↓
-Layer Merger
-    ↓
-Schema Validator
-    ↓
-Semantic Validator
-    ↓
-Capability Validator
-    ↓
-Immutable Configuration Snapshot
-    ↓
-Typed Module Views
-    ↓
-Runtime Modules
-```
-
-Runtime update flow:
-
-```text
-Settings UI
-    ↓
-Configuration Change Request
-    ↓
-Candidate Snapshot
-    ↓
-Validation
+Immutable Candidate Snapshot
     ↓
 Impact Analysis
     ↓
-Persistence
+Persist
     ↓
-Activation Boundary
+Activate at Safe Boundary
     ↓
-Configuration Event
-    ↓
-Affected Runtime Modules
+Typed Runtime Views
 ```
 
----
-
-## 63. Security Summary
-
-The initial security rules are:
+Ranh giới cốt lõi:
 
 ```text
-No plain-text provider credentials in normal configuration
+Configuration controls policy.
 
-No secrets in logs, events, traces or exports
+Runtime Control owns authority.
 
-No remote processing without an explicit permitted policy
+Artifact Store owns publication.
 
-No permanent raw capture storage by default
+Scheduler owns admission.
 
-No partial activation of invalid configuration
+Resource Manager owns lifecycle.
 
-No arbitrary module access to the complete configuration
-
-No automatic overwrite of corrupted user configuration
-
-No execution of code from configuration
+Storage owns persistence.
 ```
-
----
-
-## 64. Completion Criteria
-
-This architecture document is considered ready for implementation planning when:
-
-* configuration categories are accepted;
-* precedence rules are accepted;
-* activation modes are accepted;
-* module ownership is accepted;
-* secret references are accepted;
-* initial schema fields are sufficient for the MVP;
-* configuration change events align with `EVENT_BUS.md`;
-* restart behavior aligns with `STATE_MACHINE.md`;
-* configuration dependencies align with `MODULE_DEPENDENCY.md`;
-* loading and activation flows align with `DATA_FLOW.md`.
-
----
-
-## 65. Next Recommended Runtime Documents
-
-After this document, the recommended order is:
-
-```text
-runtime/RUNTIME_CONFIG.md
-    ↓
-runtime/RUNTIME_CONTEXT.md
-    ↓
-runtime/RUNTIME_LIFECYCLE.md
-    ↓
-runtime/WORK_SCHEDULER.md
-    ↓
-runtime/CANCELLATION_MODEL.md
-    ↓
-runtime/RESOURCE_LIMITS.md
-    ↓
-runtime/ERROR_RECOVERY.md
-```
-
-The immediate next document should be:
-
-```text
-runtime/RUNTIME_CONTEXT.md
-```
-
-It should define the runtime objects and identifiers shared across modules, including:
-
-* application runtime ID;
-* reading session context;
-* processing generation;
-* configuration snapshot ID;
-* correlation and causation IDs;
-* cancellation scope;
-* active source context;
-* provider execution context;
-* diagnostic trace context.

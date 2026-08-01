@@ -1,465 +1,457 @@
+# runtime/SCHEDULER.md
+
 # Runtime Scheduler
 
 > Project: CRAI  
-> Version: 0.1  
+> Version: 1.0  
 > Status: Architecture Draft
 
 ---
 
 ## 1. Purpose
 
-This document defines how CRAI selects, prioritizes, starts, delays, retries, and rejects runtime work.
+Tài liệu này định nghĩa cách CRAI Scheduler đánh giá, ưu tiên và đưa ra admission decision cho `WorkItem`.
 
-The Scheduler is the decision-making component between:
+Scheduler nằm giữa Runtime Control và Worker Execution:
 
 ```text
-Work Queue
-    ↓
+Runtime Control
+    ↓ submits eligible WorkItem
 Scheduler
-    ↓
-Worker
+    ↓ admission decision
+Work Queue / Worker Execution
 ```
 
-The Work Queue stores pending work.
-
-The Scheduler decides which work is allowed to execute next.
-
-This document focuses on scheduling policy rather than implementation technology.
+Scheduler không sở hữu business workflow, retry policy, terminal outcome hoặc runtime authority.
 
 ---
 
-## 2. Scope
+## 2. Core Responsibility
 
-The Scheduler is responsible for:
+Scheduler chịu trách nhiệm duy nhất ở cấp kiến trúc:
 
-- selecting the next work item
-- assigning work to available workers
-- prioritizing current user-visible content
-- rejecting obsolete work
-- limiting concurrency
-- coordinating retry decisions
-- applying fairness between sessions
-- reacting to resource pressure
-- protecting UI responsiveness
+> Quyết định WorkItem nào được phép tiến gần hơn tới execution, vào thời điểm nào và dưới resource budget nào.
 
-The Scheduler is not responsible for:
+Scheduler chịu trách nhiệm:
 
-- storing pending work
-- implementing OCR
-- implementing translation
-- rendering UI components
-- storing persistent data
-- directly freeing every runtime resource
-- defining provider-specific retry rules
+- đánh giá candidate WorkItem;
+- kiểm tra admission condition;
+- ưu tiên current-revision work;
+- áp dụng priority class;
+- giới hạn concurrency;
+- match worker capability;
+- áp dụng fairness;
+- phản ứng với resource pressure;
+- bảo vệ control path và UI responsiveness;
+- loại bỏ hoặc thay thế queued work không còn giá trị;
+- phát scheduling decision có reason code.
 
-Those responsibilities belong to their respective runtime or domain modules.
+Scheduler không:
+
+- tạo BusinessExecutionPlan;
+- thay đổi business dependency;
+- tạo WorkItem;
+- tạo retry Attempt;
+- quyết định terminal outcome;
+- xác nhận stale result cuối cùng;
+- tự cancel running Attempt;
+- tự lookup cache;
+- chọn provider theo business policy;
+- commit Artifact;
+- commit UI;
+- sở hữu durable persistence;
+- giải phóng mọi resource vật lý.
 
 ---
 
-## 3. Design Goals
+## 3. Architectural Position
 
-The Scheduler must satisfy the following goals:
+```text
+BusinessExecutionPlan
+        ↓
+Runtime Control
+        ↓ creates WorkItem
+Scheduler
+        ↓
+ADMIT / DEFER / REJECT / REPLACE
+        ↓
+Work Queue
+        ↓
+Worker Execution
+```
 
-- prioritize the latest valid revision
-- minimize user-visible latency
-- avoid processing obsolete work
-- prevent one stage from exhausting all resources
-- prevent background work from blocking interactive work
-- keep worker usage bounded
-- support cooperative cancellation
-- remain observable
-- behave predictably under load
-- degrade gracefully when providers are slow
+Scheduler không được bypass Runtime Control.
 
 ---
 
 ## 4. Scheduling Philosophy
 
-CRAI is an interactive reading application.
+CRAI là ứng dụng đọc tương tác, không phải batch-processing system.
 
-It is not a batch-processing system.
-
-The Scheduler therefore optimizes for:
+Scheduler tối ưu cho:
 
 ```text
-Current User Experience
+Useful Current-Revision Output
 ```
 
-rather than:
+thay vì:
 
 ```text
-Completion of Every Submitted Task
+Completion of Every Submitted WorkItem
 ```
 
-Example:
+Nguyên tắc trung tâm:
 
 ```text
-Revision 20 queued
-Revision 21 queued
-Revision 22 queued
+Current Revision First
+Bounded Concurrency
+Drop Obsolete Pending Work
+Protect Control Path
+Reject Stale Results at Runtime Control
 ```
-
-If Revision 22 is the newest visible page, the Scheduler may:
-
-```text
-Execute Revision 22
-Drop Revision 21
-Drop Revision 20
-```
-
-Completing obsolete revisions would consume resources without improving the current reading experience.
 
 ---
 
 ## 5. Scheduler Inputs
 
-The Scheduler receives decisions inputs from multiple sources.
+Scheduler nhận read-only scheduling inputs từ các runtime component.
 
-### 5.1 Work Queue
+### 5.1 Runtime Control
 
-Provides pending work items.
+Cung cấp:
 
-### 5.2 Session Manager
+- active session state;
+- current revision;
+- WorkItem eligibility;
+- cancellation state;
+- shutdown state;
+- priority elevation từ user action;
+- dependency readiness.
 
-Provides:
+### 5.2 Revision Store
 
-- active session state
-- current revision
-- session priority
-- user interaction state
-- session termination state
+Cung cấp:
 
-### 5.3 Revision Manager
+- revision identity;
+- revision age;
+- current/superseded state;
+- revision metadata;
+- resource linkage cần cho admission.
 
-Provides:
+Revision Store không cấp authority; authority thuộc Runtime Control.
 
-- current valid revision
-- revision age
-- revision ownership
-- revision obsolescence state
+### 5.3 Work Queue
 
-### 5.4 Worker Pool
+Cung cấp:
 
-Provides:
+- pending WorkItem;
+- queue capacity;
+- queue saturation;
+- queued-at time;
+- replacement candidates.
 
-- available workers
-- busy workers
-- worker capability
-- worker health
-- provider availability
+### 5.4 Worker Execution
 
-### 5.5 Resource Monitor
+Cung cấp:
 
-Provides:
+- available worker slots;
+- worker capability;
+- worker health;
+- execution-context availability;
+- worker-pool utilization.
 
-- CPU pressure
-- memory pressure
-- GPU pressure
-- network availability
-- queue saturation
+### 5.5 Provider Manager
 
-### 5.6 Cancellation Manager
+Cung cấp:
 
-Provides cancellation state for:
+- provider availability;
+- provider capability;
+- provider concurrency state;
+- provider health;
+- rate-limit state.
 
-- session
-- revision
-- pipeline
-- work item
-- provider request
+Scheduler sử dụng các dữ liệu này để admission, không tự chọn provider theo business policy.
 
-### 5.7 Cache Manager
+### 5.6 Resource Monitor
 
-Provides whether the requested result already exists.
+Cung cấp:
+
+- CPU pressure;
+- memory pressure;
+- GPU pressure;
+- network availability;
+- artifact pressure;
+- temporary-storage pressure.
+
+### 5.7 Runtime Configuration
+
+Cung cấp immutable configuration snapshot cho:
+
+- queue capacity;
+- concurrency limit;
+- priority policy;
+- fairness;
+- resource budget;
+- admission threshold;
+- preemption policy.
 
 ---
 
 ## 6. Scheduling Unit
 
-The basic scheduling unit is a `WorkItem`.
+Đơn vị scheduling là `WorkItem`.
 
-A WorkItem contains at least:
+Canonical `WorkItem` được định nghĩa tại `PIPELINE_RUNTIME.md`.
+
+Scheduler chỉ sử dụng scheduling metadata cần thiết:
 
 ```text
 WorkItem
 ├── WorkItemId
 ├── SessionId
 ├── RevisionId
-├── Stage
+├── BusinessStageId
+├── WorkType
 ├── PriorityClass
 ├── CreatedAt
-├── Attempt
 ├── Deadline
 ├── CostHint
-├── ProviderRequirement
-└── CancellationHandle
+├── CapabilityRequirements
+├── InputArtifactRefs
+├── ConfigurationVersion
+└── CancellationScope
 ```
 
-The Scheduler must not rely on mutable payload data stored inside the queue.
+Scheduler không đọc hoặc mutate business payload.
 
-Large runtime data is accessed through revision-scoped storage.
+Large payload chỉ được truy cập bằng `ArtifactRef`.
 
 ---
 
 ## 7. Scheduling Decision
 
-For every candidate WorkItem, the Scheduler may produce one of the following decisions:
+Scheduler chỉ tạo một trong bốn admission decision:
 
 | Decision | Meaning |
 |---|---|
-| `RUN` | Start execution immediately |
-| `DEFER` | Keep pending until a later scheduling cycle |
-| `DROP` | Remove because the work is no longer useful |
-| `CANCEL` | Request cancellation of already-started work |
-| `RETRY` | Create a new attempt according to retry policy |
-| `FAIL` | Mark the work as permanently failed |
-| `CACHE_HIT` | Skip execution and continue with cached output |
+| `ADMIT` | Cho phép WorkItem tiến vào queue hoặc execution slot |
+| `DEFER` | Giữ WorkItem ở trạng thái pending để đánh giá lại |
+| `REJECT` | Từ chối admission vì WorkItem không còn hoặc chưa bao giờ hợp lệ |
+| `REPLACE` | Thay queued WorkItem cũ bằng WorkItem mới có giá trị cao hơn |
 
-A scheduling decision must be explicit and observable.
+Scheduler không tạo các decision sau:
+
+```text
+RETRY
+FAIL
+SUCCEED
+CANCEL
+CACHE_HIT
+```
+
+Các quyết định đó thuộc Runtime Control, Retry Policy, Cache Policy hoặc Authority Validation.
 
 ---
 
-## 8. Priority Classes
+## 8. Decision Reason Codes
 
-CRAI uses a small number of priority classes.
+Mỗi decision phải có reason code.
 
-### 8.1 Interactive Critical
-
-Work directly required to display the newest visible content.
-
-Examples:
-
-- OCR for the current revision
-- translation for the current revision
-- presentation build for the current revision
-
-### 8.2 Interactive Supporting
-
-Work that improves the current reading experience but is not immediately blocking presentation.
-
-Examples:
-
-- glossary enrichment
-- low-cost layout refinement
-- alternative translation preparation
-
-### 8.3 Background
-
-Work that is useful but not required for immediate reading.
-
-Examples:
-
-- cache warming
-- history indexing
-- low-priority diagnostics
-- model preloading
-
-### 8.4 Maintenance
-
-Internal cleanup or telemetry work.
-
-Examples:
-
-- metrics aggregation
-- expired cache cleanup
-- trace export
-
-Priority order:
+Ví dụ:
 
 ```text
-Interactive Critical
+CURRENT_REVISION
+NEWER_REVISION_AVAILABLE
+SESSION_INACTIVE
+REVISION_SUPERSEDED
+DEPENDENCY_NOT_READY
+QUEUE_CAPACITY_AVAILABLE
+QUEUE_CAPACITY_EXCEEDED
+REPLACED_BY_NEWER_WORK
+NO_COMPATIBLE_WORKER
+CONCURRENCY_LIMIT
+RESOURCE_BUDGET_EXCEEDED
+PROVIDER_UNAVAILABLE
+PROVIDER_SATURATED
+DEADLINE_EXCEEDED
+RUNTIME_PAUSED
+RUNTIME_STOPPING
+CONTROL_CAPACITY_RESERVED
+```
+
+Reason code phục vụ:
+
+- diagnostics;
+- metrics;
+- deterministic testing;
+- scheduler tuning;
+- explanation.
+
+---
+
+## 9. Priority Classes
+
+CRAI sử dụng một tập priority class nhỏ và ổn định.
+
+### 9.1 Interactive Critical
+
+Work trực tiếp cần để tạo output cho nội dung hiện tại người dùng đang xem.
+
+### 9.2 Interactive Supporting
+
+Work cải thiện trải nghiệm hiện tại nhưng không chặn output chính.
+
+### 9.3 Background
+
+Work hữu ích nhưng không cần cho tương tác hiện tại.
+
+### 9.4 Maintenance
+
+Cleanup, metrics aggregation, bounded diagnostics hoặc preloading.
+
+Thứ tự mặc định:
+
+```text
+INTERACTIVE_CRITICAL
     >
-Interactive Supporting
+INTERACTIVE_SUPPORTING
     >
-Background
+BACKGROUND
     >
-Maintenance
+MAINTENANCE
 ```
 
 ---
 
-## 9. Priority Score
+## 10. Priority Inputs
 
-Priority class alone is not enough.
-
-The Scheduler may compute a dynamic score.
-
-Conceptually:
+Priority decision có thể xét:
 
 ```text
-Priority Score =
-    Priority Class
-    + Revision Freshness
-    + User Visibility
-    + Stage Urgency
-    + Deadline Pressure
-    - Obsolescence Penalty
-    - Resource Cost Penalty
+Priority Class
+Current Revision
+User Visibility
+User Interaction
+Business Priority
+Deadline Pressure
+Queue Age
+Cost Hint
+Resource Cost
+Provider Availability
+Obsolescence Risk
+Fairness Weight
 ```
 
-The exact numeric formula is implementation-specific.
+Priority score cụ thể là implementation detail, nhưng phải:
 
-The architectural requirement is that the score remains:
-
-- deterministic
-- explainable
-- bounded
-- observable
+- deterministic;
+- explainable;
+- bounded;
+- observable;
+- testable.
 
 ---
 
-## 10. Revision Freshness
+## 11. Current Revision Preference
 
-Revision freshness is one of the strongest scheduling signals.
+Current revision là tín hiệu scheduling mạnh nhất.
 
-Example:
-
-```text
-Current Revision: 42
-```
-
-Pending work:
+Default rule:
 
 ```text
-Revision 39
-Revision 40
-Revision 41
-Revision 42
+WorkItem.RevisionId == Session.CurrentRevisionId
+    → eligible for current-revision priority
 ```
 
-Default behavior:
+WorkItem của revision cũ:
 
-- Revision 42 receives the highest priority.
-- Revisions 39–41 are evaluated for immediate drop.
-- Older work may survive only when explicitly reusable.
+- thường bị `REJECT`;
+- có thể bị `REPLACE` khi vẫn đang queued;
+- chỉ được tiếp tục nếu Runtime Control vẫn đánh dấu eligible;
+- không bao giờ được Scheduler tự cấp commit authority.
 
-A revision is normally obsolete when:
-
-```text
-WorkItem.RevisionId != Session.CurrentRevisionId
-```
-
-Exceptions must be explicitly documented.
+Scheduler không phải authority validator cuối cùng.
 
 ---
 
-## 11. Latest Valid Revision Wins
+## 12. Obsolete Work Elimination
 
-The main scheduling invariant is:
+Obsolete work nên bị loại càng sớm càng tốt.
 
-> Only the newest valid revision may advance toward user-visible presentation.
+Các điểm kiểm tra:
 
-This does not mean all older work must always be stopped instantly.
+### Before Admission
 
-An older task may continue when:
+Không admit WorkItem đã mất eligibility.
 
-- it is nearly complete
-- stopping it is more expensive than finishing it
-- its result can be reused safely
-- it does not block current work
-- it does not consume a scarce worker needed by the current revision
+### While Pending
 
-However, an older result must never update the active UI.
+Từ chối hoặc replace WorkItem khi revision mới xuất hiện.
+
+### Before Queue Dispatch
+
+Đánh giá lại current revision, cancellation state và resource budget.
+
+### Before Worker Assignment
+
+Xác nhận worker compatibility và Runtime Control eligibility.
+
+### After Execution
+
+Không thuộc Scheduler. Runtime Control thực hiện authority validation.
 
 ---
 
-## 12. Stage Urgency
+## 13. Admission Preconditions
 
-Different stages have different urgency.
+Trước khi `ADMIT`, Scheduler phải xác nhận:
 
-Suggested default order:
+- Runtime đang cho phép admission;
+- session còn active;
+- revision còn eligible;
+- dependency đã ready;
+- cancellation chưa revoke work;
+- input ArtifactRef tồn tại theo metadata được cấp;
+- queue capacity còn;
+- compatible worker hoặc execution pool tồn tại;
+- concurrency budget còn;
+- resource budget còn;
+- provider runtime state phù hợp khi cần;
+- deadline chưa hết;
+- control capacity vẫn được bảo vệ.
+
+---
+
+## 14. Worker Capability Matching
+
+WorkItem có thể khai báo `CapabilityRequirements`.
+
+Ví dụ:
 
 ```text
-Presentation Validation
-    >
-Translation
-    >
-OCR
-    >
-Layout
-    >
-Observation
-    >
-Background Processing
+CapabilityRequirements
+├── WorkType
+├── ExecutionClass
+├── CPU/GPU Requirement
+├── Local/Remote Eligibility
+├── Language Capability
+├── Model Capability
+├── Memory Class
+└── Provider Capability
 ```
 
-This order is not a fixed universal rule.
+Scheduler chỉ admit hoặc dispatch tới worker tương thích.
 
-For example:
-
-- OCR may become more urgent if no text exists yet.
-- Presentation may be deferred if its revision is already stale.
-- Translation may be skipped on cache hit.
-
-Stage urgency must always be evaluated together with revision validity.
-
----
-
-## 13. Worker Capability Matching
-
-Not every worker can execute every WorkItem.
-
-Workers may differ by:
-
-- stage capability
-- local or remote provider
-- CPU or GPU requirement
-- supported language
-- supported model
-- concurrency limit
-- current health
-
-Example:
-
-```text
-OCR WorkItem
-    ↓
-Requires OCR-capable worker
-    ↓
-Prefers GPU worker
-    ↓
-Falls back to CPU worker
-```
-
-The Scheduler must select only compatible workers.
-
----
-
-## 14. Concurrency Limits
-
-Every expensive stage must have an explicit concurrency limit.
-
-Suggested MVP defaults:
-
-| Stage | Suggested concurrency |
-|---|---:|
-| Capture | 1 |
-| Observation | 1 |
-| OCR | 1 |
-| Layout | 1–2 |
-| Translation | 1–2 |
-| Presentation Build | 1 |
-| UI Commit | 1 |
-
-These are starting assumptions, not permanent values.
-
-Concurrency must be configurable because it depends on:
-
-- device capability
-- local model cost
-- remote provider limits
-- memory pressure
-- user preference
+Scheduler không biết implementation chi tiết bên trong Business Module.
 
 ---
 
 ## 15. Resource Classes
 
-Workers and tasks may use different resource classes.
-
-Suggested classes:
+Các resource class logic có thể gồm:
 
 ```text
+CONTROL
 UI
 CPU_LIGHT
 CPU_HEAVY
@@ -468,848 +460,732 @@ NETWORK
 IO
 ```
 
-The Scheduler must prevent one class from starving another.
+Scheduler phải ngăn một resource class làm starve:
 
-Example:
-
-A long-running local translation model must not block:
-
-- screen observation
-- cancellation handling
-- UI presentation
-- session stop commands
+- control command;
+- cancellation;
+- UI commit;
+- observation/capture control;
+- shutdown;
+- diagnostics tối thiểu cần thiết.
 
 ---
 
-## 16. Admission Control
+## 16. Concurrency Control
 
-Before a WorkItem enters execution, the Scheduler performs admission checks.
+Concurrency phải bounded.
 
-Checks include:
+Giới hạn có thể áp dụng theo:
 
-- session still active
-- revision still valid
-- cancellation not requested
-- required input exists
-- compatible worker exists
-- concurrency budget available
-- memory budget available
-- provider is healthy
-- deadline has not expired
+- global Runtime;
+- session;
+- WorkType;
+- worker pool;
+- provider;
+- execution class;
+- GPU context;
+- network provider;
+- resource class.
 
-If any required check fails, the Scheduler must choose:
+Không hard-code concurrency theo capability nội bộ như OCR hoặc Layout tại tài liệu này.
 
-- defer
-- drop
-- retry
-- fail
-
-It must not start work blindly.
+Giá trị cụ thể thuộc `RUNTIME_CONFIG.md`.
 
 ---
 
-## 17. Obsolete Work Elimination
+## 17. Admission Budget
 
-Obsolete work should be removed as early as possible.
-
-Elimination may occur:
-
-### Before Enqueue
-
-Do not enqueue work for an invalid revision.
-
-### While Queued
-
-Remove pending work after a newer revision becomes current.
-
-### Before Execution
-
-Validate again immediately before assigning a worker.
-
-### During Execution
-
-Request cooperative cancellation.
-
-### After Execution
-
-Reject the result during commit validation.
-
-This layered validation prevents stale work from leaking through race conditions.
-
----
-
-## 18. Scheduling Cycle
-
-A scheduling cycle may follow this sequence:
+Admission decision phải xét tổng hợp:
 
 ```text
-Receive runtime signal
-    ↓
-Collect candidate WorkItems
-    ↓
+Queue Budget
+Worker Budget
+Provider Budget
+CPU Budget
+GPU Budget
+Memory Budget
+Artifact Budget
+Temporary Storage Budget
+Control Capacity Reserve
+```
+
+Không có một budget đơn lẻ nào được coi là đủ.
+
+---
+
+## 18. Control Capacity
+
+Runtime phải giữ capacity cho:
+
+- stop;
+- pause;
+- resume;
+- cancellation;
+- shutdown;
+- revision replacement;
+- user-triggered replan;
+- fatal error handling.
+
+Control command không được xếp sau domain work dài hạn trong cùng bottleneck mà không có capacity reserve.
+
+---
+
+## 19. Scheduling Cycle
+
+Một scheduling cycle điển hình:
+
+```text
+Runtime signal received
+        ↓
+Collect eligible candidates
+        ↓
 Remove invalid candidates
-    ↓
-Check cache
-    ↓
+        ↓
+Evaluate replacement opportunities
+        ↓
 Compute priority
-    ↓
-Match worker capability
-    ↓
-Check resource budgets
-    ↓
-Select next WorkItem
-    ↓
-Start execution
-    ↓
-Emit scheduling decision
+        ↓
+Match capability
+        ↓
+Check budgets
+        ↓
+Produce admission decision
+        ↓
+Emit decision telemetry
 ```
 
-Scheduling signals may include:
+Scheduling signal có thể gồm:
 
-- new work enqueued
-- worker became available
-- revision changed
-- task completed
-- task failed
-- cancellation requested
-- resource pressure changed
-- provider health changed
+- WorkItem created;
+- queue changed;
+- worker available;
+- revision changed;
+- session state changed;
+- provider state changed;
+- resource pressure changed;
+- configuration activated;
+- Runtime paused/resumed;
+- shutdown started.
 
-The Scheduler should be event-driven rather than continuously polling at high frequency.
+Scheduler nên event-driven.
 
 ---
 
-## 19. Preemption
+## 20. Queue Replacement
 
-Preemption means interrupting already-running work to execute more valuable work.
+`REPLACE` dùng khi WorkItem mới có cùng logical replacement key nhưng giá trị cao hơn.
 
-CRAI should use cooperative preemption.
-
-Example:
+Ví dụ replacement key có thể dựa trên:
 
 ```text
-Revision 40 OCR running
-    ↓
-Revision 41 becomes current
-    ↓
-Scheduler requests cancellation of Revision 40
-    ↓
-Worker reaches a cancellation checkpoint
-    ↓
-Worker stops safely
-    ↓
-Revision 41 starts
+SessionId
+BusinessStageId
+WorkType
+TargetIdentity
 ```
 
-Hard thread termination must not be used as the default cancellation method.
+Default latest-value behavior:
 
-Hard termination risks:
+```text
+Keep newest eligible pending WorkItem
+Replace older pending WorkItem with same replacement key
+```
 
-- corrupted provider state
-- leaked memory
-- locked resources
-- incomplete output
-- inconsistent metrics
+Không replace running Attempt trực tiếp.
+
+Running work chỉ có thể mất authority hoặc nhận cooperative cancellation từ Runtime Control.
 
 ---
 
-## 20. Preemption Policy
+## 21. Preemption Boundary
 
-A running task should be considered for preemption when:
+Scheduler không tự cancel running Attempt.
 
-- a newer critical revision is waiting
-- the worker is scarce
-- the current task is obsolete
-- cancellation is supported
-- estimated remaining time is significant
+Scheduler có thể phát recommendation hoặc admission pressure signal:
 
-A task may be allowed to finish when:
+```text
+PREEMPTION_RECOMMENDED
+SCARCE_CAPACITY_BLOCKED
+OBSOLETE_RUNNING_WORK
+```
 
-- it is close to completion
-- the worker is not needed elsewhere
-- the result is cacheable
-- cancellation has high cleanup cost
-- provider cancellation is unsupported
+Runtime Control và Cancellation Coordinator quyết định cancellation.
 
-The Scheduler should use a simple MVP policy before introducing complex prediction.
+Default MVP behavior:
+
+```text
+If obsolete running work blocks a scarce worker
+AND current interactive work is waiting
+THEN recommend preemption.
+```
+
+Nếu cancellation không khả thi, Scheduler vẫn ưu tiên current work khi capacity xuất hiện.
 
 ---
 
-## 21. MVP Preemption Rule
+## 22. Fairness
 
-For the first implementation:
+Scheduler phải ngăn một session hoặc WorkType chiếm toàn bộ capacity vô hạn.
 
-```text
-If running work is obsolete
-AND a newer Interactive Critical item needs the same scarce worker
-THEN request cancellation.
-```
-
-Otherwise:
+Fairness có thể xét:
 
 ```text
-Allow current work to finish,
-but reject stale results.
+Foreground Session Weight
+Visible Secondary Session Weight
+Background Session Weight
+WorkType Share
+Provider Share
+Queue Age
 ```
 
-This rule is practical and avoids requiring precise remaining-time estimation.
-
----
-
-## 22. Fairness Between Sessions
-
-CRAI may eventually support multiple sessions.
-
-Examples:
-
-- multiple capture windows
-- background imported image
-- active screen reader
-- browser-based structured text session
-
-The Scheduler must not allow one session to consume all workers indefinitely.
-
-Default fairness model:
-
-```text
-Active Foreground Session
-    >
-Visible Secondary Session
-    >
-Background Session
-```
-
-Within the same priority class, scheduling may use round-robin or weighted fairness.
-
-For the MVP, only one active interactive session is required.
+MVP có thể chỉ hỗ trợ một foreground interactive session, nhưng architecture không được khóa cứng giả định đó.
 
 ---
 
 ## 23. User Interaction Priority
 
-Direct user actions always receive elevated scheduling priority.
+User-triggered work có thể được Runtime Control nâng priority.
 
-Examples:
+Ví dụ:
 
-- stop translation
-- change capture region
-- retranslate selected segment
-- correct OCR text
-- switch provider
-- open or close session
+- manual retranslation;
+- manual correction;
+- change presentation mode;
+- session stop;
+- region change;
+- source change.
 
-Control commands should not wait behind long OCR or translation work.
+Scheduler không tự suy luận business intent từ payload.
 
-They must use a dedicated control path or reserved execution capacity.
-
----
-
-## 24. Retry Scheduling
-
-Retry decisions must consider:
-
-- error classification
-- attempt count
-- revision validity
-- provider health
-- deadline
-- current user value
-
-Retryable errors include:
-
-- temporary network failure
-- provider rate limiting
-- transient timeout
-- temporary worker failure
-
-Non-retryable errors include:
-
-- invalid input
-- unsupported format
-- canceled revision
-- invalid credentials
-- deterministic parsing failure without fallback
+Nó chỉ sử dụng priority metadata đã được Runtime Control xác nhận.
 
 ---
 
-## 25. Retry Limits
+## 24. Deadline Handling
 
-Retries must be bounded.
+Deadline là scheduling metadata, không phải terminal outcome.
 
-Suggested MVP defaults:
+Khi deadline hết, Scheduler có thể:
 
-| Stage | Maximum attempts |
-|---|---:|
-| OCR | 2 |
-| Layout | 1 |
-| Translation | 2 |
-| Presentation Build | 1 |
+- `REJECT` nếu chưa admit;
+- `DEFER` không còn phù hợp;
+- phát deadline signal cho Runtime Control;
+- từ chối admission vào provider chậm.
 
-A retry must not occur when the revision is already obsolete.
+Scheduler không tự đánh dấu WorkItem `FAILED`.
 
 ---
 
-## 26. Retry Delay
+## 25. Provider Boundary
 
-Retries should use bounded delay.
+Provider Manager sở hữu:
 
-Suggested behavior:
+- registration;
+- health;
+- availability;
+- rate-limit state;
+- capability;
+- runtime lifecycle.
+
+Scheduler chỉ sử dụng provider runtime state để admission.
+
+Scheduler không:
+
+- chọn provider theo business meaning;
+- quyết định fallback;
+- tạo retry;
+- đọc credential;
+- normalize provider error.
+
+---
+
+## 26. Cache Boundary
+
+Scheduler không lookup cache trực tiếp.
+
+Luồng đúng:
 
 ```text
-Attempt 1
-    ↓ failure
-Short delay
-    ↓
-Attempt 2
+Runtime Control / Cache Policy
+        ↓ determines reusable result
+WorkItem may become unnecessary
+        ↓
+Scheduler receives only remaining eligible work
 ```
 
-For interactive work, long exponential backoff may make the result useless.
+Nếu accepted Artifact đã tồn tại, Runtime Control có thể không tạo WorkItem hoặc rút WorkItem khỏi eligibility.
 
-Therefore:
-
-- interactive retries should remain short
-- provider rate limits may trigger fallback
-- background work may use longer backoff
-- retries must respect the revision deadline
-
-Exact timing belongs in implementation configuration.
+`CACHE_HIT` không phải Scheduler decision.
 
 ---
 
-## 27. Provider Selection
+## 27. Retry Boundary
 
-The Scheduler may coordinate provider selection but must not implement provider logic.
+Retry Policy và Runtime Control quyết định có tạo Attempt mới hay không.
 
-Possible outcomes:
+Luồng đúng:
 
 ```text
-Preferred Provider
-    ↓ unavailable
-Fallback Provider
-    ↓ unavailable
-Local Provider
-    ↓ unavailable
-Fail or Defer
+Attempt failed
+        ↓
+Runtime Control validates relevance
+        ↓
+Retry Policy evaluates
+        ↓
+New Attempt created
+        ↓
+Scheduler evaluates admission
 ```
 
-Provider selection considers:
+Scheduler chỉ admit Attempt mới.
 
-- capability
-- latency
-- cost
-- privacy mode
-- health
-- concurrency limit
-- language support
+Scheduler không:
 
-Detailed provider policy belongs to provider-management documentation.
+- phân loại retryable error;
+- đếm retry budget như source of truth;
+- tạo AttemptId;
+- quyết định provider fallback.
 
 ---
 
-## 28. Deadline Handling
+## 28. Partial Result Boundary
 
-Interactive work may carry a deadline.
+Partial result support phải được BusinessExecutionPlan và owner module cho phép.
 
-Example:
+Scheduler chỉ có thể admit các WorkItem liên quan đến partial path.
 
-```text
-Translation result is useful only if returned
-before the user has moved to a newer page.
-```
+Scheduler không quyết định:
 
-A missed deadline may result in:
-
-- drop
-- cancellation
-- fallback to faster provider
-- partial presentation
-- user-visible failure
-
-The MVP should prefer dropping obsolete work rather than presenting late results.
+- partial correctness;
+- partial commit;
+- presentation semantics;
+- logical order.
 
 ---
 
-## 29. Partial Results
+## 29. Backpressure
 
-Partial-result scheduling requires explicit support.
-
-Possible examples:
-
-- some translation units completed
-- low-resolution OCR completed before refinement
-- cached segments available while others are pending
-
-Default MVP rule:
-
-> Do not commit partial presentation models.
-
-Partial intermediate results may be retained internally, but the UI receives an atomic valid presentation model.
-
-Later versions may support progressive rendering through a separate documented flow.
-
----
-
-## 30. Backpressure Coordination
-
-When downstream capacity is exhausted, the Scheduler applies backpressure.
-
-Example:
-
-```text
-Translation workers saturated
-    ↓
-Translation queue reaches limit
-    ↓
-New obsolete translation work is dropped
-    ↓
-Layout scheduling is reduced
-    ↓
-OCR scheduling is reduced
-    ↓
-Observation continues
-```
-
-Capture and observation should remain responsive even when AI stages are overloaded.
-
-The Scheduler must avoid completely blocking source observation.
-
----
-
-## 31. Memory Pressure Behavior
-
-When memory pressure increases, the Scheduler should reduce work before the process becomes unstable.
+Khi downstream capacity hết, Scheduler giảm admission thay vì cho queue tăng vô hạn.
 
 Possible actions:
 
-1. stop background work
-2. cancel obsolete work
-3. reduce concurrency
-4. remove expired queued items
-5. disable speculative work
-6. prefer remote provider over local model when appropriate
-7. reject new non-critical work
+1. reject obsolete pending work;
+2. replace older pending work;
+3. defer background work;
+4. reduce admission cho expensive WorkType;
+5. protect control and current-revision work;
+6. stop speculative or prefetch work;
+7. emit resource-pressure decision.
 
-The active user-visible revision receives the highest protection.
+Backpressure không được block control path.
 
 ---
 
-## 32. Provider Pressure Behavior
+## 30. Memory Pressure
 
-When a remote provider is slow or rate-limited:
+Khi memory pressure tăng:
+
+1. ngừng admit maintenance/background work;
+2. reject obsolete pending work;
+3. reduce expensive concurrency;
+4. preserve current interactive work;
+5. yêu cầu Runtime Control xem xét cancellation hoặc cleanup;
+6. reject non-critical new work khi vượt hard budget.
+
+Scheduler không tự dispose Artifact.
+
+---
+
+## 31. Provider Pressure
+
+Khi provider degraded hoặc saturated:
 
 ```text
-Provider Health Degraded
-    ↓
-Reduce concurrency
-    ↓
-Stop speculative requests
-    ↓
-Use cache
-    ↓
-Use fallback provider
-    ↓
-Surface controlled failure
+Provider state degraded
+        ↓
+Scheduler reduces admission
+        ↓
+Background/speculative work deferred
+        ↓
+Current interactive work prioritized
+        ↓
+Runtime Control decides fallback or failure
 ```
 
-The Scheduler must not flood a degraded provider with retries.
+Scheduler không flood provider bằng retry.
 
 ---
 
-## 33. Scheduler State
-
-The Scheduler may expose a small lifecycle:
+## 32. Scheduler Lifecycle
 
 ```text
 STOPPED
-    ↓
+  ↓
 STARTING
-    ↓
+  ↓
 RUNNING
-    ↓
+  ↔
 PAUSED
-    ↓
+  ↓
 STOPPING
-    ↓
+  ↓
 STOPPED
 ```
 
-`PAUSED` means new work is not started, but control operations and cleanup remain active.
+`PAUSED` nghĩa là:
 
-Scheduler lifecycle is separate from reading-session lifecycle.
+- không admit domain work mới;
+- control path còn hoạt động;
+- cancellation và cleanup vẫn hoạt động;
+- telemetry tối thiểu vẫn hoạt động.
+
+---
+
+## 33. Scheduler State Ownership
+
+Scheduler sở hữu:
+
+- internal policy state;
+- admission decision state;
+- fairness counters;
+- bounded scheduling metadata;
+- scheduler lifecycle;
+- decision telemetry metadata.
+
+Scheduler không sở hữu:
+
+- WorkItem terminal state;
+- Revision authority;
+- cancellation authority;
+- Artifact lifecycle;
+- provider business selection;
+- retry lineage source of truth.
 
 ---
 
 ## 34. Scheduling Events
 
-The Scheduler should emit events such as:
+Các event cuối cùng phải tuân theo Event Standard.
+
+Conceptual events:
 
 ```text
-scheduler.started
-scheduler.paused
-scheduler.resumed
-scheduler.stopped
+SCHEDULER_STARTED
+SCHEDULER_PAUSED
+SCHEDULER_RESUMED
+SCHEDULER_STOPPED
 
-work.admitted
-work.deferred
-work.started
-work.dropped
-work.cancel_requested
-work.retry_scheduled
-work.failed
-work.completed
+WORK_ADMITTED
+WORK_DEFERRED
+WORK_REJECTED
+WORK_REPLACED
 
-worker.assigned
-worker.released
-
-resource.pressure_detected
-provider.degraded
+CAPACITY_PRESSURE_DETECTED
+PREEMPTION_RECOMMENDED
+PROVIDER_CAPACITY_DEGRADED
 ```
 
-Final event names must remain consistent with `EVENT_BUS.md`.
-
----
-
-## 35. Decision Reason Codes
-
-Every non-trivial scheduling decision should include a reason code.
-
-Examples:
+Scheduler không phát:
 
 ```text
-NEWER_REVISION_AVAILABLE
-SESSION_CLOSED
-REVISION_EXPIRED
-CACHE_HIT
-NO_COMPATIBLE_WORKER
-CONCURRENCY_LIMIT
-MEMORY_PRESSURE
-PROVIDER_UNAVAILABLE
-RETRY_LIMIT_REACHED
-USER_CANCELED
-DEADLINE_EXCEEDED
+WORK_SUCCEEDED
+WORK_FAILED
+WORK_RETRIED
+WORK_CANCELED
 ```
 
-Reason codes improve:
-
-- diagnostics
-- testing
-- metrics
-- debugging
-- future scheduler tuning
+như thể Scheduler sở hữu terminal outcome.
 
 ---
 
-## 36. Scheduler Metrics
+## 35. Metrics
 
-The Scheduler should expose at least:
+Scheduler nên cung cấp:
 
-- scheduling decisions per stage
-- pending work count
-- running work count
-- dropped work count
-- canceled work count
-- retry count
-- worker utilization
-- scheduling delay
-- queue wait time
-- cache-hit bypass count
-- stale-result rejection count
-- provider saturation count
-- resource-pressure events
+- admission decision count;
+- defer count;
+- reject count;
+- replace count;
+- pending candidate count;
+- queue saturation;
+- decision latency;
+- queue wait time;
+- worker utilization input;
+- provider saturation input;
+- resource-pressure decisions;
+- current-revision admission ratio;
+- background deferral ratio;
+- fairness wait time;
+- preemption recommendation count.
 
-Metrics must not include raw private content unless explicitly allowed.
-
----
-
-## 37. Determinism and Testability
-
-Given the same:
-
-- queue state
-- session state
-- revision state
-- worker availability
-- resource state
-- configuration
-
-the Scheduler should produce the same decision.
-
-Random scheduling must not be used unless:
-
-- the randomness is intentional
-- the seed is controllable
-- the behavior is testable
-
-Scheduling policy should be testable without running real OCR or translation providers.
+Metrics không chứa user content.
 
 ---
 
-## 38. Failure Isolation
+## 36. Determinism and Testability
 
-A Scheduler failure must not corrupt domain data.
+Với cùng:
 
-If the Scheduler encounters an internal error:
+- candidate WorkItem set;
+- Runtime Control snapshot;
+- revision metadata;
+- queue state;
+- worker availability;
+- provider state;
+- resource state;
+- configuration snapshot;
+
+Scheduler phải tạo cùng decision.
+
+Randomness chỉ được dùng khi:
+
+- intentional;
+- seeded;
+- observable;
+- testable.
+
+Scheduler test không cần chạy real provider hoặc Business Module.
+
+---
+
+## 37. Failure Isolation
+
+Nếu Scheduler gặp internal failure:
 
 ```text
-Stop admitting new work
-    ↓
+Stop new admission
+        ↓
 Preserve control path
-    ↓
-Cancel or safely reject active work
-    ↓
-Emit fatal runtime event
-    ↓
-Allow session recovery or restart
+        ↓
+Notify Runtime Control
+        ↓
+Reject or hold pending work safely
+        ↓
+Emit fatal scheduler diagnostics
+        ↓
+Allow controlled runtime shutdown or restart
 ```
 
-The UI must remain capable of showing an error and stopping the session.
+Scheduler failure không được mutate business data hoặc accepted Artifact.
 
 ---
 
-## 39. MVP Scheduling Policy
+## 38. MVP Scheduling Policy
 
-The initial implementation should use a simple and practical policy.
+### 38.1 Assumptions
 
-### 39.1 Assumptions
+- một foreground interactive session;
+- một current revision;
+- bounded Work Queue;
+- bounded worker pools;
+- cooperative cancellation khi implementation hỗ trợ;
+- explicit provider capacity;
+- current-revision-first policy.
 
-- one foreground reading session
-- one current revision
-- one OCR worker
-- one translation worker
-- bounded queues
-- cooperative cancellation where supported
+### 38.2 Decision Rules
 
-### 39.2 Selection Rules
+1. Reject work khi Runtime không nhận admission.
+2. Reject work từ inactive session.
+3. Reject work không còn eligible.
+4. Replace older pending work có cùng replacement key.
+5. Bảo vệ control capacity.
+6. Ưu tiên current revision.
+7. Ưu tiên interactive critical.
+8. Tôn trọng worker capability.
+9. Tôn trọng queue, concurrency và resource budget.
+10. Admit WorkItem có giá trị cao nhất trong số candidate hợp lệ.
 
-1. Reject work from inactive sessions.
-2. Reject work from obsolete revisions.
-3. Resolve cache hits before worker assignment.
-4. Prioritize control commands.
-5. Prioritize the current revision.
-6. Prioritize user-visible stages.
-7. Respect per-stage concurrency limits.
-8. Start the highest-priority compatible work.
-9. Cancel obsolete work occupying a scarce worker.
-10. Reject stale outputs before commit.
-
-### 39.3 Queue Behavior
-
-For each interactive stage:
+### 38.3 Latest-Value Rule
 
 ```text
-Keep newest valid pending item.
-Drop older pending items for the same session and stage.
+For the same session, target and WorkType:
+keep the newest eligible pending WorkItem.
 ```
-
-This provides a practical latest-value queue without requiring a complex general-purpose scheduler.
 
 ---
 
-## 40. Example: Rapid Scrolling
+## 39. Example: Rapid Scrolling
 
 ```text
-Revision 30
-    ↓
-OCR starts
+Revision 30 WorkItem running
 
 User scrolls
 
 Revision 31 created
-    ↓
-Scheduler marks Revision 30 obsolete
-    ↓
-Cancellation requested
+Runtime Control revokes Revision 30 authority
+
+Revision 31 WorkItem becomes pending
 
 User scrolls again
 
 Revision 32 created
-    ↓
-Revision 31 pending OCR is dropped
-    ↓
-Revision 30 result is rejected if it finishes
-    ↓
-OCR worker starts Revision 32
+Revision 31 pending WorkItem replaced
+Scheduler recommends preemption for obsolete running work
+Revision 32 receives next scarce slot
 ```
 
-Outcome:
-
-- no obsolete revision updates the UI
-- the newest page receives processing priority
-- queue growth remains bounded
+Runtime Control, không phải Scheduler, reject late completion của Revision 30.
 
 ---
 
-## 41. Example: Translation Provider Delay
+## 40. Example: Provider Saturation
 
 ```text
-Revision 45 translation starts
-    ↓
-Provider becomes slow
-    ↓
-Revision 46 becomes current
-    ↓
-Scheduler requests cancellation of Revision 45
+Provider capacity exhausted
+        ↓
+Scheduler defers background provider work
+        ↓
+Current interactive work remains highest priority
+        ↓
+Provider Manager reports prolonged degradation
+        ↓
+Runtime Control / Retry Policy decides fallback
 ```
-
-If provider cancellation is supported:
-
-```text
-Request canceled
-    ↓
-Translation worker starts Revision 46
-```
-
-If provider cancellation is unsupported:
-
-```text
-Revision 45 continues externally
-    ↓
-Local worker slot is logically released when safe
-    ↓
-Late Revision 45 result is rejected
-```
-
-Provider-specific resource handling must be defined in `CANCELLATION.md`.
 
 ---
 
-## 42. Example: Cache Hit
-
-```text
-Revision 50 reaches Translation stage
-    ↓
-Translation cache lookup succeeds
-    ↓
-Scheduler returns CACHE_HIT
-    ↓
-No translation worker is assigned
-    ↓
-Presentation work is enqueued
-```
-
-Cache validation must include all required context keys.
-
----
-
-## 43. Example: Memory Pressure
+## 41. Example: Memory Pressure
 
 ```text
 Memory pressure detected
-    ↓
-Maintenance work paused
-    ↓
-Background work canceled
-    ↓
-Obsolete revisions disposed
-    ↓
-Translation concurrency reduced
-    ↓
-Current revision remains active
+        ↓
+Maintenance admission stopped
+        ↓
+Background pending work rejected
+        ↓
+Expensive concurrency reduced
+        ↓
+Current-revision work protected
+        ↓
+Runtime Control coordinates cancellation/cleanup if required
 ```
 
-If pressure remains critical:
+---
+
+## 42. Example: Replacement
 
 ```text
-Current pipeline fails safely
-    ↓
-User receives recoverable error
+Pending WorkItem A
+    Session = S1
+    WorkType = PRESENTATION_BUILD
+    Target = current viewport
+
+New WorkItem B arrives
+    same replacement key
+    newer RevisionId
+
+Scheduler decision:
+    REPLACE A with B
 ```
 
 ---
 
-## 44. Architecture Invariants
+## 43. Architecture Invariants
 
-The Scheduler must always preserve the following invariants:
-
-1. An inactive session cannot start new domain work.
-2. An obsolete revision cannot commit user-visible output.
-3. Queue capacity and concurrency are bounded.
-4. Control commands cannot be starved by domain work.
-5. A worker only receives compatible work.
-6. Retry count cannot exceed the configured limit.
-7. Canceled work cannot re-enter execution without a new WorkItem.
-8. Scheduling decisions are observable.
-9. UI work is serialized through the UI execution boundary.
-10. Current interactive work has priority over background work.
-
----
-
-## 45. Open Questions
-
-The following questions remain open for later implementation phases:
-
-- Should OCR and translation use separate schedulers or one shared scheduler?
-- Should local and remote providers have independent concurrency pools?
-- Should work cost be estimated dynamically?
-- Should nearly completed obsolete work be allowed to populate cache?
-- How should multiple foreground sessions be prioritized?
-- Should progressive translation be supported?
-- Should the Scheduler adapt concurrency automatically?
-- How should GPU memory pressure be measured?
-- Can provider cancellation reliably release billing and request capacity?
-
-These questions do not block the MVP scheduling model.
+1. Scheduler chỉ sở hữu admission decision.
+2. Scheduler không tạo WorkItem.
+3. Scheduler không tạo Attempt.
+4. Scheduler không quyết định retry.
+5. Scheduler không quyết định terminal outcome.
+6. Scheduler không commit Artifact hoặc UI.
+7. Scheduler không thay đổi BusinessExecutionPlan.
+8. Scheduler không đọc business payload.
+9. Queue và concurrency luôn bounded.
+10. Control path không bị starve.
+11. Current revision được ưu tiên.
+12. Worker chỉ nhận compatible work.
+13. Provider business selection không thuộc Scheduler.
+14. Cache lookup không thuộc Scheduler.
+15. Stale validation cuối cùng không thuộc Scheduler.
+16. Admission decision phải observable.
+17. Decision phải có reason code.
+18. Resource pressure làm giảm admission, không làm queue tăng vô hạn.
+19. Scheduler failure không phá runtime correctness.
+20. Telemetry failure không thay đổi decision semantics.
 
 ---
 
-## 46. Related Documents
+## 44. Open Questions
 
-- `README.md`
-- `PIPELINE_RUNTIME.md`
-- `WORK_QUEUE.md`
-- `CANCELLATION.md`
-- `CACHE_POLICY.md`
-- `MEMORY_MODEL.md`
-- `THREADING_MODEL.md`
-- `RESOURCE_LIFECYCLE.md`
-- `PERFORMANCE_MODEL.md`
-- `../STATE_MACHINE.md`
-- `../EVENT_BUS.md`
-- `../DATA_FLOW.md`
-- `../flows/SCREEN_COMIC_FLOW.md`
+Các câu hỏi để lại cho implementation:
+
+- một Scheduler hay nhiều policy partition trên cùng Scheduler;
+- local và remote worker có dùng capacity pool riêng không;
+- cost hint được ước lượng tĩnh hay động;
+- fairness đa session dùng weighted round-robin hay policy khác;
+- adaptive concurrency có cần thiết sau profiling không;
+- GPU memory budget được đo và reserve thế nào;
+- preemption recommendation có cần remaining-cost estimate không;
+- queue replacement key cụ thể theo từng WorkType là gì.
+
+Những câu hỏi này không chặn MVP.
 
 ---
 
-## 47. Next Step
+## 45. Related Documents
 
-The next runtime document should be:
+| Document | Relationship |
+|---|---|
+| `PIPELINE_RUNTIME.md` | WorkItem, Attempt, authority và terminal outcome |
+| `RUNTIME_COMPONENTS.md` | Scheduler component ownership |
+| `BUSINESS_PIPELINE_ORCHESTRATION.md` | BusinessExecutionPlan và BusinessStagePlan |
+| `WORK_QUEUE.md` | Bounded queued-work lifecycle |
+| `CANCELLATION.md` | Cancellation authority và propagation |
+| `RETRY_POLICY.md` | Retry decision và new Attempt |
+| `CACHE_POLICY.md` | Reuse trước execution |
+| `MEMORY_MODEL.md` | Revision, Artifact và Lease |
+| `THREADING_MODEL.md` | Worker execution context |
+| `RESOURCE_LIFECYCLE.md` | Resource ownership và disposal |
+| `PERFORMANCE_MODEL.md` | Useful-result latency và overload |
+| `RUNTIME_CONFIG.md` | Scheduling configuration |
+| `RUNTIME_OBSERVABILITY.md` | Scheduler metrics và traces |
+
+---
+
+## 46. Completion Criteria
+
+`SCHEDULER.md` được xem là đồng bộ khi:
+
+- chỉ còn bốn decision `ADMIT`, `DEFER`, `REJECT`, `REPLACE`;
+- retry và terminal outcome đã được loại khỏi ownership;
+- cache lookup không còn thuộc Scheduler;
+- provider selection được tách khỏi Scheduler;
+- Runtime Control là nguồn authority;
+- WorkItem vocabulary khớp `PIPELINE_RUNTIME.md`;
+- không hard-code capability nội bộ làm scheduling architecture;
+- queue và concurrency bounded;
+- control path được bảo vệ;
+- decision deterministic, observable và có reason code;
+- MVP policy đơn giản và triển khai được.
+
+---
+
+## 47. Summary
+
+Scheduler là admission decision engine của CRAI Runtime.
 
 ```text
-CANCELLATION.md
+Runtime Control creates eligible work.
+
+Scheduler decides admission.
+
+Work Queue holds admitted work.
+
+Workers execute attempts.
+
+Runtime Control accepts outcomes.
 ```
 
-It must define:
-
-- cancellation scopes
-- cancellation-token hierarchy
-- cooperative cancellation checkpoints
-- queued-work removal
-- provider-request cancellation
-- stale-result rejection
-- cleanup ownership
-- cancellation events
-- cancellation timeouts
-
----
-
-## 48. Summary
-
-The Scheduler is the runtime decision engine of CRAI.
-
-It selects the most valuable valid work, protects scarce resources, removes obsolete processing, and keeps the reading experience responsive.
-
-The MVP Scheduler should remain deliberately simple:
+MVP Scheduler nên duy trì:
 
 ```text
 Current Revision First
-    +
-Bounded Concurrency
-    +
-Drop Obsolete Pending Work
-    +
-Cancel Obsolete Running Work When Useful
-    +
-Reject Every Stale Result
++
+Bounded Capacity
++
+Explicit Admission
++
+Replace Obsolete Pending Work
++
+Protect Control Path
 ```
-
-More advanced adaptive scheduling should only be introduced after profiling demonstrates a real need.

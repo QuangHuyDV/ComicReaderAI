@@ -1,112 +1,75 @@
+# runtime/ERROR_MODEL.md
+
 # Runtime Error Model
 
 > Project: CRAI  
-> Version: 0.1  
+> Version: 1.0  
 > Status: Architecture Draft
 
 ---
 
 ## 1. Purpose
 
-This document defines how CRAI represents, classifies, propagates, observes, recovers from, and presents runtime errors.
+Tài liệu này định nghĩa cách CRAI Runtime:
 
-CRAI processes continuously changing screen content through multiple asynchronous stages:
+- normalize execution failure;
+- phân loại error;
+- xác định scope và severity;
+- giữ correlation context;
+- phân biệt failure với cancellation, stale và abandonment;
+- hỗ trợ recovery decision;
+- map error sang user-safe presentation;
+- quan sát error mà không lộ user content.
+
+Tài liệu này không sở hữu WorkItem lifecycle hoặc terminal outcome.
+
+Canonical terminal outcome được định nghĩa tại `PIPELINE_RUNTIME.md`.
+
+---
+
+## 2. Architectural Position
 
 ```text
-Capture
-    ↓
-Observation
-    ↓
-OCR
-    ↓
-Layout
-    ↓
-Translation
-    ↓
-Presentation
-    ↓
-UI Commit
+Worker / Provider / Runtime Component
+        ↓ detects failure
+Boundary Adapter
+        ↓ normalizes
+RuntimeError
+        ↓
+Runtime Control
+        ↓ validates relevance and authority
+Recovery Policy
+        ↓
+Retry / Degrade / Fail / User Action
+        ↓
+User-Safe Presentation and Observability
 ```
 
-Errors may occur at any stage.
+Ranh giới cốt lõi:
 
-Without a consistent error model, the runtime may:
+```text
+PIPELINE_RUNTIME owns terminal outcomes.
 
-- treat cancellation as failure
-- retry permanent errors
-- show obsolete errors to the user
-- hide fatal resource failures
-- lose provider diagnostics
-- leak implementation-specific exceptions across module boundaries
-- produce inconsistent UI behavior
-- repeatedly execute unrecoverable work
+ERROR_MODEL owns normalized error meaning.
 
-The error model provides a shared language for runtime failure handling.
+RETRY_POLICY owns retry strategy.
+
+Runtime Control owns relevance and accepted state transition.
+```
 
 ---
 
-## 2. Scope
+## 3. Error vs Outcome
 
-This document covers:
+Error và terminal outcome là hai khái niệm khác nhau.
 
-- runtime outcome categories
-- error taxonomy
-- error structure
-- error ownership
-- stage errors
-- provider errors
-- resource errors
-- configuration errors
-- validation errors
-- cancellation outcomes
-- stale-result outcomes
-- transient and permanent failures
-- recoverability
-- propagation
-- aggregation
-- user-visible error mapping
-- fatal runtime errors
-- observability
-- MVP error policy
+### RuntimeError
 
-This document does not define:
+Mô tả nguyên nhân, category, severity, scope, recoverability và diagnostic context.
 
-- exact retry counts or backoff schedules
-- provider-specific response-code tables
-- user-interface visual design
-- logging storage implementation
-- crash-reporting provider
-- programming-language exception syntax
+### Terminal Outcome
 
-Those concerns belong to related documents or implementation details.
-
----
-
-## 3. Error Model Goals
-
-The runtime error model must:
-
-- distinguish failure from cancellation
-- distinguish failure from stale-result rejection
-- classify recoverability
-- preserve useful diagnostic context
-- prevent provider details from leaking across architecture boundaries
-- prevent obsolete errors from disturbing current work
-- support deterministic retry decisions
-- support user-friendly messages
-- keep control flow explicit
-- preserve privacy
-- remain testable
-
----
-
-## 4. Core Philosophy
-
-CRAI follows this rule:
-
-> Every runtime operation ends with an explicit outcome, not merely an exception or missing value.
-
-Possible terminal outcomes are:
+Mô tả trạng thái logic cuối cùng được Runtime Control chấp nhận:
 
 ```text
 SUCCEEDED
@@ -116,264 +79,134 @@ STALE
 ABANDONED
 ```
 
-These outcomes are not interchangeable.
+Một `RuntimeError` thường đi kèm `FAILED`, nhưng không phải mọi terminal outcome đều có error.
 
----
-
-## 5. Runtime Outcome Model
-
-A WorkItem conceptually completes with:
+Ví dụ:
 
 ```text
-WorkOutcome
-├── Status
-├── WorkItemId
-├── SessionId
-├── RevisionId
-├── AttemptId
-├── Stage
-├── StartedAt
-├── CompletedAt
-├── OutputArtifactId
-├── Error
-├── CancellationReason
-└── Diagnostics
-```
+CANCELED
+    → expected control flow, có thể không có RuntimeError
 
-Only relevant fields are populated for each status.
+STALE
+    → authority rejection, không nhất thiết có failure
 
----
-
-## 6. Outcome Statuses
-
-### 6.1 SUCCEEDED
-
-The work completed successfully and produced a valid output.
-
-Example:
-
-```text
-OCR completed
-    ↓
-OCR Artifact validated
-    ↓
-Artifact published
-```
-
-A successful stage result may still later be rejected as stale before commit.
-
----
-
-### 6.2 FAILED
-
-The work could not produce a valid output because of an error.
-
-Examples:
-
-- OCR provider unavailable
-- malformed provider response
-- unsupported image format
-- resource allocation failure
-- invalid stage input
-
-A failed WorkItem may or may not be retryable.
-
----
-
-### 6.3 CANCELED
-
-The work stopped because cancellation was requested and acknowledged.
-
-Examples:
-
-- revision became obsolete
-- session stopped
-- application shutting down
-- user changed provider
-- memory pressure canceled background work
-
-Cancellation is expected control flow, not necessarily an error.
-
----
-
-### 6.4 STALE
-
-The work completed or returned a result, but the result no longer has logical authority.
-
-Examples:
-
-- result belongs to an older revision
-- attempt was superseded by a retry
-- session was closed before completion
-- provider configuration changed
-- presentation commit arrived too late
-
-A stale result must not update runtime state or UI.
-
----
-
-### 6.5 ABANDONED
-
-The runtime stopped waiting for the work, but cannot confirm that physical execution ended cleanly.
-
-Examples:
-
-- provider does not support cancellation
-- child process failed to acknowledge shutdown
-- native call remains blocked beyond the grace period
-- application shutdown timeout elapsed
-
-Abandoned work is logically invalid and must never regain commit authority.
-
----
-
-## 7. Failure, Cancellation, and Staleness
-
-These concepts must remain separate.
-
-### Failure
-
-```text
-The operation could not produce a valid result.
-```
-
-### Cancellation
-
-```text
-The operation was intentionally asked to stop.
-```
-
-### Staleness
-
-```text
-The operation may have produced a technically valid result,
-but the result no longer belongs to the active logical state.
-```
-
-Example:
-
-```text
-Revision 20 translation succeeds
-    ↓
-Revision 21 already became current
-    ↓
-Revision 20 result = STALE
-```
-
-The provider request did not fail.
-
-The runtime correctly rejects the obsolete result.
-
----
-
-## 8. Error Taxonomy
-
-Runtime errors are classified into major categories.
-
-```text
-Runtime Error
-├── Input Error
-├── Validation Error
-├── Capture Error
-├── Observation Error
-├── OCR Error
-├── Layout Error
-├── Translation Error
-├── Presentation Error
-├── Provider Error
-├── Resource Error
-├── Cache Error
-├── State Error
-├── Configuration Error
-├── Security Error
-├── Persistence Error
-├── Integration Error
-└── Internal Error
+ABANDONED
+    → runtime stopped waiting, physical execution may continue
 ```
 
 ---
 
-## 9. Error Structure
+## 4. Core Principles
 
-A normalized runtime error should conceptually contain:
+1. Mọi failure phải được normalize trước khi vượt architecture boundary.
+2. Provider-specific exception không đi trực tiếp tới UI.
+3. Cancellation không mặc định là failure.
+4. Stale result không mặc định là failure.
+5. Abandoned execution phải được phân biệt với canceled execution.
+6. Error không tự quyết định retry.
+7. Error không tự thay đổi WorkItem state.
+8. Error chỉ ảnh hưởng current state sau relevance validation.
+9. Error context không chứa user content mặc định.
+10. Fatal error chỉ dùng khi runtime invariant không thể giữ an toàn.
+11. Warnings không tạo terminal outcome mới.
+12. Duplicate error signal phải xử lý idempotently.
+
+---
+
+## 5. RuntimeError Model
+
+Conceptual model:
 
 ```text
 RuntimeError
 ├── ErrorCode
 ├── Category
 ├── Severity
-├── RetryClass
 ├── Scope
-├── Stage
+├── Recoverability
+├── RetryHint
+├── OwnerModule
+├── BusinessStageId
+├── WorkType
+├── Operation
 ├── MessageKey
 ├── TechnicalMessage
 ├── UserMessageKey
 ├── ProviderCode
-├── Cause
+├── CauseRef
 ├── Context
 ├── OccurredAt
 └── Correlation
 ```
 
-The exact implementation structure is language-specific.
+Exact implementation structure là language-specific.
 
 ---
 
-## 10. Error Code
+## 6. Stable Error Code
 
-Every normalized error should have a stable machine-readable code.
+Mỗi error phải có machine-readable `ErrorCode`.
 
-Examples:
+Ví dụ:
 
 ```text
-CAPTURE_PERMISSION_DENIED
-CAPTURE_SOURCE_UNAVAILABLE
-OCR_PROVIDER_TIMEOUT
-OCR_RESPONSE_INVALID
-TRANSLATION_RATE_LIMITED
-TRANSLATION_CONTEXT_TOO_LARGE
+INPUT_INVALID
 ARTIFACT_NOT_FOUND
-ARTIFACT_DISPOSED
-REVISION_NOT_CURRENT
-MEMORY_BUDGET_EXCEEDED
+ARTIFACT_INTEGRITY_FAILED
+PROVIDER_TIMEOUT
+PROVIDER_RATE_LIMITED
+PROVIDER_AUTH_FAILED
+RESOURCE_BUDGET_EXCEEDED
+CONFIGURATION_INVALID
+PERSISTENCE_WRITE_FAILED
 INVALID_RUNTIME_STATE
+INVARIANT_VIOLATION
 ```
 
-Error codes should:
+Error code phải:
 
-- remain stable across user-interface wording changes
-- avoid embedding variable details
-- support metrics aggregation
-- support retry policy
-- support automated tests
+- stable;
+- không chứa variable data;
+- hỗ trợ metrics;
+- hỗ trợ mapping;
+- hỗ trợ test;
+- không phụ thuộc wording UI.
 
 ---
 
-## 11. Error Category
+## 7. Error Category
 
-The category identifies the architectural area that owns the error.
-
-Examples:
+Runtime v2 dùng category ổn định:
 
 ```text
 INPUT
-CAPTURE
-OCR
-TRANSLATION
+VALIDATION
+BUSINESS_MODULE
 PROVIDER
 RESOURCE
+ARTIFACT
 STATE
 CONFIGURATION
+SECURITY
+PERSISTENCE
+INTEGRATION
+OBSERVABILITY
 INTERNAL
 ```
 
-Category is broader than `ErrorCode`.
+Category không được phản chiếu mọi capability nội bộ.
+
+Module-specific error code vẫn được phép, ví dụ:
+
+```text
+RECOGNITION_PROVIDER_TIMEOUT
+TRANSLATION_INPUT_INVALID
+PRESENTATION_COMMIT_REJECTED
+```
 
 ---
 
-## 12. Error Severity
-
-Suggested severity levels:
+## 8. Severity
 
 ```text
 INFO
@@ -385,146 +218,217 @@ FATAL
 
 ### INFO
 
-Expected non-problematic control outcome.
-
-Example:
-
-```text
-Obsolete result rejected
-```
+Expected operational outcome hoặc suppressed stale event.
 
 ### WARNING
 
-Recoverable degradation or temporary issue.
-
-Example:
-
-```text
-Remote provider slow
-```
+Recoverable degradation.
 
 ### ERROR
 
-Current operation failed and requires recovery, retry, or user action.
+Current operation failed.
 
 ### CRITICAL
 
-Major runtime capability is unavailable.
-
-Example:
-
-```text
-Capture subsystem cannot initialize
-```
+Major runtime capability unavailable hoặc repeated failure threatens service quality.
 
 ### FATAL
 
-The application cannot safely continue.
+Runtime không thể tiếp tục an toàn mà vẫn giữ invariant.
 
-Example:
-
-```text
-Core runtime state corrupted
-```
-
-Severity does not automatically determine retry behavior.
+Severity không quyết định retry strategy.
 
 ---
 
-## 13. Retry Classification
+## 9. Error Scope
 
-Errors should include one retry class.
-
-```text
-NOT_RETRYABLE
-RETRYABLE_IMMEDIATE
-RETRYABLE_DELAYED
-RETRYABLE_AFTER_CHANGE
-RETRYABLE_AFTER_USER_ACTION
-RETRYABLE_WITH_DIFFERENT_PROVIDER
-UNKNOWN
-```
-
-Detailed retry execution belongs in `RETRY_POLICY.md`.
-
----
-
-## 14. Error Scope
-
-An error must declare its impact scope.
-
-Possible scopes:
+Impact scope chuẩn:
 
 ```text
+ATTEMPT
 WORK_ITEM
-STAGE
 REVISION
 SESSION
 PROVIDER
+RUNTIME_COMPONENT
 APPLICATION
 ```
 
-### WorkItem Scope
+### Attempt
 
-Only one attempt failed.
+Chỉ physical execution hiện tại bị ảnh hưởng.
 
-### Stage Scope
+### WorkItem
 
-The current stage cannot proceed for the revision.
+Logical work không thể hoàn thành bằng current path.
 
-### Revision Scope
+### Revision
 
-The current revision cannot produce a complete presentation.
+Required output của revision không thể tạo.
 
-### Session Scope
+### Session
 
-The reading session cannot continue.
+Reading Session không thể tiếp tục.
 
-### Provider Scope
+### Provider
 
-A provider should be degraded, disabled, or reinitialized.
+Provider cần degrade, disable hoặc reinitialize.
 
-### Application Scope
+### Runtime Component
 
-The runtime cannot safely continue.
+Một runtime component mất khả năng hoạt động đúng.
+
+### Application
+
+Runtime không thể tiếp tục an toàn.
+
+`BusinessStageId` là context, không phải canonical impact scope.
+
+---
+
+## 10. Recoverability
+
+```text
+RECOVERABLE
+RECOVERABLE_WITH_DEGRADATION
+RECOVERABLE_AFTER_CONFIGURATION_CHANGE
+RECOVERABLE_AFTER_USER_ACTION
+NON_RECOVERABLE_FOR_WORK_ITEM
+NON_RECOVERABLE_FOR_REVISION
+NON_RECOVERABLE_FOR_SESSION
+NON_RECOVERABLE_FOR_APPLICATION
+```
+
+Recoverability khác retryability.
+
+Ví dụ:
+
+```text
+Provider unavailable
+    → recoverable through fallback
+    → không nhất thiết retry cùng provider
+```
+
+---
+
+## 11. Retry Hint
+
+Error Model chỉ cung cấp hint:
+
+```text
+NONE
+TRANSIENT
+AFTER_CONFIGURATION_CHANGE
+AFTER_USER_ACTION
+PROVIDER_ALTERNATIVE_POSSIBLE
+RESOURCE_RECOVERY_POSSIBLE
+UNKNOWN
+```
+
+`RETRY_POLICY.md` quyết định:
+
+```text
+RETRY_NOW
+RETRY_LATER
+RETRY_WITH_FALLBACK
+WAIT_FOR_RESOURCE
+DO_NOT_RETRY
+```
+
+Error không chứa retry decision cuối.
+
+---
+
+## 12. Correlation
+
+Error correlation nên hỗ trợ:
+
+```text
+ApplicationInstanceId
+SessionId
+RevisionId
+WorkItemId
+AttemptId
+BusinessStageId
+WorkType
+ProviderId
+Operation
+```
+
+Không phải field nào cũng bắt buộc trong mọi error.
+
+---
+
+## 13. Cause Chain
+
+Error có thể giữ internal cause chain:
+
+```text
+TRANSLATION_REQUEST_FAILED
+    caused by
+PROVIDER_NETWORK_ERROR
+    caused by
+SOCKET_TIMEOUT
+```
+
+Recovery dùng normalized top-level code.
+
+Raw cause chỉ dành cho diagnostics và phải redaction.
+
+---
+
+## 14. Error Context
+
+Context chỉ chứa metadata cần thiết:
+
+```text
+Timeout
+InputSize
+RegionCount
+MemoryPressureLevel
+ProviderRequestId
+ModelId
+ConfigurationVersion
+ArtifactType
+ArtifactVersion
+OperationPhase
+```
+
+Không chứa mặc định:
+
+- screenshot;
+- OCR text;
+- source text;
+- translation output;
+- prompt;
+- API key;
+- token;
+- complete provider payload;
+- private file path chưa sanitize.
 
 ---
 
 ## 15. Error Ownership
 
-The component that detects an error is not always the component that decides recovery.
-
-Example:
-
-```text
-Provider Adapter detects timeout
-    ↓
-Normalizes ProviderError
-    ↓
-Submits WorkFailed
-    ↓
-Runtime Control validates relevance
-    ↓
-Retry Policy decides next action
-```
-
-Responsibilities are separated as follows:
-
 | Component | Responsibility |
 |---|---|
 | Worker | Detect local execution failure |
 | Provider Adapter | Normalize provider-specific failure |
-| Runtime Control | Validate scope and relevance |
-| Retry Policy | Decide retry eligibility |
-| Scheduler | Admit replacement work |
-| UI Presenter | Map current relevant error to UI |
+| Business Module | Validate semantic correctness |
+| Runtime Control | Validate relevance and authority |
+| Retry Policy | Decide retry eligibility and strategy |
+| Scheduler | Admit new Attempt |
+| Artifact Store | Detect publication/integrity error |
+| Resource Manager | Detect disposal and ownership error |
+| Storage | Normalize persistence failure |
+| Presentation Boundary | Map current relevant error to user-safe model |
 | Observability | Record diagnostics and metrics |
+
+Detecting component không mặc định sở hữu recovery decision.
 
 ---
 
 ## 16. Exception Boundary
-
-Implementation-specific exceptions must not cross architecture boundaries unnormalized.
 
 Incorrect:
 
@@ -543,351 +447,210 @@ Provider Adapter
     ↓
 Normalized RuntimeError
     ↓
-Runtime Outcome
+AttemptCompletion
+    ↓
+Runtime Control
 ```
 
-Raw exceptions may be retained as internal causes for diagnostics, but should not become domain control flow.
+Raw exception không trở thành domain control flow.
 
 ---
 
-## 17. Error Context
+## 17. AttemptCompletion Boundary
 
-Errors should include only the context needed for diagnosis and recovery.
+Worker hoặc provider chỉ báo completion.
 
-Possible fields:
+Ví dụ:
 
 ```text
-SessionId
-RevisionId
-WorkItemId
-AttemptId
-Stage
-ProviderId
-ModelId
-Operation
-Timeout
-InputSize
-RegionCount
-MemoryPressureLevel
+AttemptFailed
+├── SessionId
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── RuntimeError
+└── TimingMetadata
 ```
 
-Sensitive content must not be included by default.
+`AttemptFailed` chưa phải accepted WorkItem outcome.
 
-Avoid including:
-
-- full screenshots
-- full OCR text
-- full translation input
-- access tokens
-- provider credentials
-- complete request bodies
-- personal reading content
+Runtime Control phải validation trước.
 
 ---
 
-## 18. Error Cause Chain
+## 18. Relevance Validation
 
-A normalized error may retain an internal cause chain.
+Trước khi error ảnh hưởng state, retry hoặc UI, Runtime Control kiểm tra:
 
-Example:
+- session còn active;
+- revision còn relevant;
+- WorkItem chưa terminal;
+- Attempt còn hợp lệ;
+- authority chưa revoke;
+- error không duplicate;
+- configuration context còn phù hợp;
+- newer outcome chưa được accept.
+
+Error từ obsolete execution có thể vẫn ghi diagnostics nhưng không thay đổi current user state.
+
+---
+
+## 19. Failure, Cancellation, Stale and Abandoned
+
+### Failure
+
+Execution không tạo được valid result.
+
+### Cancellation
+
+Execution được yêu cầu dừng và cancellation outcome được chấp nhận.
+
+### Stale
+
+Result hoặc error không còn authority.
+
+### Abandoned
+
+Runtime ngừng chờ physical execution nhưng chưa xác nhận execution đã dừng.
+
+Các khái niệm này không được collapse.
+
+---
+
+## 20. Cancellation Normalization
+
+Provider SDK có thể biểu diễn cancellation như exception.
+
+Adapter phải normalize expected cancellation thành cancellation completion, không phải generic failure.
+
+Chỉ cancellation cleanup failure mới có thể tạo additional `RuntimeError`.
+
+---
+
+## 21. Stale Error Suppression
+
+Ví dụ:
 
 ```text
-TRANSLATION_REQUEST_FAILED
-    caused by
-HTTP_REQUEST_FAILED
-    caused by
-SOCKET_TIMEOUT
+Revision A provider timeout
+Revision B already committed
 ```
 
-The cause chain helps diagnostics.
+Timeout của Revision A:
 
-Recovery decisions should normally use the normalized top-level error code and retry classification.
-
----
-
-## 19. Expected and Unexpected Errors
-
-### Expected Errors
-
-Known operational outcomes that the runtime is designed to handle.
-
-Examples:
-
-- provider timeout
-- permission denied
-- unsupported capture source
-- rate limiting
-- cancellation
-- stale result
-- invalid user configuration
-
-### Unexpected Errors
-
-Violations or conditions not anticipated by normal runtime behavior.
-
-Examples:
-
-- impossible state transition
-- null artifact after successful publication
-- reference count corruption
-- unhandled native failure
-- duplicate ownership transfer
-- internal invariant violation
-
-Unexpected errors require stronger diagnostics and may escalate scope.
+- được giữ cho diagnostics;
+- không hiển thị như current failure;
+- không làm downgrade Revision B;
+- không tự tạo retry nếu authority đã mất.
 
 ---
 
-## 20. Input Errors
+## 22. Abandoned Error Handling
 
-Input errors occur when required external input is missing, invalid, or unsupported.
+Khi Attempt abandoned:
 
-Examples:
+- authority đã revoke;
+- downstream work bị cấm;
+- provider capacity có thể vẫn occupied;
+- late Completion bị reject;
+- resource vẫn được theo dõi;
+- repeated abandonment có thể degrade provider.
+
+Abandonment không chứng minh provider failure.
+
+---
+
+## 23. Expected vs Unexpected Error
+
+### Expected
+
+Runtime đã có policy xử lý:
+
+- provider timeout;
+- permission denied;
+- invalid input;
+- rate limit;
+- configuration missing;
+- resource pressure;
+- persistence unavailable;
+- cancellation cleanup timeout.
+
+### Unexpected
+
+Có thể là invariant defect:
+
+- impossible transition;
+- ownership corruption;
+- duplicate accepted publication;
+- null required Artifact;
+- unhandled native crash;
+- impossible WorkItem lineage.
+
+Unexpected error cần diagnostics mạnh hơn.
+
+---
+
+## 24. Input Errors
+
+Input error là external hoặc business input invalid.
+
+Ví dụ:
 
 ```text
-CAPTURE_REGION_INVALID
-SOURCE_LANGUAGE_UNSUPPORTED
-TARGET_LANGUAGE_UNSUPPORTED
-EMPTY_TRANSLATION_INPUT
-IMAGE_FORMAT_UNSUPPORTED
+INPUT_MISSING
+INPUT_INVALID
 INPUT_TOO_LARGE
+SOURCE_UNSUPPORTED
+LANGUAGE_PAIR_UNSUPPORTED
 ```
 
-Input errors are usually:
+Thường:
 
-- non-retryable without changing input
-- revision-scoped or session-scoped
-- suitable for direct user explanation
+- không retry với cùng input;
+- cần user action hoặc replan;
+- scope WorkItem, Revision hoặc Session.
 
 ---
 
-## 21. Validation Errors
+## 25. Validation Errors
 
-Validation errors occur when data fails internal compatibility or integrity checks.
+Validation error xảy ra khi data không đáp ứng contract hoặc integrity.
 
-Examples:
+Ví dụ:
 
 ```text
-ARTIFACT_KEY_MISMATCH
+ARTIFACT_TYPE_MISMATCH
 ARTIFACT_VERSION_UNSUPPORTED
-OCR_ARTIFACT_INVALID
-LAYOUT_GEOMETRY_INVALID
-TRANSLATION_UNIT_INVALID
-PRESENTATION_MODEL_INVALID
+OUTPUT_CONTRACT_INVALID
+GEOMETRY_INVALID
+TRACEABILITY_INVALID
 ```
 
-Validation failure must prevent publication or commit.
-
-Invalid artifacts must not be cached.
+Validation failure phải ngăn publication hoặc commit.
 
 ---
 
-## 22. Capture Errors
+## 26. Business Module Errors
 
-Capture errors may include:
+Business Module sở hữu catalog chi tiết của mình.
+
+Runtime chỉ yêu cầu các module normalize về shared model.
+
+Ví dụ:
 
 ```text
-CAPTURE_PERMISSION_DENIED
-CAPTURE_SOURCE_NOT_FOUND
-CAPTURE_SOURCE_CLOSED
-CAPTURE_API_UNAVAILABLE
-CAPTURE_FRAME_FAILED
-CAPTURE_SURFACE_INVALID
-CAPTURE_REGION_OUT_OF_BOUNDS
-CAPTURE_DEVICE_LOST
+modules/recognition/ERRORS.md
+modules/translation/ERRORS.md
+modules/presentation/ERRORS.md
 ```
 
-Capture errors may affect:
-
-- one frame
-- one source
-- the session
-- the application capability
+Runtime Error Model không duy trì catalog đầy đủ của OCR, Layout hoặc Translation.
 
 ---
 
-## 23. Capture Error Recovery
+## 27. Provider Error Model
 
-Possible recovery actions:
-
-| Error | Typical action |
-|---|---|
-| Temporary frame failure | Skip frame and continue |
-| Source temporarily unavailable | Delayed retry |
-| Region invalid | Ask user to reselect region |
-| Permission denied | Request user action |
-| Source closed | Stop or reconfigure session |
-| Capture API unavailable | Disable capture capability |
-
-Repeated frame failure must not generate unbounded logs or retries.
-
----
-
-## 24. Observation Errors
-
-Observation errors may include:
-
-```text
-FRAME_COMPARISON_FAILED
-FINGERPRINT_GENERATION_FAILED
-STABILITY_ANALYSIS_FAILED
-OBSERVATION_INPUT_DISPOSED
-OBSERVATION_OVERLOADED
-```
-
-Observation should prefer skipping one invalid frame rather than terminating the session where safe.
-
-Repeated observation failures may escalate to session scope.
-
----
-
-## 25. OCR Errors
-
-OCR errors may include:
-
-```text
-OCR_INPUT_INVALID
-OCR_PROVIDER_UNAVAILABLE
-OCR_PROVIDER_TIMEOUT
-OCR_RATE_LIMITED
-OCR_AUTHENTICATION_FAILED
-OCR_RESPONSE_INVALID
-OCR_MODEL_LOAD_FAILED
-OCR_MODEL_INFERENCE_FAILED
-OCR_TEXT_NOT_DETECTED
-OCR_OUTPUT_TOO_LARGE
-OCR_UNSUPPORTED_SCRIPT
-```
-
-`OCR_TEXT_NOT_DETECTED` may be a valid empty outcome rather than a technical failure, depending on the stage contract.
-
----
-
-## 26. Empty OCR Result
-
-The runtime must distinguish:
-
-```text
-No text exists
-```
-
-from:
-
-```text
-OCR failed to detect existing text
-```
-
-The pipeline may not always know the difference with certainty.
-
-Suggested outcomes:
-
-```text
-OCR_SUCCESS_EMPTY
-OCR_LOW_CONFIDENCE
-OCR_FAILED
-```
-
-A successful empty OCR result may produce an empty presentation without retry.
-
-A low-confidence result may trigger:
-
-- warning
-- alternative OCR configuration
-- user-visible quality indicator
-- optional retry
-
----
-
-## 27. Layout Errors
-
-Layout errors may include:
-
-```text
-LAYOUT_INPUT_INVALID
-LAYOUT_REGION_GRAPH_INVALID
-LAYOUT_READING_ORDER_FAILED
-LAYOUT_GEOMETRY_OUT_OF_RANGE
-LAYOUT_TOO_COMPLEX
-LAYOUT_UNSUPPORTED_ORIENTATION
-```
-
-Layout may support degraded output.
-
-Example:
-
-```text
-Reading-order calculation fails
-    ↓
-Fallback to OCR provider order
-```
-
-Fallback must be explicit and observable.
-
----
-
-## 28. Translation Errors
-
-Translation errors may include:
-
-```text
-TRANSLATION_INPUT_INVALID
-TRANSLATION_PROVIDER_UNAVAILABLE
-TRANSLATION_PROVIDER_TIMEOUT
-TRANSLATION_RATE_LIMITED
-TRANSLATION_AUTHENTICATION_FAILED
-TRANSLATION_QUOTA_EXCEEDED
-TRANSLATION_CONTEXT_TOO_LARGE
-TRANSLATION_RESPONSE_INVALID
-TRANSLATION_OUTPUT_EMPTY
-TRANSLATION_LANGUAGE_UNSUPPORTED
-TRANSLATION_CONTENT_REJECTED
-TRANSLATION_MODEL_UNAVAILABLE
-```
-
-Some translation failures permit fallback to:
-
-- a smaller context
-- smaller batch
-- different provider
-- untranslated source display
-- partial result
-
----
-
-## 29. Presentation Errors
-
-Presentation errors may include:
-
-```text
-PRESENTATION_INPUT_INVALID
-PRESENTATION_LAYOUT_FAILED
-FONT_RESOLUTION_FAILED
-TEXT_MEASUREMENT_FAILED
-PRESENTATION_MODEL_INVALID
-UI_DISPATCH_FAILED
-UI_TARGET_DISPOSED
-UI_COMMIT_REJECTED
-```
-
-`UI_COMMIT_REJECTED` may represent a stale or closed-session outcome rather than a failure.
-
----
-
-## 30. Provider Error Model
-
-Provider-specific errors must be mapped into normalized categories.
-
-Conceptually:
-
-```text
-ProviderResponse
-    ↓
-Provider Adapter Mapping
-    ↓
-Normalized ProviderError
-```
-
-Normalized provider types may include:
+Provider Adapter normalize raw error thành:
 
 ```text
 PROVIDER_TIMEOUT
@@ -903,111 +666,80 @@ PROVIDER_NETWORK_ERROR
 PROVIDER_CANCELED
 ```
 
----
-
-## 31. Provider Code Preservation
-
-The normalized error may preserve:
+Optional diagnostic fields:
 
 ```text
 ProviderCode
 ProviderHttpStatus
 ProviderRequestId
+TimeoutPhase
 ```
 
-for diagnostics.
-
-Recovery logic must not depend directly on unstable provider message strings.
+Recovery không phụ thuộc raw message string.
 
 ---
 
-## 32. Provider Authentication Errors
+## 28. Provider Authentication Error
 
-Authentication failures are generally not suitable for automatic repeated retry.
-
-Examples:
+Authentication error thường:
 
 ```text
-Invalid API key
-Expired credential
-Revoked token
-Incorrect project configuration
+Recoverability = RECOVERABLE_AFTER_USER_ACTION
+RetryHint = AFTER_USER_ACTION
 ```
 
-Typical classification:
-
-```text
-RETRYABLE_AFTER_USER_ACTION
-```
-
-Repeated automatic retries would waste requests and obscure the actual problem.
+Không automatic retry lặp lại.
 
 ---
 
-## 33. Provider Rate Limiting
+## 29. Provider Rate Limit
 
-Rate limiting should be classified separately from unavailability.
+Rate limit khác unavailable.
 
-Possible recovery:
+Runtime có thể:
 
-```text
-Respect retry-after
-    ↓
-Apply provider backoff
-    ↓
-Reduce concurrency
-    ↓
-Retry only if revision remains current
-```
+- tôn trọng Retry-After;
+- giảm admission;
+- delay retry;
+- fallback;
+- mark provider degraded.
 
-Rate-limit handling must not block the runtime control context.
+Policy chi tiết thuộc Retry và Provider management.
 
 ---
 
-## 34. Provider Quota Exhaustion
+## 30. Provider Quota Error
 
-Quota exhaustion differs from temporary rate limiting.
+Quota exhaustion thường cần:
 
-Possible outcomes:
+- provider switch;
+- local fallback;
+- billing/configuration change;
+- user notification.
 
-- provider disabled for the remaining quota period
-- switch provider
-- use local mode
-- notify user
-- stop the affected stage
-
-Quota errors normally require configuration or billing changes.
+Không retry unchanged request liên tục.
 
 ---
 
-## 35. Provider Timeout
-
-Timeout means the operation exceeded CRAI's configured execution limit.
-
-It does not always mean the provider failed internally.
-
-The runtime should distinguish:
+## 31. Resource Errors
 
 ```text
-Connection timeout
-Request timeout
-Response-read timeout
-Overall operation timeout
+RESOURCE_BUDGET_EXCEEDED
+MEMORY_BUDGET_EXCEEDED
+GPU_MEMORY_EXHAUSTED
+BUFFER_ALLOCATION_FAILED
+RESOURCE_OWNERSHIP_INVALID
+RESOURCE_DISPOSAL_FAILED
+NATIVE_RESOURCE_UNAVAILABLE
 ```
 
-The normalized top-level code may remain:
+Resource error có thể là expected race nếu scope đã canceled.
 
-```text
-PROVIDER_TIMEOUT
-```
-
-while diagnostics preserve the timeout phase.
+Runtime phải kiểm tra cancellation và revision state trước khi escalate.
 
 ---
 
-## 36. Resource Errors
-
-Resource errors may include:
+## 32. Artifact Errors
 
 ```text
 ARTIFACT_NOT_FOUND
@@ -1015,501 +747,242 @@ ARTIFACT_NOT_PUBLISHED
 ARTIFACT_ALREADY_DISPOSED
 ARTIFACT_LEASE_FAILED
 ARTIFACT_TYPE_MISMATCH
-RESOURCE_OWNERSHIP_INVALID
-RESOURCE_DISPOSAL_FAILED
-MEMORY_BUDGET_EXCEEDED
-GPU_MEMORY_EXHAUSTED
-NATIVE_RESOURCE_UNAVAILABLE
-BUFFER_ALLOCATION_FAILED
-```
-
-Some resource errors indicate normal races.
-
-Example:
-
-```text
-Artifact unavailable because revision was canceled
-```
-
-This should normally become `CANCELED` or `STALE`, not an internal failure.
-
----
-
-## 37. Resource Error Normalization
-
-Before escalating a resource error, the runtime should check:
-
-```text
-Was the session closed?
-Was the revision canceled?
-Was the artifact evicted legitimately?
-Was the lease denied because disposal began?
-```
-
-Expected lifecycle races should not be misclassified as corruption.
-
----
-
-## 38. Cache Errors
-
-Cache errors may include:
-
-```text
-CACHE_LOOKUP_FAILED
-CACHE_ENTRY_CORRUPT
-CACHE_KEY_INVALID
-CACHE_INSERT_FAILED
-CACHE_EVICTION_FAILED
-CACHE_STORAGE_UNAVAILABLE
-```
-
-Cache failure must not normally break pipeline correctness.
-
-Preferred behavior:
-
-```text
-Cache error
-    ↓
-Record diagnostics
-    ↓
-Treat as cache miss
-    ↓
-Continue pipeline
-```
-
-Exceptions include resource failures that threaten application stability.
-
----
-
-## 39. State Errors
-
-State errors occur when an operation violates the runtime state machine.
-
-Examples:
-
-```text
-INVALID_STATE_TRANSITION
-SESSION_NOT_ACTIVE
-REVISION_ALREADY_CLOSED
-WORK_ALREADY_COMPLETED
+ARTIFACT_INTEGRITY_FAILED
 DUPLICATE_ARTIFACT_PUBLICATION
-COMMIT_WITHOUT_AUTHORITY
+```
+
+Không phải mọi Artifact miss là internal failure.
+
+Ví dụ artifact bị dispose sau cancellation có thể dẫn tới `CANCELED` hoặc `STALE`.
+
+---
+
+## 33. State and Invariant Errors
+
+```text
+INVALID_RUNTIME_STATE
+INVALID_STATE_TRANSITION
+WORKITEM_ALREADY_TERMINAL
 ATTEMPT_ALREADY_SUPERSEDED
+COMMIT_WITHOUT_AUTHORITY
+DUPLICATE_TERMINAL_COMPLETION
+INVARIANT_VIOLATION
 ```
 
-Some state errors may be benign duplicate commands.
+Duplicate signal có thể benign nếu idempotent.
 
-Others represent runtime invariant violations.
+Ownership corruption hoặc impossible transition có thể là fatal.
 
 ---
 
-## 40. Idempotent Duplicate Handling
-
-Duplicate completion or cancellation commands may occur.
-
-Example:
+## 34. Configuration Errors
 
 ```text
-Provider callback completes
-Timeout handler also fires
-```
-
-The runtime should handle terminal state transitions idempotently where possible.
-
-Preferred outcome:
-
-```text
-First terminal outcome accepted
-Subsequent duplicate ignored and recorded
-```
-
-Do not treat every duplicate completion as fatal.
-
----
-
-## 41. Configuration Errors
-
-Configuration errors may include:
-
-```text
+CONFIGURATION_INVALID
 PROVIDER_NOT_CONFIGURED
-PROVIDER_CREDENTIAL_MISSING
-INVALID_LANGUAGE_PAIR
+CREDENTIAL_REFERENCE_MISSING
 INVALID_TIMEOUT
 INVALID_CONCURRENCY_LIMIT
 INVALID_MEMORY_BUDGET
-INVALID_CAPTURE_RATE
 UNSUPPORTED_RUNTIME_MODE
 ```
 
-Configuration errors are generally:
-
-```text
-RETRYABLE_AFTER_CHANGE
-```
-
-or:
-
-```text
-RETRYABLE_AFTER_USER_ACTION
-```
+Thường yêu cầu configuration change hoặc user action.
 
 ---
 
-## 42. Security Errors
-
-Security errors may include:
+## 35. Security Errors
 
 ```text
 CREDENTIAL_ACCESS_DENIED
-CREDENTIAL_DECRYPTION_FAILED
+CREDENTIAL_RESOLUTION_FAILED
 UNTRUSTED_PROVIDER_CONFIGURATION
-UNSAFE_FILE_PATH
+UNSAFE_PATH
 INVALID_PLUGIN_SIGNATURE
 PERMISSION_REQUIRED
 ```
 
-Security-related errors must:
+Security error phải:
 
-- avoid leaking secrets
-- avoid automatic unsafe fallback
-- use elevated diagnostics severity
-- produce clear user action where appropriate
+- không leak secret;
+- không unsafe fallback;
+- có elevated severity phù hợp;
+- cung cấp user action rõ ràng khi cần.
 
 ---
 
-## 43. Persistence Errors
+## 36. Persistence Errors
 
-Future persistent storage may produce:
+Storage là Persistence Capability đã được thiết kế, không còn là future optional concern.
+
+Storage boundary normalize:
 
 ```text
-STORAGE_UNAVAILABLE
-STORAGE_READ_FAILED
-STORAGE_WRITE_FAILED
-STORAGE_CORRUPT
-STORAGE_QUOTA_EXCEEDED
-STORAGE_VERSION_UNSUPPORTED
+PERSISTENCE_UNAVAILABLE
+PERSISTENCE_READ_FAILED
+PERSISTENCE_WRITE_FAILED
+PERSISTENCE_CONFLICT
+PERSISTENCE_CORRUPT
+PERSISTENCE_QUOTA_EXCEEDED
+PERSISTENCE_VERSION_UNSUPPORTED
+PERSISTENCE_MIGRATION_FAILED
+RECOVERY_POINT_INVALID
 ```
 
-For the MVP memory-only runtime, most persistence errors are optional.
+Business data ownership vẫn thuộc owning module.
 
-Persistent cache failure should usually degrade to in-memory processing.
+Persistence error không được làm Runtime Artifact Store biến thành durable Storage.
 
 ---
 
-## 44. Internal Errors
+## 37. Observability Errors
 
-Internal errors represent unexpected runtime defects.
+```text
+TELEMETRY_EXPORT_FAILED
+TRACE_BUFFER_FULL
+METRIC_PUBLISH_FAILED
+DIAGNOSTIC_SNAPSHOT_FAILED
+```
 
-Examples:
+Default behavior:
+
+```text
+record bounded local diagnostic if possible
+degrade observability
+do not change runtime correctness
+```
+
+---
+
+## 38. Integration Errors
+
+```text
+INTEGRATION_CONTRACT_INVALID
+ADAPTER_UNAVAILABLE
+PROTOCOL_MISMATCH
+UNSUPPORTED_PROVIDER_CAPABILITY
+```
+
+Integration error phải được normalize tại adapter boundary.
+
+---
+
+## 39. Internal Errors
 
 ```text
 INVARIANT_VIOLATION
-NULL_REQUIRED_ARTIFACT
 OWNERSHIP_ACCOUNTING_CORRUPT
-UNEXPECTED_WORK_STATUS
-PIPELINE_GRAPH_INVALID
+UNEXPECTED_EXECUTION_STATE
 UNHANDLED_EXCEPTION
+CONTROL_LOOP_FAILED
 ```
 
-Internal errors should include:
+Internal error phải có:
 
-- high diagnostic severity
-- correlation identifiers
-- safe state capture
-- no raw private content by default
-
-Depending on scope, the runtime may:
-
-- fail one WorkItem
-- terminate one session
-- restart a subsystem
-- request application restart
-- terminate safely
+- high diagnostic severity;
+- correlation;
+- safe snapshot;
+- no user content by default;
+- explicit escalation scope.
 
 ---
 
-## 45. Fatal Errors
+## 40. Fatal Error Policy
 
-A fatal error means CRAI cannot safely preserve runtime invariants.
+Fatal error chỉ khi Runtime không thể giữ invariant.
 
-Possible examples:
+Ví dụ:
 
-- core runtime control loop terminated unexpectedly
-- Artifact Store ownership state corrupted
-- unrecoverable state-machine corruption
-- repeated native crashes in the main process
-- inability to release critical system resources
-- application-wide security failure
+- Runtime Control loop mất khả năng xử lý;
+- Artifact ownership state corrupt;
+- security boundary compromised;
+- repeated main-process native crash;
+- cannot guarantee safe commit or disposal.
 
-Fatal handling should prioritize:
+Handling:
 
 ```text
-Stop New Work
+Stop new admission
     ↓
-Prevent Invalid Commit
+Revoke authority
     ↓
-Cancel Sessions
+Prevent new commits
     ↓
-Attempt Bounded Cleanup
+Cancel sessions
     ↓
-Persist Safe Diagnostics
+Bounded cleanup
     ↓
-Exit or Restart Safely
+Persist safe diagnostics
+    ↓
+Exit or restart safely
 ```
 
 ---
 
-## 46. Recoverability
-
-Each error must have a recoverability classification.
+## 41. Error Propagation
 
 ```text
-RECOVERABLE
-RECOVERABLE_WITH_DEGRADATION
-RECOVERABLE_AFTER_USER_ACTION
-NON_RECOVERABLE_FOR_REVISION
-NON_RECOVERABLE_FOR_SESSION
-NON_RECOVERABLE_FOR_APPLICATION
-```
-
-Recoverability and retryability are related but not identical.
-
-Example:
-
-```text
-OCR provider unavailable
-```
-
-may be recoverable through a different provider without retrying the same provider.
-
----
-
-## 47. Transient Errors
-
-Transient errors may resolve without permanent configuration changes.
-
-Examples:
-
-- temporary network loss
-- provider timeout
-- provider overload
-- rate limiting
-- temporary capture failure
-- temporary model startup failure
-- resource pressure
-
-Transient does not imply unlimited retry.
-
-The revision may become obsolete before retry is useful.
-
----
-
-## 48. Permanent Errors
-
-Permanent errors are unlikely to succeed again with identical input and configuration.
-
-Examples:
-
-- unsupported language
-- invalid credential
-- unsupported image format
-- provider rejects required operation
-- invalid configuration
-- input violates provider limit with no transformation
-
-Permanent errors should not be retried unchanged.
-
----
-
-## 49. Deterministic Errors
-
-A deterministic error is expected to repeat for the same:
-
-```text
-Input
-Configuration
-Provider
-Version
-```
-
-Examples:
-
-- invalid artifact format
-- unsupported language pair
-- translation context always exceeds a fixed limit
-- provider request schema invalid
-
-Deterministic failures may be cached as negative knowledge in future versions, but this is not required for the MVP.
-
----
-
-## 50. Error Propagation
-
-Errors should propagate through structured outcomes.
-
-Preferred flow:
-
-```text
-Worker detects failure
+Failure detected
     ↓
-Create normalized RuntimeError
+RuntimeError normalized
     ↓
-Submit WorkFailed command
+AttemptCompletion submitted
     ↓
-Runtime validates WorkItem state
+Runtime Control validates relevance
     ↓
-Runtime records terminal outcome
+Accepted outcome or suppressed stale diagnostic
     ↓
-Recovery decision
+Recovery policy evaluated
     ↓
-Relevant event published
+Event and user-safe mapping
 ```
 
-Workers must not decide all recovery actions themselves.
+Worker không tự quyết định toàn bộ recovery.
 
 ---
 
-## 51. Error Relevance Validation
+## 42. Error Aggregation
 
-Before an error affects state or UI, the runtime must validate:
+Một WorkItem hoặc Revision có thể có nhiều Attempt error.
 
-```text
-Session still active?
-Revision still current or relevant?
-Attempt still authoritative?
-Stage still expected?
-Error not superseded?
-```
-
-An error from an obsolete revision should normally be recorded as stale and not shown prominently.
-
----
-
-## 52. Stale Error Suppression
-
-Example:
+Conceptual aggregate:
 
 ```text
-Revision 30 translation times out
-    ↓
-Revision 31 already committed
-```
-
-The timeout remains useful for diagnostics.
-
-However, the UI should not display:
-
-```text
-Translation failed
-```
-
-for Revision 30.
-
-Stale errors must not replace the state of current successful work.
-
----
-
-## 53. Cancellation Error Suppression
-
-Provider SDKs may represent cancellation as an exception.
-
-The adapter must normalize expected cancellation into:
-
-```text
-CANCELED
-```
-
-not:
-
-```text
-FAILED
-```
-
-Unexpected cancellation failure may still produce a resource or provider error.
-
----
-
-## 54. Abandoned Work Handling
-
-When work is abandoned:
-
-- logical authority is revoked
-- new downstream work is forbidden
-- late completion becomes stale
-- resources are tracked as draining
-- diagnostics record abandonment reason
-- capacity may remain consumed until physical completion
-
-Repeated abandonment may degrade or disable a provider.
-
----
-
-## 55. Error Aggregation
-
-One revision may produce multiple failures.
-
-Example:
-
-```text
-Primary translation provider timeout
-    ↓
-Fallback provider unavailable
-```
-
-The runtime may retain an internal error aggregate:
-
-```text
-RevisionFailure
+FailureAggregate
 ├── PrimaryError
-├── FallbackErrors
+├── AttemptErrors[]
+├── FallbackErrors[]
+├── CleanupErrors[]
 ├── FinalDisposition
 └── UserVisibleCause
 ```
 
-The user should receive one clear final message rather than every internal attempt.
+User chỉ nhận một clear final message.
 
 ---
 
-## 56. Root Error Selection
+## 43. Root Error Selection
 
-When several errors occur, select the most useful root error based on:
+Chọn root cause theo:
 
-1. final blocking cause
-2. user actionability
-3. architectural scope
-4. causal relationship
-5. severity
+1. final blocking cause;
+2. user actionability;
+3. impact scope;
+4. causal relation;
+5. severity;
+6. current relevance.
 
-Example:
-
-```text
-Provider timeout
-    ↓
-Fallback blocked because no credential
-```
-
-The user-facing error may be:
-
-```text
-No translation provider is currently available.
-```
-
-Diagnostics should preserve both underlying errors.
+Diagnostics vẫn giữ full bounded chain.
 
 ---
 
-## 57. User-Visible Error Model
-
-The UI should receive a safe presentation object.
-
-Conceptually:
+## 44. UserVisibleError
 
 ```text
 UserVisibleError
 ├── TitleKey
 ├── MessageKey
-├── Severity
+├── Level
 ├── SuggestedAction
 ├── RetryAllowed
 ├── OpenSettingsAllowed
@@ -1517,13 +990,11 @@ UserVisibleError
 └── TechnicalReference
 ```
 
-The UI should not receive raw provider exception text.
+UI không nhận raw exception hoặc provider message.
 
 ---
 
-## 58. User Error Levels
-
-Suggested user-facing levels:
+## 45. User Error Levels
 
 ```text
 INLINE_NOTICE
@@ -1533,718 +1004,407 @@ SESSION_BLOCKING_ERROR
 APPLICATION_BLOCKING_ERROR
 ```
 
-### Inline Notice
-
-Small issue that does not block reading.
-
-Example:
-
-```text
-Some text could not be recognized.
-```
-
-### Non-Blocking Warning
-
-Degraded operation with continued service.
-
-Example:
-
-```text
-Using fallback translator.
-```
-
-### Revision Error
-
-Current content could not be translated.
-
-### Session-Blocking Error
-
-The session cannot continue without action.
-
-### Application-Blocking Error
-
-The application cannot safely operate.
+Level không map trực tiếp từ technical severity; phải xét user impact và relevance.
 
 ---
 
-## 59. Preserve Previous Presentation
-
-When the current revision fails, the UI may retain the previous valid presentation.
-
-Example:
-
-```text
-Revision 40 displayed
-    ↓
-Revision 41 translation fails
-```
-
-Possible UI behavior:
-
-```text
-Keep Revision 40 visible
-Show that it belongs to previous content
-Show non-blocking error for Revision 41
-```
-
-The UI must not misrepresent old translation as current.
-
----
-
-## 60. User Action Mapping
-
-Errors may suggest actions such as:
+## 46. Suggested User Actions
 
 ```text
 RETRY
-RESELECT_CAPTURE_REGION
+RESELECT_SOURCE
 CHECK_NETWORK
 OPEN_PROVIDER_SETTINGS
 CHANGE_PROVIDER
-REDUCE_CAPTURE_REGION
-RELOAD_MODEL
+REDUCE_INPUT
 RESTART_SESSION
 RESTART_APPLICATION
 REPORT_PROBLEM
 NONE
 ```
 
-Suggested actions must be derived from normalized error codes.
+Action dựa trên normalized code và current runtime state.
 
 ---
 
-## 61. Retry UI
+## 47. Preserve Previous Presentation
 
-A retry control should only be shown when:
+Khi current revision lỗi, Presentation có thể giữ previous valid output nếu:
 
-- retry is allowed
-- the revision remains relevant
-- required input still exists
-- no retry is already active
-- repeated retry is not blocked by policy
+- được đánh dấu rõ là previous;
+- không bị hiểu nhầm là current content;
+- current error được hiển thị phù hợp;
+- user vẫn có thể tiếp tục thao tác.
 
-The UI must not provide infinite immediate retry loops for permanent errors.
-
----
-
-## 62. Partial Success
-
-A stage may produce usable but incomplete output.
-
-Examples:
-
-- OCR recognizes only some regions
-- translation fails for one bubble
-- layout falls back to simple ordering
-- font rendering uses fallback font
-
-Possible outcome:
-
-```text
-SUCCEEDED_WITH_WARNINGS
-```
-
-or:
-
-```text
-SUCCEEDED
-    +
-Warnings
-```
-
-For simplicity, the MVP should use:
-
-```text
-SUCCEEDED
-```
-
-with a bounded warning collection attached to the output artifact or completion metadata.
+Policy chi tiết thuộc Presentation.
 
 ---
 
-## 63. Warning Model
+## 48. Warning Model
 
-Warnings do not invalidate the output.
-
-Examples:
+Warnings không invalidate output.
 
 ```text
-OCR_LOW_CONFIDENCE
-LAYOUT_FALLBACK_USED
-TRANSLATION_PARTIAL
-FONT_FALLBACK_USED
-CACHE_WRITE_SKIPPED
-```
-
-Warnings should be:
-
-- observable
-- bounded
-- optionally user-visible
-- excluded from automatic retry unless policy explicitly requires it
-
----
-
-## 64. Error Events
-
-Possible runtime events include:
-
-```text
-work.failed
-work.canceled
-work.stale
-work.abandoned
-revision.failed
-session.degraded
-session.failed
-provider.degraded
-provider.recovered
-resource.cleanup.failed
-runtime.fatal
-```
-
-Events must carry lightweight metadata.
-
----
-
-## 65. Error Event Payload
-
-Suggested event metadata:
-
-```text
-ErrorEvent
-├── ErrorCode
-├── Category
+Warning
+├── WarningCode
 ├── Severity
-├── Scope
-├── Stage
-├── SessionId
-├── RevisionId
-├── WorkItemId
-├── AttemptId
-├── ProviderId
-├── RetryClass
-└── Timestamp
+├── OwnerModule
+├── UserVisible
+└── Metadata
 ```
 
-Raw input or output content must not be embedded.
-
----
-
-## 66. Logging Policy
-
-Errors should be logged according to severity and expectedness.
-
-### Debug or Trace
-
-- stale result rejected
-- expected cancellation
-- duplicate terminal command ignored
-
-### Info
-
-- provider fallback activated
-- temporary degradation entered
-
-### Warning
-
-- retryable provider failure
-- cache operation failed
-- cleanup took too long
-
-### Error
-
-- revision failed
-- provider initialization failed
-- session capability unavailable
-
-### Critical or Fatal
-
-- invariant violation
-- core runtime corruption
-- application-wide failure
-
-Expected cancellation must not flood error logs.
-
----
-
-## 67. Error Metrics
-
-Track:
-
-- errors by code
-- errors by stage
-- errors by provider
-- errors by scope
-- transient versus permanent errors
-- retryable versus non-retryable errors
-- stale errors suppressed
-- canceled operations
-- abandoned operations
-- revision failure rate
-- session failure rate
-- provider degradation count
-- fatal error count
-- fallback success rate
-- user retry count
-
----
-
-## 68. Error Tracing
-
-Error traces should identify:
+MVP dùng:
 
 ```text
-Which revision failed?
-Which stage failed?
-Which attempt failed?
-Which provider was used?
-Was the result current?
-Was retry attempted?
-Was fallback used?
-What was the final disposition?
+SUCCEEDED + bounded warnings
 ```
 
-The trace should connect the error to the original revision pipeline.
+Không tạo `SUCCEEDED_WITH_WARNINGS` terminal outcome.
 
 ---
 
-## 69. Privacy and Errors
+## 49. Warning Rules
 
-Error diagnostics must not expose reading content by default.
+Warnings phải:
 
-Do not log:
-
-- source screenshots
-- recognized text
-- translated text
-- provider prompt
-- access token
-- API key
-- private file path unless sanitized
-- user-selected window title unless explicitly allowed
-
-Content diagnostics may be enabled only through explicit debug consent and bounded retention.
+- bounded;
+- observable;
+- privacy-safe;
+- không tự kích hoạt retry;
+- không thay đổi immutable Artifact;
+- được attach vào Completion metadata hoặc Artifact metadata phù hợp.
 
 ---
 
-## 70. Error Deduplication
+## 50. Error Events
 
-Repeated identical errors may occur rapidly.
+Conceptual events:
 
-Examples:
+```text
+RUNTIME_ERROR_NORMALIZED
+WORK_FAILED
+REVISION_DEGRADED
+REVISION_FAILED
+SESSION_DEGRADED
+SESSION_FAILED
+PROVIDER_DEGRADED
+PROVIDER_RECOVERED
+RESOURCE_CLEANUP_FAILED
+PERSISTENCE_DEGRADED
+RUNTIME_FATAL
+```
 
-- capture permission denied every frame
-- provider unavailable for every revision
-- model load failure for every request
+Tên cuối phải tuân theo Event Standard.
 
-The runtime should deduplicate or rate-limit repeated notifications and logs.
+---
 
-Possible deduplication key:
+## 51. Event Payload
 
 ```text
 ErrorCode
-+
-ProviderId
-+
-Stage
-+
+Category
+Severity
+Scope
+Recoverability
+RetryHint
 SessionId
-+
-Time Window
+RevisionId
+WorkItemId
+AttemptId
+BusinessStageId
+WorkType
+ProviderId
+OccurredAt
 ```
 
-Metrics should still preserve occurrence counts.
+Không chứa raw content.
 
 ---
 
-## 71. Error Storm Protection
+## 52. Logging Policy
 
-An error storm can overload:
+### Trace / Debug
 
-- logs
-- UI notifications
-- event bus
-- telemetry
-- retry system
+- stale result rejected;
+- expected cancellation;
+- duplicate terminal signal ignored.
 
-Protection may include:
+### Info
 
-- repeated-error suppression
-- provider circuit state
-- session pause
-- retry backoff
-- event sampling
-- aggregate notifications
+- fallback activated;
+- provider recovered;
+- degraded mode entered.
+
+### Warning
+
+- transient provider failure;
+- cache/persistence degraded;
+- cleanup slow.
+
+### Error
+
+- WorkItem or Revision failed.
+
+### Critical / Fatal
+
+- invariant violation;
+- Runtime Control failure;
+- application-wide unsafe state.
+
+Expected cancellation không flood logs.
 
 ---
 
-## 72. Provider Degradation
+## 53. Metrics
 
-Repeated provider errors may transition provider health:
+Theo dõi:
+
+- errors by code/category/scope;
+- provider failures;
+- resource failures;
+- persistence failures;
+- transient vs permanent;
+- retry hint distribution;
+- stale error suppressed;
+- canceled and abandoned count;
+- revision/session failure rate;
+- fallback success;
+- fatal count;
+- cleanup failure;
+- user action rate;
+- warning count.
+
+Không dùng `stage` làm metric dimension bắt buộc; ưu tiên `OwnerModule`, `BusinessStageId`, `WorkType`.
+
+---
+
+## 54. Error Tracing
+
+Trace nên trả lời:
+
+- session nào;
+- revision nào;
+- WorkItem nào;
+- Attempt nào;
+- owner module nào;
+- operation nào;
+- provider nào;
+- authority còn hay không;
+- retry/fallback có xảy ra không;
+- final disposition là gì.
+
+---
+
+## 55. Privacy
+
+Standard error diagnostics không chứa:
+
+- screenshots;
+- recognized text;
+- translated text;
+- prompts;
+- tokens;
+- API keys;
+- raw provider body;
+- window title;
+- source URL;
+- private path chưa sanitize.
+
+Content diagnostics chỉ có khi explicit consent và bounded retention.
+
+---
+
+## 56. Error Deduplication
+
+Dedup key có thể gồm:
+
+```text
+ErrorCode
+OwnerModule
+ProviderId
+SessionId
+TimeWindow
+```
+
+Metrics vẫn giữ occurrence count.
+
+UI và logs có thể rate-limit repeated notification.
+
+---
+
+## 57. Error Storm Protection
+
+Protection:
+
+- deduplication;
+- log throttling;
+- event sampling;
+- provider degradation;
+- retry backoff;
+- aggregate notification;
+- session pause khi cần;
+- bounded diagnostic buffer.
+
+Error handling không được tự tạo thêm overload.
+
+---
+
+## 58. Provider Degradation
+
+Repeated provider error có thể chuyển health:
 
 ```text
 HEALTHY
-    ↓
+  ↓
 DEGRADED
-    ↓
+  ↓
 UNAVAILABLE
-```
-
-Recovery may transition:
-
-```text
-UNAVAILABLE
-    ↓
+  ↓
 PROBING
-    ↓
+  ↓
 HEALTHY
 ```
 
-Detailed circuit-breaker behavior may be defined later.
+Provider Manager sở hữu health state.
 
-The MVP may use a simpler consecutive-failure threshold.
+Error Model chỉ cung cấp normalized signals.
 
 ---
 
-## 73. Revision Failure
+## 59. Revision Failure
 
-A revision is failed when required pipeline output cannot be produced and no valid recovery path remains.
-
-Conceptually:
+Revision fail khi required output không thể tạo và recovery path đã hết.
 
 ```text
-Required Stage Failed
+Required WorkItem failed
     ↓
-Retry or Fallback Exhausted
+Retry/fallback exhausted
     ↓
-Revision Marked Failed
+Revision failure accepted
 ```
 
-Revision failure must not automatically terminate the session.
-
-The next captured revision may process normally.
+Revision failure không tự kết thúc Session.
 
 ---
 
-## 74. Session Failure
+## 60. Session Failure
 
-A session fails when it cannot continue processing its configured source.
+Session fail khi không thể tiếp tục configured reading intent.
 
-Examples:
+Ví dụ:
 
-- capture source permanently closed
-- required permission unavailable
-- no usable OCR provider
-- session configuration invalid
-- repeated critical resource failure
+- source permanently unavailable;
+- permission unavailable;
+- required capability unavailable;
+- configuration invalid;
+- repeated critical resource failure.
 
-The session may enter:
-
-```text
-FAILED
-```
-
-while the application remains usable.
+Application vẫn có thể hoạt động.
 
 ---
 
-## 75. Application Failure
+## 61. Application Failure
 
-Application-level failure is reserved for conditions that invalidate the runtime itself.
+Chỉ dùng khi runtime itself unsafe.
 
-Examples:
-
-- control loop terminated
-- artifact ownership corrupted
-- unrecoverable native subsystem failure
-- core configuration unreadable
-- security boundary compromised
-
-The runtime should avoid escalating revision or provider errors to application scope unnecessarily.
+Revision, provider hoặc Storage error không được escalate lên Application nếu còn cô lập được.
 
 ---
 
-## 76. Error State Transitions
+## 62. Artifact Publication Boundary
 
-Possible WorkItem transitions:
-
-```text
-QUEUED
-    ↓
-RUNNING
-    ├── SUCCEEDED
-    ├── FAILED
-    ├── CANCELED
-    ├── STALE
-    └── ABANDONED
-```
-
-A WorkItem may transition to one terminal state only.
-
-Duplicate terminal events are ignored or recorded as diagnostics.
-
----
-
-## 77. Revision Error States
-
-A revision may conceptually be:
-
-```text
-ACTIVE
-PROCESSING
-DEGRADED
-SUCCEEDED
-FAILED
-CANCELED
-OBSOLETE
-```
-
-`OBSOLETE` is not the same as `FAILED`.
-
-An obsolete revision may have been technically successful but replaced before commit.
-
----
-
-## 78. Error and Artifact Publication
-
-Failed, canceled, stale, or abandoned stage outputs must not be published as normal reusable artifacts.
-
-Allowed publication:
-
-```text
-SUCCEEDED
-```
-
-Potentially allowed with explicit metadata:
-
-```text
-SUCCEEDED with warnings
-```
-
-Forbidden by default:
+Candidate output từ:
 
 ```text
 FAILED
 CANCELED
 STALE
 ABANDONED
-PARTIAL UNVALIDATED OUTPUT
 ```
 
----
+không được publish như accepted reusable Artifact.
 
-## 79. Error and Cache Policy
-
-The cache must not retain invalid stage results as successful artifacts.
-
-A future negative-result cache may store deterministic failures separately.
-
-For the MVP:
+MVP:
 
 ```text
 Failure
-    ↓
-No cache promotion
+    → no successful cache promotion
 ```
 
-Warnings may be retained only if the artifact remains valid and compatible.
+Negative cache là future capability riêng.
 
 ---
 
-## 80. Error and Resource Cleanup
+## 63. Cleanup Failure
 
-Every terminal outcome must trigger cleanup.
-
-```text
-SUCCEEDED
-FAILED
-CANCELED
-STALE
-ABANDONED
-```
-
-all require:
-
-- release worker-local resources
-- release leases where possible
-- release provider request handles
-- update concurrency accounting
-- complete WorkItem terminal bookkeeping
-
-`ABANDONED` may leave physical resources draining, but logical bookkeeping must still complete.
-
----
-
-## 81. Cleanup Failure
-
-Cleanup failure must not restore a completed WorkItem to active state.
-
-Example:
+Cleanup failure không thay primary logical outcome.
 
 ```text
-Work failed
-    ↓
-Cleanup also fails
-```
-
-Record:
-
-```text
-Primary Work Error
+Primary Outcome
 +
-Cleanup Error
+Cleanup RuntimeError
 ```
 
-The cleanup error may escalate resource or provider health.
-
-The primary logical outcome remains terminal.
+Cleanup error có thể degrade Resource Manager hoặc Provider health.
 
 ---
 
-## 82. Error and Shutdown
+## 64. Error and Shutdown
 
-During shutdown, many operations may return cancellation-like failures.
+Trong shutdown:
 
-Expected shutdown outcomes should normalize to:
+- expected cancellations normalize thành `CANCELED`;
+- unresponsive execution có thể thành `ABANDONED`;
+- stale late results bị reject;
+- chỉ cleanup failure đe dọa safety mới escalate.
 
-```text
-CANCELED
-```
-
-or:
-
-```text
-ABANDONED
-```
-
-rather than generating user-visible errors.
-
-Only cleanup failures that threaten safe shutdown should be elevated.
+User không nên thấy hàng loạt error do expected shutdown.
 
 ---
 
-## 83. Error and Performance
+## 65. Error and Race Resolution
 
-Errors affect performance through:
+### Failure vs Cancellation
 
-- timeout duration
-- retry delay
-- fallback cost
-- repeated provider initialization
-- stale execution
-- cleanup latency
-- UI error rendering
+Serialized Runtime Control quyết định event nào được accept trước.
 
-Performance metrics should distinguish:
+### Completion vs Timeout
 
-```text
-Successful Useful Latency
-Failed Attempt Latency
-Recovery Latency
-```
+First accepted terminal command wins.
+
+### Duplicate Completion
+
+First accepted outcome wins; duplicate ignored and recorded.
+
+### Late Attempt Result
+
+Authority validation rejects stale result.
 
 ---
 
-## 84. Error and Cancellation Race
+## 66. Error Mapping Registry
 
-A failure and cancellation may occur nearly simultaneously.
-
-Example:
+Conceptual registry:
 
 ```text
-Provider connection fails
-Cancellation requested at the same time
+Raw Provider Error
+    → RuntimeError
+
+RuntimeError
+    → RetryHint
+
+RuntimeError + Current State
+    → UserVisibleError
+
+RuntimeError
+    → Severity / Scope / Recoverability
 ```
 
-Suggested resolution:
-
-1. if cancellation was already authoritative before failure observation, classify as canceled;
-2. if failure became terminal first, classify as failed;
-3. record the concurrent cancellation in diagnostics;
-4. allow only one terminal state.
-
-Exact ordering is determined by serialized Runtime Control processing.
+Không bắt buộc một global class duy nhất trong MVP.
 
 ---
 
-## 85. Error and Timeout Race
-
-A response may arrive near the timeout boundary.
-
-The first terminal event accepted by Runtime Control wins.
-
-Example:
-
-```text
-Timeout command accepted first
-    ↓
-Work marked failed or timed out
-    ↓
-Later provider completion becomes stale
-```
-
-or:
-
-```text
-Provider completion accepted first
-    ↓
-Work succeeds
-    ↓
-Later timeout command ignored
-```
-
----
-
-## 86. Error and Retry Attempt Identity
-
-Every retry receives a new `AttemptId`.
-
-```text
-Revision 60
-├── Attempt 1: timeout
-├── Attempt 2: provider error
-└── Attempt 3: success
-```
-
-Late results from Attempt 1 or Attempt 2 must not overwrite Attempt 3.
-
----
-
-## 87. Error Mapping Registry
-
-The runtime should centralize error mapping.
-
-Conceptually:
-
-```text
-ErrorMappingRegistry
-├── Provider SDK error → RuntimeError
-├── Native error → RuntimeError
-├── RuntimeError → RetryClass
-├── RuntimeError → UserVisibleError
-└── RuntimeError → Severity
-```
-
-This registry may be implemented as configuration, code, or provider-specific adapters.
-
-It does not require one global class in the MVP.
-
----
-
-## 88. MVP Error Policy
-
-The MVP should use a conservative error model.
-
-### Required Terminal Outcomes
-
-```text
-SUCCEEDED
-FAILED
-CANCELED
-STALE
-ABANDONED
-```
+## 67. MVP Error Policy
 
 ### Required Error Fields
 
@@ -2252,31 +1412,31 @@ ABANDONED
 ErrorCode
 Category
 Severity
-RetryClass
 Scope
-Stage
+Recoverability
+RetryHint
 TechnicalMessage
-Correlation identifiers
+Correlation
 ```
 
 ### Required Behaviors
 
-1. Provider-specific errors are normalized.
-2. Cancellation is not logged as failure.
-3. Stale results never update the UI.
-4. Obsolete errors are suppressed from current user state.
-5. Failed artifacts are not cached.
-6. One WorkItem accepts only one terminal outcome.
-7. Error messages do not expose secrets or reading content.
-8. Retry decisions are centralized.
-9. Session errors do not terminate the application unnecessarily.
-10. Fatal errors stop new work before shutdown.
+1. Provider error được normalize.
+2. Cancellation không log như failure.
+3. Stale error không ảnh hưởng current UI.
+4. Failed candidate không promote.
+5. One WorkItem accepts one terminal outcome.
+6. Error không chứa secret hoặc reading content.
+7. Retry decision centralized.
+8. Session failure không làm Application fail vô cớ.
+9. Fatal error dừng admission trước shutdown.
+10. Warning không tạo outcome mới.
+11. Persistence error normalize tại Storage boundary.
+12. Observability failure không phá runtime correctness.
 
 ---
 
-## 89. Suggested MVP Error Codes
-
-Initial codes may include:
+## 68. Suggested MVP Error Codes
 
 ### Runtime
 
@@ -2284,448 +1444,290 @@ Initial codes may include:
 RUNTIME_INTERNAL_ERROR
 RUNTIME_INVALID_STATE
 RUNTIME_SHUTTING_DOWN
+RUNTIME_CONTROL_FAILED
 ```
 
-### Capture
+### Provider
 
 ```text
-CAPTURE_PERMISSION_DENIED
-CAPTURE_SOURCE_UNAVAILABLE
-CAPTURE_FRAME_FAILED
-CAPTURE_REGION_INVALID
+PROVIDER_TIMEOUT
+PROVIDER_UNAVAILABLE
+PROVIDER_AUTH_FAILED
+PROVIDER_RATE_LIMITED
+PROVIDER_QUOTA_EXCEEDED
+PROVIDER_RESPONSE_INVALID
 ```
 
-### OCR
-
-```text
-OCR_INPUT_INVALID
-OCR_PROVIDER_TIMEOUT
-OCR_PROVIDER_UNAVAILABLE
-OCR_AUTHENTICATION_FAILED
-OCR_RESPONSE_INVALID
-OCR_MODEL_FAILED
-```
-
-### Layout
-
-```text
-LAYOUT_INPUT_INVALID
-LAYOUT_PROCESSING_FAILED
-```
-
-### Translation
-
-```text
-TRANSLATION_INPUT_INVALID
-TRANSLATION_PROVIDER_TIMEOUT
-TRANSLATION_PROVIDER_UNAVAILABLE
-TRANSLATION_AUTHENTICATION_FAILED
-TRANSLATION_RATE_LIMITED
-TRANSLATION_QUOTA_EXCEEDED
-TRANSLATION_RESPONSE_INVALID
-```
-
-### Resource
+### Resource and Artifact
 
 ```text
 ARTIFACT_NOT_FOUND
+ARTIFACT_INTEGRITY_FAILED
 ARTIFACT_DISPOSED
-MEMORY_BUDGET_EXCEEDED
+RESOURCE_BUDGET_EXCEEDED
 RESOURCE_CLEANUP_FAILED
 ```
 
-### Presentation
+### Configuration and Security
 
 ```text
-PRESENTATION_BUILD_FAILED
-UI_COMMIT_REJECTED
-UI_TARGET_UNAVAILABLE
+CONFIGURATION_INVALID
+CREDENTIAL_REFERENCE_MISSING
+CREDENTIAL_ACCESS_DENIED
+PERMISSION_REQUIRED
 ```
 
-This list should remain intentionally small at first.
+### Persistence
+
+```text
+PERSISTENCE_UNAVAILABLE
+PERSISTENCE_READ_FAILED
+PERSISTENCE_WRITE_FAILED
+PERSISTENCE_CONFLICT
+PERSISTENCE_CORRUPT
+```
+
+Module-specific code nằm trong tài liệu module.
 
 ---
 
-## 90. Example: Remote Translation Timeout
+## 69. Example: Provider Timeout
 
 ```text
-Translation request starts
-    ↓
-Configured timeout expires
-    ↓
-Provider Adapter aborts request
-    ↓
-TRANSLATION_PROVIDER_TIMEOUT created
-    ↓
-WorkFailed submitted
-    ↓
-Runtime validates revision is current
-    ↓
-Retry Policy evaluates retry
+Provider request times out
+        ↓
+Adapter creates PROVIDER_TIMEOUT
+        ↓
+AttemptFailed submitted
+        ↓
+Runtime Control validates relevance
+        ↓
+Retry Policy evaluates
 ```
 
-Possible final behavior:
-
-- delayed retry
-- fallback provider
-- revision failure
-- non-blocking UI error
+Nếu revision stale, error chỉ dùng cho diagnostics.
 
 ---
 
-## 91. Example: Timeout for Obsolete Revision
+## 70. Example: Invalid Provider Response
 
 ```text
-Revision 70 translation running
-    ↓
-Revision 71 becomes current
-    ↓
-Revision 70 cancellation requested
-    ↓
-Provider later times out
-```
-
-Runtime outcome:
-
-```text
-Revision 70 result has no current authority
-    ↓
-Record stale or canceled diagnostic
-    ↓
-Do not show translation error to user
+Provider response malformed
+        ↓
+Adapter normalization fails validation
+        ↓
+PROVIDER_RESPONSE_INVALID
+        ↓
+No accepted Artifact publication
+        ↓
+Retry/fallback evaluated
 ```
 
 ---
 
-## 92. Example: Invalid OCR Response
+## 71. Example: Artifact Missing During Cancellation
 
 ```text
-OCR provider returns malformed regions
-    ↓
-Provider Adapter normalization fails
-    ↓
-OCR_RESPONSE_INVALID
-    ↓
-No OCR Artifact published
-    ↓
-No cache promotion
-    ↓
-Retry or fallback evaluated
-```
-
----
-
-## 93. Example: Empty OCR Result
-
-```text
-OCR completes successfully
-    ↓
-No text regions detected
-```
-
-Possible result:
-
-```text
-SUCCEEDED
-Output: empty OCR Artifact
-Warning: none
-```
-
-The pipeline may produce an empty presentation.
-
-It should not automatically classify this as provider failure.
-
----
-
-## 94. Example: Cache Corruption
-
-```text
-Translation artifact found in cache
-    ↓
-Validation fails
-    ↓
-CACHE_ENTRY_CORRUPT
-    ↓
-Entry evicted
-    ↓
-Treat as cache miss
-    ↓
-Execute translation normally
-```
-
-The user may never need to see this error.
-
----
-
-## 95. Example: Artifact Disposed During Cancellation
-
-```text
-Worker requests artifact lease
-    ↓
-Revision cancellation already began
-    ↓
+Worker requests Artifact Lease
+        ↓
+Revision cancellation already draining
+        ↓
 Lease denied
 ```
 
-Expected outcome:
-
-```text
-CANCELED
-```
-
-or:
-
-```text
-STALE
-```
-
-not:
-
-```text
-RUNTIME_INTERNAL_ERROR
-```
+Expected outcome có thể là `CANCELED` hoặc `STALE`, không tự động là internal error.
 
 ---
 
-## 96. Example: Authentication Failure
+## 72. Example: Persistence Conflict
 
 ```text
-Provider rejects credential
-    ↓
-TRANSLATION_AUTHENTICATION_FAILED
-    ↓
-Provider marked unavailable
-    ↓
-No immediate automatic retry
-    ↓
-UI offers provider settings
+Storage write uses stale PersistenceVersion
+        ↓
+PERSISTENCE_CONFLICT
+        ↓
+Owning module decides merge/reload behavior
+```
+
+Storage không chiếm business ownership.
+
+---
+
+## 73. Example: Observability Export Failure
+
+```text
+Trace export fails
+        ↓
+TELEMETRY_EXPORT_FAILED
+        ↓
+Local bounded diagnostic retained if possible
+        ↓
+Runtime execution continues
 ```
 
 ---
 
-## 97. Example: Memory Budget Exceeded
+## 74. Example: Fatal Invariant
 
 ```text
-OCR WorkItem requests admission
-    ↓
-Memory budget unavailable
-```
-
-Possible outcomes:
-
-- defer WorkItem
-- evict cache
-- use lower-resolution processing
-- cancel background work
-- fail revision with resource error
-
-The error is not necessarily fatal to the session.
-
----
-
-## 98. Example: Fatal Runtime Invariant
-
-```text
-Artifact ownership count becomes invalid
-    ↓
-Runtime cannot determine safe disposal
-```
-
-Possible response:
-
-```text
-Stop admitting new work
-    ↓
-Prevent new commits
-    ↓
-Cancel sessions
-    ↓
-Record critical diagnostics
-    ↓
-Shutdown safely
+Artifact ownership accounting corrupt
+        ↓
+INVARIANT_VIOLATION
+        ↓
+Stop admission
+        ↓
+Revoke authority
+        ↓
+Bounded cleanup
+        ↓
+Safe shutdown
 ```
 
 ---
 
-## 99. Error Invariants
+## 75. Architecture Invariants
 
-The runtime must preserve these invariants:
-
-1. Every WorkItem has exactly one terminal outcome.
-2. Failure, cancellation, staleness, and abandonment remain distinct.
-3. Provider-specific exceptions are normalized before leaving adapters.
-4. Obsolete errors do not replace current user-visible state.
-5. Stale results cannot publish current pipeline authority.
-6. Failed artifacts are not promoted to normal cache.
-7. Cancellation is expected control flow.
-8. Retry decisions do not belong to individual workers.
-9. UI receives safe normalized error models.
-10. Raw credentials and reading content are excluded from standard errors.
-11. Session-scoped failures do not become application-fatal without cause.
-12. Cache failure does not normally break pipeline correctness.
-13. Cleanup occurs for every terminal outcome.
-14. Duplicate terminal commands are handled idempotently.
-15. Internal invariant violations receive elevated diagnostics.
-16. Retry requires a new AttemptId.
-17. Late attempt results cannot overwrite newer attempts.
-18. User-visible messages are based on current relevant state.
-19. Errors remain bounded under repeated failure.
-20. Fatal errors stop new work before shutdown.
-
----
-
-## 100. Testing Requirements
-
-Tests should cover:
-
-- successful terminal outcome
-- provider timeout
-- authentication failure
-- rate limiting
-- quota exhaustion
-- malformed provider response
-- empty OCR result
-- low-confidence OCR warning
-- layout fallback
-- cache corruption
-- cache unavailable
-- resource lease denied after cancellation
-- artifact disposed unexpectedly
-- memory admission failure
-- cancellation during provider request
-- provider completion after cancellation
-- timeout and completion race
-- retry result arriving before old attempt
-- duplicate completion command
-- obsolete revision error suppression
-- session close during error handling
-- application shutdown during failure
-- cleanup failure after primary failure
-- fatal runtime invariant violation
-- repeated-error deduplication
-- error privacy validation
+1. Terminal outcome canonical thuộc `PIPELINE_RUNTIME.md`.
+2. Error Model không định nghĩa lại WorkItem lifecycle.
+3. RuntimeError khác terminal outcome.
+4. Failure, cancellation, stale và abandoned khác nhau.
+5. Provider exception phải normalize.
+6. Error không tự retry.
+7. Error không tự commit.
+8. Error không tự thay state.
+9. Relevance validation bắt buộc.
+10. Obsolete error không thay current UI.
+11. Warnings không tạo outcome mới.
+12. Failed output không promote.
+13. Cleanup failure không đổi primary outcome.
+14. Duplicate terminal signal idempotent.
+15. Fatal error dừng admission trước shutdown.
+16. Persistence error thuộc Storage boundary.
+17. Artifact error không mặc định là persistence error.
+18. Observability failure không phá correctness.
+19. User-visible mapping không nhận raw exception.
+20. Standard diagnostics không chứa user content.
+21. Error category không hard-code capability nội bộ.
+22. RetryHint không phải Retry decision.
+23. Business Module sở hữu semantic error catalog.
+24. Runtime Control sở hữu final relevance.
+25. Error handling phải bounded dưới error storm.
 
 ---
 
-## 101. Open Questions
+## 76. Testing Requirements
 
-The following questions remain open:
+Test phải bao phủ:
 
-- Which provider-specific error codes need dedicated normalized mappings?
-- Should low-confidence OCR trigger automatic fallback?
-- Should partial translation be considered success with warnings?
-- Which errors should preserve the previous presentation?
-- What consecutive-failure threshold should degrade a provider?
-- Will the MVP support automatic provider fallback?
-- Should deterministic failures be negatively cached later?
-- How much technical detail should be available in the user-facing diagnostics screen?
-- Should fatal subsystem errors restart only that subsystem?
-- Which errors should trigger application restart?
-- How should local model crashes be isolated?
-- Should error messages include provider names?
-- Which warning types should be visible by default?
-- How long should repeated-error suppression remain active?
-
-These questions can be resolved after provider selection and UI design.
-
----
-
-## 102. Related Documents
-
-- `README.md`
-- `PIPELINE_RUNTIME.md`
-- `WORK_QUEUE.md`
-- `SCHEDULER.md`
-- `CANCELLATION.md`
-- `CACHE_POLICY.md`
-- `MEMORY_MODEL.md`
-- `THREADING_MODEL.md`
-- `RESOURCE_LIFECYCLE.md`
-- `PERFORMANCE_MODEL.md`
-- `RETRY_POLICY.md`
-- `RUNTIME_OBSERVABILITY.md`
-- `RUNTIME_CONFIG.md`
-- `../STATE_MACHINE.md`
-- `../EVENT_BUS.md`
-- `../DATA_FLOW.md`
-- `../flows/SCREEN_COMIC_FLOW.md`
+- provider timeout;
+- auth failure;
+- rate limit;
+- quota exhaustion;
+- malformed response;
+- invalid input;
+- validation failure;
+- Artifact lease denied after cancellation;
+- Artifact integrity failure;
+- persistence conflict;
+- persistence unavailable;
+- observability export failure;
+- stale error suppression;
+- cancellation exception normalization;
+- abandoned provider request;
+- duplicate completion;
+- timeout/completion race;
+- cleanup failure after primary failure;
+- provider degradation;
+- user-safe mapping;
+- warning handling;
+- privacy validation;
+- error deduplication;
+- fatal invariant.
 
 ---
 
-## 103. Next Step
+## 77. Open Questions
 
-The next runtime document should be:
+- Module-specific error catalogs nằm ở file nào cho từng module?
+- Error Mapping Registry dùng code hay configuration?
+- Provider degradation threshold là bao nhiêu?
+- Warning nào user-visible mặc định?
+- Previous presentation được giữ với error nào?
+- Error technical detail trong diagnostics UI đến mức nào?
+- Persistent negative cache có cần không?
+- Fatal subsystem có restart riêng được không?
+- Provider name có nên xuất hiện trong UI error không?
+- Error deduplication window là bao lâu?
+
+---
+
+## 78. Related Documents
+
+| Document | Relationship |
+|---|---|
+| `PIPELINE_RUNTIME.md` | Terminal outcome và authority |
+| `RUNTIME_COMPONENTS.md` | Error ownership theo component |
+| `RETRY_POLICY.md` | Retry strategy |
+| `CANCELLATION.md` | Canceled, stale và abandoned |
+| `SCHEDULER.md` | Admission after recovery |
+| `WORK_QUEUE.md` | Queued removal và dispatch integrity |
+| `MEMORY_MODEL.md` | Artifact and revision state |
+| `RESOURCE_LIFECYCLE.md` | Cleanup ownership |
+| `CACHE_POLICY.md` | Failed-result promotion |
+| `PERFORMANCE_MODEL.md` | Failure and recovery latency |
+| `RUNTIME_OBSERVABILITY.md` | Error logs, metrics and traces |
+| `RUNTIME_CONFIG.md` | Error and recovery configuration |
+| `BOOT_SEQUENCE.md` | Fatal startup/shutdown handling |
+| `../../modules/storage/ERRORS.md` | Persistence-specific error codes |
+| `../../modules/*/ERRORS.md` | Business Module error catalogs |
+
+---
+
+## 79. Completion Criteria
+
+`ERROR_MODEL.md` được xem là đồng bộ khi:
+
+- outcome ownership được trả về `PIPELINE_RUNTIME.md`;
+- RuntimeError tách khỏi AttemptCompletion và accepted outcome;
+- taxonomy không còn hard-code OCR/Layout pipeline;
+- `Stage` được thay bằng OwnerModule, BusinessStageId, WorkType và Operation;
+- RetryHint không còn là Retry decision;
+- scope chuẩn có Attempt, WorkItem, Revision, Session, Provider, Runtime Component và Application;
+- module-specific catalog được đẩy về module;
+- Storage persistence được phản ánh là capability hiện hữu;
+- WorkItem/Revision state không bị định nghĩa lại;
+- warnings không tạo outcome mới;
+- privacy, deduplication và error storm được định nghĩa;
+- fatal policy và ownership rõ ràng.
+
+---
+
+## 80. Summary
+
+CRAI Runtime Error Model chuẩn hóa ý nghĩa của failure:
 
 ```text
-RETRY_POLICY.md
-```
-
-It should define:
-
-- retry eligibility
-- attempt identity
-- maximum attempts
-- immediate and delayed retry
-- exponential backoff
-- jitter
-- retry-after support
-- provider fallback
-- retry budgets
-- current-revision validation
-- cancellation interaction
-- timeout interaction
-- resource cleanup between attempts
-- user-triggered retry
-- retry observability
-- retry-storm protection
-
----
-
-## 104. Summary
-
-CRAI treats runtime completion as an explicit outcome:
-
-```text
-SUCCEEDED
-FAILED
-CANCELED
-STALE
-ABANDONED
-```
-
-Errors are normalized through:
-
-```text
-Detection
-    ↓
-Classification
-    ↓
-Scope Validation
-    ↓
-Relevance Validation
-    ↓
-Recovery Decision
-    ↓
-User-Safe Presentation
-    ↓
+Failure detected
+        ↓
+RuntimeError normalized
+        ↓
+Runtime Control validates relevance
+        ↓
+Recovery decision
+        ↓
+User-safe mapping
+        ↓
 Observability
 ```
 
-The most important distinction is:
+Ranh giới cốt lõi:
 
 ```text
-Technical failure
-    ≠
-Cancellation
-    ≠
-Obsolete result
+Outcome says what finally happened.
+
+RuntimeError explains why execution failed.
+
+Retry Policy decides whether another Attempt is useful.
+
+Runtime Control decides whether the error still matters.
 ```
-
-This distinction allows CRAI to:
-
-- avoid false error messages during rapid scrolling
-- prevent stale provider failures from disturbing current reading
-- retry only meaningful work
-- preserve clean runtime metrics
-- recover providers independently
-- keep application failures isolated to the smallest valid scope

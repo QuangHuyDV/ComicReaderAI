@@ -1,1132 +1,919 @@
+# runtime/CANCELLATION.md
+
 # Runtime Cancellation
 
 > Project: CRAI  
-> Version: 0.1  
+> Version: 1.0  
 > Status: Architecture Draft
 
 ---
 
 ## 1. Purpose
 
-This document defines how CRAI stops queued, running, delayed, retried, and externally delegated work.
+Tài liệu này định nghĩa cách CRAI Runtime thu hồi authority, dừng queued work, yêu cầu running execution dừng an toàn, xử lý provider không thể hủy, và ngăn late result ảnh hưởng current revision.
 
-Cancellation is a core runtime capability.
+Cancellation là một runtime control capability.
 
-It exists to ensure that obsolete or interrupted work does not:
-
-- waste CPU, GPU, memory, or network resources
-- delay newer user-visible work
-- update the UI with stale data
-- remain alive after its session or revision ends
-- leak provider requests or runtime resources
-
-This document defines cancellation behavior, ownership, scope, propagation, cleanup, and result validation.
-
----
-
-## 2. Scope
-
-This document covers:
-
-- cancellation scopes
-- cancellation propagation
-- cancellation token hierarchy
-- queued-work cancellation
-- running-work cancellation
-- provider-request cancellation
-- cancellation checkpoints
-- cancellation deadlines
-- cleanup ownership
-- stale-result rejection
-- cancellation events
-- cancellation reason codes
-- cancellation metrics
-- MVP cancellation policy
-
-This document does not define:
-
-- scheduler priority
-- queue ordering
-- cache invalidation policy
-- memory-retention policy
-- provider-specific SDK behavior
-- operating-system thread termination
-
-Those concerns belong to related runtime or provider documents.
-
----
-
-## 3. Cancellation Goals
-
-The cancellation system must satisfy the following goals:
-
-- stop obsolete work as early as possible
-- avoid unsafe hard termination
-- propagate cancellation predictably
-- keep cancellation bounded in time
-- protect the active revision
-- prevent stale commits
-- release owned resources
-- remain observable
-- remain testable
-- work even when external providers cannot be interrupted
-
----
-
-## 4. Cancellation Philosophy
-
-CRAI uses cooperative cancellation.
-
-A cancellation request means:
-
-> The runtime no longer wants this work to continue.
-
-It does not always mean:
-
-> The work has already stopped.
-
-Cancellation therefore has two distinct concepts:
+Mục tiêu của cancellation không chỉ là “dừng công việc”, mà trước hết là:
 
 ```text
-Cancellation Requested
-```
-
-and:
-
-```text
-Cancellation Completed
-```
-
-A worker may need time to:
-
-- reach a safe checkpoint
-- stop a provider request
-- release temporary buffers
-- return execution capacity
-- emit a final cancellation result
-
----
-
-## 5. Three-Layer Protection Model
-
-CRAI uses three layers of cancellation protection.
-
-### Layer 1 — Prevent Execution
-
-If work has not started yet:
-
-```text
-Remove from queue
-or
-Mark invalid before dequeue
-```
-
-This is the cheapest form of cancellation.
-
-### Layer 2 — Stop Execution Cooperatively
-
-If work is already running:
-
-```text
-Request cancellation
-    ↓
-Worker reaches cancellation checkpoint
-    ↓
-Worker exits safely
-```
-
-### Layer 3 — Reject Stale Result
-
-If work cannot be stopped:
-
-```text
-Work finishes
-    ↓
-Result reaches commit boundary
-    ↓
-Revision validity check fails
-    ↓
-Result discarded
-```
-
-The third layer is mandatory even when the first two layers exist.
-
----
-
-## 6. Cancellation Terminology
-
-| Term | Meaning |
-|---|---|
-| `Cancellation Request` | A signal that work should stop |
-| `Cancellation Token` | Read-only cancellation state available to workers |
-| `Cancellation Source` | Owner capable of requesting cancellation |
-| `Cancellation Scope` | Runtime boundary affected by cancellation |
-| `Cancellation Checkpoint` | Safe location where a worker checks cancellation |
-| `Cancellation Completion` | Confirmation that work has stopped and cleanup completed |
-| `Stale Result` | Result produced for an invalid or obsolete revision |
-| `Hard Termination` | Forceful thread or process stop without cooperative cleanup |
-
----
-
-## 7. Cancellation Scopes
-
-Cancellation may target different runtime scopes.
-
-### 7.1 Application Scope
-
-Stops all runtime activity.
-
-Examples:
-
-- application shutdown
-- fatal runtime failure
-- forced restart
-
-### 7.2 Scheduler Scope
-
-Stops admission of new work and requests cancellation of active runtime work.
-
-Examples:
-
-- runtime pause
-- scheduler restart
-- critical resource pressure
-
-### 7.3 Session Scope
-
-Stops all work belonging to one reading session.
-
-Examples:
-
-- user closes the session
-- user stops translation
-- session becomes invalid
-
-### 7.4 Revision Scope
-
-Stops all work belonging to one source revision.
-
-Examples:
-
-- user scrolls
-- a newer stable frame becomes current
-- capture region content changes
-
-### 7.5 Pipeline Scope
-
-Stops the remaining stages of one revision pipeline.
-
-Examples:
-
-- OCR produces no usable text
-- fatal layout failure
-- user cancels only one processing attempt
-
-### 7.6 Stage Scope
-
-Stops one specific stage.
-
-Examples:
-
-- translation provider switched
-- OCR retry abandoned
-- optional refinement canceled
-
-### 7.7 Work Item Scope
-
-Stops one exact queue item or execution attempt.
-
-### 7.8 Provider Request Scope
-
-Stops one external or local provider operation where supported.
-
----
-
-## 8. Cancellation Hierarchy
-
-Cancellation scopes form a parent-child hierarchy.
-
-```text
-Application
-    ↓
-Scheduler
-    ↓
-Session
-    ↓
-Revision
-    ↓
-Pipeline
-    ↓
-Stage
-    ↓
-Work Item
-    ↓
-Provider Request
-```
-
-When a parent scope is canceled, all child scopes are considered canceled.
-
-Examples:
-
-```text
-Session canceled
-    ↓
-All revisions canceled
-    ↓
-All pipelines canceled
-    ↓
-All active and queued work canceled
-```
-
-Canceling a child scope does not automatically cancel its parent.
-
-Example:
-
-```text
-Translation Work Item canceled
-```
-
-does not necessarily cancel:
-
-```text
-Entire Session
+Revoke authority immediately.
+Stop execution when safe.
+Reject late results unconditionally.
+Drain resources correctly.
 ```
 
 ---
 
-## 9. Cancellation Token Model
-
-Every cancelable operation receives a token derived from its owning scope.
-
-Conceptually:
+## 2. Architectural Position
 
 ```text
-ApplicationToken
-    ↓
-SessionToken
-    ↓
-RevisionToken
-    ↓
-PipelineToken
-    ↓
-WorkItemToken
+Cancellation Request
+        ↓
+Runtime Control
+        ↓
+Authority Revoked
+        ↓
+Queued Work Removal
+        ↓
+Running Attempt Signaled
+        ↓
+Provider Abort / Cooperative Stop / Abandon
+        ↓
+Resource Drain
+        ↓
+Cancellation Outcome Accepted
 ```
 
-A child token is canceled when:
+Runtime Control là source of truth cho cancellation authority.
 
-- its own source is canceled
-- any parent source is canceled
-
-A token should expose at least:
-
-```text
-IsCancellationRequested
-Reason
-RequestedAt
-Scope
-```
-
-Implementation-specific APIs may expose additional helpers.
+Scheduler, Work Queue, Worker và Provider Adapter chỉ thực hiện phần trách nhiệm tương ứng.
 
 ---
 
-## 10. Linked Cancellation Tokens
+## 3. Core Principles
 
-A WorkItem may depend on more than one cancellation condition.
-
-Example:
-
-```text
-WorkItem canceled when:
-- session closes
-- revision becomes obsolete
-- scheduler shuts down
-- deadline expires
-```
-
-These conditions may be represented as a linked token.
-
-Conceptually:
-
-```text
-LinkedToken =
-    SessionToken
-    OR RevisionToken
-    OR SchedulerToken
-    OR DeadlineToken
-```
-
-The first cancellation source to trigger should define the primary reason.
-
-Additional reasons may be preserved as metadata.
+1. Cancellation bắt đầu bằng authority revocation.
+2. Logical cancellation xảy ra trước physical stop.
+3. Physical execution có thể dừng chậm hoặc không dừng được.
+4. Late Completion luôn phải qua authority validation.
+5. Cancellation không mặc định là failure.
+6. Cancellation không tự tạo retry.
+7. Hard thread termination bị cấm trong primary process.
+8. Cleanup ownership phải explicit.
+9. Cancellation wait phải bounded.
+10. Provider capacity thực tế phải được phản ánh trung thực.
+11. Canceled work không được tạo downstream work.
+12. Cancellation events không chứa user content.
 
 ---
 
-## 11. Cancellation Reasons
+## 4. Cancellation Goals
 
-Every cancellation request must include a reason code.
+Cancellation phải:
 
-Suggested reason codes:
+- loại obsolete work sớm;
+- bảo vệ current revision;
+- giải phóng queue capacity;
+- giảm wasted CPU, GPU, memory và network;
+- không làm block UI;
+- không làm provider request sống vô hạn không theo dõi;
+- không revive work đã mất authority;
+- không làm sai terminal outcome;
+- hỗ trợ deterministic testing;
+- hỗ trợ shutdown an toàn.
+
+---
+
+## 5. Canonical Cancellation Scopes
+
+Runtime v2 sử dụng các scope chuẩn:
+
+```text
+APPLICATION
+SESSION
+REVISION
+WORK_ITEM
+ATTEMPT
+PROVIDER_REQUEST
+```
+
+### 5.1 Application Scope
+
+Thu hồi authority toàn Runtime.
+
+Ví dụ:
+
+- application shutdown;
+- fatal invariant failure;
+- controlled restart.
+
+### 5.2 Session Scope
+
+Thu hồi authority của một Reading Session.
+
+Ví dụ:
+
+- người dùng đóng session;
+- session trở thành invalid;
+- session stop command.
+
+### 5.3 Revision Scope
+
+Thu hồi authority của một Revision.
+
+Ví dụ:
+
+- newer revision xuất hiện;
+- source identity thay đổi;
+- BusinessExecutionPlan mới thay thế plan cũ.
+
+### 5.4 WorkItem Scope
+
+Thu hồi authority của một logical WorkItem.
+
+Ví dụ:
+
+- optional work không còn cần thiết;
+- business dependency invalidated.
+
+### 5.5 Attempt Scope
+
+Thu hồi authority của một physical execution attempt.
+
+Ví dụ:
+
+- provider switch;
+- timeout;
+- attempt-specific preemption.
+
+### 5.6 Provider Request Scope
+
+Yêu cầu dừng một local hoặc remote provider operation.
+
+---
+
+## 6. Scope Hierarchy
+
+```text
+APPLICATION
+    ↓
+SESSION
+    ↓
+REVISION
+    ↓
+WORK_ITEM
+    ↓
+ATTEMPT
+    ↓
+PROVIDER_REQUEST
+```
+
+Parent cancellation ảnh hưởng toàn bộ child scope.
+
+Child cancellation không tự động cancel parent.
+
+Ví dụ:
+
+```text
+Cancel ATTEMPT
+    ≠
+Cancel REVISION
+```
+
+Escalation phải là policy decision rõ ràng của Runtime Control.
+
+---
+
+## 7. Removed Legacy Scopes
+
+Các scope sau không còn là cancellation scope chuẩn:
+
+```text
+SCHEDULER
+PIPELINE
+STAGE
+```
+
+Lý do:
+
+- Scheduler có lifecycle riêng, không phải execution authority scope.
+- Pipeline đã được biểu diễn bằng Revision và BusinessExecutionPlan.
+- Runtime không còn sử dụng stage như execution identity chuẩn.
+
+Nếu một Business Stage bị thay thế, Runtime Control revoke WorkItem hoặc Attempt liên quan.
+
+---
+
+## 8. Cancellation Context
+
+Architecture sử dụng khái niệm tổng quát:
+
+```text
+CancellationContext
+├── Scope
+├── ScopeId
+├── ParentContextRef
+├── IsCancellationRequested
+├── ReasonCode
+├── RequestedAt
+├── RequestedBy
+├── GraceDeadline
+└── Metadata
+```
+
+`CancellationToken` có thể là implementation cụ thể, nhưng không phải architectural requirement.
+
+---
+
+## 9. Cancellation Reference
+
+WorkItem và Attempt chỉ mang lightweight reference:
+
+```text
+CancellationScope
+CancellationContextRef
+```
+
+Không được nhúng mutable cancellation implementation hoặc provider handle trực tiếp vào public WorkItem contract.
+
+---
+
+## 10. Cancellation Reasons
+
+Reason code phải stable.
+
+Ví dụ:
 
 ```text
 APPLICATION_SHUTDOWN
-SCHEDULER_STOPPED
 SESSION_CLOSED
-USER_STOPPED_TRANSLATION
-CAPTURE_REGION_CHANGED
+USER_STOPPED
 NEWER_REVISION_AVAILABLE
-REVISION_EXPIRED
-PIPELINE_FAILED
-STAGE_REPLACED
+SOURCE_CHANGED
+WORK_SUPERSEDED
+ATTEMPT_REPLACED
 PROVIDER_SWITCHED
 PROVIDER_TIMEOUT
 DEADLINE_EXCEEDED
 RESOURCE_PRESSURE
-WORK_SUPERSEDED
-RETRY_ABORTED
+DEPENDENCY_INVALIDATED
+RUNTIME_STOPPING
 MANUAL_CANCEL
-DEPENDENCY_CANCELED
 ```
 
-Reason codes must be stable enough for:
+Reason code phục vụ:
 
-- metrics
-- tests
-- diagnostics
-- UI messages
-- future policy tuning
+- metrics;
+- tests;
+- diagnostics;
+- UI mapping;
+- policy analysis.
 
 ---
 
-## 12. Cancellation States
+## 11. Cancellation Progression
 
-A cancelable WorkItem may move through these states:
+Cancellation progression không định nghĩa lại WorkItem lifecycle.
 
 ```text
 ACTIVE
-    ↓
-CANCEL_REQUESTED
-    ↓
-CANCELING
-    ↓
-CANCELED
+  ↓
+AUTHORITY_REVOKED
+  ↓
+SIGNALING
+  ↓
+DRAINING
+  ↓
+ACKNOWLEDGED
 ```
 
-Alternative terminal outcomes:
+Hoặc:
 
 ```text
-COMPLETED
-FAILED
-DROPPED
-EXPIRED
+DRAINING
+  ↓
+ABANDONED
 ```
 
-A WorkItem must never return from a terminal state to an active state.
+Canonical WorkItem terminal outcome vẫn được định nghĩa tại `PIPELINE_RUNTIME.md`.
 
 ---
 
-## 13. Difference Between Terminal Outcomes
+## 12. Authority Revocation
 
-### Canceled
+Đây là bước bắt buộc đầu tiên.
 
-Work had been accepted or started, then was explicitly stopped.
+Khi cancellation được chấp nhận, Runtime Control phải:
 
-### Dropped
+- revoke commit authority;
+- revoke downstream scheduling authority;
+- đánh dấu WorkItem/Attempt không còn eligible;
+- ngăn accepted Artifact publication;
+- ngăn UI commit;
+- ngăn canceled scope được revive.
 
-Work was discarded before execution because it was no longer valuable.
-
-### Expired
-
-Work exceeded its validity window or deadline.
-
-### Failed
-
-Work could not complete because of an error.
-
-### Completed
-
-Work successfully produced a valid output.
-
-These outcomes should not be collapsed into one generic status.
+Authority revocation phải xảy ra ngay cả khi physical cancellation chưa bắt đầu.
 
 ---
 
-## 14. Queued-Work Cancellation
+## 13. Three-Layer Protection
 
-Queued work should be canceled by removal or invalidation.
+### Layer 1 — Prevent Execution
 
-Possible implementation strategies:
+Nếu work chưa chạy:
 
-### Physical Removal
+```text
+Authority revoked
+    ↓
+Queued item removed or invalidated
+```
 
-Remove the WorkItem from the queue immediately.
+### Layer 2 — Stop Execution Cooperatively
 
-Advantages:
+Nếu Attempt đang chạy:
 
-- frees queue capacity
-- reduces future scans
+```text
+Cancellation signaled
+    ↓
+Worker reaches checkpoint
+    ↓
+Execution stops safely
+```
 
-Disadvantages:
+### Layer 3 — Reject Late Result
 
-- may require indexed removal
-- may complicate concurrent queue access
+Nếu không thể dừng:
 
-### Logical Invalidation
+```text
+Attempt completes late
+    ↓
+Authority validation fails
+    ↓
+Result rejected
+```
 
-Mark the WorkItem or its scope as canceled.
+Layer 3 luôn bắt buộc.
 
-The queue skips it during dequeue.
+---
 
-Advantages:
+## 14. Queued Work Removal
 
-- simpler queue implementation
-- suitable for lock-free or channel-based queues
+Luồng chuẩn:
 
-Disadvantages:
+```text
+Runtime Control revokes authority
+        ↓
+Work Queue receives removal instruction
+        ↓
+Queued item removed or logically invalidated
+```
 
-- stale entries remain until observed
-- queue metrics must distinguish active and invalid items
+Queue không tự quyết định terminal outcome.
 
-For the MVP, logical invalidation is acceptable if queues remain small and bounded.
+Queue có thể sử dụng:
+
+- physical removal;
+- logical invalidation.
+
+MVP có thể dùng logical invalidation nếu queue nhỏ và bounded.
 
 ---
 
 ## 15. Dequeue Validation
 
-Every WorkItem must be validated immediately before execution.
+Ngay trước dispatch phải xác nhận:
 
-Checks include:
+- session active;
+- revision eligible;
+- WorkItem chưa bị revoke;
+- Attempt còn hợp lệ;
+- dependency còn ready;
+- deadline còn hợp lệ;
+- runtime chưa stopping.
 
-- cancellation requested
-- session active
-- revision current
-- input available
-- deadline valid
-- attempt still permitted
-
-Example:
+Nếu invalid:
 
 ```text
-Dequeue WorkItem
-    ↓
-Validate cancellation
-    ↓
-Invalid
-    ↓
-Mark Canceled or Dropped
-    ↓
-Do not assign worker
+Do not dispatch.
+Notify Runtime Control.
 ```
 
-This validation protects against race conditions between enqueue and execution.
+Queue hoặc Scheduler không tự đánh dấu WorkItem `CANCELED`.
 
 ---
 
-## 16. Running-Work Cancellation
-
-Running work uses cooperative cancellation.
-
-The runtime performs:
+## 16. Running Attempt Cancellation
 
 ```text
-Request cancellation
+Authority revoked
     ↓
-Worker observes token
+Cancellation signal delivered
+    ↓
+Worker observes context
     ↓
 Worker stops at safe checkpoint
     ↓
-Worker releases owned resources
+Temporary resources released
     ↓
-Worker reports Canceled
+Completion reported
 ```
 
-Workers must not ignore cancellation indefinitely.
+Worker phải phản hồi cancellation trong bounded time khi implementation cho phép.
 
 ---
 
-## 17. Cancellation Checkpoints
+## 17. Generic Cancellation Checkpoints
 
-A cancellation checkpoint is a safe place where a worker can stop.
+Worker nên kiểm tra cancellation:
 
-Workers should check cancellation:
+- trước expensive execution;
+- trước provider invocation;
+- sau provider invocation;
+- giữa bounded batches;
+- trước large allocation;
+- trước candidate Artifact creation;
+- trước Completion;
+- trước observable side effect;
+- trước UI dispatch;
+- ngay trước UI commit.
 
-- before expensive work begins
-- before provider calls
-- after provider calls
-- between processing batches
-- before allocating large buffers
-- before writing stage output
-- before emitting completion
-- before scheduling the next stage
-
-Checkpoint frequency should reflect task cost.
+Checkpoint chi tiết thuộc Business Module hoặc Provider Adapter tương ứng.
 
 ---
 
-## 18. OCR Cancellation Checkpoints
+## 18. Business Module Boundary
 
-Suggested OCR checkpoints:
+Runtime không hard-code checkpoint theo OCR, Layout, Translation hoặc Presentation.
+
+Business Module phải khai báo hoặc triển khai checkpoint phù hợp với:
+
+- cost;
+- batch boundary;
+- provider behavior;
+- resource ownership;
+- output atomicity.
+
+Runtime chỉ yêu cầu cooperative cancellation contract.
+
+---
+
+## 19. Provider Cancellation Categories
+
+### 19.1 Fully Cancelable
+
+Provider hỗ trợ abort ngay.
 
 ```text
-Before image preprocessing
-Before model invocation
-Between detected regions
-After OCR provider returns
-Before storing OCR result
-Before enqueueing layout work
-```
-
-For local OCR processing, cancellation may also be checked between batches or tiles.
-
-If the OCR library exposes no cancellation API, CRAI must still reject the result after completion.
-
----
-
-## 19. Layout Cancellation Checkpoints
-
-Suggested layout checkpoints:
-
-```text
-Before region grouping
-Between page regions
-Before reading-order resolution
-Before storing layout result
-Before building translation units
-```
-
-Layout work is usually shorter than OCR or translation, so cancellation frequency may be lower.
-
----
-
-## 20. Translation Cancellation Checkpoints
-
-Suggested translation checkpoints:
-
-```text
-Before cache lookup
-Before provider request
-Between translation-unit batches
-After provider response
-Before glossary post-processing
-Before storing translation result
-Before presentation scheduling
-```
-
-A multi-unit translation request should support cancellation between batches when practical.
-
----
-
-## 21. Presentation Cancellation Checkpoints
-
-Suggested presentation checkpoints:
-
-```text
-Before building presentation model
-Before UI-thread dispatch
-Immediately before UI commit
-```
-
-The final validation before UI commit is mandatory.
-
----
-
-## 22. Provider Request Cancellation
-
-Provider operations fall into three categories.
-
-### 22.1 Fully Cancelable
-
-The provider supports request cancellation.
-
-Examples:
-
-- local task with cancellation token
-- HTTP request with abort controller
-- process with supported interrupt API
-
-Behavior:
-
-```text
-Request cancellation
+Signal cancellation
     ↓
 Abort provider request
     ↓
-Wait for provider acknowledgment
+Provider acknowledges
     ↓
-Release provider slot
+Capacity released
 ```
 
-### 22.2 Cooperatively Cancelable
+### 19.2 Cooperatively Cancelable
 
-The provider supports cancellation only at certain boundaries.
-
-Behavior:
+Provider chỉ dừng tại checkpoint.
 
 ```text
-Set cancellation flag
+Set cancellation state
     ↓
-Provider stops at next checkpoint
+Provider reaches checkpoint
+    ↓
+Stops safely
 ```
 
-### 22.3 Non-Cancelable
+### 19.3 Non-Cancelable
 
-The provider call cannot be safely interrupted.
-
-Behavior:
+Provider không thể dừng an toàn.
 
 ```text
-Mark request abandoned
+Authority revoked
     ↓
-Do not block newer scheduling where avoidable
+Request marked abandoned
     ↓
-Wait for late completion
+Runtime stops waiting
     ↓
-Discard result
+Physical request may continue
+    ↓
+Late result rejected
 ```
 
-Non-cancelable requests must be bounded by timeout and provider concurrency limits.
+---
+
+## 20. Abandoned Execution
+
+`ABANDONED` nghĩa là:
+
+> Runtime không còn chờ execution, nhưng chưa xác nhận physical work đã kết thúc.
+
+Abandoned execution:
+
+- không có commit authority;
+- không được schedule downstream work;
+- vẫn phải được theo dõi;
+- vẫn có thể giữ provider capacity;
+- vẫn cần cleanup khi late completion đến;
+- không được giả định đã giải phóng billing hoặc resource.
 
 ---
 
-## 23. Abandoned Provider Requests
+## 21. Provider Capacity Truthfulness
 
-An abandoned provider request is still executing externally but no longer has user value.
+Nếu provider request vẫn chạy:
 
-It must:
+- provider slot vẫn được tính occupied khi thực tế còn occupied;
+- concurrency không được tăng giả tạo;
+- billing risk vẫn được ghi nhận;
+- late response vẫn phải được consume hoặc discard an toàn.
 
-- lose commit permission
-- lose permission to schedule downstream work
-- remain tracked until completion or timeout
-- not count as active user-visible work
-- continue counting against provider capacity if the provider still holds resources
-
-The runtime must not pretend that an external request was freed when it was not.
+Runtime không được coi logical detach là physical release.
 
 ---
 
-## 24. Provider Billing Considerations
+## 22. Cancellation Grace Period
 
-Canceling a local runtime operation does not guarantee that a remote provider stops billing.
-
-Provider documentation may define whether:
-
-- request cancellation is supported
-- partial requests are billed
-- completed late responses are billed
-- timeout releases capacity
-
-CRAI must not assume cancellation eliminates provider cost.
-
-Detailed provider behavior belongs in provider-specific documentation.
-
----
-
-## 25. Cancellation Timeout
-
-Cancellation must not wait forever.
-
-Each stage may define a cancellation grace period.
-
-Suggested conceptual behavior:
+Cancellation wait phải bounded.
 
 ```text
 Cancellation requested
-    ↓
+        ↓
 Wait for cooperative stop
-    ↓
-Grace period exceeded
-    ↓
-Mark task abandoned
-    ↓
-Detach commit rights
-    ↓
-Continue cleanup asynchronously
+        ↓
+Grace deadline exceeded
+        ↓
+Mark Attempt ABANDONED
+        ↓
+Runtime stops waiting
+        ↓
+Continue asynchronous tracking
 ```
 
-The exact timeout depends on:
-
-- local or remote execution
-- stage cost
-- cleanup requirements
-- provider capability
+Grace period cụ thể thuộc `RUNTIME_CONFIG.md`.
 
 ---
 
-## 26. Hard Termination Policy
+## 23. Hard Termination Policy
 
-Hard termination should not be used inside the primary application process.
+Hard termination bị cấm trong primary process.
 
-Forbidden by default:
+Không được:
 
-- forcibly killing a thread
-- interrupting arbitrary memory operations
-- disposing shared state while a worker still uses it
+- kill arbitrary thread;
+- dispose shared memory đang được dùng;
+- interrupt unmanaged operation không có safety guarantee;
+- terminate worker mà không có ownership cleanup.
 
-Hard termination may only be considered when work executes in an isolated child process.
-
-Example:
-
-```text
-OCR Worker Process
-    ↓
-Cancellation timeout exceeded
-    ↓
-Terminate process
-    ↓
-Restart clean worker process
-```
-
-This requires explicit process-isolation design and is not required for the MVP.
+Hard termination chỉ có thể xem xét trong isolated child process với process-restart policy rõ ràng.
 
 ---
 
-## 27. Commit Permission
+## 24. Completion After Cancellation
 
-Every running task has conditional permission to commit its result.
+Worker vẫn phải gửi Completion khi có thể.
 
-Completion alone does not grant commit permission.
-
-Before storing or presenting a result, the runtime validates:
+Completion có thể là:
 
 ```text
-Session active?
-Revision current?
-Pipeline valid?
-Cancellation not requested?
-Output belongs to expected attempt?
+AttemptCanceled
+AttemptAbandoned
+AttemptCompletedLate
+AttemptFailedDuringCancellation
 ```
 
-Only then may the result advance.
+Runtime Control quyết định accepted terminal outcome.
 
 ---
 
-## 28. Stale-Result Rejection
+## 25. Authority Validation
 
-Stale-result rejection is the final correctness boundary.
+Mọi Completion sau cancellation phải kiểm tra:
 
-Conceptually:
+- SessionId;
+- RevisionId;
+- WorkItemId;
+- AttemptId;
+- current authority;
+- cancellation state;
+- duplicate state;
+- accepted outcome state;
+- Artifact integrity.
 
-```text
-Result arrives
-    ↓
-Compare Result.SessionId
-    ↓
-Compare Result.RevisionId
-    ↓
-Compare Result.AttemptId
-    ↓
-Check cancellation state
-    ↓
-Valid?
-```
-
-If no:
+Possible result:
 
 ```text
-Discard result
-Emit stale-result event
-Release result resources
-```
-
-A stale result must never:
-
-- update the UI
-- overwrite newer cache entries incorrectly
-- enqueue downstream work
-- revive a canceled pipeline
-
----
-
-## 29. Attempt Validation
-
-Retries may produce multiple attempts for the same stage.
-
-Example:
-
-```text
-Revision 60
-Translation Attempt 1
-Translation Attempt 2
-```
-
-If Attempt 2 becomes authoritative, a late result from Attempt 1 must be rejected.
-
-Commit validation should therefore include:
-
-```text
-ProcessingAttemptId
-```
-
-not only:
-
-```text
-RevisionId
+REJECT_CANCELED
+REJECT_STALE
+REJECT_DUPLICATE
+REJECT_INVALID_STATE
 ```
 
 ---
 
-## 30. Cancellation and Cache
+## 26. Cancellation vs Stale
 
-Cancellation does not automatically mean the produced result is unusable for cache.
+Cancellation và stale khác nhau.
 
-A completed obsolete result may be cacheable only when:
+### Canceled
 
-- result is deterministic enough
-- cache key fully describes its inputs
-- result contains no partial or corrupted data
-- provider completion was successful
-- retention policy permits it
-- storing it does not delay current work
+Authority bị revoke bởi explicit control decision.
 
-Default MVP rule:
+### Stale
 
-> Do not cache results from canceled or obsolete interactive work.
+Result không còn phù hợp với current runtime state.
 
-This simplifies correctness.
+Một Attempt có thể bị cancellation request và completion của nó cuối cùng bị phân loại `STALE` hoặc `CANCELED` tùy Runtime Control acceptance rules.
 
-The policy may be relaxed later after profiling.
+Canonical terminal semantics thuộc `PIPELINE_RUNTIME.md` và `ERROR_MODEL.md`.
+
+---
+
+## 27. Cancellation vs Failure
+
+Cancellation không phải error mặc định.
+
+```text
+Technical Failure
+    ≠
+Cancellation
+    ≠
+Stale Result
+    ≠
+Abandoned Execution
+```
+
+Cleanup failure có thể tạo diagnostics error nhưng không phục hồi authority.
+
+---
+
+## 28. Cancellation and Retry
+
+Cancellation không tự tạo retry.
+
+Luồng chuẩn:
+
+```text
+Attempt canceled or failed
+        ↓
+Runtime Control evaluates relevance
+        ↓
+Retry Policy evaluates
+        ↓
+New AttemptId created
+        ↓
+Scheduler admission
+```
+
+Quy tắc:
+
+- same WorkItemId;
+- new AttemptId;
+- cancellation vì newer revision thì không retry;
+- Attempt cũ không được resume;
+- Provider switch có thể tạo Attempt mới;
+- retry budget không thuộc Cancellation component.
+
+---
+
+## 29. Queued Retry Work
+
+Nếu delayed retry đang pending và scope bị canceled:
+
+```text
+Authority revoked
+    ↓
+Delayed retry canceled
+    ↓
+No new Attempt admitted
+```
+
+Cancellation phải ngăn delayed retry hồi sinh WorkItem đã mất authority.
+
+---
+
+## 30. Resource Drain
+
+Sau authority revocation:
+
+```text
+Stop new work
+    ↓
+Cancel child operations
+    ↓
+Release temporary resources
+    ↓
+Release or detach provider resources
+    ↓
+Release Artifact Leases
+    ↓
+Report completion
+```
+
+Logical cancellation có thể hoàn tất trước physical drain.
 
 ---
 
 ## 31. Cleanup Ownership
 
-The component that creates or acquires a resource owns cleanup unless ownership is explicitly transferred.
-
-Examples:
-
-| Resource | Default cleanup owner |
+| Resource | Default owner |
 |---|---|
-| Image preprocessing buffer | Image-processing worker |
-| OCR provider request | OCR provider adapter |
-| Translation network request | Translation provider adapter |
-| Temporary layout graph | Layout worker |
-| WorkItem cancellation source | Pipeline coordinator |
-| Revision-scoped data | Revision store |
-| UI dispatch handle | Presentation coordinator |
+| Attempt temporary resource | Worker Execution |
+| Provider request | Provider Adapter |
+| Candidate Artifact | Producer cho đến ownership transfer |
+| Accepted Artifact | Artifact Store |
+| Artifact Lease | Lease holder |
+| Queued position | Work Queue |
+| Revision metadata | Revision Store |
+| Physical backing resource | Resource Manager |
+| UI dispatch handle | Presentation boundary |
 
-Cancellation must not create ambiguous cleanup ownership.
-
----
-
-## 32. Cleanup Sequence
-
-A worker handling cancellation should generally:
-
-```text
-Stop producing new work
-    ↓
-Cancel child operations
-    ↓
-Release temporary local resources
-    ↓
-Return or detach provider resources
-    ↓
-Avoid committing output
-    ↓
-Report cancellation outcome
-```
-
-Cleanup must be idempotent where practical.
-
-Repeated cleanup calls must not corrupt state.
+Ownership transfer phải explicit.
 
 ---
 
-## 33. Cancellation Propagation
+## 32. Cleanup Rules
 
-Cancellation should propagate downward through owned operations.
+Cleanup phải:
 
-Example:
-
-```text
-Revision canceled
-    ↓
-Pipeline canceled
-    ↓
-OCR canceled
-    ↓
-Translation canceled
-    ↓
-Presentation canceled
-```
-
-Cancellation should not propagate upward automatically.
-
-Example:
-
-```text
-One translation unit canceled
-```
-
-does not automatically cancel:
-
-```text
-Entire application
-```
-
-Escalation requires an explicit policy decision.
+- idempotent khi thực tế cho phép;
+- không revive canceled work;
+- không phục hồi commit authority;
+- không dispose resource còn lease;
+- observable khi thất bại;
+- bounded theo retry/cleanup policy;
+- không block UI lâu dài.
 
 ---
 
-## 34. Child Task Registration
+## 33. Child Operation Registration
 
-A parent operation must register child operations before or immediately after starting them.
-
-This prevents a race where:
+Child operation phải register trước khi execution bắt đầu.
 
 ```text
-Parent canceled
+Create child context
     ↓
-Child starts without inheriting cancellation
+Link to parent scope
+    ↓
+Register ownership
+    ↓
+Start child operation
 ```
 
-Correct behavior:
+Điều này ngăn child operation thoát khỏi parent cancellation.
+
+---
+
+## 34. Downward Propagation
+
+Cancellation propagates xuống child scope.
 
 ```text
-Create child token from parent
+SESSION
     ↓
-Register child
+REVISION
     ↓
-Start child
+WORK_ITEM
+    ↓
+ATTEMPT
+    ↓
+PROVIDER_REQUEST
 ```
+
+Propagation lên parent không tự động.
 
 ---
 
 ## 35. Cancellation Race Conditions
 
-Common races include:
-
-### Completion and Cancellation at the Same Time
-
-The result may complete just as cancellation is requested.
+### Completion and Cancellation Simultaneously
 
 Resolution:
 
 ```text
-Commit validation decides authority.
+Authority validation decides.
 ```
 
-### New Revision During Queue Dequeue
-
-The WorkItem may become stale after dequeue but before execution.
+### Revision Changes During Dispatch
 
 Resolution:
 
 ```text
-Validate immediately before worker assignment.
+Validate immediately before Worker assignment.
 ```
 
-### UI Commit After Revision Change
-
-UI dispatch may already be queued.
+### UI Dispatch Already Queued
 
 Resolution:
 
 ```text
-Validate again on the UI thread before applying.
+Validate again on UI context before commit.
 ```
 
-### Provider Response After Timeout
-
-The provider may return after the runtime marked the request abandoned.
+### Provider Response After Abandonment
 
 Resolution:
 
 ```text
-Discard response and release associated resources.
+Reject result and release late resources.
+```
+
+### Retry Timer Fires During Cancellation
+
+Resolution:
+
+```text
+Check authority before creating or admitting new Attempt.
 ```
 
 ---
 
-## 36. UI Cancellation Behavior
+## 36. UI Boundary
 
-Cancellation should avoid unnecessary visual disruption.
+UI phản ánh logical cancellation ngay.
 
-When an obsolete revision is canceled:
+Khi cancellation được chấp nhận:
 
-- current visible translation may remain until replacement is ready
-- loading indicators should reflect the active revision
-- stale errors should not replace valid newer content
-- user-initiated stop should stop loading feedback promptly
-- UI must not wait for slow provider cleanup before responding
-
-The UI reflects logical cancellation, not necessarily physical provider completion.
+- loading state của scope cũ dừng;
+- current valid content có thể vẫn hiển thị;
+- stale error không thay thế newer content;
+- UI không chờ provider cleanup;
+- UI commit cũ bị authority validation chặn.
 
 ---
 
 ## 37. User-Initiated Cancellation
 
-User actions may request cancellation.
+Luồng:
 
-Examples:
+```text
+User intent changes
+        ↓
+Application updates business intent
+        ↓
+Runtime Control revokes authority
+        ↓
+UI updates promptly
+        ↓
+Physical cancellation and cleanup continue
+```
 
-- stop translation
-- close reader
-- change capture region
-- switch reading mode
-- restart current translation
-- switch provider
+Ví dụ:
 
-User commands should:
-
-1. update session intent immediately
-2. revoke commit permission
-3. request runtime cancellation
-4. update UI promptly
-5. perform cleanup asynchronously where safe
+- stop;
+- close session;
+- change region;
+- switch mode;
+- retranslate;
+- switch provider.
 
 ---
 
 ## 38. Automatic Cancellation
 
-The runtime may cancel work automatically when:
+Runtime có thể tự cancel khi:
 
-- a newer revision becomes current
-- a deadline expires
-- memory pressure becomes critical
-- provider becomes unhealthy
-- retry policy changes
-- session becomes inactive
-- required input is evicted
-- downstream stage becomes impossible
+- newer revision xuất hiện;
+- session inactive;
+- deadline hết;
+- critical resource pressure;
+- provider unhealthy;
+- dependency invalidated;
+- BusinessExecutionPlan replaced;
+- runtime stopping.
 
-Automatic cancellation must include a reason code.
+Automatic cancellation luôn cần reason code.
 
 ---
 
 ## 39. Cancellation Events
 
-Suggested events:
+Conceptual events:
 
 ```text
-cancellation.requested
-cancellation.propagated
-cancellation.acknowledged
-cancellation.completed
-cancellation.timeout
-
-work.cancel_requested
-work.canceled
-work.abandoned
-work.result_rejected
-
-revision.canceled
-pipeline.canceled
-provider_request.cancel_requested
-provider_request.abandoned
+CANCELLATION_REQUESTED
+AUTHORITY_REVOKED
+CANCELLATION_PROPAGATED
+CANCELLATION_ACKNOWLEDGED
+CANCELLATION_TIMED_OUT
+ATTEMPT_ABANDONED
+QUEUED_WORK_REMOVED
+LATE_RESULT_REJECTED
 ```
 
-Final event names must align with `EVENT_BUS.md`.
+Tên cuối phải tuân theo Event Standard.
 
 ---
 
-## 40. Cancellation Event Payload
+## 40. Event Payload
 
-A cancellation event should include:
+Cancellation event có thể chứa:
 
 ```text
 EventId
-Timestamp
+OccurredAt
 Scope
 ScopeId
 SessionId
@@ -1136,418 +923,393 @@ AttemptId
 ReasonCode
 RequestedBy
 RequestedAt
-CompletedAt
-Provider
-Stage
+AcknowledgedAt
+GraceDeadline
+Outcome
 ```
 
-Optional fields should be omitted when not applicable.
+Không chứa:
 
-No raw comic text or image data should be included in cancellation events.
-
----
-
-## 41. Cancellation Metrics
-
-The runtime should track:
-
-- cancellation requests by scope
-- cancellation completion time
-- queued items dropped
-- running tasks canceled
-- tasks abandoned after timeout
-- provider requests successfully aborted
-- provider requests that completed late
-- stale results rejected
-- cleanup failures
-- cancellation reason distribution
-- average cancellation acknowledgment latency
-
-These metrics help identify providers or stages that do not stop efficiently.
+- screenshot;
+- source text;
+- OCR text;
+- translated text;
+- prompt;
+- secret;
+- provider request body.
 
 ---
 
-## 42. Logging Requirements
+## 41. Metrics
 
-Cancellation logs should record:
+Theo dõi:
 
-- scope
-- reason
-- stage
-- revision
-- attempt
-- cancellation latency
-- completion outcome
-
-Logs must avoid:
-
-- source images
-- OCR text
-- translation content
-- provider secrets
-
----
-
-## 43. Error Handling During Cancellation
-
-Cleanup itself may fail.
-
-Examples:
-
-- provider abort throws an error
-- temporary buffer cannot be released immediately
-- child task does not acknowledge cancellation
-- worker becomes unresponsive
-
-Cancellation cleanup failure must:
-
-- not restore commit permission
-- not revive canceled work
-- emit diagnostics
-- escalate resource cleanup when needed
-- preserve active revision correctness
+- cancellation request count theo scope;
+- authority revocation latency;
+- queued removal latency;
+- worker acknowledgment latency;
+- cancellation completion latency;
+- abandoned Attempt count;
+- provider abort success ratio;
+- late Completion count;
+- late result rejection count;
+- cleanup failure count;
+- reason-code distribution;
+- drain duration;
+- provider capacity held after logical cancellation.
 
 ---
 
-## 44. Cancellation and Retry
+## 42. Logging
 
-A canceled attempt must not be retried automatically unless the Scheduler explicitly creates a new WorkItem.
+Log cancellation phải chứa identity và state metadata, không chứa user content.
 
-Examples:
+Nên ghi:
+
+- scope;
+- reason;
+- SessionId;
+- RevisionId;
+- WorkItemId;
+- AttemptId;
+- authority revoked time;
+- acknowledgment time;
+- drain state;
+- terminal outcome.
+
+---
+
+## 43. Cancellation Failure
+
+Cancellation operation có thể thất bại vật lý.
+
+Ví dụ:
+
+- provider abort throws;
+- worker không acknowledge;
+- temporary resource release lỗi;
+- child operation không dừng;
+- process không phản hồi.
+
+Khi đó:
+
+- authority vẫn bị revoke;
+- work không được revive;
+- diagnostics được phát;
+- Resource Manager tiếp tục cleanup;
+- Runtime có thể mark Attempt abandoned;
+- current revision correctness vẫn được bảo vệ.
+
+---
+
+## 44. Shutdown Integration
+
+Application shutdown sử dụng Application scope.
 
 ```text
-Canceled because newer revision exists
-    ↓
-Never retry
+Stop new admission
+        ↓
+Revoke application authority
+        ↓
+Remove queued work
+        ↓
+Signal running attempts
+        ↓
+Wait bounded grace period
+        ↓
+Mark remaining work abandoned
+        ↓
+Drain and dispose resources
 ```
 
-```text
-Canceled because provider switched
-    ↓
-Scheduler may create a new attempt using the new provider
-```
-
-The new attempt must receive a new:
-
-```text
-WorkItemId
-ProcessingAttemptId
-CancellationToken
-```
+Shutdown chi tiết phải thống nhất với `BOOT_SEQUENCE.md`.
 
 ---
 
-## 45. Cancellation and Session Recovery
+## 45. MVP Cancellation Policy
 
-A canceled session is terminal unless product behavior explicitly supports resume.
+### Required Scopes
 
-Resume should create:
+```text
+APPLICATION
+SESSION
+REVISION
+WORK_ITEM
+ATTEMPT
+PROVIDER_REQUEST
+```
 
-- a new active session state
-- new revision ownership
-- new cancellation scopes
+### Required Rules
 
-Old canceled tokens must never be reused.
+1. Mọi WorkItem có CancellationContextRef.
+2. Session close revoke toàn bộ child authority.
+3. New revision revoke revision cũ.
+4. Queued obsolete work bị remove hoặc invalidate.
+5. Running Attempt nhận cooperative signal.
+6. Worker check trước và sau expensive boundary.
+7. Provider abort được dùng khi hỗ trợ.
+8. Non-cancelable request trở thành abandoned.
+9. Late Completion luôn validation.
+10. UI commit validation lại trên UI context.
+11. Delayed retry bị cancel cùng scope.
+12. Hard termination không dùng trong primary process.
 
 ---
 
-## 46. MVP Cancellation Policy
-
-The first implementation should remain simple.
-
-### 46.1 Required Scopes
-
-MVP requires:
-
-- application
-- session
-- revision
-- work item
-- provider request
-
-Pipeline and stage scopes may be represented internally if needed.
-
-### 46.2 Required Rules
-
-1. Every WorkItem carries cancellation context.
-2. Session close cancels all session work.
-3. New revision cancels older revision work.
-4. Queued obsolete work is skipped or removed.
-5. Running obsolete work receives a cancellation request.
-6. Workers check cancellation before and after expensive operations.
-7. Provider requests use abort support when available.
-8. Non-cancelable provider results are discarded.
-9. Every result is validated before commit.
-10. UI commit validates the active revision again.
-
-### 46.3 MVP Cancellation Sequence
+## 46. MVP Sequence
 
 ```text
 New Revision Created
-    ↓
-Mark Previous Revision Obsolete
-    ↓
-Cancel Previous Revision Token
-    ↓
-Invalidate Queued Work
-    ↓
-Request Running Work Cancellation
-    ↓
-Schedule New Revision
-    ↓
-Reject Late Old Results
-    ↓
-Dispose Old Revision Resources
+        ↓
+Previous Revision Authority Revoked
+        ↓
+Queued Work Removed
+        ↓
+Running Attempts Signaled
+        ↓
+New Revision Work Admitted
+        ↓
+Late Old Results Rejected
+        ↓
+Old Resources Drained
 ```
 
 ---
 
-## 47. Example: Scroll During OCR
+## 47. Example: Rapid Content Change
 
 ```text
-Revision 70 OCR running
-    ↓
-User scrolls
-    ↓
+Revision 70 Attempt running
+        ↓
 Revision 71 becomes current
-    ↓
-Revision 70 token canceled
-    ↓
-OCR provider abort requested
+        ↓
+Revision 70 authority revoked
+        ↓
+Queued Revision 70 work removed
+        ↓
+Running Attempt signaled
+        ↓
+Revision 71 receives priority
 ```
 
-If OCR stops:
+Nếu Attempt cũ kết thúc muộn:
 
 ```text
-OCR reports Canceled
+Completion arrives
     ↓
-Temporary buffers released
-```
-
-If OCR cannot stop:
-
-```text
-OCR finishes late
+Authority validation fails
     ↓
-Commit validation fails
-    ↓
-Result discarded
+Result rejected
 ```
 
 ---
 
-## 48. Example: Scroll During Translation
+## 48. Example: Provider Switch
 
 ```text
-Revision 80 translation request active
-    ↓
-Revision 81 created
-    ↓
-Revision 80 canceled
+Attempt using Provider A
+        ↓
+User switches provider
+        ↓
+Attempt authority revoked
+        ↓
+Provider A abort requested
+        ↓
+New AttemptId created for Provider B
+        ↓
+Scheduler admission
 ```
 
-Cancelable provider:
+WorkItemId giữ nguyên nếu logical work không đổi.
+
+---
+
+## 49. Example: Non-Cancelable Provider
 
 ```text
-Abort request
-    ↓
-Release provider slot
-    ↓
-Start Revision 81
-```
-
-Non-cancelable provider:
-
-```text
-Mark request abandoned
-    ↓
-Revision 81 receives next available safe capacity
-    ↓
-Late Revision 80 response discarded
+Provider request running
+        ↓
+Cancellation requested
+        ↓
+Authority revoked
+        ↓
+Abort unsupported
+        ↓
+Attempt marked ABANDONED
+        ↓
+Provider capacity remains occupied
+        ↓
+Late response rejected and cleaned
 ```
 
 ---
 
-## 49. Example: Session Closed
+## 50. Example: Session Close
 
 ```text
-User closes reading session
+Session close
     ↓
-Session token canceled
+Session authority revoked
     ↓
-Queued work invalidated
+All revision/work/attempt scopes canceled
     ↓
-Running work receives cancellation
+Queued work removed
     ↓
-UI detaches session presentation
+Running work signaled
     ↓
-Revision data disposed when safe
+UI detached
+    ↓
+Resources disposed when safe
 ```
-
-The application itself may remain running.
-
----
-
-## 50. Example: Provider Switch
-
-```text
-Translation using Provider A
-    ↓
-User switches to Provider B
-    ↓
-Provider A stage work canceled
-    ↓
-Old attempt loses commit permission
-    ↓
-New attempt created for Provider B
-```
-
-The session and revision may remain active.
 
 ---
 
 ## 51. Example: Cancellation Timeout
 
 ```text
-Provider request cancellation requested
-    ↓
-Grace period exceeded
-    ↓
-Request marked abandoned
-    ↓
-WorkItem marked Canceled
-    ↓
-Commit permission revoked
-    ↓
-Provider completion tracked asynchronously
+Cancellation signal sent
+        ↓
+Grace deadline exceeded
+        ↓
+Runtime stops waiting
+        ↓
+Attempt becomes ABANDONED
+        ↓
+Late execution remains tracked
+        ↓
+Cleanup continues asynchronously
 ```
-
-The runtime continues without trusting the late result.
 
 ---
 
 ## 52. Architecture Invariants
 
-The cancellation system must preserve these invariants:
-
-1. Parent cancellation affects all child scopes.
-2. Child cancellation does not automatically cancel its parent.
-3. Cancellation never grants permission to retry automatically.
-4. Canceled work cannot commit user-visible output.
-5. Every UI commit validates current revision ownership.
-6. Every retry creates a new processing attempt.
-7. Cleanup ownership is explicit.
-8. Hard thread termination is forbidden in the primary process.
-9. Cancellation wait time is bounded.
-10. Late external results are treated as untrusted.
-11. Old cancellation tokens are never reused.
-12. Cancellation events contain no raw private content.
+1. Authority revocation xảy ra trước physical stop.
+2. Parent cancellation ảnh hưởng child scope.
+3. Child cancellation không tự cancel parent.
+4. Cancellation không tự retry.
+5. Canceled scope không commit.
+6. Late Completion luôn validation.
+7. Mỗi retry tạo AttemptId mới.
+8. WorkItemId giữ nguyên khi logical work không đổi.
+9. Hard termination bị cấm trong primary process.
+10. Grace period luôn bounded.
+11. Non-cancelable execution có thể trở thành abandoned.
+12. Abandoned không đồng nghĩa resource đã được release.
+13. Cleanup ownership explicit.
+14. Cleanup failure không phục hồi authority.
+15. Queue không sở hữu cancellation authority.
+16. Scheduler không sở hữu cancellation outcome.
+17. Worker không tự quyết định terminal outcome.
+18. UI phản ánh logical cancellation, không chờ physical stop.
+19. Event và log không chứa user content.
+20. Cancellation semantics không phụ thuộc implementation token cụ thể.
 
 ---
 
 ## 53. Testing Requirements
 
-Cancellation tests should cover:
+Test phải bao phủ:
 
-- cancel before enqueue
-- cancel while queued
-- cancel between dequeue and execution
-- cancel during OCR
-- cancel during translation
-- cancel during UI dispatch
-- simultaneous completion and cancellation
-- session cancellation
-- revision replacement
-- provider without abort support
-- cancellation timeout
-- late provider result
-- retry after provider switch
-- cleanup called more than once
-- stale result rejected
-- child task inherits parent cancellation
+- cancel trước admission;
+- cancel khi queued;
+- cancel giữa dispatch và execution;
+- cancel running Attempt;
+- simultaneous completion và cancellation;
+- session cancellation;
+- revision replacement;
+- provider abort supported;
+- provider abort unsupported;
+- cancellation timeout;
+- late Completion;
+- retry timer bị cancel;
+- provider switch tạo Attempt mới;
+- cleanup idempotency;
+- child scope inheritance;
+- UI commit validation;
+- shutdown cancellation;
+- resource still held after logical cancellation.
 
-Tests should use deterministic fake workers and providers.
+Tests dùng deterministic fake worker và provider.
 
 ---
 
 ## 54. Open Questions
 
-The following questions remain open:
+- Grace period mặc định theo execution class là bao lâu?
+- Local AI có cần isolated process không?
+- Provider nào hỗ trợ abort thực sự?
+- Abandoned provider slot được accounting thế nào?
+- UI có giữ previous valid content đến khi replacement sẵn sàng không?
+- Memory pressure ở mức nào được phép cancel current work?
+- Partial output sau cancellation có bao giờ được giữ không?
+- Cleanup retry budget là bao nhiêu?
 
-- Which OCR libraries support cooperative cancellation?
-- Should long-running local AI work execute in child processes?
-- How long should each cancellation grace period be?
-- Should obsolete completed results ever populate cache?
-- Can remote-provider requests be detached without occupying local worker capacity?
-- Should UI retain previous translation until new content is ready?
-- Which cancellation reason codes should be user-visible?
-- Should memory pressure cancel current work or only background work?
-- How should partial translation batches be handled after cancellation?
-
-These questions do not block the MVP policy.
+Các câu hỏi này không chặn MVP architecture.
 
 ---
 
 ## 55. Related Documents
 
-- `README.md`
-- `PIPELINE_RUNTIME.md`
-- `WORK_QUEUE.md`
-- `SCHEDULER.md`
-- `CACHE_POLICY.md`
-- `MEMORY_MODEL.md`
-- `THREADING_MODEL.md`
-- `RESOURCE_LIFECYCLE.md`
-- `PERFORMANCE_MODEL.md`
-- `../STATE_MACHINE.md`
-- `../EVENT_BUS.md`
-- `../DATA_FLOW.md`
-- `../flows/SCREEN_COMIC_FLOW.md`
+| Document | Relationship |
+|---|---|
+| `PIPELINE_RUNTIME.md` | Authority, WorkItem, Attempt và terminal outcome |
+| `RUNTIME_COMPONENTS.md` | Cancellation Coordinator ownership |
+| `SCHEDULER.md` | Admission và preemption recommendation |
+| `WORK_QUEUE.md` | Queued-work removal |
+| `RETRY_POLICY.md` | Retry sau failure/cancellation |
+| `ERROR_MODEL.md` | Canceled, stale, abandoned và failure |
+| `MEMORY_MODEL.md` | Artifact Lease và revision retention |
+| `RESOURCE_LIFECYCLE.md` | Drain và physical disposal |
+| `THREADING_MODEL.md` | Cooperative cancellation context |
+| `RUNTIME_CONFIG.md` | Grace period và timeout |
+| `RUNTIME_OBSERVABILITY.md` | Metrics, events và logs |
+| `BOOT_SEQUENCE.md` | Shutdown integration |
 
 ---
 
-## 56. Next Step
+## 56. Completion Criteria
 
-The next runtime document should be:
+`CANCELLATION.md` được xem là đồng bộ khi:
 
-```text
-CACHE_POLICY.md
-```
-
-It should define:
-
-- cache layers
-- cache ownership
-- cache keys
-- revision-independent reuse
-- provider and model versioning
-- glossary and context dependencies
-- stale-cache protection
-- memory and persistent cache boundaries
-- eviction
-- privacy
-- canceled-result cache rules
+- cancellation bắt đầu bằng authority revocation;
+- scope chuẩn chỉ còn application, session, revision, WorkItem, Attempt và provider request;
+- token không còn là architectural requirement;
+- WorkItem lifecycle không bị định nghĩa lại;
+- queued removal khớp Work Queue mới;
+- checkpoint generic, không hard-code OCR/Translation;
+- abandoned được tách rõ khỏi canceled;
+- retry dùng same WorkItemId và new AttemptId;
+- cleanup ownership tổng quát;
+- UI không chờ physical stop;
+- late result luôn bị authority validation;
+- events, metrics và MVP policy nhất quán.
 
 ---
 
 ## 57. Summary
 
-CRAI uses cancellation to protect responsiveness and correctness.
-
-The practical runtime model is:
+Cancellation trong CRAI không được hiểu đơn giản là gửi một tín hiệu dừng.
 
 ```text
-Prevent Obsolete Work
-    ↓
-Cancel Running Work Cooperatively
-    ↓
-Bound Cancellation Waiting
-    ↓
-Reject Every Stale Result
-    ↓
-Release Resources Safely
+Cancellation Request
+        ↓
+Authority Revoked
+        ↓
+Queued Work Removed
+        ↓
+Running Attempt Signaled
+        ↓
+Execution Stops or Becomes Abandoned
+        ↓
+Late Result Rejected
+        ↓
+Resources Drained Safely
 ```
 
-Cancellation is not considered complete merely because a signal was sent.
+Ranh giới cốt lõi:
 
-Correctness is guaranteed only when stale work has lost commit permission and can no longer affect the active reading experience.
+```text
+Cancellation protects correctness first.
+
+Physical stopping protects efficiency second.

@@ -1,175 +1,102 @@
+# runtime/RUNTIME_OBSERVABILITY.md
+
 # Runtime Observability
 
 > Project: CRAI  
-> Version: 0.1  
+> Version: 1.0  
 > Status: Architecture Draft
 
 ---
 
 ## 1. Purpose
 
-This document defines how CRAI observes, diagnoses, measures, and explains runtime behavior.
+Tài liệu này định nghĩa cách CRAI quan sát, đo lường, chẩn đoán và giải thích hành vi của Runtime.
 
-CRAI processes continuously changing screen content through an asynchronous pipeline:
+Observability phải trả lời được:
+
+- WorkItem nào đã được tạo và vì sao?
+- Attempt nào thực sự chạy?
+- Work chậm ở queue, provider, lease hay publication?
+- Completion còn authority hay đã stale?
+- Candidate Artifact có được chấp nhận không?
+- Ownership transfer có thành công không?
+- Artifact đã publish nhưng có commit không?
+- Resource nào còn retention hoặc active lease?
+- Cancellation đã revoke authority và drain đến đâu?
+- Retry có tạo recovery hữu ích không?
+- Runtime đang pressure hay overload ở đâu?
+- UI bị chậm vì Runtime, dispatcher hay rendering?
+- Shutdown đang bị block bởi resource nào?
+
+Observability phải giải thích **runtime decision**, không chỉ ghi lại implementation activity.
+
+---
+
+## 2. Architectural Position
 
 ```text
-Capture
+Runtime Operation
     ↓
-Observation
+Metrics / Trace / Event / Structured Log
     ↓
-Revision
+Bounded Observability Pipeline
     ↓
-OCR
+Local Diagnostics
     ↓
-Layout
-    ↓
-Translation
-    ↓
-Presentation
-    ↓
-UI Commit
+Optional Sanitized Export
 ```
 
-The pipeline also includes:
+Observability không:
 
-- queues
-- scheduling
-- cancellation
-- retries
-- cache reuse
-- provider calls
-- resource ownership
-- artifact leases
-- stale-result rejection
-- UI authority validation
-
-Without a unified observability model, it becomes difficult to answer questions such as:
-
-- Why did the translation appear slowly?
-- Which stage caused the delay?
-- Did the provider fail or was the result stale?
-- Why was a revision canceled?
-- How much work was wasted?
-- Is memory still owned or waiting for lease release?
-- Did a retry improve the result?
-- Is the UI blocked?
-- Is the runtime overloaded?
-- Why was a result not committed?
-
-This document establishes the signals, identifiers, privacy rules, and diagnostic tools required to answer those questions.
+- sở hữu Runtime state;
+- thay Event Bus;
+- quyết định retry;
+- cấp authority;
+- mutate Artifact;
+- block Runtime Control;
+- chứa reading content mặc định.
 
 ---
 
-## 2. Scope
+## 3. Core Philosophy
 
-This document covers:
+```text
+Record what happened
++
+Explain why it happened
++
+Show whether it still mattered
+```
 
-- observability goals
-- telemetry signal types
-- structured logs
-- metrics
-- traces
-- runtime events
-- diagnostic snapshots
-- correlation identifiers
-- revision tracing
-- WorkItem tracing
-- attempt tracing
-- queue visibility
-- provider visibility
-- retry visibility
-- cancellation visibility
-- stale-work visibility
-- cache visibility
-- artifact lifecycle visibility
-- resource and memory visibility
-- UI responsiveness visibility
-- performance-budget monitoring
-- error observability
-- privacy and redaction
-- cardinality control
-- sampling
-- telemetry retention
-- development diagnostics
-- production telemetry
-- testing requirements
-- MVP observability policy
-
-This document does not define:
-
-- exact telemetry vendor
-- exact logging library
-- final dashboard technology
-- cloud monitoring infrastructure
-- final data-retention periods
-- detailed user-facing diagnostics UI
-- analytics or product-behavior tracking
-
-Those decisions belong to implementation and deployment documentation.
-
----
-
-## 3. Observability Goals
-
-The runtime observability system must allow developers and operators to:
-
-- reconstruct the lifecycle of a revision
-- identify the current critical-path bottleneck
-- distinguish queue delay from execution delay
-- distinguish failure from cancellation and staleness
-- identify excessive revision churn
-- identify wasted computation
-- identify provider degradation
-- identify retry storms
-- identify resource leaks
-- identify artifact retention problems
-- identify UI responsiveness problems
-- identify runtime overload
-- validate architecture invariants
-- diagnose failures without exposing reading content
-- compare cold-start and steady-state behavior
-- verify graceful shutdown
-- measure whether performance targets are being met
-
----
-
-## 4. Core Philosophy
-
-CRAI follows this rule:
-
-> Observability must explain runtime decisions, not merely record implementation activity.
-
-A log such as:
+Một log như:
 
 ```text
 Translation completed
 ```
 
-is insufficient.
+không đủ.
 
-The runtime must also be able to determine:
+Observability cần trả lời:
 
 ```text
-Translation completed
-    ↓
 For which Session?
 For which Revision?
+For which WorkItem?
 For which Attempt?
-Was it still authoritative?
-Was the result published?
-Was the result committed?
-Was it rejected as stale?
-How long did it wait?
-How long did it execute?
+Which WorkType?
+Which Provider?
+Was authority valid?
+Was Candidate accepted?
+Was ownership transferred?
+Was Artifact published?
+Was Presentation committed?
+Was the result stale or canceled?
+How much time was spent waiting, executing and draining?
 ```
-
-Observability must reflect the architecture model.
 
 ---
 
-## 5. Observability Is Not Logging
-
-Observability consists of several complementary signal types.
+## 4. Observability Signals
 
 ```text
 Runtime Observability
@@ -180,169 +107,73 @@ Runtime Observability
 └── Diagnostic Snapshots
 ```
 
-Each signal answers a different type of question.
+### Metrics
+
+Aggregate count, ratio, latency và resource state.
+
+### Traces
+
+Causal lifecycle của Revision, WorkItem, Attempt, provider request và publication.
+
+### Structured Logs
+
+Abnormal event, failure, invariant hoặc decision explanation.
+
+### Runtime Events
+
+Architectural messages; không tự động là telemetry.
+
+### Diagnostic Snapshots
+
+Best-effort current-state inspection.
 
 ---
 
-## 6. Metrics
+## 5. Signal Selection
 
-Metrics answer aggregate questions.
+Dùng Metrics cho:
 
-Examples:
+- counts;
+- rates;
+- durations;
+- percentiles;
+- ratios;
+- capacity;
+- pressure.
 
-- How many revisions are created per minute?
-- What is the P95 useful-result latency?
-- How many WorkItems are waiting?
-- What percentage of completed work is stale?
-- How often does OCR fail?
-- How much memory is retained by cache?
-- How many provider requests are in flight?
-- How often are retries successful?
+Dùng Trace cho:
 
-Metrics should be:
+- causal flow;
+- Attempt lineage;
+- authority validation;
+- ownership transfer;
+- publication;
+- retry/fallback;
+- UI commit.
 
-- cheap to record
-- bounded in cardinality
-- suitable for aggregation
-- suitable for alerting
-- suitable for trend analysis
+Dùng Log cho:
 
----
+- error;
+- invariant violation;
+- rejected ownership transfer;
+- cleanup failure;
+- shutdown anomaly;
+- unexpected decision.
 
-## 7. Traces
+Dùng Snapshot cho:
 
-Traces answer causal and chronological questions.
-
-Examples:
-
-- What happened to Revision 142?
-- Which stage delayed its completion?
-- Which provider request timed out?
-- Which retry eventually succeeded?
-- Why was the final presentation rejected?
-- Which artifact was reused from cache?
-
-A trace should show the complete path of one logical operation.
-
----
-
-## 8. Structured Logs
-
-Structured logs answer event-specific diagnostic questions.
-
-Examples:
-
-- Why did artifact publication fail?
-- What error caused the provider to degrade?
-- Why was a duplicate terminal event ignored?
-- Why did shutdown abandon a worker?
-- Why was cache corruption detected?
-
-Logs should be used for meaningful events, not every high-frequency operation.
+- queue;
+- authority;
+- provider;
+- Artifact;
+- retention;
+- Lease;
+- resource pressure;
+- recent failures.
 
 ---
 
-## 9. Runtime Events
-
-Runtime events are internal architectural messages.
-
-Examples:
-
-```text
-revision.created
-work.started
-work.completed
-artifact.published
-provider.degraded
-session.failed
-```
-
-Runtime events are not automatically telemetry.
-
-The observability layer may subscribe to selected events and convert them into:
-
-- metrics
-- trace spans
-- structured logs
-- diagnostic state
-
-The event bus must not depend on telemetry availability.
-
----
-
-## 10. Diagnostic Snapshots
-
-A diagnostic snapshot captures runtime state at a specific moment.
-
-Example:
-
-```text
-Runtime Snapshot
-├── Application State
-├── Active Sessions
-├── Current Revisions
-├── Queue Depths
-├── Running WorkItems
-├── Provider Health
-├── Memory Pressure
-├── Artifact Counts
-├── Cache Usage
-├── Worker Utilization
-└── Recent Errors
-```
-
-Snapshots are useful when the runtime is:
-
-- stuck
-- slow
-- shutting down incorrectly
-- retaining memory
-- repeatedly retrying
-- rejecting commits
-
-A snapshot describes current state rather than historical flow.
-
----
-
-## 11. Signal Selection
-
-The runtime should use the smallest appropriate signal.
-
-Use metrics for:
-
-- counts
-- rates
-- durations
-- ratios
-- resource usage
-
-Use traces for:
-
-- causal execution flow
-- revision timelines
-- retry lineage
-- cross-stage latency
-
-Use logs for:
-
-- abnormal events
-- errors
-- invariant violations
-- state explanations
-
-Use snapshots for:
-
-- current runtime inspection
-- support diagnostics
-- leak investigation
-
-Do not log every operation solely because it is observable.
-
----
-
-## 12. Correlation Model
-
-CRAI requires consistent correlation identifiers.
+## 6. Correlation Model
 
 Primary hierarchy:
 
@@ -350,490 +181,568 @@ Primary hierarchy:
 ApplicationInstanceId
     ↓
 SessionId
-        ↓
+    ↓
 RevisionId
-            ↓
+    ↓
 WorkItemId
-                ↓
+    ↓
 AttemptId
 ```
 
-Additional identifiers include:
+Additional identifiers:
 
 ```text
+BusinessExecutionPlanId
+BusinessStageId
 ArtifactId
+CandidateArtifactId
+ResourceId
+LeaseId
 ProviderRequestId
+PresentationId
 TraceId
 SpanId
 CaptureSourceId
-PresentationId
 ```
 
-These identifiers serve different purposes and must not be treated as interchangeable.
+Các identifier không được dùng thay thế lẫn nhau.
 
 ---
 
-## 13. ApplicationInstanceId
+## 7. Correlation Requirements
 
-`ApplicationInstanceId` identifies one running application process or logical runtime instance.
-
-It is useful for:
-
-- startup and shutdown correlation
-- crash investigation
-- separating repeated launches
-- provider-client lifecycle
-- resource-leak analysis
-
-A new value should be created on each application start.
-
----
-
-## 14. SessionId
-
-`SessionId` identifies one reading session.
-
-A session may include:
-
-- one capture source
-- one selected screen region
-- language configuration
-- provider configuration
-- multiple revisions
-
-The SessionId allows all activity from one reading flow to be correlated.
-
----
-
-## 15. RevisionId
-
-`RevisionId` identifies one logical version of observed content.
-
-A revision is created only when the observation system accepts content as meaningfully changed and stable enough to process.
-
-Revision telemetry should answer:
-
-- when the revision was created
-- whether it became current
-- which artifacts were reused
-- which stages executed
-- whether it succeeded
-- whether it became obsolete
-- whether it committed to UI
-- how much work was wasted
-
----
-
-## 16. WorkItemId
-
-`WorkItemId` identifies one scheduled unit of work.
-
-Examples:
-
-- OCR WorkItem
-- Layout WorkItem
-- Translation WorkItem
-- Presentation WorkItem
-
-A retry should not reuse the same WorkItem authority unless the architecture explicitly models WorkItem separately from Attempt.
-
-For the MVP, the recommended model is:
-
-```text
-Logical Stage Work
-    ↓
-One or more Attempts
-```
-
-Each physical execution attempt must still have its own AttemptId.
-
----
-
-## 17. AttemptId
-
-`AttemptId` identifies one physical execution attempt.
-
-Example:
-
-```text
-Revision 80
-└── Translation WorkItem
-    ├── Attempt 1: timeout
-    ├── Attempt 2: provider unavailable
-    └── Attempt 3: success
-```
-
-AttemptId is required to prevent late outcomes from older attempts from appearing authoritative.
-
-Observability must preserve attempt lineage.
-
----
-
-## 18. ArtifactId
-
-`ArtifactId` identifies an immutable artifact.
-
-Examples:
-
-- source image
-- OCR result
-- layout
-- translation
-- presentation model
-
-Artifact telemetry should support:
-
-- creation tracing
-- publication tracing
-- lease tracking
-- cache retention
-- revision ownership
-- disposal timing
-- reuse analysis
-
-Artifact identifiers should not embed private content.
-
----
-
-## 19. ProviderRequestId
-
-`ProviderRequestId` identifies one provider operation.
-
-It may be:
-
-- generated internally
-- supplied by provider
-- mapped from provider response metadata
-
-It allows CRAI logs to correlate local request state with provider diagnostics.
-
-Provider request identifiers must never contain credentials.
-
----
-
-## 20. Correlation Requirements
-
-Every stage completion should be traceable to at least:
+Mọi Attempt Completion phải có tối thiểu:
 
 ```text
 SessionId
 RevisionId
 WorkItemId
 AttemptId
-Stage
+OwnerModule
+BusinessStageId
+WorkType
 ```
 
-Provider work should additionally include:
+Provider execution thêm:
 
 ```text
 ProviderId
+ProviderProfile
 ProviderRequestId
 ModelId
 ```
 
-Artifact events should additionally include:
+Artifact lifecycle thêm:
 
 ```text
-ArtifactId
+ArtifactId hoặc CandidateArtifactId
 ArtifactType
+ResourceId
+```
+
+Lifecycle operation có thể thêm:
+
+```text
+LeaseId
+RetentionClass
+Owner
 ```
 
 ---
 
-## 21. Correlation Propagation
-
-Correlation context must propagate through:
+## 8. Correlation Propagation
 
 ```text
 Runtime Command
     ↓
+Runtime Control
+    ↓
+BusinessExecutionPlan
+    ↓
+WorkItem
+    ↓
 Scheduler
     ↓
-Queue
+Work Queue
     ↓
-Worker
+Worker / Provider Adapter
     ↓
-Provider Adapter
+Completion
     ↓
-Completion Command
+Authority Validation
     ↓
-Runtime Control
+Ownership Transfer
     ↓
 Artifact Publication
     ↓
-UI Commit
+Presentation Commit
 ```
 
-Correlation context should remain lightweight.
-
-It must not contain full domain payloads.
+Correlation context phải lightweight và content-free.
 
 ---
 
-## 22. Pipeline Trace
+## 9. Revision Root Trace
 
-A revision trace should conceptually contain:
+Mỗi accepted Revision nên có một root trace:
 
 ```text
-Revision Trace
+REVISION
 ├── Observation
 ├── Revision Creation
-├── Cache Resolution
-├── OCR
-├── Layout
-├── Translation
+├── Business Planning
+├── Reuse Evaluation
+├── WorkItems
+│   └── Attempts
+├── Authority Validation
+├── Candidate Validation
+├── Ownership Transfer
+├── Artifact Publication
 ├── Presentation
-├── Commit Validation
 └── UI Commit
 ```
 
-Optional branches may include:
+Optional branches:
 
-- retry
-- fallback
-- cancellation
-- cache hit
-- stale rejection
-- partial success
-- resource wait
-
----
-
-## 23. Revision Root Span
-
-Each revision should create one root trace span.
-
-Suggested name:
-
-```text
-runtime.revision
-```
-
-Useful attributes:
-
-```text
-session.id
-revision.id
-revision.sequence
-source.type
-source.language
-target.language
-revision.current_at_creation
-device.profile
-runtime.mode
-```
-
-Do not include recognized or translated text.
+- cancellation;
+- retry;
+- provider fallback;
+- cache reuse;
+- stale rejection;
+- resource wait;
+- degradation;
+- cleanup.
 
 ---
 
-## 24. Stage Spans
+## 10. WorkItem and Attempt Trace
 
-Each stage attempt should create a span.
+`WorkItemId` định danh logical work.
 
-Examples:
+`AttemptId` định danh physical execution.
 
 ```text
-runtime.ocr
-runtime.layout
-runtime.translation
-runtime.presentation
-runtime.ui_commit
+WorkItem W1
+├── Attempt A1: timeout
+├── Attempt A2: provider fallback
+└── Attempt A3: accepted
 ```
 
-Suggested attributes:
+Trace phải phân biệt:
+
+- first Attempt;
+- automatic retry;
+- provider fallback;
+- manual re-execution;
+- abandoned Attempt;
+- late Completion.
+
+Retry giữ same WorkItemId và tạo new AttemptId.
+
+---
+
+## 11. Attempt Span
+
+Suggested span:
 
 ```text
-stage
+runtime.attempt
+```
+
+Attributes:
+
+```text
+owner.module
+business_stage.id
+work.type
 attempt.number
+execution.class
+queue.class
 queue.wait_ms
+resource.wait_ms
+lease.wait_ms
 execution.duration_ms
-cache.status
 provider.id
-provider.model
+provider.profile
 result.status
-result.current
+authority.state
 cancellation.requested
 error.code
 ```
 
----
-
-## 25. Queue Wait Span or Attribute
-
-Queue wait should be separately observable.
-
-Possible model:
-
-```text
-WorkItem created
-    ↓
-Queue wait
-    ↓
-Execution
-```
-
-It may be represented as:
-
-- a child span
-- span events
-- timestamps on one stage span
-
-The important requirement is that queue delay must not be merged invisibly into execution duration.
+Không dùng raw input/output.
 
 ---
 
-## 26. Provider Span
+## 12. Authority Trace
 
-Remote provider activity should create a dedicated span.
+Authority phải observable.
 
-Suggested names:
+Possible spans/events:
 
 ```text
-provider.ocr.request
-provider.translation.request
+AUTHORITY_VALIDATION_STARTED
+AUTHORITY_ACCEPTED
+AUTHORITY_REJECTED
+AUTHORITY_REVOKED
+COMMIT_AUTHORITY_REJECTED
+LATE_COMPLETION_REJECTED
 ```
 
-Suggested fields:
+Attributes:
+
+```text
+authority.scope
+authority.reason
+authority.current_revision
+authority.validation_ms
+authority.requested_attempt
+authority.accepted_attempt
+```
+
+---
+
+## 13. Candidate and Publication Trace
+
+```text
+Candidate Created
+    ↓
+Candidate Registered
+    ↓
+Semantic / Integrity Validation
+    ↓
+Authority Validation
+    ↓
+Ownership Transfer
+    ↓
+Artifact Published
+```
+
+Metrics/spans phải phân biệt:
+
+- candidate creation;
+- candidate rejection;
+- transfer failure;
+- duplicate publication;
+- successful publication;
+- candidate cleanup.
+
+---
+
+## 14. Ownership Trace
+
+Lifecycle events:
+
+```text
+OWNERSHIP_TRANSFER_REQUESTED
+OWNERSHIP_TRANSFER_ACCEPTED
+OWNERSHIP_TRANSFER_REJECTED
+OWNERSHIP_RELEASED
+```
+
+Attributes:
+
+```text
+resource.id
+resource.type
+previous_owner
+new_owner
+transfer.reason
+transfer.duration_ms
+```
+
+Payload ownership khác retention ownership.
+
+---
+
+## 15. Resource Lease Trace
+
+Events:
+
+```text
+LEASE_ACQUIRED
+LEASE_RELEASED
+LEASE_DENIED
+LEASE_WAIT_STARTED
+LEASE_WAIT_COMPLETED
+LEASE_LEAK_DETECTED
+```
+
+Attributes:
+
+```text
+lease.id
+resource.id
+resource.type
+lease.owner
+lease.wait_ms
+lease.hold_ms
+lease.result
+```
+
+Lease identifier dùng trong trace/log, không dùng metric label.
+
+---
+
+## 16. Retention Observability
+
+Retention events:
+
+```text
+RETENTION_ADDED
+RETENTION_REMOVED
+RETENTION_EXPIRED
+RETENTION_EVICTED
+```
+
+Attributes:
+
+```text
+resource.type
+retention.class
+retention.owner_type
+retention.reason
+size.estimate
+```
+
+Cache retention không được mô tả như payload ownership.
+
+---
+
+## 17. Resource Lifecycle Trace
+
+Canonical lifecycle:
+
+```text
+RESOURCE_CREATED
+    ↓
+RESOURCE_REGISTERED
+    ↓
+OWNERSHIP_TRANSFERRED
+    ↓
+RESOURCE_PUBLISHED
+    ↓
+RETENTION_ADDED / LEASE_ACQUIRED
+    ↓
+RESOURCE_LOGICALLY_DISPOSED
+    ↓
+RESOURCE_DRAINING
+    ↓
+RESOURCE_PHYSICALLY_DISPOSED
+```
+
+Anomalies:
+
+- resource registered nhưng không cleanup;
+- candidate never accepted/released;
+- Lease never released;
+- duplicate ownership transfer;
+- dispose while leased;
+- draining quá lâu;
+- resource resurrection;
+- provider handle retained after shutdown.
+
+---
+
+## 18. Provider Trace
+
+Suggested span:
+
+```text
+provider.request
+```
+
+Attributes:
 
 ```text
 provider.id
+provider.profile
 provider.model
 provider.operation
-request.input_size
-request.region_count
-request.timeout_ms
-response.status
+provider.request_size_class
+provider.timeout_ms
+provider.result
 provider.http_status
 provider.error_code
 provider.request_id
-network.duration_ms
+provider.queue_wait_ms
 provider.duration_ms
+provider.abandoned
+provider.abort_supported
 ```
 
-Sensitive request content must not be attached.
+Không attach prompt, source text hoặc raw response.
 
 ---
 
-## 27. Cache Span
+## 19. Cache and Reuse Trace
 
-Cache operations should be visible when they affect latency or correctness.
-
-Examples:
+Suggested spans:
 
 ```text
-cache.lookup
-cache.publish
-cache.evict
+cache.reuse_lookup
+cache.candidate_validation
+cache.promotion
+cache.eviction
 ```
 
-Suggested attributes:
+Attributes:
 
 ```text
 artifact.type
-cache.key_version
+owner.module
+cache.scope
 cache.result
+cache.reject_reason
 cache.lookup_ms
+cache.validation_ms
 cache.retention_class
 cache.eviction_reason
+privacy.partition
 ```
 
-The raw cache key should not be logged if it could reveal content fingerprints unnecessarily.
+Raw cache key và fingerprint không export mặc định.
 
 ---
 
-## 28. Artifact Lifecycle Trace
+## 20. Queue Trace
 
-An artifact lifecycle may span beyond one revision.
-
-Conceptual flow:
+Queue wait phải tách execution.
 
 ```text
-Created
+WorkItem Eligible
     ↓
-Registered
+Scheduler Decision
     ↓
-Published
+Queued
     ↓
-Leased
+Selected
     ↓
-Released
-    ↓
-Retained by Cache
-    ↓
-Evicted
-    ↓
-Disposed
+Dispatched
 ```
 
-A full distributed-style trace may not be appropriate for long-lived artifacts.
+Có thể dùng span hoặc timestamps.
 
-Instead, use:
-
-- lifecycle events
-- artifact-state metrics
-- structured logs for anomalies
-- diagnostic snapshot details
-
----
-
-## 29. Trace Completion Status
-
-A revision trace should end with one final disposition.
-
-Possible values:
+Metrics phải phân biệt logical queue class:
 
 ```text
-COMMITTED
-FAILED
-CANCELED
-OBSOLETE
-STALE_RESULT
-SESSION_CLOSED
-ABANDONED
+CONTROL
+INTERACTIVE
+BACKGROUND
+MAINTENANCE
 ```
 
-This final disposition is distinct from individual WorkItem outcomes.
+---
+
+## 21. Scheduler Observability
+
+Scheduler decision phải explainable:
+
+```text
+ADMIT
+DEFER
+REJECT
+REPLACE
+```
+
+Attributes:
+
+```text
+decision
+reason
+priority_class
+work.type
+queue.class
+resource.pressure
+capacity.available
+current_revision
+decision.duration_ms
+```
+
+Không log mọi decision nếu volume cao; dùng metric + sampled trace.
 
 ---
 
-## 30. Trace Sampling
+## 22. Cancellation Trace
 
-Tracing every high-frequency frame or comparison may be expensive.
+Cancellation trace trả lời:
 
-The runtime should prioritize tracing:
+- ai yêu cầu;
+- scope nào;
+- reason;
+- authority revoke lúc nào;
+- queued work nào removed;
+- Attempt nào signaled;
+- provider abort có thành công không;
+- Attempt nào abandoned;
+- resource drain bao lâu;
+- late Completion nào bị reject.
 
-- accepted revisions
-- errors
-- retries
-- slow revisions
-- stale completions
-- provider failures
-- performance-budget violations
-- shutdown anomalies
+Canonical milestones:
 
-Frames that never become revisions may be represented through metrics rather than full traces.
-
----
-
-## 31. Metrics Design Principles
-
-Metrics must:
-
-- use stable names
-- use bounded dimensions
-- avoid raw identifiers as labels
-- distinguish logical and physical work
-- distinguish current and stale work
-- distinguish queue wait and execution
-- distinguish cold and warm execution
-- remain low overhead
+```text
+CANCELLATION_REQUESTED
+AUTHORITY_REVOKED
+QUEUED_WORK_REMOVED
+ATTEMPT_SIGNALED
+CANCELLATION_ACKNOWLEDGED
+ATTEMPT_ABANDONED
+RESOURCE_DRAIN_COMPLETED
+```
 
 ---
 
-## 32. Metric Naming
+## 23. Retry Trace
 
-Suggested naming pattern:
+```text
+Attempt 1
+    ↓ failed
+Retry Evaluated
+    ↓ delayed / fallback / skipped
+Attempt 2
+```
+
+Attributes:
+
+```text
+retry.decision
+retry.strategy
+retry.reason
+retry.delay_ms
+retry.budget_remaining
+retry.provider_changed
+retry.cache_satisfied
+```
+
+Retry trace phải giữ Attempt lineage.
+
+---
+
+## 24. Stale and Late Work
+
+Stale work vẫn visible cho developer nhưng quiet cho user.
+
+Record:
+
+```text
+original_revision
+current_revision
+work.type
+attempt.number
+execution.duration
+provider.cost_estimate
+authority.reject_reason
+candidate_created
+publication_attempted
+```
+
+Stale result không được tính là provider failure nếu technical execution thành công.
+
+---
+
+## 25. Metrics Naming
+
+Conceptual prefix:
 
 ```text
 crai.runtime.<domain>.<measurement>
@@ -843,296 +752,230 @@ Examples:
 
 ```text
 crai.runtime.revision.created_total
-crai.runtime.work.queue_depth
-crai.runtime.translation.duration_ms
-crai.runtime.provider.requests_inflight
-crai.runtime.artifact.active_count
-crai.runtime.ui.commit_duration_ms
+crai.runtime.workitem.active_count
+crai.runtime.attempt.duration_ms
+crai.runtime.authority.validation_ms
+crai.runtime.publication.duration_ms
+crai.runtime.lease.hold_ms
+crai.runtime.resource.draining_count
+crai.runtime.ui.commit_ms
 ```
 
-Exact naming may depend on the metrics system.
-
-The conceptual names should remain stable.
+Exact backend naming có thể khác, semantics phải stable.
 
 ---
 
-## 33. Metric Types
+## 26. Metric Design Rules
 
-Use counters for:
+Metrics phải:
 
-```text
-revision.created_total
-work.completed_total
-work.failed_total
-retry.started_total
-artifact.disposed_total
-```
-
-Use gauges for:
-
-```text
-queue.depth
-provider.requests_inflight
-artifact.active_count
-memory.active_bytes
-worker.active_count
-```
-
-Use histograms for:
-
-```text
-useful_result_latency
-queue_wait_duration
-stage_execution_duration
-provider_request_duration
-artifact_lifetime
-```
+- bounded cardinality;
+- stable name;
+- low overhead;
+- separate logical và physical work;
+- separate current và stale;
+- separate queue wait và execution;
+- separate accepted và rejected;
+- separate logical và physical disposal;
+- avoid raw identifiers.
 
 ---
 
-## 34. Revision Metrics
+## 27. Safe Metric Dimensions
 
-Recommended revision metrics:
+Preferred dimensions:
+
+```text
+owner_module
+work_type
+business_stage_class
+execution_class
+provider
+provider_profile
+result_status
+terminal_outcome
+authority_result
+cache_status
+queue_class
+cancellation_reason
+resource_type
+retention_class
+pressure_level
+device_profile
+```
+
+Không dùng:
+
+- SessionId;
+- RevisionId;
+- WorkItemId;
+- AttemptId;
+- ArtifactId;
+- ResourceId;
+- ProviderRequestId;
+- raw error message;
+- content hash.
+
+---
+
+## 28. Revision Metrics
 
 ```text
 revision.created_total
+revision.current_total
+revision.superseded_total
 revision.committed_total
 revision.failed_total
 revision.canceled_total
-revision.obsolete_total
 revision.active_count
-revision.creation_rate
 revision.lifetime_ms
 revision.useful_latency_ms
-revision.time_to_first_useful_result_ms
+revision.first_useful_result_ms
 revision.commit_ratio
+revision.churn_rate
 ```
 
 ---
 
-## 35. Revision Churn Metrics
-
-Track:
+## 29. WorkItem Metrics
 
 ```text
-observation.frame_total
-observation.changed_frame_total
-observation.stable_candidate_total
-revision.created_total
-revision.canceled_total
-revision.reached_ocr_total
-revision.reached_translation_total
-revision.committed_total
+workitem.created_total
+workitem.eligible_total
+workitem.admitted_total
+workitem.rejected_total
+workitem.replaced_total
+workitem.active_count
+workitem.accepted_total
+workitem.failed_total
+workitem.canceled_total
+workitem.stale_total
+workitem.abandoned_total
 ```
 
-These metrics show where excessive work is entering the pipeline.
+WorkItem metric không trộn Attempt count.
 
 ---
 
-## 36. WorkItem Metrics
-
-Recommended WorkItem metrics:
-
-```text
-work.created_total
-work.admitted_total
-work.started_total
-work.succeeded_total
-work.failed_total
-work.canceled_total
-work.stale_total
-work.abandoned_total
-work.active_count
-work.queue_wait_ms
-work.execution_ms
-```
-
-Dimensions may include:
-
-```text
-stage
-result_status
-execution_class
-```
-
----
-
-## 37. Attempt Metrics
-
-Recommended attempt metrics:
+## 30. Attempt Metrics
 
 ```text
 attempt.started_total
 attempt.completed_total
 attempt.failed_total
-attempt.superseded_total
+attempt.canceled_total
+attempt.abandoned_total
+attempt.late_total
 attempt.duration_ms
 attempt.count_per_workitem
-```
-
-Attempt metrics should distinguish:
-
-- initial attempt
-- automatic retry
-- manual retry
-- fallback-provider attempt
-
----
-
-## 38. Useful Work Metrics
-
-Raw completion count is insufficient.
-
-Track:
-
-```text
-useful_work.completed_total
-useful_work.execution_ms
-wasted_work.completed_total
-wasted_work.execution_ms
-stale_work.ratio
-current_revision.commit_ratio
-```
-
-Conceptually:
-
-```text
-Useful Work Ratio =
-Current Accepted Execution
-/
-Total Executed Work
+attempt.resource_wait_ms
+attempt.lease_wait_ms
 ```
 
 ---
 
-## 39. Queue Metrics
+## 31. Authority Metrics
 
-Each bounded queue should expose:
+```text
+authority.validation_total
+authority.accepted_total
+authority.rejected_total
+authority.revoked_total
+authority.validation_ms
+authority.late_completion_rejected_total
+authority.commit_rejected_total
+```
+
+Dimensions reason phải bounded.
+
+---
+
+## 32. Publication Metrics
+
+```text
+candidate.created_total
+candidate.rejected_total
+candidate.cleanup_failed_total
+ownership.transfer_total
+ownership.transfer_failed_total
+ownership.transfer_ms
+artifact.published_total
+artifact.publication_failed_total
+artifact.publication_ms
+artifact.duplicate_publication_total
+```
+
+---
+
+## 33. Queue Metrics
 
 ```text
 queue.depth
 queue.capacity
 queue.utilization_ratio
 queue.enqueue_total
-queue.dequeue_total
-queue.rejected_total
+queue.dispatch_total
 queue.replaced_total
-queue.dropped_total
-queue.obsolete_removed_total
+queue.removed_total
+queue.rejected_total
 queue.wait_ms
 queue.oldest_item_age_ms
+queue.saturation_duration_ms
 ```
-
-Dimensions:
-
-```text
-queue.name
-stage
-priority
-```
-
-Avoid WorkItemId as a metric dimension.
 
 ---
 
-## 40. Scheduler Metrics
-
-Recommended Scheduler metrics:
+## 34. Scheduler Metrics
 
 ```text
-scheduler.admission_total
-scheduler.admission_rejected_total
+scheduler.decision_total
+scheduler.admit_total
+scheduler.defer_total
+scheduler.reject_total
+scheduler.replace_total
+scheduler.decision_ms
 scheduler.current_revision_admission_ms
-scheduler.capacity_wait_ms
-scheduler.active_work_count
-scheduler.decision_duration_ms
-scheduler.priority_preemption_total
+scheduler.control_capacity_available
 ```
-
-Scheduler decision duration must remain small.
 
 ---
 
-## 41. Cancellation Metrics
-
-Recommended cancellation metrics:
+## 35. Cancellation Metrics
 
 ```text
 cancellation.requested_total
+cancellation.authority_revoke_ms
+cancellation.queued_remove_ms
 cancellation.acknowledged_total
-cancellation.propagation_ms
-cancellation.running_work_total
-cancellation.queued_work_total
+cancellation.worker_ack_ms
 cancellation.provider_abort_success_total
 cancellation.provider_abort_failed_total
-cancellation.drain_duration_ms
+cancellation.abandoned_total
+cancellation.drain_ms
+cancellation.late_result_total
 ```
-
-Dimensions may include:
-
-```text
-reason
-stage
-provider
-```
-
-Cancellation reason values must remain bounded.
 
 ---
 
-## 42. Stale-Result Metrics
-
-Recommended stale metrics:
+## 36. Retry Metrics
 
 ```text
-stale.result_total
-stale.error_suppressed_total
-stale.execution_ms
-stale.provider_cost_estimate
-stale.artifact_rejected_total
-stale.ui_commit_rejected_total
-```
-
-Stale results are not provider failures.
-
-They must not be counted as stage-failure rate unless a separate technical failure occurred.
-
----
-
-## 43. Retry Metrics
-
-Recommended retry metrics:
-
-```text
-retry.scheduled_total
-retry.started_total
-retry.succeeded_total
-retry.failed_total
+retry.evaluated_total
+retry.approved_total
 retry.skipped_total
+retry.delayed_total
+retry.admitted_total
 retry.exhausted_total
 retry.canceled_total
 retry.delay_ms
-retry.recovery_latency_ms
-retry.attempt_count
-retry.provider_changed_total
-```
-
-Skip reasons may include:
-
-```text
-REVISION_OBSOLETE
-SESSION_CLOSED
-BUDGET_EXHAUSTED
-ERROR_NOT_RETRYABLE
-PROVIDER_UNAVAILABLE
-CANCELED
+retry.recovery_ms
+retry.provider_fallback_total
+retry.concurrent_count
 ```
 
 ---
 
-## 44. Provider Metrics
-
-Recommended provider metrics:
+## 37. Provider Metrics
 
 ```text
 provider.request_total
@@ -1141,272 +984,68 @@ provider.failure_total
 provider.timeout_total
 provider.rate_limited_total
 provider.canceled_total
+provider.abandoned_total
 provider.requests_inflight
-provider.request_duration_ms
+provider.request_ms
 provider.queue_wait_ms
-provider.input_size
-provider.output_size
-provider.health_state
-provider.fallback_total
 provider.cold_start_ms
-```
-
-Dimensions may include:
-
-```text
-provider
-model
-operation
-result
-```
-
-Provider request IDs must not be metric labels.
-
----
-
-## 45. Provider Health Signals
-
-Provider health should be derived from:
-
-- recent success rate
-- timeout rate
-- rate-limit rate
-- tail latency
-- consecutive failures
-- authentication status
-- quota status
-- initialization state
-
-Possible provider states:
-
-```text
-HEALTHY
-SLOW
-DEGRADED
-RATE_LIMITED
-UNAVAILABLE
-PROBING
-```
-
-State transitions should be observable.
-
----
-
-## 46. Capture Metrics
-
-Recommended capture metrics:
-
-```text
-capture.frame_total
-capture.frame_failed_total
-capture.frame_replaced_total
-capture.frame_dropped_total
-capture.active_sources
-capture.callback_duration_ms
-capture.copy_duration_ms
-capture.region_pixels
-capture.effective_rate
-capture.configured_rate
-```
-
-The runtime should distinguish capture rate from accepted revision rate.
-
----
-
-## 47. Observation Metrics
-
-Recommended observation metrics:
-
-```text
-observation.processed_frame_total
-observation.changed_frame_total
-observation.unchanged_frame_total
-observation.stability_candidate_total
-observation.stability_accepted_total
-observation.analysis_duration_ms
-observation.pending_frame_replaced_total
-observation.fingerprint_duration_ms
+provider.cost_estimate
+provider.health_state
 ```
 
 ---
 
-## 48. OCR Metrics
-
-Recommended OCR metrics:
-
-```text
-ocr.request_total
-ocr.success_total
-ocr.empty_total
-ocr.low_confidence_total
-ocr.failure_total
-ocr.queue_wait_ms
-ocr.execution_ms
-ocr.region_count
-ocr.input_pixels
-ocr.cache_hit_total
-ocr.cache_miss_total
-```
-
-Where confidence is provider-specific, normalize carefully before aggregation.
-
----
-
-## 49. Layout Metrics
-
-Recommended layout metrics:
-
-```text
-layout.request_total
-layout.success_total
-layout.failure_total
-layout.fallback_total
-layout.execution_ms
-layout.region_count
-layout.reading_order_count
-```
-
----
-
-## 50. Translation Metrics
-
-Recommended translation metrics:
-
-```text
-translation.request_total
-translation.success_total
-translation.partial_total
-translation.failure_total
-translation.queue_wait_ms
-translation.execution_ms
-translation.unit_count
-translation.input_length
-translation.output_length
-translation.batch_size
-translation.cache_hit_total
-translation.cache_miss_total
-translation.provider_cost_estimate
-```
-
-Do not record raw text in metric labels.
-
----
-
-## 51. Presentation Metrics
-
-Recommended presentation metrics:
-
-```text
-presentation.build_total
-presentation.build_failed_total
-presentation.build_duration_ms
-presentation.text_block_count
-presentation.ui_dispatch_ms
-presentation.commit_duration_ms
-presentation.commit_rejected_total
-presentation.visible_duration_ms
-```
-
----
-
-## 52. UI Responsiveness Metrics
-
-Recommended UI metrics:
-
-```text
-ui.command_acknowledgment_ms
-ui.dispatch_delay_ms
-ui.long_task_total
-ui.long_task_duration_ms
-ui.frame_stall_total
-ui.commit_duration_ms
-ui.pending_update_count
-```
-
-Framework-specific instrumentation may vary.
-
-The architecture requires that UI blocking remains observable.
-
----
-
-## 53. Cache Metrics
-
-Recommended cache metrics:
+## 38. Cache Metrics
 
 ```text
 cache.lookup_total
 cache.hit_total
 cache.miss_total
-cache.insert_total
-cache.insert_failed_total
+cache.validation_rejected_total
+cache.compatibility_miss_total
+cache.integrity_failure_total
+cache.privacy_partition_miss_total
+cache.promotion_total
+cache.promotion_skipped_total
 cache.eviction_total
-cache.corrupt_entry_total
+cache.retained_bytes
 cache.lookup_ms
-cache.active_entries
-cache.active_bytes
-cache.reused_compute_ms
-```
-
-Dimensions may include:
-
-```text
-artifact_type
-retention_class
-eviction_reason
+cache.saved_execution_ms
+cache.saved_provider_cost
+cache.inflight_coalesced_total
 ```
 
 ---
 
-## 54. Artifact Metrics
-
-Recommended artifact metrics:
+## 39. Resource and Lease Metrics
 
 ```text
-artifact.created_total
-artifact.published_total
-artifact.reused_total
-artifact.active_count
-artifact.active_bytes
-artifact.lease_count
-artifact.disposal_pending_count
-artifact.disposed_total
-artifact.lifetime_ms
-artifact.disposal_latency_ms
-```
-
-Dimensions may include:
-
-```text
-artifact_type
-storage_class
-retention_class
-```
-
----
-
-## 55. Resource Lifecycle Metrics
-
-Recommended resource metrics:
-
-```text
+resource.created_total
 resource.registered_total
-resource.transfer_total
-resource.lease_acquired_total
-resource.lease_released_total
-resource.dispose_requested_total
-resource.dispose_completed_total
-resource.dispose_failed_total
-resource.pending_disposal_count
+resource.logical_disposed_total
+resource.physical_disposed_total
+resource.disposal_failed_total
 resource.draining_count
-```
+resource.draining_ms
+resource.leak_detected_total
 
-These metrics help validate `RESOURCE_LIFECYCLE.md`.
+lease.acquired_total
+lease.released_total
+lease.denied_total
+lease.active_count
+lease.wait_ms
+lease.hold_ms
+lease.leak_total
+
+retention.added_total
+retention.removed_total
+retention.active_count
+retention.active_bytes
+```
 
 ---
 
-## 56. Memory Metrics
-
-Recommended memory metrics:
+## 40. Memory and Pressure Metrics
 
 ```text
 memory.process_bytes
@@ -1414,62 +1053,19 @@ memory.managed_bytes
 memory.native_bytes
 memory.artifact_bytes
 memory.cache_bytes
-memory.worker_temporary_bytes
+memory.attempt_local_bytes
 memory.draining_bytes
-memory.pressure_level
-memory.admission_rejected_total
-memory.allocation_failed_total
-```
-
-Where exact memory accounting is unavailable, estimated values should be marked as estimates.
-
----
-
-## 57. GPU Metrics
-
-When local GPU processing exists, measure:
-
-```text
 gpu.memory_used_bytes
-gpu.memory_reserved_bytes
-gpu.inference_inflight
-gpu.inference_duration_ms
-gpu.model_load_duration_ms
-gpu.model_resident_count
-gpu.queue_depth
-gpu.allocation_failed_total
-gpu.ui_contention_total
+native.handle_count
+resource.pressure_level
+resource.admission_rejected_total
 ```
 
-GPU telemetry should remain optional for platforms without supported access.
+Estimated values phải đánh dấu estimate trong metadata.
 
 ---
 
-## 58. Worker Metrics
-
-Recommended worker metrics:
-
-```text
-worker.pool_size
-worker.active_count
-worker.idle_count
-worker.utilization_ratio
-worker.task_started_total
-worker.task_completed_total
-worker.task_failed_total
-worker.shutdown_wait_ms
-worker.abandoned_total
-```
-
-Logical stage concurrency should be tracked separately from physical thread count.
-
----
-
-## 59. Runtime Control Metrics
-
-The Runtime Control context must remain responsive.
-
-Track:
+## 41. Runtime Control Metrics
 
 ```text
 runtime.command_queue_depth
@@ -1478,61 +1074,48 @@ runtime.command_delay_ms
 runtime.loop_stall_total
 runtime.state_transition_total
 runtime.invalid_transition_total
-runtime.duplicate_terminal_event_total
+runtime.duplicate_completion_total
+runtime.authority_validation_ms
+runtime.publication_coordination_ms
 ```
 
-A slow Runtime Control loop may delay:
-
-- cancellation
-- scheduler decisions
-- commit validation
-- shutdown
+Runtime Control loop chậm sẽ làm delay cancellation, admission, publication và commit.
 
 ---
 
-## 60. Event Bus Metrics
-
-Recommended event-bus metrics:
+## 42. UI Metrics
 
 ```text
-event.published_total
-event.delivered_total
-event.dropped_total
-event.handler_failed_total
-event.handler_duration_ms
-event.queue_depth
+ui.command_ack_ms
+ui.dispatch_delay_ms
+ui.long_task_total
+ui.long_task_ms
+ui.frame_stall_total
+ui.commit_ms
+ui.commit_rejected_total
+ui.pending_update_count
+ui.authority_revalidation_ms
 ```
-
-Dimensions should use bounded event types.
-
-The event bus must not become a high-cardinality telemetry stream.
 
 ---
 
-## 61. Error Metrics
+## 43. Error Metrics and Logs
 
-Recommended error metrics:
+Error metric:
 
 ```text
 error.total
-error.by_category
 error.by_code
+error.by_category
 error.by_scope
 error.transient_total
-error.permanent_total
 error.user_visible_total
 error.suppressed_total
 error.deduplicated_total
 error.fatal_total
 ```
 
-Exact implementation may flatten these into one metric with bounded dimensions.
-
----
-
-## 62. Error Logs
-
-A structured error log should conceptually contain:
+Structured error log fields:
 
 ```text
 timestamp
@@ -1540,515 +1123,340 @@ severity
 error.code
 error.category
 error.scope
-error.retry_class
-stage
+error.retry_hint
+owner.module
+business_stage.id
+work.type
 session.id
 revision.id
-work_item.id
+workitem.id
 attempt.id
 provider.id
-message
-cause.type
-current_revision
+authority.state
 result.disposition
+message
 ```
 
-Sensitive content must be excluded.
+Technical message phải sanitize.
 
 ---
 
-## 63. Performance Budget Signals
+## 44. Runtime Events
 
-The runtime should emit a budget-violation signal when important limits are exceeded.
-
-Examples:
+Conceptual events:
 
 ```text
-performance.useful_latency_exceeded
-performance.queue_wait_exceeded
-performance.provider_latency_exceeded
-performance.ui_dispatch_exceeded
-performance.memory_budget_exceeded
-performance.stale_ratio_exceeded
+REVISION_CREATED
+WORKITEM_CREATED
+ATTEMPT_STARTED
+ATTEMPT_COMPLETED
+AUTHORITY_REVOKED
+AUTHORITY_REJECTED
+CANDIDATE_CREATED
+OWNERSHIP_TRANSFERRED
+ARTIFACT_PUBLISHED
+LEASE_ACQUIRED
+LEASE_RELEASED
+RETENTION_ADDED
+RETENTION_REMOVED
+RESOURCE_LOGICALLY_DISPOSED
+RESOURCE_PHYSICALLY_DISPOSED
+PROVIDER_DEGRADED
+SESSION_FAILED
+RUNTIME_FATAL
 ```
 
-Budget violations may produce:
-
-- metrics
-- trace annotations
-- rate-limited warning logs
-- adaptive degradation input
+Event Bus không phụ thuộc telemetry availability.
 
 ---
 
-## 64. Performance Budget Context
-
-A violation should include:
-
-```text
-budget.name
-budget.value
-observed.value
-stage
-provider
-revision.status
-degradation.level
-```
-
-Do not emit one noisy log for every repeated sample.
-
-Use aggregation and rate limiting.
-
----
-
-## 65. Diagnostic Snapshot Model
-
-A runtime diagnostic snapshot may contain:
+## 45. Diagnostic Snapshot Model
 
 ```text
 RuntimeDiagnosticSnapshot
-├── CapturedAt
 ├── Application
 ├── Sessions
 ├── Revisions
+├── Authority
+├── WorkItems
+├── Attempts
 ├── Queues
-├── Workers
+├── Scheduler
 ├── Providers
+├── Candidates
 ├── Artifacts
-├── Cache
+├── Ownership
+├── Retention
+├── Leases
 ├── Resources
-├── Memory
-├── GPU
+├── ResourcePressure
+├── Cache
 ├── UI
 ├── RecentErrors
-└── RecentTransitions
+└── RecentEvents
+```
+
+Snapshot là best-effort, không phải transactional export.
+
+---
+
+## 46. Authority Snapshot
+
+```text
+application_authority
+active_session_count
+current_revision_by_session
+revoked_scope_count
+pending_completion_validation
+recent_authority_rejections
+commit_authority_state
 ```
 
 ---
 
-## 66. Application Snapshot
-
-Suggested fields:
+## 47. Work and Attempt Snapshot
 
 ```text
-application.instance_id
-application.state
-application.uptime
-application.version
-runtime.mode
-shutdown.state
-telemetry.mode
+workitem.active_count
+workitem.by_work_type
+attempt.running_count
+attempt.abandoned_count
+attempt.pending_retry_count
+oldest_attempt_age
+current_revision_attempts
+obsolete_attempts
+```
+
+Không nhúng WorkItem payload.
+
+---
+
+## 48. Artifact and Ownership Snapshot
+
+```text
+candidate.count
+artifact.count_by_type
+artifact.bytes_by_type
+ownership.transfer_pending_count
+ownership.owner_count_by_type
+artifact.publication_pending_count
+artifact.publication_failed_count
 ```
 
 ---
 
-## 67. Session Snapshot
-
-Suggested fields:
+## 49. Lease and Retention Snapshot
 
 ```text
-session.id
-session.state
-capture.source_type
-capture.active
-current_revision.id
-current_revision.age
-provider.configuration
-created_at
-last_activity_at
-```
-
-Sensitive source titles should be omitted or sanitized.
-
----
-
-## 68. Revision Snapshot
-
-Suggested fields:
-
-```text
-revision.id
-revision.state
-revision.created_at
-revision.is_current
-revision.stage
-revision.active_work_count
-revision.pending_retry_count
-revision.artifact_count
-revision.last_error_code
-revision.commit_status
+lease.active_count
+lease.oldest_age
+lease.waiting_count
+lease.leak_suspect_count
+retention.count_by_class
+retention.bytes_by_class
+disposal.blocked_by_lease
 ```
 
 ---
 
-## 69. Queue Snapshot
-
-Suggested fields:
+## 50. Resource Snapshot
 
 ```text
-queue.name
+resource.count_by_type
+resource.draining_count
+resource.oldest_draining_age
+resource.logical_disposed_count
+resource.pending_physical_disposal
+resource.cleanup_failure_count
+native.handle_count
+gpu.resource_count
+```
+
+---
+
+## 51. Queue and Scheduler Snapshot
+
+```text
+queue.class
 queue.capacity
 queue.depth
-queue.oldest_item_age
+queue.oldest_age
 queue.current_revision_items
 queue.obsolete_items
+scheduler.last_decision
+scheduler.control_capacity
+scheduler.pressure_state
 ```
-
-The snapshot should not include full WorkItem payloads by default.
 
 ---
 
-## 70. Provider Snapshot
-
-Suggested fields:
+## 52. Provider Snapshot
 
 ```text
 provider.id
+provider.profile
 provider.state
-provider.model
 provider.requests_inflight
-provider.consecutive_failures
-provider.last_success_at
-provider.last_error_code
+provider.abandoned_requests
+provider.recent_p50
+provider.recent_p95
+provider.failure_rate
+provider.rate_limit_state
 provider.backoff_until
-provider.initialized
+provider.last_error_code
 ```
 
-Credentials must never be included.
+Credentials không bao giờ xuất hiện.
 
 ---
 
-## 71. Artifact Snapshot
+## 53. Development Diagnostic Views
 
-Suggested fields:
+Development-only views nên có:
+
+- Revision Timeline;
+- WorkItem/Attempt Lineage;
+- Authority View;
+- Publication View;
+- Ownership View;
+- Lease View;
+- Retention View;
+- Queue View;
+- Provider View;
+- Resource Pressure View;
+- Shutdown Timeline.
+
+---
+
+## 54. Revision Timeline View
+
+Example:
 
 ```text
-artifact.count_by_type
-artifact.bytes_by_type
-artifact.active_lease_count
-artifact.disposal_pending_count
-artifact.oldest_pending_disposal_age
-artifact.cache_owned_count
-artifact.revision_owned_count
+Revision 210
+├── Observation             35 ms
+├── Planning                4 ms
+├── Reuse Evaluation        6 ms
+├── Queue Wait             10 ms
+├── Attempt Execution     420 ms
+├── Authority Validation    2 ms
+├── Ownership Transfer      1 ms
+├── Publication             3 ms
+├── Presentation           42 ms
+└── UI Commit              16 ms
 ```
 
-Individual ArtifactIds may be exposed only in development diagnostics.
-
----
-
-## 72. Snapshot Collection
-
-Snapshot collection must:
-
-- avoid blocking Runtime Control for a long duration
-- avoid acquiring broad locks
-- use immutable or copied metadata
-- exclude large artifact payloads
-- remain safe during shutdown
-- tolerate partial data
-
-A snapshot is best-effort diagnostic state, not a transactional database export.
-
----
-
-## 73. Recent Event Ring Buffer
-
-The development runtime may maintain a bounded in-memory ring buffer of recent lightweight events.
-
-Examples:
+Stale Revision:
 
 ```text
-revision.created
-work.started
-work.completed
-retry.scheduled
-artifact.published
-provider.degraded
-ui.commit.rejected
+Revision 211
+├── Attempt Execution     900 ms
+├── Authority Reject        1 ms
+└── STALE
 ```
 
-Benefits:
+---
 
-- local diagnosis without persistent logging
-- reconstruction of recent state transitions
-- support snapshot enrichment
+## 55. Recent Event Ring Buffer
 
-The buffer must be:
+Development Runtime có thể giữ bounded ring buffer của lightweight event.
 
-- bounded
-- content-free
-- removable in production
-- safe under concurrency
+Yêu cầu:
+
+- bounded;
+- content-free;
+- concurrency-safe;
+- optional trong production;
+- không thay durable log;
+- không giữ raw payload.
 
 ---
 
-## 74. Structured Logging Principles
+## 56. Structured Logging Rules
 
-Structured logs should:
+Structured logs phải:
 
-- use stable event names
-- use machine-readable fields
-- avoid string parsing for core logic
-- preserve correlation identifiers
-- avoid large payloads
-- avoid high-frequency noise
-- support redaction
-- support severity filtering
+- stable event name;
+- machine-readable field;
+- correlation identifiers;
+- bounded size;
+- redaction;
+- severity phù hợp;
+- rate limiting;
+- deduplication.
+
+Không dùng high-severity cho:
+
+- expected cancellation;
+- normal stale rejection;
+- cache miss;
+- queue replacement;
+- normal fallback;
+- user session stop.
 
 ---
 
-## 75. Suggested Log Event Names
+## 57. Cardinality Control
 
-Examples:
+Unsafe metric labels:
+
+- all runtime IDs;
+- provider request ID;
+- raw error;
+- file path;
+- window title;
+- source text;
+- content hash.
+
+IDs chỉ dùng trace, structured log hoặc local development snapshot.
+
+---
+
+## 58. Privacy Principles
 
 ```text
-runtime.started
-runtime.shutdown.started
-runtime.shutdown.completed
-runtime.shutdown.timeout
-session.started
-session.failed
-revision.created
-revision.obsolete
-revision.failed
-work.failed
-work.abandoned
-retry.exhausted
-provider.degraded
-provider.recovered
-artifact.lifecycle.invalid
-resource.cleanup.failed
-runtime.invariant_violated
+No Reading Content by Default
 ```
 
----
+Standard telemetry không chứa:
 
-## 76. Logging Normal Operations
-
-Do not use high-severity logs for:
-
-- expected cancellation
-- stale-result rejection
-- queue replacement
-- cache miss
-- normal provider fallback
-- session stop
-
-These may use:
-
-- trace
-- debug
-- metrics
-- low-volume informational events
+- screenshot;
+- recognized text;
+- translation;
+- prompt;
+- source URL;
+- page title;
+- window title;
+- clipboard;
+- provider body;
+- secret;
+- token;
+- credential.
 
 ---
 
-## 77. Error Deduplication
+## 59. Content-Derived Metadata
 
-Repeated errors must not flood logs or UI.
+Có thể dùng metadata coarse và bounded:
 
-A possible deduplication key:
+- dimensions;
+- region count;
+- text-length bucket;
+- language code;
+- confidence bucket;
+- input-size class;
+- hash algorithm version.
 
-```text
-ErrorCode
-+
-Stage
-+
-ProviderId
-+
-SessionId
-+
-Time Window
-```
+Content fingerprint:
 
-Deduplication should preserve:
-
-- first occurrence
-- repeat count
-- last occurrence
-- escalation if severity changes
+- local by default;
+- không metric label;
+- không export mặc định;
+- phải có privacy classification.
 
 ---
 
-## 78. Log Rate Limiting
-
-High-frequency events should be rate-limited.
-
-Examples:
-
-- capture frame failure
-- repeated provider unavailability
-- cache lookup failure
-- stale completion
-- duplicate callback
-
-Metrics should still count all occurrences when feasible.
-
----
-
-## 79. Cardinality
-
-Telemetry cardinality must remain bounded.
-
-Unsafe metric labels include:
-
-- SessionId
-- RevisionId
-- WorkItemId
-- AttemptId
-- ArtifactId
-- provider request ID
-- raw error message
-- source text
-- file path
-- window title
-
-These belong in traces, logs, or local diagnostics.
-
----
-
-## 80. Safe Metric Dimensions
-
-Generally safe bounded dimensions include:
-
-```text
-stage
-result_status
-error_code
-provider
-model
-execution_class
-cache_status
-cancellation_reason
-resource_type
-memory_pressure_level
-device_profile
-```
-
-Even these should be reviewed for bounded value sets.
-
----
-
-## 81. Privacy Principles
-
-CRAI processes private reading content.
-
-Observability must follow:
-
-```text
-No Content by Default
-```
-
-Standard telemetry must not include:
-
-- screenshots
-- OCR text
-- translation text
-- prompts
-- source URLs
-- page titles
-- selected window titles
-- clipboard content
-- API credentials
-- tokens
-- raw provider request bodies
-
----
-
-## 82. Content-Derived Metadata
-
-Some content-derived metadata may be useful.
-
-Examples:
-
-- image dimensions
-- region count
-- text length
-- language code
-- confidence range
-- hash version
-
-Such metadata should be:
-
-- non-reversible where practical
-- coarse when exact values are unnecessary
-- disabled if privacy risk outweighs diagnostic value
-
----
-
-## 83. Hashes and Fingerprints
-
-Content hashes and perceptual fingerprints may still be identifying.
-
-They should:
-
-- not be exported by default
-- not be used as public metric labels
-- remain local unless explicitly required
-- be truncated or anonymized for diagnostics
-- use versioned algorithms
-
----
-
-## 84. Credentials and Secrets
-
-The observability layer must redact:
-
-```text
-Authorization
-API keys
-Access tokens
-Refresh tokens
-Cookies
-Provider secrets
-Encryption keys
-```
-
-Redaction must occur before storage or export.
-
-Do not rely solely on UI hiding.
-
----
-
-## 85. Technical Messages
-
-Raw provider or native error messages may contain sensitive data.
-
-Before logging:
-
-```text
-Raw Error
-    ↓
-Normalize
-    ↓
-Sanitize
-    ↓
-Structured Log
-```
-
-The original raw error may remain in memory briefly for local debugging only where safe.
-
----
-
-## 86. Diagnostic Consent
-
-Detailed content diagnostics, if ever supported, must require explicit user action.
-
-Possible modes:
-
-```text
-STANDARD
-ENHANCED_DIAGNOSTICS
-CONTENT_DEBUG
-```
-
-For the MVP, `CONTENT_DEBUG` should remain disabled or development-only.
-
----
-
-## 87. Telemetry Modes
-
-Suggested conceptual modes:
+## 60. Telemetry Modes
 
 ```text
 OFF
@@ -2059,486 +1467,174 @@ DEVELOPMENT_VERBOSE
 
 ### OFF
 
-Only essential in-memory runtime state.
+Chỉ essential in-memory counters/state.
 
 ### LOCAL_ONLY
 
-Logs and snapshots remain on device.
+Logs, traces và snapshots ở device.
 
 ### ANONYMOUS_OPERATIONAL
 
-Bounded non-content metrics may be exported.
+Chỉ bounded content-free aggregate.
 
 ### DEVELOPMENT_VERBOSE
 
-Additional traces and lifecycle diagnostics enabled.
-
-Exact product policy will be decided later.
+Thêm lifecycle trace và diagnostic details, vẫn không chứa content mặc định.
 
 ---
 
-## 88. Local Diagnostics
+## 61. Diagnostic Consent
 
-The MVP should prioritize local diagnostics.
+Detailed content diagnostics nếu có phải explicit.
 
-Local diagnostics may include:
-
-- recent trace history
-- metrics snapshot
-- runtime state snapshot
-- sanitized error logs
-- provider health
-- queue status
-- memory status
-
-This avoids requiring production telemetry infrastructure during early development.
-
----
-
-## 89. Production Telemetry
-
-Future production telemetry should prefer:
-
-- aggregated metrics
-- sampled traces
-- sanitized errors
-- explicit user consent where required
-- bounded retention
-- no reading content
-
-Production telemetry must never become a hidden content-collection mechanism.
-
----
-
-## 90. Sampling Strategy
-
-Not all traces need equal retention.
-
-Always retain or strongly sample:
-
-- fatal errors
-- invariant violations
-- application shutdown failures
-- revision failures
-- provider authentication failures
-- memory critical events
-- excessive useful-result latency
-
-Sample more aggressively:
-
-- normal successful revisions
-- cache hits
-- unchanged observation frames
-- routine cancellation
-- normal queue activity
-
----
-
-## 91. Tail-Based Sampling
-
-Future systems may retain traces based on the final outcome.
-
-Examples:
+Possible modes:
 
 ```text
-Keep trace if:
-- latency exceeds threshold
-- revision fails
-- retry occurs
-- stale execution exceeds threshold
-- provider changes
-- cleanup fails
+STANDARD
+ENHANCED_DIAGNOSTICS
+CONTENT_DEBUG
 ```
 
-This provides more useful data than random-only sampling.
+MVP: `CONTENT_DEBUG` disabled hoặc development-only.
 
 ---
 
-## 92. Telemetry Overhead
+## 62. Sampling
 
-Observability must not become a performance bottleneck.
+Ưu tiên giữ:
 
-It should avoid:
+- fatal/invariant;
+- shutdown failure;
+- authority conflict;
+- publication failure;
+- cleanup failure;
+- resource leak;
+- slow useful result;
+- retry;
+- stale expensive work;
+- provider degradation.
 
-- synchronous disk writes on critical path
-- blocking network export
-- serializing large objects
-- excessive allocation
-- unbounded log queues
-- full tracing of every frame
-- expensive stack capture for expected outcomes
+Sample mạnh hơn:
 
-Telemetry processing should use bounded asynchronous delivery where applicable.
+- normal success;
+- cache hit;
+- unchanged frame;
+- routine cancellation;
+- normal queue operation.
 
----
-
-## 93. Telemetry Backpressure
-
-Telemetry queues must also be bounded.
-
-When full, preferred behavior:
-
-1. preserve fatal and critical events
-2. preserve important errors
-3. preserve aggregate counters
-4. drop verbose trace details
-5. drop repeated informational logs
-
-Telemetry overload must not block the runtime pipeline.
+Tail-based sampling có thể dùng trong tương lai.
 
 ---
 
-## 94. Observability Failure
+## 63. Telemetry Overhead
 
-Telemetry failure must not break runtime correctness.
+Observability không được:
 
-Examples:
+- synchronous disk write trên critical path;
+- blocking network export;
+- serialize payload lớn;
+- tạo unbounded queue;
+- trace mọi frame;
+- capture expensive stack cho expected flow;
+- block Runtime Control.
 
-- log write failed
-- metrics exporter unavailable
-- trace buffer full
-- snapshot serialization failed
+Telemetry queue cũng phải bounded.
 
-Preferred behavior:
+---
+
+## 64. Telemetry Backpressure
+
+Khi telemetry saturated:
+
+1. giữ fatal/critical;
+2. giữ invariant và important error;
+3. giữ aggregate metrics;
+4. drop verbose span detail;
+5. drop repeated info/debug;
+6. increment dropped telemetry metric.
+
+Runtime không block.
+
+---
+
+## 65. Observability Failure
+
+Observability failure:
+
+- exporter unavailable;
+- log sink fail;
+- trace buffer full;
+- snapshot failure;
+- telemetry config invalid.
+
+Default:
 
 ```text
-Record local bounded diagnostic if possible
+Record bounded local diagnostic if possible
     ↓
-Continue runtime
-```
-
-Observability subsystem failure may be visible as a warning but should not terminate the session.
-
----
-
-## 95. Development Diagnostic View
-
-A development-only diagnostic view should eventually expose:
-
-```text
-Current Session
-Current Revision
-Pipeline Stage
-Queue Depths
-Running Attempts
-Provider Health
-Useful Result Latency
-Cache Hits
-Artifact Count
-Memory Usage
-Recent Errors
-Recent Runtime Events
-```
-
-The view should use metadata only.
-
----
-
-## 96. Revision Timeline View
-
-A useful development visualization may show:
-
-```text
-Revision 210
-├── Observation     35 ms
-├── Queue Wait      10 ms
-├── OCR             420 ms
-├── Layout          28 ms
-├── Translation     680 ms
-├── Presentation    42 ms
-└── UI Commit       16 ms
-```
-
-For failed or stale revisions:
-
-```text
-Revision 211
-├── OCR             500 ms
-├── Translation     900 ms
-└── STALE
-```
-
-This directly exposes wasted work.
-
----
-
-## 97. Queue Diagnostic View
-
-A queue diagnostic view should show:
-
-```text
-Queue
-Capacity
-Depth
-Oldest Age
-Current Revision Items
-Obsolete Items
-Running Count
-Rejected Count
-```
-
-This helps distinguish provider slowness from admission problems.
-
----
-
-## 98. Resource Diagnostic View
-
-A resource diagnostic view should show:
-
-```text
-Artifact Type
-Active Count
-Active Bytes
-Revision Owners
-Cache Owners
-Worker Leases
-Pending Disposal
-Oldest Pending Disposal
-```
-
-This helps identify ownership leaks.
-
----
-
-## 99. Provider Diagnostic View
-
-A provider diagnostic view should show:
-
-```text
-Provider
-Model
-State
-In-Flight Requests
-Recent P50/P95 Latency
-Recent Failure Rate
-Rate-Limit Status
-Backoff State
-Last Error
-```
-
-Credentials and raw responses must remain hidden.
-
----
-
-## 100. Observability and State Machine
-
-Runtime state transitions should emit traceable events.
-
-Example:
-
-```text
-SESSION_IDLE
-    ↓ StartSession
-SESSION_STARTING
-    ↓ CaptureReady
-SESSION_ACTIVE
-```
-
-For each transition, observability may record:
-
-```text
-entity
-previous_state
-new_state
-trigger
-result
-duration
-```
-
-Invalid transitions should generate elevated diagnostics.
-
----
-
-## 101. Observability and Scheduler
-
-Scheduler decisions should be explainable.
-
-Important decisions include:
-
-- WorkItem admitted
-- WorkItem deferred
-- WorkItem rejected
-- obsolete work removed
-- retry admitted
-- provider capacity unavailable
-- memory admission denied
-- current revision prioritized
-
-Not every decision requires a log.
-
-Metrics and trace annotations are usually sufficient.
-
----
-
-## 102. Observability and Cancellation
-
-A cancellation trace should answer:
-
-```text
-Who requested cancellation?
-Why?
-When?
-Which work was queued?
-Which work was running?
-Did provider abort succeed?
-How long until resources drained?
-```
-
-Suggested cancellation reasons:
-
-```text
-REVISION_REPLACED
-SESSION_STOPPED
-APPLICATION_SHUTDOWN
-USER_REQUEST
-PROVIDER_CHANGED
-MEMORY_PRESSURE
-RETRY_SUPERSEDED
-```
-
-The reason list must remain bounded.
-
----
-
-## 103. Observability and Retry
-
-A retry trace should connect attempts.
-
-Example:
-
-```text
-Attempt 1
-    ↓ failed: PROVIDER_TIMEOUT
-Retry scheduled: 500 ms
+Degrade observability
     ↓
-Attempt 2
-    ↓ succeeded
+Continue Runtime
 ```
 
-Trace attributes should include:
-
-```text
-attempt.number
-retry.reason
-retry.delay_ms
-retry.budget_remaining
-provider.changed
-```
+Không làm Session fail mặc định.
 
 ---
 
-## 104. Observability and Stale Results
+## 66. Startup Observability
 
-Stale work should remain visible to developers but quiet for users.
-
-A stale completion should record:
-
-```text
-original_revision
-current_revision_at_completion
-stage
-attempt
-execution_duration
-provider_cost_estimate
-rejection_reason
-```
-
-This information helps optimize cancellation and stability detection.
-
----
-
-## 105. Observability and Cache
-
-Cache observability should explain:
-
-- why a lookup hit or missed
-- which artifact type was reused
-- how much work was avoided
-- why an entry was evicted
-- whether validation rejected an entry
-- whether a cache failure degraded to pipeline execution
-
-Avoid exposing full cache keys.
-
----
-
-## 106. Observability and Resource Lifecycle
-
-Resource diagnostics should verify:
-
-```text
-Create
-    ↓
-Register
-    ↓
-Publish
-    ↓
-Acquire Lease
-    ↓
-Release Lease
-    ↓
-Dispose
-```
-
-Anomalies include:
-
-- lease never released
-- disposal pending too long
-- owner removed but bytes retained
-- duplicate ownership transfer
-- artifact disposed while leased
-- resource registered but never published
-- provider handle retained after shutdown
-
----
-
-## 107. Observability and Shutdown
-
-Shutdown observability should track:
-
-```text
-shutdown.requested_at
-new_work_stopped_at
-sessions_canceled_at
-workers_drained_at
-providers_unloaded_at
-resources_disposed_at
-shutdown.completed_at
-```
-
-Also track:
-
-```text
-shutdown.abandoned_work_count
-shutdown.cleanup_failure_count
-shutdown.duration_ms
-```
-
----
-
-## 108. Startup Observability
-
-Startup should track:
+Track:
 
 ```text
 runtime.initialize_ms
+runtime_control.ready_ms
 capture.initialize_ms
 provider.initialize_ms
+artifact_store.initialize_ms
 cache.initialize_ms
 model.load_ms
 ui.ready_ms
-first_revision_latency_ms
+first_revision_ms
+first_useful_result_ms
 ```
 
-Cold-start metrics must be distinguished from steady state.
+Cold start tách steady state.
 
 ---
 
-## 109. Health Model
+## 67. Shutdown Observability
 
-The runtime may expose a summarized health state.
+Track milestones:
 
-Possible states:
+```text
+shutdown.requested_at
+admission.stopped_at
+authority.revoked_at
+sessions.canceled_at
+queues.drained_at
+attempts.drained_at
+providers.unloaded_at
+leases.released_at
+resources.disposed_at
+telemetry.flushed_at
+shutdown.completed_at
+```
+
+Metrics:
+
+```text
+shutdown.duration_ms
+shutdown.abandoned_attempt_count
+shutdown.cleanup_failure_count
+shutdown.remaining_lease_count
+shutdown.remaining_resource_count
+```
+
+---
+
+## 68. Health Model
+
+Overall:
 
 ```text
 HEALTHY
@@ -2548,552 +1644,410 @@ CRITICAL
 SHUTTING_DOWN
 ```
 
-Health may be derived from:
+Sub-health:
 
-- session capability
-- provider availability
-- memory pressure
-- queue saturation
-- control-loop responsiveness
-- fatal errors
+- Runtime Control;
+- Capture;
+- Provider;
+- Scheduler;
+- Artifact Store;
+- Resource Manager;
+- Storage;
+- UI;
+- Observability.
 
-Health is a summary, not a replacement for detailed metrics.
-
----
-
-## 110. Health Snapshot
-
-Suggested health structure:
-
-```text
-RuntimeHealth
-├── Overall
-├── Capture
-├── OCR
-├── Translation
-├── Provider
-├── Memory
-├── Scheduler
-├── UI
-└── Observability
-```
-
-A degraded telemetry exporter should not necessarily make the overall runtime unhealthy.
+Observability degraded không tự làm overall Runtime critical.
 
 ---
 
-## 111. Alerts
+## 69. Alerts
 
-During development or future production operation, useful alerts may include:
+Useful alerts:
 
-- fatal runtime error
-- sustained memory growth
-- sustained queue saturation
-- provider failure rate above threshold
-- useful-result latency above threshold
-- stale-work ratio above threshold
-- retry exhaustion rate above threshold
-- Runtime Control loop stall
-- pending resource disposal too old
-- application shutdown timeout
+- fatal Runtime error;
+- Runtime Control stall;
+- sustained queue saturation;
+- high stale ratio;
+- useful latency exceeded;
+- provider failure rate;
+- retry exhaustion;
+- sustained resource pressure;
+- Lease leak;
+- draining resource too old;
+- publication failure rate;
+- shutdown timeout.
 
-Threshold values belong in `RUNTIME_CONFIG.md`.
-
----
-
-## 112. Alert Stability
-
-Alerts must avoid flapping.
-
-Possible techniques:
-
-- minimum duration
-- moving window
-- repeated sample threshold
-- recovery threshold separate from trigger threshold
-- deduplication
-- cooldown period
+Threshold thuộc `RUNTIME_CONFIG.md`.
 
 ---
 
-## 113. Observability Configuration
+## 70. Alert Stability
 
-Configurable observability behavior may include:
+Dùng:
 
-```text
-telemetry.mode
-metrics.enabled
-tracing.enabled
-trace.sample_rate
-slow_revision_threshold
-slow_stage_threshold
-log.level
-log.retention
-diagnostic_ring_buffer_size
-snapshot.enabled
-content_logging.enabled
-```
-
-The exact configuration schema belongs in `RUNTIME_CONFIG.md`.
+- moving window;
+- minimum duration;
+- trigger/recovery hysteresis;
+- cooldown;
+- deduplication;
+- consecutive sample threshold.
 
 ---
 
-## 114. Observability Defaults
-
-Recommended MVP defaults:
-
-```text
-Local metrics: enabled
-Structured error logs: enabled
-Revision traces: enabled in development
-Full frame tracing: disabled
-Content logging: disabled
-Diagnostic snapshots: enabled
-Recent event ring buffer: enabled and bounded
-Remote export: disabled
-```
-
----
-
-## 115. Testing Observability
-
-Observability must be tested like runtime behavior.
-
-Tests should verify:
-
-- identifiers propagate correctly
-- one revision produces one root trace
-- retry attempts link correctly
-- stale results receive correct disposition
-- cancellation is not counted as failure
-- queue wait and execution are separated
-- sensitive content is redacted
-- metric dimensions remain bounded
-- telemetry queue remains bounded
-- telemetry failure does not break runtime
-- snapshot collection is non-blocking
-- shutdown telemetry completes safely
-
----
-
-## 116. Deterministic Telemetry Tests
-
-Fake clocks and fake providers should allow deterministic verification.
-
-Example:
-
-```text
-Queue delay = 100 ms
-Execution delay = 400 ms
-Provider delay = 300 ms
-UI commit delay = 20 ms
-```
-
-Tests should assert that telemetry reports the correct segments.
-
----
-
-## 117. Privacy Tests
-
-Automated tests should scan logs and telemetry for forbidden values.
-
-Examples:
-
-- API key
-- authorization header
-- OCR text
-- translation text
-- source image path
-- raw screenshot bytes
-- provider prompt
-
-Redaction should be verified before export.
-
----
-
-## 118. Cardinality Tests
-
-Tests should verify that metrics do not create labels from:
-
-- SessionId
-- RevisionId
-- WorkItemId
-- AttemptId
-- ArtifactId
-- arbitrary error messages
-
-Metrics should use stable bounded enums.
-
----
-
-## 119. Failure Tests
-
-Observability-specific failures to test:
-
-- log sink unavailable
-- metrics queue full
-- trace exporter unavailable
-- diagnostic snapshot failure
-- event subscriber exception
-- disk full
-- invalid telemetry configuration
-- shutdown while telemetry is flushing
-
-Runtime correctness must remain intact.
-
----
-
-## 120. Long-Session Observability Tests
-
-Long-session testing should verify:
-
-- diagnostic ring buffers remain bounded
-- trace buffers remain bounded
-- metric structures do not grow by identifier
-- logs do not grow without retention
-- telemetry threads remain bounded
-- snapshot latency remains stable
-- resource metrics match real disposal behavior
-
----
-
-## 121. MVP Observability Model
-
-The MVP should implement:
+## 71. MVP Observability Model
 
 ```text
 Runtime Observability
 ├── In-Memory Metrics
 ├── Structured Local Logs
-├── Revision Trace Timeline
+├── Revision/WorkItem/Attempt Trace
 ├── Bounded Recent Event Buffer
 └── Runtime Diagnostic Snapshot
 ```
 
-Remote telemetry export is not required initially.
+Remote export không bắt buộc.
 
 ---
 
-## 122. MVP Required Correlation
-
-The MVP must propagate:
+## 72. MVP Required Correlation
 
 ```text
+ApplicationInstanceId
 SessionId
 RevisionId
 WorkItemId
 AttemptId
-Stage
+OwnerModule
+WorkType
 ```
 
-Provider work must additionally carry:
+Provider thêm:
 
 ```text
 ProviderId
 ProviderRequestId
 ```
 
-Artifact events must carry:
+Artifact thêm:
 
 ```text
-ArtifactId
+ArtifactId hoặc CandidateArtifactId
 ArtifactType
 ```
 
 ---
 
-## 123. MVP Required Metrics
+## 73. MVP Required Metrics
 
-At minimum:
+Minimum:
 
 ```text
 revision.created_total
 revision.committed_total
 revision.failed_total
-revision.obsolete_total
+revision.superseded_total
 revision.useful_latency_ms
 
-work.started_total
-work.failed_total
-work.canceled_total
-work.stale_total
+workitem.created_total
+workitem.admitted_total
+workitem.failed_total
+workitem.canceled_total
+workitem.stale_total
+
+attempt.started_total
+attempt.failed_total
+attempt.abandoned_total
+attempt.duration_ms
+
+authority.validation_ms
+authority.rejected_total
 
 queue.depth
 queue.wait_ms
 
-provider.request_duration_ms
+provider.request_ms
 provider.failure_total
 provider.requests_inflight
 
-retry.started_total
+retry.approved_total
 retry.exhausted_total
 
 cache.hit_total
 cache.miss_total
 
+candidate.rejected_total
+artifact.published_total
 artifact.active_count
 artifact.active_bytes
-artifact.pending_disposal_count
+
+lease.active_count
+resource.draining_count
+resource.disposal_failed_total
 
 memory.process_bytes
+resource.pressure_level
 
-ui.commit_duration_ms
+ui.commit_ms
+ui.commit_rejected_total
 ```
 
 ---
 
-## 124. MVP Required Logs
+## 74. MVP Required Logs
 
-At minimum, structured logs should exist for:
+Structured logs cho:
 
-```text
-runtime startup failure
-session startup failure
-revision terminal failure
-provider initialization failure
-provider authentication failure
-retry exhaustion
-resource cleanup failure
-invalid state transition
-fatal invariant violation
-shutdown timeout
-```
+- startup failure;
+- Session startup failure;
+- WorkItem terminal failure;
+- provider initialization/auth failure;
+- retry exhaustion;
+- ownership transfer failure;
+- publication failure;
+- cleanup failure;
+- Lease leak;
+- invalid state transition;
+- invariant violation;
+- shutdown timeout.
 
 ---
 
-## 125. MVP Required Trace
+## 75. MVP Required Trace
 
-One accepted revision should be traceable through:
+Một accepted Revision trace:
 
 ```text
 Observation
     ↓
 Revision Creation
     ↓
-OCR
+Business Planning
     ↓
-Layout
+Reuse Evaluation
     ↓
-Translation
+WorkItem / Attempt
+    ↓
+Authority Validation
+    ↓
+Ownership Transfer
+    ↓
+Artifact Publication
     ↓
 Presentation
     ↓
 UI Commit
 ```
 
-Retries and stale outcomes must appear in the same logical trace.
+Retry, cancellation và stale rejection nằm trong cùng logical trace.
 
 ---
 
-## 126. MVP Diagnostic Snapshot
+## 76. Testing Requirements
 
-The MVP snapshot should include:
+Test phải verify:
+
+- correlation propagation;
+- one root Revision trace;
+- same WorkItem/new Attempt lineage;
+- authority accepted/rejected;
+- ownership transfer success/failure;
+- Candidate publication/rejection;
+- Lease acquire/release/contention/leak;
+- retention add/remove;
+- logical/physical disposal;
+- stale result disposition;
+- cancellation không tính failure;
+- queue wait tách execution;
+- privacy redaction;
+- bounded metric dimensions;
+- bounded telemetry queue;
+- snapshot non-blocking;
+- exporter failure không phá Runtime;
+- shutdown telemetry;
+- no content in events/logs/metrics.
+
+---
+
+## 77. Deterministic Tests
+
+Dùng:
+
+- fake clock;
+- fake provider;
+- manual Completion gate;
+- manual authority gate;
+- fake Artifact Store;
+- fake Lease manager;
+- deterministic telemetry sink.
+
+Assert chính xác:
 
 ```text
-Application State
-Session State
-Current Revision
-Queue Depths
-Active WorkItems
-Provider State
-Cache Usage
-Artifact Counts
-Memory Usage
-Recent Errors
-Recent Runtime Events
+Queue Wait
+Execution
+Authority Validation
+Ownership Transfer
+Publication
+UI Commit
+Drain
 ```
 
 ---
 
-## 127. Observability Invariants
+## 78. Long-Session Tests
 
-The runtime must preserve these invariants:
+Verify:
 
-1. Every accepted revision has a traceable lifecycle.
-2. Every WorkItem outcome can be correlated with its revision.
-3. Every retry has a distinct AttemptId.
-4. Queue wait and execution duration remain distinguishable.
-5. Cancellation is not counted as failure.
-6. Stale results are observable but do not become user-visible errors.
-7. Raw reading content is excluded from standard telemetry.
-8. Credentials and tokens are always redacted.
-9. Metric cardinality remains bounded.
-10. Telemetry failure cannot break runtime correctness.
-11. Telemetry queues remain bounded.
-12. Runtime Control is never blocked by telemetry export.
-13. Diagnostic snapshots exclude large artifact payloads.
-14. Artifact lifecycle anomalies are observable.
-15. Provider health changes are observable.
-16. Fatal errors receive elevated diagnostics.
-17. Duplicate events do not create duplicate terminal outcomes.
-18. Production telemetry is content-free by default.
-19. Trace sampling preserves important failures and slow operations.
-20. Observability overhead remains bounded and measurable.
+- metric structure không tăng theo IDs;
+- trace/ring buffer bounded;
+- logs retention bounded;
+- telemetry worker bounded;
+- snapshots stable;
+- Lease metrics khớp actual state;
+- resource disposal metrics khớp lifecycle;
+- no retention leak;
+- observability overhead stable.
 
 ---
 
-## 128. Open Questions
+## 79. Architecture Invariants
 
-The following questions remain open:
-
-- Which telemetry library will be used?
-- Will OpenTelemetry be adopted?
-- Should local traces persist across application restarts?
-- How long should local logs be retained?
-- Should diagnostic snapshots be exportable as a support package?
-- Should the user be able to disable all telemetry?
-- Which metrics should be visible in the normal UI?
-- Which metrics should remain development-only?
-- What slow-revision threshold should trigger detailed trace retention?
-- Should provider request cost estimates be stored?
-- Should resource lifecycle events be traced individually or sampled?
-- How should GPU telemetry be implemented across platforms?
-- Should application crashes produce a local recovery report?
-- Should anonymous production metrics be supported in the MVP?
-- What level of technical detail should a support bundle contain?
-- Should source application metadata ever be collected with consent?
-
-These questions can be decided after the desktop framework, provider strategy, and deployment model are selected.
-
----
-
-## 129. Related Documents
-
-- `README.md`
-- `PIPELINE_RUNTIME.md`
-- `WORK_QUEUE.md`
-- `SCHEDULER.md`
-- `CANCELLATION.md`
-- `CACHE_POLICY.md`
-- `MEMORY_MODEL.md`
-- `THREADING_MODEL.md`
-- `RESOURCE_LIFECYCLE.md`
-- `PERFORMANCE_MODEL.md`
-- `ERROR_MODEL.md`
-- `RETRY_POLICY.md`
-- `RUNTIME_CONFIG.md`
-- `RUNTIME_COMPONENTS.md`
-- `../STATE_MACHINE.md`
-- `../EVENT_BUS.md`
-- `../DATA_FLOW.md`
-- `../flows/SCREEN_COMIC_FLOW.md`
+1. Observability giải thích decision, không chỉ activity.
+2. Mọi accepted Revision có traceable lifecycle.
+3. WorkItem và Attempt identity tách biệt.
+4. Retry có AttemptId riêng.
+5. Authority validation observable.
+6. Ownership transfer observable.
+7. Candidate rejection observable.
+8. Publication observable.
+9. Lease lifecycle observable.
+10. Retention lifecycle observable.
+11. Logical và physical disposal tách biệt.
+12. Queue wait tách execution.
+13. Cancellation không tính failure.
+14. Stale work observable nhưng quiet cho user.
+15. Runtime events không tự động là telemetry.
+16. Event Bus không phụ thuộc telemetry.
+17. Standard telemetry không chứa reading content.
+18. Secrets được redact trước storage/export.
+19. Metric cardinality bounded.
+20. Runtime IDs không là aggregate labels.
+21. Telemetry queue bounded.
+22. Telemetry failure không phá correctness.
+23. Runtime Control không block bởi export.
+24. Snapshot không chứa payload lớn.
+25. Provider health transition observable.
+26. Duplicate signal không tạo duplicate terminal outcome.
+27. Fatal/invariant có elevated diagnostics.
+28. Sampling giữ slow/failure/cleanup traces.
+29. Observability overhead measurable.
+30. Cache/Storage/Runtime ownership không bị trộn trong telemetry.
 
 ---
 
-## 130. Next Step
+## 80. Open Questions
 
-The next runtime document should be:
-
-```text
-RUNTIME_CONFIG.md
-```
-
-It should define:
-
-- configuration ownership
-- configuration scopes
-- application defaults
-- session configuration
-- provider configuration
-- pipeline configuration
-- capture configuration
-- stability thresholds
-- queue capacities
-- concurrency limits
-- timeout configuration
-- retry configuration
-- cache and memory budgets
-- observability configuration
-- validation
-- hot reload
-- configuration snapshots
-- configuration versioning
-- secret handling
-- safe defaults
-- MVP configuration policy
-
-After that, the Runtime section should be concluded with:
-
-```text
-RUNTIME_COMPONENTS.md
-```
-
-This final document should consolidate the logical runtime components and determine whether concepts such as:
-
-```text
-Resource Manager
-Attempt
-Provider Manager
-Runtime Store
-```
-
-need standalone implementation modules or remain architectural responsibilities.
+- Dùng OpenTelemetry không?
+- Trace local có persist qua restart không?
+- Log retention bao lâu?
+- Support bundle có export Snapshot không?
+- User có tắt toàn bộ telemetry không?
+- Metric nào user-facing?
+- Slow Revision threshold?
+- Provider cost estimate có lưu không?
+- Lifecycle event trace toàn bộ hay sample?
+- GPU telemetry đa nền tảng?
+- Crash recovery report?
+- Anonymous operational telemetry trong MVP?
+- Authority/Ownership diagnostic view có cần user-facing không?
+- Lease leak threshold theo resource type?
+- Content-derived metadata nào được export?
 
 ---
 
-## 131. Summary
+## 81. Related Documents
 
-CRAI observability is built from:
+| Document | Relationship |
+|---|---|
+| `PIPELINE_RUNTIME.md` | WorkItem, Attempt, Completion, authority |
+| `RUNTIME_COMPONENTS.md` | Observability ownership |
+| `SCHEDULER.md` | Admission decisions |
+| `WORK_QUEUE.md` | Queue metrics |
+| `CANCELLATION.md` | Authority revoke and drain |
+| `RETRY_POLICY.md` | Attempt lineage |
+| `ERROR_MODEL.md` | RuntimeError telemetry |
+| `CACHE_POLICY.md` | Reuse and retention |
+| `MEMORY_MODEL.md` | Memory/resource metrics |
+| `RESOURCE_LIFECYCLE.md` | Ownership, Lease, disposal |
+| `THREADING_MODEL.md` | Execution context |
+| `PERFORMANCE_MODEL.md` | Performance budgets |
+| `RUNTIME_CONFIG.md` | Telemetry settings |
+| `BOOT_SEQUENCE.md` | Startup/shutdown timeline |
+| `../core/EVENT_BUS.md` | Runtime event semantics |
+
+---
+
+## 82. Completion Criteria
+
+`RUNTIME_OBSERVABILITY.md` được xem là đồng bộ khi:
+
+- pipeline trace dùng BusinessExecutionPlan/WorkItem/Attempt;
+- Stage không còn là dimension bắt buộc;
+- authority trace và metrics tồn tại;
+- Candidate → transfer → publication observable;
+- ownership, retention và Lease tách rõ;
+- logical/physical disposal observable;
+- Snapshot có authority, ownership, Lease và pressure;
+- Runtime Event naming đồng bộ;
+- privacy/cardinality/sampling giữ nguyên;
+- MVP metrics và tests khớp Runtime v2.
+
+---
+
+## 83. Summary
+
+CRAI Observability dùng:
 
 ```text
 Metrics
-    +
++
 Traces
-    +
++
 Structured Logs
-    +
++
 Runtime Events
-    +
++
 Diagnostic Snapshots
 ```
 
-The main correlation model is:
+Correlation chính:
 
 ```text
-ApplicationInstanceId
+Application
     ↓
-SessionId
-        ↓
-RevisionId
-            ↓
-WorkItemId
-                ↓
-AttemptId
-```
-
-Observability must explain:
-
-```text
-What happened?
-Why did it happen?
-How long did it take?
-Was the work still relevant?
-What resource did it consume?
-What final authority did it have?
-```
-
-The primary observable outcome is not merely stage completion.
-
-It is:
-
-```text
-Current Valid Revision
+Session
     ↓
-Useful Translation Produced
+Revision
     ↓
-Presentation Successfully Committed
+WorkItem
+    ↓
+Attempt
 ```
 
-At the same time, observability must preserve privacy:
+Lifecycle cần giải thích:
 
 ```text
-No Screenshots
-No OCR Text
-No Translation Text
-No Prompts
-No Credentials
+Attempt Completed
+    ↓
+Authority Validated
+    ↓
+Candidate Accepted
+    ↓
+Ownership Transferred
+    ↓
+Artifact Published
+    ↓
+Presentation Committed
 ```
 
-unless an explicit development-only diagnostic mode has been enabled.
-
-The MVP should begin with local, bounded, content-free observability and add remote telemetry only after the runtime behavior and privacy model are stable.
+Observability thành công khi Runtime có thể trả lời không chỉ **điều gì đã xảy ra**, mà còn **vì sao quyết định đó được đưa ra, kết quả có còn authority không, và resource nào vẫn đang giữ nó**.

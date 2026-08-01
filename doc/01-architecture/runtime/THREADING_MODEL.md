@@ -1,138 +1,121 @@
+# runtime/THREADING_MODEL.md
+
 # Runtime Threading Model
 
 > Project: CRAI  
-> Version: 0.1  
+> Version: 1.0  
 > Status: Architecture Draft
 
 ---
 
 ## 1. Purpose
 
-This document defines how CRAI distributes runtime work across execution contexts, threads, workers, asynchronous operations, and optional isolated processes.
+Tài liệu này định nghĩa cách CRAI phân phối WorkItem và Attempt qua các logical execution context, worker, asynchronous operation và optional isolated process mà vẫn giữ UI responsiveness, authority correctness và bounded resource usage.
 
-CRAI continuously performs:
+`Execution Context` là abstraction logic.
 
-- screen capture
-- frame observation
-- image processing
-- OCR
-- layout analysis
-- translation
-- provider communication
-- presentation-model creation
-- UI rendering
+```text
+Execution Context
+    ≠ OS Thread
+    ≠ Thread Pool Worker
+    ≠ Coroutine
+    ≠ Task
+    ≠ Process
+```
 
-Without an explicit threading model, the runtime may:
-
-- freeze the user interface
-- create too many competing workers
-- block capture while waiting for translation
-- access thread-affine resources incorrectly
-- mutate shared state concurrently
-- retain resources across unsafe thread boundaries
-- create race conditions between revisions
-- reduce performance through excessive parallelism
-
-The threading model protects responsiveness, correctness, and bounded resource usage.
+Implementation có thể map một hoặc nhiều logical context lên physical thread, event loop, task scheduler, GPU queue hoặc process khi semantics vẫn được giữ.
 
 ---
 
 ## 2. Scope
 
-This document covers:
+Tài liệu này bao phủ:
 
-- execution contexts
-- UI thread boundaries
-- scheduler execution
-- screen-capture execution
-- CPU-bound workers
-- I/O-bound operations
-- provider concurrency
-- worker pools
-- thread-affine resources
-- synchronization
-- event dispatch
-- immutable data transfer
-- blocking restrictions
-- cancellation behavior
-- process isolation
-- MVP threading policy
+- logical execution context;
+- context ownership và lifecycle;
+- UI boundary;
+- Runtime Control context;
+- Scheduler execution;
+- capture/observation context;
+- execution resource pool;
+- CPU/GPU/native/remote execution;
+- provider callbacks;
+- thread/process affinity;
+- immutable transfer;
+- Resource Lease;
+- synchronization;
+- event dispatch;
+- cancellation;
+- shutdown;
+- process isolation;
+- metrics;
+- MVP policy.
 
-This document does not define:
+Không định nghĩa:
 
-- exact programming-language thread APIs
-- desktop-framework-specific dispatcher syntax
-- provider SDK internals
-- scheduler priority policy
-- memory budget values
-- detailed stage algorithms
-
-Those concerns belong to implementation or related runtime documents.
-
----
-
-## 3. Threading Goals
-
-The threading model must:
-
-- keep the UI responsive
-- keep capture and observation responsive
-- prevent expensive AI work from blocking control operations
-- bound CPU and provider concurrency
-- preserve revision correctness
-- support cooperative cancellation
-- minimize shared mutable state
-- avoid unnecessary thread creation
-- support thread-affine resources safely
-- remain understandable and testable
+- exact thread API;
+- framework dispatcher syntax;
+- Scheduler priority policy;
+- memory budget values;
+- provider SDK internals;
+- Business Module algorithm;
+- process topology cuối cùng.
 
 ---
 
-## 4. Threading Philosophy
+## 3. Core Principles
 
-CRAI follows this core rule:
+1. Execution Context là logical abstraction.
+2. Physical thread là implementation detail.
+3. Core Runtime state có một logical writer.
+4. Runtime Control sở hữu execution authority.
+5. Worker không mutate Runtime state trực tiếp.
+6. Worker không sở hữu shared payload.
+7. Shared payload immutable sau publication.
+8. Resource Lease không cấp ownership.
+9. Provider callback không cấp authority.
+10. Physical completion order không quyết định logical acceptance.
+11. UI context không chạy heavy domain work.
+12. Control path không cạnh tranh trực tiếp với heavy work.
+13. CPU, GPU, provider và process concurrency luôn bounded.
+14. Blocking wait bị cấm trên UI và Runtime Control context.
+15. Event subscriber chạy trên declared context.
+16. Cancellation revoke authority trước physical drain.
+17. Shutdown dừng admission trước cleanup.
+18. Thread affinity phải được khai báo.
+19. Publication phải atomic.
+20. Threading correctness không phụ thuộc cache availability.
 
-> Execution contexts coordinate through immutable artifacts, lightweight commands, and explicit state ownership.
+---
 
-The runtime should avoid:
+## 4. Architectural Position
 
 ```text
-Multiple workers
+Runtime Control
+    ↓ creates eligible WorkItem / Attempt
+Scheduler
+    ↓ admits
+Execution Resource Pool
+    ↓ dispatches
+Worker Execution
+    ↓ invokes Business Module or Provider Adapter
+Candidate Completion
     ↓
-Mutating the same revision object
-    ↓
-Locking large shared structures
-    ↓
-Unpredictable state
+Runtime Control
+    ↓ validates authority
+Artifact Store
+    ↓ accepts ownership and publishes
+Presentation
+    ↓ commits on UI Context
 ```
 
-Instead, CRAI should prefer:
-
-```text
-Worker reads immutable input
-    ↓
-Worker creates immutable output
-    ↓
-Runtime validates output
-    ↓
-Artifact is published atomically
-```
-
-Threads should communicate through:
-
-- WorkItems
-- immutable artifact references
-- events
-- completion messages
-- cancellation tokens
-
-They should not communicate by modifying shared pipeline payloads directly.
+Threading Model không sở hữu business workflow hoặc terminal outcome.
 
 ---
 
 ## 5. Execution Contexts
 
-CRAI defines logical execution contexts rather than requiring one physical thread for every component.
+CRAI định nghĩa các logical context:
 
 ```text
 Application Runtime
@@ -140,698 +123,537 @@ Application Runtime
 ├── Runtime Control Context
 ├── Capture Context
 ├── Observation Context
-├── CPU Worker Pool
+├── CPU Execution Pool
 ├── Provider I/O Context
 ├── Optional GPU Context
-└── Optional Isolated Worker Process
+├── Maintenance Context
+└── Optional Isolated Process Context
 ```
 
-An implementation may map multiple logical contexts onto the same underlying thread or task scheduler when safe.
+Một implementation có thể merge context khi:
+
+- affinity không bị phá;
+- control path vẫn được bảo vệ;
+- concurrency vẫn bounded;
+- observability vẫn phân biệt được logical context.
 
 ---
 
-## 6. UI Execution Context
+## 6. Execution Context Ownership
 
-The UI execution context owns all thread-affine user-interface operations.
+| Execution Context | Logical owner |
+|---|---|
+| UI Context | Presentation boundary |
+| Runtime Control Context | Runtime Control |
+| Capture Context | Capture Module runtime adapter |
+| Observation Context | Capture/Recognition observation adapter |
+| CPU Execution Pool | Worker Execution manager |
+| Provider I/O Context | Provider Manager / Adapter |
+| GPU Context | Provider Manager hoặc GPU coordinator |
+| Maintenance Context | Runtime infrastructure |
+| Isolated Process Context | Process supervisor |
 
-It is responsible for:
-
-- reading and updating UI controls
-- applying presentation models
-- showing loading and error states
-- handling user commands
-- updating capture-region selection UI
-- creating or destroying UI-bound surfaces
-- interacting with framework-specific visual objects
-
-Only the UI context may mutate UI state.
-
----
-
-## 7. UI Thread Restrictions
-
-The UI context must not directly perform:
-
-- OCR inference
-- translation requests
-- large image preprocessing
-- blocking file access
-- synchronous network calls
-- provider initialization with significant startup cost
-- long cache scans
-- expensive layout analysis
-- blocking cancellation cleanup
-
-The UI context may initiate these operations by submitting commands to the runtime.
+Ownership phải rõ để lifecycle và shutdown không mơ hồ.
 
 ---
 
-## 8. UI Command Flow
+## 7. Execution Context Lifecycle
 
-User actions should follow:
+```text
+CREATED
+  ↓
+INITIALIZED
+  ↓
+RUNNING
+  ↔
+PAUSED
+  ↓
+DRAINING
+  ↓
+STOPPED
+  ↓
+DISPOSED
+```
+
+Không phải context nào cũng hỗ trợ `PAUSED`.
+
+Context disposal phải tôn trọng active Attempt, Lease và thread/process affinity.
+
+---
+
+## 8. UI Execution Context
+
+UI Context là context duy nhất được mutate UI state.
+
+Nó sở hữu:
+
+- UI control state;
+- presentation commit;
+- loading/error display;
+- capture-region selection UI;
+- framework-bound visual resource;
+- UI-local lifecycle.
+
+UI Context không được:
+
+- chạy Recognition/Translation;
+- gọi provider đồng bộ;
+- block chờ Runtime;
+- thực hiện large image processing;
+- giữ Runtime lock;
+- dispose shared Artifact;
+- mutate Runtime Control state.
+
+---
+
+## 9. UI Command Flow
 
 ```text
 User Action
     ↓
 UI validates local input
     ↓
-UI submits runtime command
+UI submits Runtime Command
     ↓
 UI updates immediate interaction state
     ↓
-Runtime processes command asynchronously
+Runtime handles asynchronously
     ↓
-Runtime publishes result or state event
+Validated result/event returned
     ↓
-UI applies validated update
+UI applies update on UI Context
 ```
 
-Examples:
-
-- start reading
-- stop translation
-- change capture region
-- switch provider
-- retry current revision
-- close session
-
-The UI must not wait synchronously for the complete pipeline.
+UI không chờ toàn pipeline hoàn tất đồng bộ.
 
 ---
 
-## 9. UI Commit Boundary
-
-Presentation output crosses into the UI through an explicit commit boundary.
+## 10. UI Commit Boundary
 
 ```text
-Presentation Artifact Ready
-    ↓
-Validate SessionId
-    ↓
-Validate RevisionId
-    ↓
-Validate AttemptId
-    ↓
-Dispatch to UI Context
-    ↓
-Validate Again
-    ↓
-Apply Atomically
+Presentation Candidate Ready
+        ↓
+Runtime Control validates authority
+        ↓
+Commit request dispatched to UI Context
+        ↓
+UI Context validates again
+        ↓
+Atomic Presentation replacement
 ```
 
-The second validation on the UI context is mandatory because the active revision may change while the update is waiting in the UI queue.
+Second validation bắt buộc vì active Revision có thể thay đổi trong lúc UI queue chờ.
 
 ---
 
-## 10. Runtime Control Context
+## 11. Runtime Control Context
 
-The runtime control context coordinates:
+Runtime Control Context là authority owner cho mutable Runtime state:
 
-- session lifecycle
-- revision lifecycle
-- state-machine transitions
-- queue admission
-- scheduler signals
-- cancellation propagation
-- artifact publication
-- commit validation
-- worker completion handling
+- Session runtime metadata;
+- current Revision;
+- WorkItem logical state;
+- Attempt lineage;
+- cancellation authority;
+- accepted terminal outcome;
+- commit authority;
+- shutdown state.
 
-This context provides serialized ownership of core runtime state.
+Context này phải:
+
+- nhanh;
+- serialized;
+- deterministic;
+- non-blocking;
+- không chạy heavy domain work.
 
 ---
 
-## 11. Single-Writer Principle
+## 12. Single Logical Writer
 
-Core mutable runtime state should have one logical writer.
+Core mutable Runtime state có một logical writer.
 
-Examples:
+Các context khác:
+
+- đọc immutable snapshot;
+- gửi command;
+- gửi Completion;
+- không mutate shared Runtime object trực tiếp.
+
+Single writer không bắt buộc một dedicated OS thread.
+
+---
+
+## 13. Runtime Command Queue
+
+Conceptual commands:
 
 ```text
-Session state
-Current revision pointer
-Scheduler state
-Worker assignment state
-Artifact ownership metadata
+START_SESSION
+STOP_SESSION
+UPDATE_SOURCE
+SUBMIT_OBSERVATION
+ATTEMPT_COMPLETED
+ATTEMPT_FAILED
+ATTEMPT_CANCELED
+PROVIDER_HEALTH_CHANGED
+RESOURCE_PRESSURE_CHANGED
+REQUEST_PRESENTATION_COMMIT
 ```
 
-Other contexts may read snapshots or submit commands, but should not mutate these structures directly.
-
-This reduces the need for broad locking.
+Command chỉ chứa lightweight metadata và ArtifactRef.
 
 ---
 
-## 12. Runtime Command Queue
+## 14. Runtime Control Restrictions
 
-External contexts communicate with the runtime control context through a command queue or equivalent serialized mechanism.
+Runtime Control không:
 
-Possible commands:
+- chạy provider call;
+- chờ Worker;
+- chờ UI dispatch;
+- xử lý full image;
+- build large presentation;
+- block cancellation cleanup;
+- hold broad lock;
+- perform durable I/O synchronously.
+
+---
+
+## 15. Scheduler Execution Context
+
+MVP có thể chạy Scheduler trong Runtime Control Context nếu scheduling decision ngắn và bounded.
+
+Scheduler có thể tách context riêng khi:
+
+- candidate set lớn;
+- multi-session complexity tăng;
+- contention đo được;
+- policy computation trở nên đắt.
+
+Scheduler context tách riêng vẫn không được mutate authority trực tiếp.
+
+---
+
+## 16. WorkItem Execution Mapping
+
+WorkItem không “chạy trên thread” theo nghĩa kiến trúc.
 
 ```text
-StartSession
-StopSession
-UpdateCaptureRegion
-SubmitStableFrame
-WorkCompleted
-WorkFailed
-CancelRevision
-ProviderHealthChanged
-MemoryPressureChanged
-CommitPresentation
+WorkItem
+    ↓
+Scheduler Admission
+    ↓
+Execution Context Selection
+    ↓
+Worker Assignment
+    ↓
+Physical Thread / Task / Event Loop / Process
 ```
 
-Commands should contain lightweight metadata and artifact references.
+Runtime contract không phụ thuộc physical mapping.
 
 ---
 
-## 13. Runtime Control Restrictions
+## 17. Execution Resource Pool
 
-The runtime control context must not perform long-running domain work.
+`Execution Resource Pool` là abstraction chung.
 
-It should not:
-
-- call OCR synchronously
-- wait synchronously for providers
-- process full images
-- translate text directly
-- block while workers cancel
-- render presentation surfaces
-
-Its responsibilities should remain fast and deterministic.
-
----
-
-## 14. Scheduler Execution Context
-
-The Scheduler may execute within the runtime control context for the MVP.
-
-Scheduling decisions should be short:
+Có thể gồm:
 
 ```text
-Collect candidates
-    ↓
-Validate
-    ↓
-Choose work
-    ↓
-Assign worker
+CPU Worker Pool
+GPU Queue
+Dedicated Native Thread
+Provider Async Capacity
+Process Pool
 ```
 
-A dedicated scheduler thread is not required initially.
+Pool phải:
 
-A separate scheduler context may be introduced only when:
-
-- scheduling computation becomes expensive
-- many sessions are active
-- many worker pools must be coordinated
-- profiling shows contention in the control loop
-
----
-
-## 15. Capture Execution Context
-
-Screen capture may require a dedicated execution context because capture APIs may be:
-
-- thread-affine
-- event-driven
-- tied to operating-system callbacks
-- backed by GPU surfaces
-- sensitive to timing
-
-Capture must not depend on OCR or translation completion.
-
-The capture loop should remain independently responsive.
+- bounded;
+- capability-aware;
+- pressure-aware;
+- observable;
+- cancelable khi platform hỗ trợ.
 
 ---
 
-## 16. Capture Responsibilities
+## 18. Capture Context
 
-The capture context may:
+Capture có thể cần context riêng vì:
 
-- acquire a screen frame
-- timestamp the frame
-- create or reference a capture surface
-- register a lightweight source artifact
-- notify observation
-- release temporary capture resources
+- OS callback;
+- thread affinity;
+- GPU-backed surface;
+- timing sensitivity;
+- source-specific lifecycle.
 
-It should not perform:
-
-- OCR
-- translation
-- large synchronous encoding
-- presentation rendering
-- cache persistence
+Capture không phụ thuộc Completion của Recognition hoặc Translation.
 
 ---
 
-## 17. Capture Frequency
+## 19. Capture Backpressure
 
-Capture should not create one permanent thread per frame.
-
-The capture context should use:
-
-- one long-lived capture loop
-- operating-system frame callbacks
-- a timer-driven asynchronous loop
-- framework-supported capture events
-
-Only one active capture operation per capture source should normally exist.
-
----
-
-## 18. Capture Backpressure
-
-When downstream processing is slow, capture should not queue every frame.
-
-Preferred behavior:
+Capture không queue mọi frame.
 
 ```text
-Frame 1 observed
-Frame 2 replaces pending Frame 1
-Frame 3 replaces pending Frame 2
+Frame A pending
+Frame B arrives → replaces A
+Frame C arrives → replaces B
 ```
 
-The observation path should use latest-value behavior rather than an unbounded frame queue.
-
-Capture remains responsive while old unprocessed observations are discarded.
+Latest-value behavior được ưu tiên cho observation input.
 
 ---
 
-## 19. Observation Execution Context
+## 20. Observation Context
 
-Observation includes:
+Observation có thể gồm:
 
-- frame comparison
-- change detection
-- stability detection
-- fingerprint preparation
-- candidate revision creation
+- change detection;
+- stability detection;
+- fingerprint preparation;
+- candidate Revision input.
 
-Observation may share an execution context with capture only when its work is lightweight and bounded.
+Mỗi capture source nên có serial observation semantics.
 
-If observation becomes CPU-intensive, it should execute through a dedicated serial worker or CPU pool.
-
----
-
-## 20. Observation Serialization
-
-Observation for one capture source should normally remain serial.
-
-Incorrect:
-
-```text
-Frame 10 comparison running
-Frame 11 comparison running
-Frame 12 comparison running
-```
-
-This may produce out-of-order stability decisions.
-
-Preferred:
-
-```text
-Observe latest frame
-    ↓
-Complete comparison
-    ↓
-Observe newest available frame
-```
-
-Intermediate frames may be replaced.
+Intermediate input có thể replace, nhưng ordering decision không được chạy song song không kiểm soát.
 
 ---
 
 ## 21. CPU-Bound Work
 
-CPU-bound work includes:
+CPU-heavy execution phải ngoài UI và Runtime Control contexts.
 
-- image preprocessing
-- frame-difference calculation
-- OCR with a local CPU model
-- layout analysis
-- reading-order resolution
-- text normalization
-- presentation-model construction
+Ví dụ tổng quát:
 
-CPU-bound work must execute outside the UI and runtime control contexts.
+- image processing;
+- local model inference;
+- normalization;
+- structured document processing;
+- presentation model construction.
 
----
-
-## 22. CPU Worker Pool
-
-CRAI should use a bounded CPU worker pool.
-
-A worker pool prevents:
-
-- one new thread per WorkItem
-- excessive context switching
-- CPU oversubscription
-- uncontrolled temporary-memory growth
-
-Conceptually:
-
-```text
-CPU Work Queue
-    ↓
-Bounded CPU Worker Pool
-    ↓
-CPU Work Completion
-```
+Concurrency không hard-code theo OCR/Layout stage.
 
 ---
 
-## 23. CPU Pool Size
+## 22. CPU Execution Pool
 
-The number of CPU workers should be conservative.
+CPU Pool phải bounded để tránh:
 
-A general-purpose formula such as:
+- thread explosion;
+- oversubscription;
+- temporary-memory spike;
+- control-path starvation;
+- excessive context switching.
 
-```text
-CPU count = logical processor count
-```
-
-must not be used blindly.
-
-CRAI shares CPU resources with:
-
-- the desktop UI
-- screen capture
-- browser or reader application
-- operating system
-- local models
-- background applications
-
-The MVP should begin with low concurrency.
-
-Suggested initial assumptions:
-
-| Work class | Suggested concurrency |
-|---|---:|
-| Observation | 1 |
-| Image preprocessing | 1 |
-| OCR | 1 |
-| Layout | 1 |
-| Presentation building | 1 |
-
-Some stages may share the same physical pool while preserving separate concurrency limits.
+MVP bắt đầu với low concurrency.
 
 ---
 
-## 24. Stage Concurrency Limits
+## 23. Capability Limits
 
-Worker-pool capacity and stage concurrency are separate concepts.
-
-Example:
+Pool capacity và capability concurrency là hai khái niệm riêng.
 
 ```text
-CPU Pool Capacity: 3
-
-OCR concurrency: 1
-Layout concurrency: 1
-Presentation concurrency: 1
+CPU Pool Capacity = N
+WorkType concurrency limits = bounded per policy
 ```
 
-This prevents all workers from being consumed by one expensive stage.
-
-The Scheduler enforces stage-specific limits.
+Scheduler thực thi capability-aware admission.
 
 ---
 
-## 25. CPU Work Granularity
+## 24. Work Granularity
 
-CPU tasks should be large enough to avoid scheduling overhead but small enough to support cancellation and fairness.
+Work phải:
 
-Too small:
+- đủ lớn để scheduling overhead thấp;
+- đủ nhỏ để cancellation và fairness hiệu quả;
+- không tạo một task cho mỗi ký tự;
+- không tạo một uninterruptible task cho toàn bộ document.
 
-```text
-One WorkItem per character
-```
-
-Too large:
-
-```text
-One uninterruptible WorkItem for the whole book
-```
-
-Suitable examples:
-
-- one stable screen revision
-- one OCR region batch
-- one page layout
-- one bounded translation-unit batch
-- one presentation model
+Granularity cụ thể thuộc Business Module và WorkType contract.
 
 ---
 
-## 26. I/O-Bound Work
+## 25. I/O-Bound Work
 
-I/O-bound work includes:
+I/O nên dùng async API khi có:
 
-- remote OCR requests
-- remote translation requests
-- provider authentication refresh
-- disk-cache access
-- persistent storage
-- telemetry export
-- optional document loading
+- remote provider;
+- Storage;
+- telemetry;
+- document loading;
+- provider authentication.
 
-I/O-bound operations should use asynchronous APIs where available.
+Async không đồng nghĩa unlimited.
 
-Waiting for network or disk must not occupy a dedicated CPU thread unnecessarily.
+Concurrency, socket, billing và callback đều phải bounded.
 
 ---
 
-## 27. Asynchronous Does Not Mean Unlimited
-
-Asynchronous provider calls can still consume:
-
-- memory
-- sockets
-- provider quotas
-- billing
-- request slots
-- completion callbacks
-
-Provider concurrency must remain bounded even when no physical thread is blocked.
-
-Incorrect:
+## 26. Provider I/O Context
 
 ```text
-Start every queued translation request asynchronously
-```
-
-Correct:
-
-```text
-Provider concurrency limit
-    ↓
-Admit bounded requests
-    ↓
-Queue or drop remaining work
-```
-
----
-
-## 28. Provider I/O Context
-
-Provider requests may use the platform asynchronous runtime.
-
-A dedicated network thread is usually unnecessary.
-
-Conceptually:
-
-```text
-Translation WorkItem
+WorkItem
     ↓
 Provider Adapter
     ↓
 Asynchronous Request
     ↓
-Completion Callback
+Callback
     ↓
-Runtime Command Queue
+Normalize Result
+    ↓
+Runtime Command
 ```
 
-Provider callbacks must not mutate runtime state directly.
+Callback không mutate Runtime state.
 
-They submit completion messages to the runtime control context.
+Callback không grant authority.
+
+Callback không giữ Runtime implementation object lâu dài.
 
 ---
 
-## 29. Provider Adapter Responsibilities
+## 27. Provider Callback Boundary
 
-Provider adapters are responsible for:
+Provider callback phải:
 
-- asynchronous request creation
-- timeout setup
-- cancellation integration
-- response normalization
-- provider error classification
-- request-local resource cleanup
-- concurrency accounting
-
-They must not:
-
-- commit UI output
-- advance the pipeline directly
-- mutate the active revision
-- bypass Scheduler admission
+1. capture minimal request identity;
+2. normalize provider output/error;
+3. release request-local resource khi phù hợp;
+4. submit Completion;
+5. không advance downstream work;
+6. không update UI;
+7. không tự retry.
 
 ---
 
-## 30. Provider Completion Ordering
+## 28. Provider Execution Declaration
 
-Provider responses may complete out of order.
-
-Example:
+Provider phải khai báo:
 
 ```text
-Revision 20 request starts
-Revision 21 request starts later
-Revision 21 completes first
-Revision 20 completes later
+ExecutionClass
+Affinity
+MaximumConcurrency
+CancellationSupport
+ProcessIsolation
+MemoryCostHint
+GpuCostHint
+BlockingBehavior
 ```
 
-The runtime must not rely on completion order.
-
-Every result must include:
+Possible `ExecutionClass`:
 
 ```text
-SessionId
-RevisionId
-Stage
-AttemptId
-WorkItemId
-```
-
-Commit validation determines whether the result remains valid.
-
----
-
-## 31. Local Provider Execution
-
-Local OCR or translation providers may be:
-
-- synchronous CPU libraries
-- asynchronous libraries
-- GPU-backed libraries
-- thread-affine native libraries
-- process-hosted models
-
-Each provider adapter must declare its execution requirements.
-
-Conceptually:
-
-```text
-ProviderCapabilities
-├── ExecutionClass
-├── ThreadAffinity
-├── MaximumConcurrency
-├── CancellationSupport
-├── ProcessIsolation
-└── MemoryCost
+CPU
+GPU
+REMOTE_IO
+NATIVE_SERIAL
+PROCESS
+HYBRID
 ```
 
 ---
 
-## 32. Thread-Affine Providers
+## 29. Execution Affinity
 
-Some providers or resources may require all operations on the same thread.
+`ExecutionAffinity` tổng quát hơn thread affinity.
 
-Examples may include:
-
-- native graphics contexts
-- capture APIs
-- particular GPU contexts
-- embedded browser objects
-- some OCR library handles
-
-Such a provider should use a dedicated serial execution context.
+Có thể là:
 
 ```text
-Provider Command Queue
-    ↓
-Dedicated Provider Thread
-    ↓
-Provider Operation
+ANY
+SPECIFIC_THREAD
+SPECIFIC_EVENT_LOOP
+SPECIFIC_PROCESS
+SPECIFIC_GPU_QUEUE
+SERIAL_CONTEXT
+UI_CONTEXT
 ```
 
-Thread affinity must be declared explicitly rather than discovered through runtime failures.
+Affinity phải explicit trước execution.
 
 ---
 
-## 33. GPU Execution Context
+## 30. GPU Context
 
-GPU work may require:
+GPU execution có thể cần:
 
-- a dedicated command stream
-- serialized model inference
-- thread-affine resource creation
-- explicit synchronization
-- bounded GPU concurrency
+- dedicated command queue;
+- serial model inference;
+- explicit synchronization;
+- GPU memory budget;
+- UI rendering protection.
 
-The architecture does not assume that GPU work is automatically parallel.
-
-Running multiple GPU tasks concurrently may increase:
-
-- memory pressure
-- context contention
-- latency
-- transfer overhead
-
-The MVP may serialize each local GPU provider.
+Parallel GPU execution không mặc định tốt hơn.
 
 ---
 
-## 34. GPU and UI Interaction
+## 31. Process Isolation
 
-UI rendering and AI inference may share the same physical GPU.
+Isolated process phù hợp cho:
 
-The runtime should protect UI responsiveness by:
+- unstable native library;
+- large model;
+- hard-cancel requirement;
+- third-party plugin;
+- high-memory import.
 
-- limiting GPU inference concurrency
-- avoiding unnecessary high-resolution processing
-- releasing obsolete tensors
-- avoiding speculative GPU work
-- monitoring inference latency
-- reducing load under rendering pressure where possible
+Process chỉ giao tiếp qua adapter/command contract.
 
-The UI must not wait synchronously for GPU AI work.
-
----
-
-## 35. Worker Ownership
-
-A worker owns only:
-
-- its execution-local temporary resources
-- its acquired artifact leases
-- its provider-request handle
-- its completion result until publication
-
-A worker does not own:
-
-- session lifecycle
-- current revision state
-- global cache policy
-- downstream scheduling
-- UI state
-
-This boundary prevents worker code from becoming a second runtime coordinator.
+Nó không mutate Runtime state trực tiếp.
 
 ---
 
-## 36. Work Execution Contract
+## 32. Cross-Process Payload
 
-A worker execution should conceptually follow:
+Large payload không serialize lặp lại.
+
+Possible mechanism:
+
+- shared memory;
+- memory-mapped file;
+- temporary file;
+- shared surface;
+- Artifact handle.
+
+Process topology cụ thể thuộc tài liệu riêng.
+
+---
+
+## 33. Worker Ownership
+
+Worker sở hữu:
+
+- Attempt-local resource;
+- acquired Resource Lease;
+- provider request handle;
+- candidate output trước transfer.
+
+Worker không sở hữu:
+
+- shared payload;
+- Session/Revision authority;
+- Cache Policy;
+- downstream scheduling;
+- UI state;
+- accepted Artifact sau ownership transfer.
+
+---
+
+## 34. Worker Execution Contract
 
 ```text
-Receive WorkItem
+Receive immutable Attempt input
     ↓
-Validate cancellation
+Validate CancellationContext
     ↓
-Acquire input artifact leases
+Acquire Resource Leases
     ↓
 Validate inputs
     ↓
@@ -839,1226 +661,760 @@ Execute bounded operation
     ↓
 Check cancellation
     ↓
-Create immutable output
+Create Candidate Artifact
     ↓
-Submit completion command
+Submit Completion
     ↓
-Release temporary resources and leases
+Release local resources and leases
 ```
 
-The runtime control context decides whether the output is published or rejected.
+Runtime Control quyết định acceptance.
 
 ---
 
-## 37. Worker Completion
-
-Workers must not directly enqueue downstream work.
-
-Preferred behavior:
+## 35. Candidate Publication Flow
 
 ```text
-Worker completes OCR
+Worker Completion
     ↓
-Submits WorkCompleted
+Candidate Artifact
     ↓
-Runtime validates result
+Runtime Control authority validation
     ↓
-Artifact published
+Artifact Store ownership transfer
     ↓
-Scheduler admits Layout WorkItem
+Atomic publication
 ```
 
-This preserves centralized pipeline authority.
+Publication không xảy ra trực tiếp từ Worker.
 
 ---
 
-## 38. Shared Mutable State
-
-Shared mutable state should be minimized.
+## 36. Shared Mutable State
 
 Forbidden by default:
 
-- multiple workers appending to one shared OCR result
-- translation workers modifying one presentation model
-- provider callbacks updating session state directly
-- UI and runtime mutating one shared collection
-- workers changing queue priority themselves
+- multiple workers mutate one payload;
+- callback mutates Session;
+- UI và Runtime share mutable collection;
+- Worker changes Queue priority;
+- Worker updates Revision graph.
 
-Where shared mutation is unavoidable, ownership and synchronization must be explicit.
+Mutable builder chỉ local cho một Worker cho đến finalize.
 
 ---
 
-## 39. Immutable Data Across Boundaries
+## 37. Cross-Context Data
 
-Data crossing execution contexts should be immutable or treated as immutable.
-
-Examples:
+Data crossing context phải immutable hoặc treated-as-immutable:
 
 ```text
-RevisionSnapshot
-ArtifactReference
-ProviderResult
-PresentationModel
-RuntimeEvent
+RuntimeCommand
 WorkItem
-```
-
-Mutable builder objects should remain local to one worker until finalized.
-
----
-
-## 40. Synchronization Strategy
-
-CRAI should prefer synchronization in this order:
-
-1. single ownership
-2. serialized command processing
-3. immutable values
-4. bounded concurrent collections
-5. narrow locks
-6. broader locking only when unavoidable
-
-The runtime should not begin with a complex graph of locks.
-
----
-
-## 41. Lock Scope
-
-When locks are required, they must:
-
-- protect one clearly defined resource
-- remain held for short periods
-- never surround provider calls
-- never surround long image processing
-- never surround UI dispatch waits
-- avoid nested acquisition where possible
-
-Incorrect:
-
-```text
-Lock Session
-    ↓
-Call translation provider
-    ↓
-Wait several seconds
-```
-
-Correct:
-
-```text
-Lock briefly
-    ↓
-Read required metadata
-    ↓
-Release lock
-    ↓
-Call provider
+AttemptInput
+ArtifactRef
+Completion
+RuntimeEvent
+PresentationModel
 ```
 
 ---
 
-## 42. Lock Ordering
+## 38. Synchronization Strategy
 
-If multiple locks become necessary, a global acquisition order must be documented.
+Ưu tiên:
 
-Possible order:
+1. explicit ownership;
+2. single logical writer;
+3. serialized command processing;
+4. immutable data;
+5. Resource Lease;
+6. bounded concurrent structure;
+7. narrow lock;
+8. broader locking chỉ khi bất khả kháng.
+
+---
+
+## 39. Lock Rules
+
+Lock nếu cần phải:
+
+- scope nhỏ;
+- hold ngắn;
+- không qua provider call;
+- không qua UI dispatch;
+- không qua heavy processing;
+- không qua shutdown wait;
+- tránh nested locks.
+
+Kiến trúc ưu tiên tránh lock ordering phức tạp.
+
+---
+
+## 40. Blocking Policy
+
+Blocking bị cấm trong:
+
+- UI Context;
+- Runtime Control Context;
+- capture callback;
+- provider callback;
+- Event Bus dispatch loop.
+
+Dedicated Worker có thể block nếu:
+
+- API inherently synchronous;
+- capacity được accounting;
+- timeout bounded;
+- cancellation policy rõ;
+- control/UI không bị ảnh hưởng.
+
+---
+
+## 41. Sync-over-Async
+
+Không dùng pattern tương đương:
 
 ```text
-Application
+Async().Wait()
+Async().Result
+```
+
+trên UI/Control path.
+
+Async call chain nên giữ async end-to-end khi thực tế cho phép.
+
+---
+
+## 42. Event Dispatch
+
+```text
+Publisher
     ↓
+Event Dispatcher
+    ↓
+Declared Execution Context
+    ↓
+Subscriber
+```
+
+Publisher không execute arbitrary subscriber logic đồng bộ.
+
+Subscriber muốn thay Runtime state phải gửi Command.
+
+---
+
+## 43. Event Ordering
+
+Ordering chỉ guarantee theo scope explicit.
+
+Per-session serialized stream có thể giữ causal order.
+
+Không guarantee total ordering toàn hệ thống.
+
+Consumer phải dùng identity và timestamp.
+
+---
+
+## 44. Event Reentrancy
+
+State transition phải hoàn tất trước khi event-triggered command được xử lý.
+
+```text
+Transition completes
+    ↓
+Event queued
+    ↓
+Subscriber runs
+    ↓
+New command queued
+```
+
+---
+
+## 45. Cancellation and Contexts
+
+```text
+Cancellation Request
+    ↓
+Runtime Control revokes authority
+    ↓
+Queued work removed
+    ↓
+Running context signaled
+    ↓
+Attempt drains or becomes abandoned
+    ↓
+Resources released
+```
+
+Caller không block vô hạn chờ physical stop.
+
+---
+
+## 46. Cancellation Checkpoints
+
+Generic checkpoints:
+
+- before expensive acquisition;
+- before heavy execution;
+- between bounded batches;
+- after external call;
+- before Candidate creation;
+- before Completion;
+- before UI dispatch;
+- before UI commit.
+
+---
+
+## 47. Timers
+
+Timer callback phải ngắn.
+
+Dùng cho:
+
+- capture pacing;
+- stability timing;
+- provider timeout;
+- retry delay;
+- idle unload;
+- metrics sampling.
+
+Timer callback gửi Command, không chạy full work.
+
+---
+
+## 48. Retry Delay
+
+Delayed retry không giữ blocked thread.
+
+```text
+Cancelable delay registered
+    ↓
+Delay completes
+    ↓
+Authority revalidated
+    ↓
+Retry-ready command submitted
+```
+
+---
+
+## 49. Control Path Protection
+
+Control path phải luôn có execution capacity cho:
+
+- cancellation;
+- stop;
+- Revision replacement;
+- Completion processing;
+- provider timeout;
+- shutdown;
+- UI state signal.
+
+Heavy work không được chiếm toàn bộ capacity mà control path cần.
+
+---
+
+## 50. Workload Classes
+
+```text
+CONTROL
+UI
+CAPTURE
+OBSERVATION
+CPU_LIGHT
+CPU_HEAVY
+NETWORK_IO
+GPU
+NATIVE_SERIAL
+PROCESS
+MAINTENANCE
+```
+
+Scheduler dùng class cho admission và capacity, không hard-code Business Module internals.
+
+---
+
+## 51. Background Work
+
+Background work phải:
+
+- low concurrency;
+- yield to interactive;
+- stop dưới pressure;
+- cancelable;
+- không giữ UI-affine resource;
+- không block shutdown.
+
+---
+
+## 52. Artifact Store Concurrency
+
+Artifact Store phải:
+
+- thread-safe;
+- ownership-safe;
+- lease-safe;
+- publication-safe;
+- disposal-safe.
+
+Payload immutable sau publication.
+
+Consumers chỉ thấy:
+
+```text
+not available
+```
+
+hoặc:
+
+```text
+complete accepted Artifact
+```
+
+---
+
+## 53. Revision Registry Concurrency
+
+Revision Registry có một logical writer qua Runtime Control.
+
+Worker chỉ yêu cầu snapshot/Lease.
+
+Worker không mutate Revision relation trực tiếp.
+
+---
+
+## 54. Atomic Presentation Replacement
+
+Presentation commit phải atomic từ góc nhìn UI.
+
+Progressive rendering nếu có cần consistency model riêng.
+
+---
+
+## 55. Race Prevention
+
+Các race chính:
+
+- Revision superseded khi Attempt hoàn tất;
+- cache eviction khi Lease active;
+- UI closed khi commit queued;
+- provider switched khi callback tới;
+- Session close khi Capture callback chạy;
+- logical disposal khi native use chưa xong.
+
+Giải pháp:
+
+- authority validation;
+- immutable payload;
+- Lease;
+- serialized Runtime Control;
+- context-affinity;
+- atomic publication.
+
+---
+
+## 56. Deadlock Prevention
+
+1. UI không chờ Runtime đồng bộ.
+2. Runtime Control không chờ UI.
+3. Không hold lock qua provider.
+4. Không hold Artifact Store lock chờ Worker.
+5. Không nested lock nếu tránh được.
+6. External operation có timeout.
+7. Shutdown async và bounded.
+8. Event subscriber không reenter transition trực tiếp.
+
+---
+
+## 57. Error Across Contexts
+
+Worker normalize execution result thành Completion:
+
+```text
+ATTEMPT_COMPLETED
+ATTEMPT_FAILED
+ATTEMPT_CANCELED
+ATTEMPT_ABANDONED
+```
+
+Completion chứa:
+
+- SessionId;
+- RevisionId;
+- WorkItemId;
+- AttemptId;
+- BusinessStageId;
+- WorkType;
+- RuntimeErrorRef;
+- timing metadata.
+
+Runtime Control quyết định accepted outcome.
+
+---
+
+## 58. Unhandled Worker Failure
+
+Unhandled failure phải:
+
+- release Attempt-local resource;
+- release Lease;
+- notify Runtime Control;
+- mark Worker/provider health khi cần;
+- không crash toàn app nếu isolation vẫn an toàn;
+- trigger process isolation consideration nếu native failure lặp.
+
+---
+
+## 59. Shutdown
+
+```text
+Stop New Admission
+    ↓
+Revoke Authority
+    ↓
+Cancel Queued Work
+    ↓
+Signal Running Contexts
+    ↓
+Bounded Drain
+    ↓
+Mark Remaining Attempts Abandoned
+    ↓
+Release Leases
+    ↓
+Dispose Contexts and Resources
+```
+
+Order chi tiết thuộc `BOOT_SEQUENCE.md`.
+
+---
+
+## 60. Structured Concurrency
+
+Logical scope:
+
+```text
 Session
     ↓
 Revision
     ↓
-Artifact
+WorkItem
     ↓
-Worker
+Attempt
 ```
 
-However, the preferred architecture should avoid acquiring multiple locks simultaneously.
+Child execution phải gắn owner scope.
+
+Khi parent kết thúc:
+
+- child nhận cancellation;
+- child không được sống không tracking;
+- non-cancelable child thành abandoned.
+
+Architecture không bắt buộc framework cụ thể.
 
 ---
 
-## 43. Blocking Policy
+## 61. Metrics
 
-Blocking waits are forbidden in:
+Theo dõi:
 
-- UI context
-- runtime control context
-- capture callback
-- provider completion callback
-- event-dispatch loop
-
-Examples of forbidden behavior:
-
-- synchronous waiting for an async task
-- sleeping to wait for cancellation
-- blocking on network completion
-- waiting for UI dispatcher while holding a lock
-- waiting for worker shutdown inside an event callback
-
----
-
-## 44. Allowed Blocking
-
-Blocking may be acceptable inside a dedicated worker when:
-
-- the provider API is inherently synchronous
-- the worker pool accounts for the blocked capacity
-- cancellation or timeout is bounded
-- the UI and control contexts remain unaffected
-- concurrency remains limited
-
-Example:
-
-```text
-Dedicated OCR Worker
-    ↓
-Synchronous native OCR call
-```
-
-This is safer than performing the call on the UI thread, but asynchronous or process-isolated execution may still be preferable.
+- UI dispatch delay;
+- Runtime command queue length;
+- Runtime Control processing delay;
+- control-path delay;
+- capture callback delay;
+- observation latency;
+- execution context utilization;
+- Worker utilization;
+- CPU/GPU saturation;
+- provider in-flight;
+- queue wait;
+- Lease wait;
+- publication delay;
+- authority validation delay;
+- cancellation acknowledgment;
+- event dispatch delay;
+- blocked Worker count;
+- active thread count khi đo được;
+- process restart count.
 
 ---
 
-## 45. Sync-Over-Async Prohibition
-
-Implementations should avoid patterns equivalent to:
-
-```text
-AsyncOperation().Wait()
-AsyncOperation().Result
-```
-
-Such patterns can cause:
-
-- deadlocks
-- thread-pool starvation
-- UI freezes
-- lost cancellation responsiveness
-
-Asynchronous flows should remain asynchronous through their call chain where practical.
-
----
-
-## 46. Event Dispatch Model
-
-Runtime events should be published through an event bus or serialized event dispatcher.
-
-The event publisher should not execute arbitrary subscriber logic synchronously on the publisher's thread.
-
-Incorrect:
-
-```text
-Worker publishes event
-    ↓
-UI subscriber executes immediately on worker thread
-```
-
-Preferred:
-
-```text
-Worker submits completion
-    ↓
-Runtime publishes event
-    ↓
-Subscriber dispatcher routes event
-    ↓
-Subscriber handles in its own execution context
-```
-
----
-
-## 47. Event Subscriber Isolation
-
-One slow event subscriber must not block:
-
-- worker completion
-- scheduler progress
-- cancellation propagation
-- UI control commands
-
-Subscriber execution may use:
-
-- UI dispatcher
-- runtime command queue
-- diagnostics queue
-- bounded background handler
-
-The required context should be declared per subscriber.
-
----
-
-## 48. Event Ordering
-
-Event ordering is only guaranteed where explicitly required.
-
-Within one serialized session control stream, CRAI should preserve causal order.
-
-Example:
-
-```text
-revision.created
-    ↓
-work.started
-    ↓
-work.completed
-    ↓
-presentation.committed
-```
-
-Across unrelated sessions or providers, global ordering is not required.
-
-Consumers must use identifiers and timestamps rather than assuming total event order.
-
----
-
-## 49. Event Reentrancy
-
-Event handlers must not reenter mutable runtime operations unpredictably.
-
-Example risk:
-
-```text
-Runtime changes state
-    ↓
-Publishes event synchronously
-    ↓
-Subscriber calls runtime again
-    ↓
-State transition occurs inside original transition
-```
-
-Preferred behavior:
-
-```text
-State transition completes
-    ↓
-Event queued
-    ↓
-Subscriber command processed later
-```
-
-This preserves state-machine consistency.
-
----
-
-## 50. Cancellation and Threads
-
-Cancellation is cooperative across all execution contexts.
-
-A cancellation request should:
-
-- update cancellation state quickly
-- invalidate queued work
-- signal running workers
-- abort asynchronous requests where supported
-- avoid blocking the requesting context
-- defer cleanup completion when necessary
-
-The thread issuing cancellation must not wait indefinitely for physical termination.
-
----
-
-## 51. Cancellation Checkpoints
-
-CPU workers should check cancellation:
-
-- before acquiring expensive resources
-- before starting heavy processing
-- between batches or regions
-- after provider completion
-- before publishing output
-
-I/O operations should connect cancellation to:
-
-- request abort
-- timeout
-- response-read cancellation
-- provider adapter state
-
----
-
-## 52. Worker Shutdown
-
-Worker-pool shutdown should follow:
-
-```text
-Stop accepting new work
-    ↓
-Cancel queued work
-    ↓
-Request active work cancellation
-    ↓
-Wait for bounded grace period
-    ↓
-Mark remaining work abandoned
-    ↓
-Release worker resources
-```
-
-The UI should remain responsive during shutdown.
-
----
-
-## 53. Application Shutdown
-
-Application shutdown should coordinate:
-
-```text
-UI requests shutdown
-    ↓
-Runtime stops new sessions
-    ↓
-Capture stops
-    ↓
-Session cancellation propagates
-    ↓
-Provider requests canceled
-    ↓
-Workers drain within timeout
-    ↓
-Native resources disposed
-    ↓
-Application exits
-```
-
-The shutdown sequence belongs in more detail in `RESOURCE_LIFECYCLE.md`.
-
----
-
-## 54. Process Isolation
-
-Some work may eventually run in isolated child processes.
-
-Suitable candidates:
-
-- unstable native OCR libraries
-- large local AI models
-- providers requiring hard termination
-- plugins with uncertain reliability
-- high-memory import pipelines
-
-Process isolation can provide:
-
-- crash isolation
-- hard cancellation through process termination
-- separate memory accounting
-- provider restart
-- reduced native-library contamination
-
----
-
-## 55. Process Isolation Costs
-
-Process isolation also introduces:
-
-- inter-process communication
-- serialization cost
-- image-transfer cost
-- startup latency
-- deployment complexity
-- process supervision
-- more difficult debugging
-
-It should not be introduced without a clear requirement.
-
----
-
-## 56. Cross-Process Payload Policy
-
-Large artifacts should not be serialized repeatedly across processes.
-
-Possible strategies:
-
-- shared memory
-- memory-mapped files
-- temporary files
-- operating-system shared surfaces
-- compressed transfer
-- artifact handles
-
-The selected strategy depends on the implementation platform.
-
-For the MVP, all primary runtime work may remain in one process.
-
----
-
-## 57. Timer Execution
-
-Timers may be used for:
-
-- capture pacing
-- stability detection
-- provider timeouts
-- idle model unloading
-- retry delay
-- metrics sampling
-
-Timer callbacks must remain short.
-
-They should submit commands rather than perform full pipeline work directly.
-
----
-
-## 58. Delay and Retry
-
-Retry delay must not occupy a blocked thread.
-
-Preferred:
-
-```text
-Register asynchronous delay
-    ↓
-Delay completes
-    ↓
-Submit retry-ready command
-```
-
-Delayed retries must remain cancelable.
-
----
-
-## 59. Thread-Pool Starvation
-
-Thread-pool starvation can occur when:
-
-- synchronous provider calls occupy every worker
-- tasks block waiting for tasks from the same pool
-- too many CPU jobs are submitted
-- callbacks require unavailable worker threads
-- retries start without bounds
-
-CRAI should avoid using one unrestricted global pool for every workload.
-
----
-
-## 60. Workload Separation
-
-Logical workload separation should exist even if the platform uses one physical pool underneath.
-
-Suggested classes:
-
-```text
-CONTROL
-CAPTURE
-OBSERVATION
-CPU_HEAVY
-CPU_LIGHT
-NETWORK_IO
-GPU
-UI
-MAINTENANCE
-```
-
-The Scheduler uses these classes for admission and concurrency policy.
-
----
-
-## 61. CPU-Heavy and CPU-Light Work
-
-CPU-heavy work:
-
-- local OCR inference
-- image transformations
-- local AI translation
-- complex page segmentation
-
-CPU-light work:
-
-- validation
-- artifact metadata creation
-- cache-key calculation
-- state transitions
-- event-envelope creation
-
-CPU-light control work should not wait behind a queue full of CPU-heavy tasks.
-
----
-
-## 62. Control-Path Protection
-
-CRAI must reserve enough execution capacity for:
-
-- cancellation
-- session stop
-- provider timeout handling
-- revision replacement
-- UI-state updates
-- worker completion processing
-
-The control path must remain responsive even when domain workers are saturated.
-
-This may be achieved through:
-
-- a dedicated runtime control context
-- reserved worker capacity
-- non-blocking asynchronous commands
-
----
-
-## 63. Priority and Threading
-
-Thread priority at the operating-system level should not be the primary scheduling mechanism.
-
-CRAI should express priority through:
-
-- queue selection
-- admission control
-- stage concurrency
-- worker assignment
-- obsolete-work cancellation
-
-Operating-system thread priority may be platform-dependent and difficult to reason about.
-
----
-
-## 64. Background Work
-
-Background work includes:
-
-- cache cleanup
-- diagnostics export
-- history indexing
-- model preloading
-- persistent-cache writes
-
-Background work must:
-
-- use low concurrency
-- yield to interactive work
-- stop under memory or CPU pressure
-- remain cancelable
-- avoid UI-bound resources
-
-The MVP should minimize background work.
-
----
-
-## 65. Thread Safety of Artifact Store
-
-The Artifact Store may receive concurrent:
-
-- reads
-- lease acquisition
-- lease release
-- publication requests
-- eviction requests
-
-Its internal synchronization must preserve:
-
-- immutable payload access
-- atomic publication
-- correct ownership accounting
-- safe logical disposal
-- safe physical disposal
-
-Artifact payloads themselves should remain read-only after publication.
-
----
-
-## 66. Thread Safety of Revision Store
-
-The Revision Store should have one logical writer through the runtime control context.
-
-Workers may request:
-
-```text
-GetArtifactLease
-```
-
-but should not directly mutate revision relationships.
-
-This reduces concurrent mutation of revision metadata.
-
----
-
-## 67. Atomic Publication
-
-Artifact publication must appear atomic to consumers.
-
-Consumers should observe either:
-
-```text
-Artifact not available
-```
-
-or:
-
-```text
-Complete valid artifact available
-```
-
-They must not observe partially constructed artifacts.
-
-Workers build outputs locally, then submit them for publication.
-
----
-
-## 68. Atomic Presentation Replacement
-
-Presentation replacement should be atomic from the UI perspective.
-
-Incorrect:
-
-```text
-Clear old text
-    ↓
-Add translated lines one by one
-    ↓
-Failure halfway
-```
-
-Preferred:
-
-```text
-Build complete presentation model
-    ↓
-Validate
-    ↓
-Replace current model in one UI transaction
-```
-
-Progressive rendering, if added later, requires its own explicit consistency model.
-
----
-
-## 69. Data Race Prevention
-
-Potential data races include:
-
-- revision becoming obsolete while worker completes
-- cache eviction while worker reads
-- UI closure while update is queued
-- provider switch while request completes
-- session close while capture callback runs
-- artifact disposal while native operation uses it
-
-These are handled through:
-
-- immutable artifacts
-- leases
-- serialized runtime state
-- cancellation tokens
-- commit validation
-- bounded resource lifecycle
-
----
-
-## 70. Deadlock Prevention
-
-CRAI should prevent deadlocks by following these rules:
-
-1. Never block the UI waiting for runtime work.
-2. Never block runtime control waiting for UI completion.
-3. Never hold locks across provider calls.
-4. Never wait for worker completion while holding Artifact Store locks.
-5. Avoid nested locks.
-6. Use timeouts for external operations.
-7. Use asynchronous shutdown coordination.
-8. Process event commands after current state transitions complete.
-
----
-
-## 71. Error Handling Across Contexts
-
-Exceptions or failures must not escape arbitrarily across thread boundaries.
-
-Workers should convert failures into structured completion outcomes:
-
-```text
-WorkSucceeded
-WorkFailed
-WorkCanceled
-WorkAbandoned
-```
-
-The outcome should include:
-
-- WorkItemId
-- SessionId
-- RevisionId
-- AttemptId
-- stage
-- error classification
-- timing information
-
-The runtime then decides the next action.
-
----
-
-## 72. Unhandled Worker Failure
-
-An unhandled worker exception must:
-
-- release worker-local resources
-- release artifact leases
-- mark the worker operation failed
-- notify runtime control
-- avoid terminating the entire application where possible
-- trigger provider or worker health checks if needed
-
-Failures in native code may require process isolation in later versions.
-
----
-
-## 73. Diagnostics and Thread Context
-
-Diagnostics should record execution context information such as:
-
-- logical context
-- worker identifier
-- stage
-- session
-- revision
-- attempt
-- queue wait time
-- execution time
-- cancellation state
-
-Physical thread IDs may be useful for debugging but should not become domain identifiers.
-
----
-
-## 74. Testing the Threading Model
-
-Tests should cover:
-
-- UI remains responsive during slow OCR
-- capture continues while translation waits
-- control commands execute while workers are saturated
-- provider responses complete out of order
-- revision changes during UI dispatch
-- session closes during capture callback
-- cache eviction occurs during artifact read
-- cancellation occurs during CPU work
-- cancellation occurs during provider request
-- worker fails before publishing output
-- duplicate completions are rejected
-- event handler submits a new runtime command
-- shutdown occurs during active processing
-- stage concurrency limits are respected
-- no unbounded thread creation occurs
-
----
-
-## 75. Deterministic Testing
-
-Threading tests should avoid relying only on real timing.
-
-Use controllable test components:
-
-```text
-FakeScheduler
-FakeWorker
-FakeProvider
-ManualCompletionGate
-ManualCancellationGate
-DeterministicEventQueue
-```
-
-Tests should explicitly control:
-
-- when work starts
-- when work completes
-- when cancellation occurs
-- when UI dispatch executes
-- which result arrives first
-
-This makes race-condition tests repeatable.
-
----
-
-## 76. Performance Observation
-
-Threading metrics should include:
-
-- UI dispatch delay
-- runtime command-queue length
-- capture callback delay
-- observation latency
-- worker utilization
-- CPU pool saturation
-- provider in-flight requests
-- task queue wait time
-- cancellation acknowledgment time
-- event-dispatch delay
-- blocked-worker count
-- active thread count where measurable
-- process-isolated worker restart count
-
----
-
-## 77. MVP Threading Model
-
-The initial implementation should remain deliberately simple.
-
-### 77.1 Required Execution Contexts
+## 62. MVP Execution Contexts
 
 ```text
 1 UI Context
 1 Runtime Control Context
-1 Capture/Observation Context
-1 Bounded CPU Worker Pool
+1 Capture/Observation Serial Context
+1 Bounded CPU Execution Pool
 Asynchronous Provider I/O
+Optional serial GPU/native context
 ```
 
-Capture and observation may initially share one serial context if profiling shows the observation work is lightweight.
-
-### 77.2 Required Concurrency
-
-Suggested MVP limits:
-
-| Stage | Concurrency |
-|---|---:|
-| Capture source | 1 |
-| Observation | 1 |
-| OCR | 1 |
-| Layout | 1 |
-| Translation provider | 1 |
-| Presentation build | 1 |
-| UI commit | 1 |
-
-Remote translation concurrency may later increase to `2` if translation-unit batching requires it.
-
-### 77.3 Required Rules
-
-1. UI work runs only on the UI context.
-2. No domain processing runs on the UI context.
-3. Core runtime state has one logical writer.
-4. Workers receive immutable inputs.
-5. Workers return immutable outputs.
-6. Workers do not schedule downstream work directly.
-7. Provider calls use asynchronous APIs where possible.
-8. Every stage has bounded concurrency.
-9. Capture does not queue every frame.
-10. Every UI commit validates revision identity.
-11. Cancellation never blocks the caller indefinitely.
-12. No unbounded thread creation is allowed.
+Capture và Observation có thể merge trong MVP nếu lightweight.
 
 ---
 
-## 78. Suggested MVP Execution Flow
+## 63. MVP Rules
+
+1. UI chỉ mutate UI.
+2. Heavy work không chạy trên UI.
+3. Runtime state có one logical writer.
+4. Workers nhận immutable input.
+5. Workers trả Completion và Candidate output.
+6. Workers không schedule downstream work.
+7. Provider callback chỉ gửi Completion.
+8. Concurrency bounded theo workload class.
+9. Capture latest-value.
+10. UI commit validation hai lần.
+11. Cancellation không block caller vô hạn.
+12. Không unbounded thread/task creation.
+13. Worker không sở hữu shared payload.
+14. Resource Lease dùng cho shared resource.
+15. Shutdown dừng admission trước drain.
+
+---
+
+## 64. Example: Generic Execution
 
 ```text
-UI Thread
-    ↓ StartSession command
-
-Runtime Control
-    ↓ Starts capture and session state
-
-Capture/Observation Context
-    ↓ Stable frame detected
-    ↓ SubmitStableFrame command
-
-Runtime Control
-    ↓ Creates revision
-    ↓ Scheduler admits OCR
-
-CPU Worker
-    ↓ Runs OCR
-    ↓ Submits WorkCompleted
-
-Runtime Control
-    ↓ Publishes OCR artifact
-    ↓ Scheduler admits Layout
-
-CPU Worker
-    ↓ Runs Layout
-    ↓ Submits WorkCompleted
-
-Runtime Control
-    ↓ Publishes Layout artifact
-    ↓ Scheduler admits Translation
-
-Provider Async I/O
-    ↓ Translation response
-    ↓ Submits WorkCompleted
-
-Runtime Control
-    ↓ Publishes Translation artifact
-    ↓ Scheduler admits Presentation
-
-CPU Worker
-    ↓ Builds Presentation artifact
-    ↓ Submits WorkCompleted
-
-Runtime Control
-    ↓ Validates commit
-    ↓ Dispatches UI update
-
-UI Thread
-    ↓ Validates revision again
-    ↓ Replaces presentation atomically
+Runtime Control creates WorkItem
+        ↓
+Scheduler admits
+        ↓
+Execution Context selected
+        ↓
+Worker executes Attempt
+        ↓
+Candidate Artifact produced
+        ↓
+Completion submitted
+        ↓
+Runtime Control validates
+        ↓
+Artifact Store accepts ownership
+        ↓
+Artifact published
 ```
 
 ---
 
-## 79. Example: User Scrolls During Translation
+## 65. Example: Late Provider Callback
 
 ```text
-Translation request for Revision 20 active
-    ↓
-Capture context detects new stable frame
-    ↓
-Runtime creates Revision 21
-    ↓
-Revision 20 cancellation requested
-    ↓
-Provider abort requested asynchronously
-    ↓
-Scheduler admits Revision 21 work
+Provider callback arrives
+        ↓
+Adapter normalizes result
+        ↓
+Completion submitted
+        ↓
+Runtime Control detects stale authority
+        ↓
+Result rejected
 ```
 
-If Revision 20 completes late:
-
-```text
-Provider completion callback
-    ↓
-Submit WorkCompleted
-    ↓
-Runtime rejects stale result
-```
-
-No provider callback updates the UI directly.
+Callback never updates UI or Runtime state directly.
 
 ---
 
-## 80. Example: Slow OCR
+## 66. Example: UI Closed Before Commit
 
 ```text
-OCR worker busy
+Commit queued to UI
     ↓
-Capture continues
-    ↓
-Observation replaces pending frames
-    ↓
-Newest stable revision becomes current
-    ↓
-Old OCR work canceled when useful
-```
-
-The UI and capture path remain responsive because OCR runs outside both contexts.
-
----
-
-## 81. Example: UI Closed Before Commit
-
-```text
-Presentation update queued to UI
-    ↓
-User closes session
-    ↓
-Session becomes inactive
+Session closes
     ↓
 UI callback executes
     ↓
-Commit validation fails
+Second authority validation fails
     ↓
-Presentation discarded
+Presentation candidate released
 ```
-
-The UI callback must not assume that a queued update remains valid.
 
 ---
 
-## 82. Example: Cache Eviction During OCR Read
+## 67. Example: Cache Eviction During Read
 
 ```text
-OCR worker acquires SourceImageArtifact lease
+Worker holds Artifact Lease
     ↓
-Cache evicts source artifact
+Cache retention removed
     ↓
-Cache retention released
+Payload remains
     ↓
-Worker lease remains valid
+Worker releases Lease
     ↓
-OCR finishes
-    ↓
-Lease released
-    ↓
-Artifact physically disposed
+Physical disposal becomes eligible
 ```
-
-No global lock is held during OCR processing.
 
 ---
 
-## 83. Example: Provider Callback
-
-Incorrect:
+## 68. Example: Native Serial Provider
 
 ```text
-Provider response
+WorkItem admitted
     ↓
-Callback updates Session.CurrentRevision
+Dedicated serial context
+    ↓
+Synchronous native call
+    ↓
+Completion normalized
+    ↓
+Runtime Command
 ```
 
-Correct:
-
-```text
-Provider response
-    ↓
-Provider adapter normalizes result
-    ↓
-Submit WorkCompleted command
-    ↓
-Runtime validates and publishes
-```
+No Runtime lock is held during native execution.
 
 ---
 
-## 84. Future Threading Evolution
+## 69. Architecture Invariants
 
-Potential future improvements include:
-
-- separate capture and observation contexts
-- dedicated local-model processes
-- independent OCR and translation worker pools
-- multi-session weighted scheduling
-- GPU execution coordinator
-- shared-memory artifact transport
-- adaptive concurrency based on CPU and memory pressure
-- parallel translation-unit processing
-- structured concurrency framework
-
-These should be introduced only when product needs and profiling justify them.
-
----
-
-## 85. Structured Concurrency Direction
-
-Where the implementation platform supports it, child work should remain tied to an owning scope.
-
-Example:
-
-```text
-Session Task Scope
-    └── Revision Task Scope
-        ├── OCR Task
-        ├── Layout Task
-        └── Translation Task
-```
-
-When the parent scope ends, child work receives cancellation and cannot outlive its logical owner without being tracked as abandoned work.
-
-The architecture does not require a specific structured-concurrency library, but it adopts the ownership principle.
+1. Execution Context là logical.
+2. Physical thread là implementation detail.
+3. Context ownership explicit.
+4. Context lifecycle bounded.
+5. UI only mutates UI.
+6. Runtime Control owns authority.
+7. Core Runtime state has one logical writer.
+8. Heavy work never blocks Runtime Control.
+9. Control path always protected.
+10. Worker never owns shared payload.
+11. Worker owns only Attempt-local resource and Lease.
+12. Lease never grants ownership.
+13. Provider callback never grants authority.
+14. Callback never mutates Runtime directly.
+15. Publication never transfers ownership implicitly.
+16. Ownership transfer explicit before accepted publication.
+17. Physical completion order never determines logical outcome.
+18. Execution order never implies commit order.
+19. Shared payload immutable.
+20. CPU/GPU/provider/process concurrency bounded.
+21. Thread/process affinity explicit.
+22. Locks not held across external or heavy work.
+23. Event subscriber does not block publisher indefinitely.
+24. Subscriber changes Runtime only through Command.
+25. UI commit revalidates authority.
+26. Cancellation revoke authority before drain.
+27. Delayed retry uses non-blocking timer.
+28. Shutdown stops admission before cleanup.
+29. Artifact Store is ownership/lease/publication safe.
+30. Threading correctness independent of cache.
 
 ---
 
-## 86. Architecture Invariants
+## 70. Testing Requirements
 
-The threading model must preserve these invariants:
+Test phải bao phủ:
 
-1. Only the UI context mutates UI state.
-2. The UI context never performs expensive domain work.
-3. Core mutable runtime state has one logical writer.
-4. Capture remains independent from OCR and translation completion.
-5. Observation for one capture source is ordered.
-6. CPU and provider concurrency are bounded.
-7. Published artifacts are immutable.
-8. Workers cannot mutate session or revision state directly.
-9. Workers cannot commit UI output directly.
-10. Provider callbacks submit runtime messages instead of mutating state.
-11. Every UI commit revalidates session and revision ownership.
-12. Locks are never held across long-running operations.
-13. Event subscribers cannot block the publisher indefinitely.
-14. Cancellation and control commands retain execution capacity.
-15. No stage creates an unbounded number of threads or asynchronous requests.
-16. Physical completion order never determines logical authority.
-17. Native thread-affine resources execute only in their declared context.
-18. Threading correctness does not depend on cache availability.
-
----
-
-## 87. Open Questions
-
-The following questions remain open:
-
-- Which desktop framework will provide the UI dispatcher?
-- Which screen-capture API will be used?
-- Is the capture API thread-affine?
-- Can capture and observation safely share one serial context?
-- Which OCR provider will be selected for the MVP?
-- Is the OCR API synchronous, asynchronous, CPU-based, or GPU-based?
-- Does the selected OCR provider support cancellation?
-- Will translation use only remote providers initially?
-- Should local model providers use dedicated threads or processes?
-- What CPU worker-pool size is appropriate for minimum-spec devices?
-- Should presentation construction occur on a worker or partially on the UI context?
-- Which event bus implementation preserves required per-session ordering?
-- Will the selected platform support structured concurrency?
-- Which native resources require explicit thread affinity?
-
-These questions do not block the initial architecture.
+- UI responsiveness during slow execution;
+- control commands under saturation;
+- callback out-of-order;
+- Revision switch during UI dispatch;
+- Session close during Capture callback;
+- eviction with active Lease;
+- cancellation during CPU/GPU/provider work;
+- Worker failure before publication;
+- duplicate Completion;
+- event subscriber queues Command;
+- shutdown during active work;
+- affinity enforcement;
+- no unbounded task creation;
+- context drain;
+- process callback isolation;
+- authority rejection after late completion;
+- ownership transfer before publication.
 
 ---
 
-## 88. Related Documents
+## 71. Open Questions
 
-- `README.md`
-- `PIPELINE_RUNTIME.md`
-- `WORK_QUEUE.md`
-- `SCHEDULER.md`
-- `CANCELLATION.md`
-- `CACHE_POLICY.md`
-- `MEMORY_MODEL.md`
-- `RESOURCE_LIFECYCLE.md`
-- `PERFORMANCE_MODEL.md`
-- `../STATE_MACHINE.md`
-- `../EVENT_BUS.md`
-- `../DATA_FLOW.md`
-- `../flows/SCREEN_COMIC_FLOW.md`
+- Desktop framework và UI dispatcher nào?
+- Capture API có affinity gì?
+- Capture/Observation có merge được không?
+- Provider nào sync/native/GPU?
+- Default CPU pool size?
+- GPU coordinator có cần trong MVP không?
+- Local model chạy thread hay process?
+- Event Bus đảm bảo ordering theo scope thế nào?
+- Structured concurrency support của stack?
+- Presentation build chạy Worker hay UI một phần?
+- Context lifecycle registry nằm ở đâu?
 
 ---
 
-## 89. Next Step
+## 72. Related Documents
 
-The next runtime document should be:
-
-```text
-RESOURCE_LIFECYCLE.md
-```
-
-It should define:
-
-- resource ownership transfer
-- resource creation and registration
-- artifact leases
-- temporary-resource cleanup
-- revision disposal
-- session shutdown
-- provider loading and unloading
-- native-resource disposal
-- draining canceled work
-- shutdown order
-- cleanup failure handling
-- lifecycle observability
+| Document | Relationship |
+|---|---|
+| `PIPELINE_RUNTIME.md` | WorkItem, Attempt, Completion, authority |
+| `RUNTIME_COMPONENTS.md` | Runtime Control and Worker ownership |
+| `SCHEDULER.md` | Admission and workload class |
+| `WORK_QUEUE.md` | Dispatch boundary |
+| `CANCELLATION.md` | Authority revocation and cooperative stop |
+| `RETRY_POLICY.md` | Delayed retry and new Attempt |
+| `MEMORY_MODEL.md` | Resource Lease and budgets |
+| `RESOURCE_LIFECYCLE.md` | Ownership transfer and disposal |
+| `CACHE_POLICY.md` | Retention and active Lease |
+| `ERROR_MODEL.md` | Completion error normalization |
+| `PERFORMANCE_MODEL.md` | Context saturation and latency |
+| `RUNTIME_CONFIG.md` | Pool and concurrency limits |
+| `RUNTIME_OBSERVABILITY.md` | Execution metrics |
+| `BOOT_SEQUENCE.md` | Context startup/shutdown |
+| `../core/EVENT_BUS.md` | Event dispatch semantics |
 
 ---
 
-## 90. Summary
+## 73. Completion Criteria
 
-CRAI uses a small number of explicit execution contexts rather than creating one thread for every component or WorkItem.
+`THREADING_MODEL.md` được xem là đồng bộ khi:
 
-The practical model is:
+- Execution Context được tách physical thread;
+- context ownership và lifecycle rõ;
+- Runtime Control là authority owner;
+- Worker không sở hữu shared payload;
+- Resource Lease thay Artifact-only view;
+- Candidate → validation → transfer → publication rõ;
+- Provider callback không mutate/grant authority;
+- Execution Affinity tổng quát;
+- Event subscriber chạy trên declared context;
+- control path protected;
+- shutdown/cancellation khớp Runtime v2;
+- Stage-specific vocabulary bị loại khỏi architecture core;
+- invariants và testing đầy đủ.
+
+---
+
+## 74. Summary
+
+CRAI sử dụng một số ít logical execution context rõ ràng:
 
 ```text
 UI Context
-    +
++
 Serialized Runtime Control
-    +
-Responsive Capture and Observation
-    +
-Bounded CPU Workers
-    +
-Bounded Asynchronous Provider I/O
-    +
++
+Responsive Capture/Observation
++
+Bounded Execution Resource Pools
++
+Bounded Provider I/O
++
 Immutable Artifact Exchange
 ```
 
-The MVP should favor serialized ownership and low concurrency over aggressive parallelism.
+Ranh giới cốt lõi:
 
-Correctness and UI responsiveness are more important than maximizing worker utilization.
+```text
+Execution Context defines where work may run.
 
-Parallel execution should only be increased after profiling confirms that it improves end-to-end reading latency without causing memory pressure, UI contention, or provider overload.
+Runtime Control defines whether work still matters.
+
+Worker performs physical execution.
+
+Artifact Store owns accepted shared payload.
+
+UI commits only after authority validation.
+```
