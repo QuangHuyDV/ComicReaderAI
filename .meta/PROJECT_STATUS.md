@@ -1,106 +1,331 @@
 # CRAI — Project Status
 
-**Date:** 2026-07-30  
+**Updated:** 2026-08-03  
 **Project key:** `CRAI`  
-**Architecture Status:**
-- Core Architecture        ✅ Complete
-- Runtime Architecture     ✅ Complete (Refinement Remaining)
-- Business Modules         🟡 In Progress
-- Implementation           ❌ Not Started
+**Document role:** Current project entry point and architecture status summary  
+**Approach:** Documentation First · Capability First · User Experience First · Provider Independent
 
-**Approach:** Documentation First · Capability First · UX First · Provider Independent
-
+> This document records the current architectural truth of CRAI and the history that led to it.  
+> Detailed module and architecture documents remain the authoritative source for their own scope.
 
 ---
 
-## Current Progress
+# 1. Executive Summary
 
-| Area                  | Status        |
-Project Foundation       ✅ Complete
+## 1.1 Project Overview
 
-Product Analysis         ✅ Complete
+CRAI is a desktop-first application that helps users read and translate foreign-language novels, comics, documents and on-screen content with minimal interruption to the reading experience.
 
-Capability Analysis      ✅ Complete
+The initial product focus is:
 
-Core Architecture        ✅ Complete
+- source languages: Simplified Chinese, Traditional Chinese and English
+- initial target language: Vietnamese
+- direct structured-text acquisition whenever available
+- OCR only when structured text cannot be obtained reliably
+- Side Panel as the primary MVP presentation mode
+- Overlay supported through a separate architectural boundary
+- local-first and privacy-aware processing where practical
+- replaceable OCR, translation and platform implementations
 
-Runtime Architecture     ✅ Complete
-
-Capture Module           ✅ Complete
-
-Recognition Module       ✅ Complete
-
-Text Processing Module   ✅ Complete
-
-Translation Module       ✅ Complete
-
-Presentation Module      🟡 In Progress
-
-Reading Module           ⏳ Planned
-
-Storage Module           ⏳ Planned
-
-Event Standard           🟡 In Progress
-
-Implementation           ❌ Not Started
+CRAI is not designed as a single OCR-to-translation script. It is designed as a modular reading system that separates content acquisition, recognition, text preparation, translation, presentation, session control and persistence responsibilities.
 
 ---
 
-## 20. Cập nhật kiến trúc (2026-07-29)
+## 1.2 Product and Architecture Principles
 
-### Module Architecture
+The project currently follows these principles:
 
-Đã thống nhất chuyển sang Business Modules:
+- **Documentation First** — architecture and contracts are clarified before implementation.
+- **Capability First** — system capabilities are analyzed before deciding module boundaries.
+- **User Experience First** — technical choices must minimize interruption while reading.
+- **Provider Independent** — business architecture does not depend on a specific OCR or translation provider.
+- **Explicit Ownership** — every state, model, command, event and persisted record has a defined owner.
+- **Serializable Boundaries** — public contracts must be serializable and implementation-neutral.
+- **Immutable Results** — cross-module results and artifacts are treated as immutable values or references.
+- **Current Revision Authority** — only the current valid content revision may commit user-visible results.
+- **Privacy by Default** — screenshots, clipboard content, OCR text and translated text are not logged or persisted by default.
+- **Reversible Design** — implementation choices should remain replaceable until real constraints justify commitment.
+
+The analysis order remains:
 
 ```text
-Reading
+Product Goal
+    ↓
+Capabilities
+    ↓
+User Journeys
+    ↓
+Use Cases and Workflows
+    ↓
+State, Event and Data Models
+    ↓
+Business Modules
+    ↓
+Runtime and Infrastructure
+    ↓
+Implementation
+```
+
+---
+
+## 1.3 Current Architecture Status
+
+| Architecture Area | Status | Current Meaning |
+|---|---|---|
+| Project Foundation | ✅ Complete | AI, project and module rules are established. |
+| Product Analysis | ✅ Complete | Product goal, scope and primary user journeys are defined. |
+| Capability Analysis | ✅ Complete | Core capabilities and their boundaries are documented. |
+| Core Architecture | ✅ Complete | State, event, dependency and data-flow foundations are defined. |
+| Runtime Architecture | ✅ Runtime v2 synchronized | Runtime documents now use the same WorkItem/Attempt, authority, Candidate Artifact, ownership, publication, Lease, retention and disposal model. |
+| Business Module Architecture | 🟡 Cross-module synchronization | All principal module document sets exist. Storage and Recognition have completed the latest consolidation; remaining modules may still require Runtime v2 terminology review. |
+| Detailed Recognition/OCR Architecture | 🟡 Next review area | The detailed `doc/01-architecture/ocr/` documents exist but have not yet been reconciled with the newly completed Recognition module contracts. |
+| Technology Selection | ⏳ Not Started | Frameworks, languages, providers and process topology have not been finalized. |
+| Implementation | ❌ Not Started | No production implementation has begun. |
+
+The current business-module set is:
+
+```text
+Reading / Reading Session
 Capture
 Recognition
+Text Processing
 Translation
 Presentation
 Storage
+Preferences
+Diagnostics
+UI Adapter
 ```
 
-Observation, Classification, Layout Analysis, OCR, Text Extraction và Context Preparation trở thành thành phần nội bộ của Recognition Module.
+Capabilities such as OCR, preprocessing, region detection, layout interpretation, reading-order resolution, normalization, context preparation, rendering and persistence mechanics remain internal architectural responsibilities. They are not automatically standalone business modules.
 
-### Capture Module
-
-Đã hoàn thành:
+Runtime v2 is now the shared execution language across the project:
 
 ```text
-capture/
-├── README.md
-├── MODULE.md
-├── CONTRACT.md
-├── EVENTS.md
-└── STATES.md
+Session
+    ↓
+Revision
+    ↓
+BusinessExecutionPlan
+    ↓
+WorkItem
+    ↓
+Attempt
+    ↓
+Candidate Artifact
+    ↓
+Authority Validation
+    ↓
+Ownership Transfer
+    ↓
+Artifact Publication
+    ↓
+Presentation Commit
 ```
 
-### Event Standard
+---
 
-Đã thống nhất tạo:
+## 1.4 Current Module Progress
+
+| Module | Status | Notes |
+|---|---|---|
+| Capture | ✅ Documented | Module overview, contract, events, states and errors exist; later Runtime v2 terminology review may still be needed. |
+| Recognition | ✅ Runtime v2 synchronized | `README.md`, `MODULE.md`, `CONTRACT.md`, `STATES.md`, `EVENTS.md` and `ERRORS.md` now share the Candidate Artifact and Runtime authority model. |
+| Text Processing | ✅ Documented | Produces normalized and structured source data for Translation; cross-check against the new Recognition Artifact boundary remains a later synchronization task. |
+| Translation | ✅ Documented | Owns translation semantics and translation output, not presentation layout. |
+| Presentation | ✅ Documented | Module documentation and architecture review have been completed. |
+| Reading / Reading Session | ✅ Documented | Reading/session responsibilities and lifecycle have been designed. |
+| Storage | ✅ Complete | Storage was consolidated as a Persistence Capability with README, contracts, models, migration, states, events and errors. |
+| Preferences | ✅ Documented | Module document set exists. |
+| Diagnostics | ✅ Documented | Module document set exists. |
+| UI Adapter | ✅ Documented | Module document set exists and remains separate from Presentation semantics. |
+
+Storage is treated as a **Persistence Capability**, not as the owner of business data and not as a generic Repository, Cache or Backend module.
+
+The owning business module defines the meaning and lifecycle of its data. Storage provides implementation-independent persistence mechanisms such as versioned entries, metadata, snapshots, retention instructions, archival records, recovery points and schema-evolution support.
+
+The following concepts remain separate:
 
 ```text
-docs/architecture/core/EVENT_STANDARD.md
+Runtime Artifact Store
+Runtime Cache / Retention
+Persistent Storage
 ```
 
-### Naming Convention
+Recognition is now defined as an image-to-structured-source module:
 
 ```text
-README.md
-MODULE.md
-CONTRACT.md
-EVENTS.md
-STATES.md
+Image Artifact
+    ↓
+Recognition Attempt
+    ↓
+Candidate Recognition Artifact
+    ↓
+Runtime Authority Validation
+    ↓
+Published Recognition Artifact
+    ↓
+Text Processing
 ```
 
-### Điểm tiếp tục
+Recognition does not own WorkItem/Attempt lifecycle, retry, cancellation authority, provider lifecycle or Artifact publication.
+
+---
+
+## 1.5 Current Focus
+
+The immediate focus is synchronization of detailed architecture with the newly consolidated Runtime v2 and Recognition contracts.
+
+Current priorities are:
+
+1. review `doc/01-architecture/ocr/PIPELINE.md`
+2. reconcile detailed OCR/Recognition documents with `doc/02-modules/recognition/`
+3. remove remaining Stage-centric or request-centric terminology where it conflicts with Runtime v2
+4. verify that detailed OCR documents do not duplicate module ownership or Runtime orchestration
+5. continue cross-module synchronization, especially the Recognition Artifact → Text Processing boundary
+6. update this project-status document whenever a document group is completed
+
+The next detailed folder is:
 
 ```text
-docs/architecture/core/EVENT_STANDARD.md
-↓
-modules/recognition/
+doc/01-architecture/ocr/
+├── PIPELINE.md
+├── PREPROCESS.md
+├── DETECTION.md
+├── RECOGNITION.md
+├── POSTPROCESS.md
+├── LAYOUT.md
+├── READING_ORDER.md
+├── TEXT_DIRECTION.md
+├── QUALITY.md
+└── PROVIDERS.md
 ```
+
+No technology stack, provider or implementation decision should be inferred from the current architecture documents unless explicitly recorded.
+
+---
+
+## 1.6 Architecture Snapshot
+
+The current high-level product flow is:
+
+```text
+Reading Session
+    ↓
+Capture or Structured Text Acquisition
+    ↓
+Recognition when image interpretation is required
+    ↓
+Text Processing
+    ↓
+Translation
+    ↓
+Presentation
+    ↓
+UI Adapter
+```
+
+The current Runtime execution flow is:
+
+```text
+Stable Content
+    ↓
+Revision
+    ↓
+BusinessExecutionPlan
+    ↓
+WorkItem
+    ↓
+Attempt
+    ↓
+Candidate Artifact
+    ↓
+Authority Validation
+    ↓
+Ownership Transfer
+    ↓
+Artifact Publication
+    ↓
+Presentation Commit
+```
+
+Supporting Runtime responsibilities:
+
+```text
+Runtime Control
+├── revision and execution authority
+├── WorkItem and Attempt lifecycle
+├── scheduling and bounded queues
+├── cancellation and retry coordination
+├── Candidate acceptance and publication coordination
+└── terminal outcome acceptance
+
+Resource Manager / Artifact Store
+├── Resource registration
+├── ownership transfer
+├── Resource Lease
+├── retention
+├── logical disposal
+└── physical disposal
+
+Runtime Observability
+├── metrics
+├── traces
+├── structured logs
+├── runtime events
+└── diagnostic snapshots
+
+Storage
+├── implementation-independent persistence
+├── versioned records and snapshots
+├── retention and archival instructions
+├── recovery
+└── schema evolution
+```
+
+The architecture preserves two main input paths:
+
+```text
+Text Flow
+    → prefer structured text and bypass Recognition where possible
+
+Image Flow
+    → capture image, recognize structured source content,
+      process text, translate and present
+```
+
+Business modules own semantic meaning.
+
+Runtime owns execution orchestration and authority.
+
+Artifact Store owns accepted shared payload.
+
+Storage owns persistence mechanisms.
+
+Pipeline stages and module events never independently decide the next business stage.
+
+---
+
+## 1.7 How to Resume the Project
+
+For a new AI session or a new contributor, use this reading order:
+
+1. read this Executive Summary
+2. read the current architecture snapshot and module progress sections
+3. read the specific module or architecture document relevant to the assigned task
+4. read Development History only when the reason behind a decision is needed
+5. verify the current-focus and next-task sections before proposing new work
+6. for Recognition work, read `doc/02-modules/recognition/README.md` before the detailed `doc/01-architecture/ocr/` documents
+
+Do not rely on an older progress entry when it conflicts with the current summary or the latest detailed module documents.
+
+When updating this file:
+
+- keep the Executive Summary limited to current truth
+- move chronological changes into Development History
+- avoid duplicating detailed contracts already owned by module documents
+- update status, current focus and next task together
+- mark uncertainty explicitly instead of guessing
 
 ---
 
@@ -3647,93 +3872,89 @@ thay vì chỉ tối ưu một thành phần riêng lẻ.
 
 # 29. Architecture Backlog
 
-## 29.1 Mục đích
+## 29.1 Purpose
 
-Phần này liệt kê các nội dung kiến trúc chưa hoàn thành.
+This section records architecture work that remains after the Runtime v2 and Recognition v2 consolidation.
 
-Khác với TODO thông thường, Architecture Backlog mô tả:
-
-- lý do chưa thực hiện;
-- mức độ ưu tiên;
-- tài liệu phụ thuộc;
-- rủi ro nếu trì hoãn.
+Completed work is not kept as an active backlog item.
 
 ---
 
 ## 29.2 High Priority
 
-### Event Standard
+### Detailed Recognition/OCR Architecture Synchronization
 
-Trạng thái
+**Status:** In Progress
 
-In Progress
+**Scope:**
 
-Phụ thuộc
+```text
+doc/01-architecture/ocr/
+├── PIPELINE.md
+├── PREPROCESS.md
+├── DETECTION.md
+├── RECOGNITION.md
+├── POSTPROCESS.md
+├── LAYOUT.md
+├── READING_ORDER.md
+├── TEXT_DIRECTION.md
+├── QUALITY.md
+└── PROVIDERS.md
+```
 
-- Event Bus
-- Module Contract
+**Goal:**
 
-Mục tiêu
-
-Chuẩn hóa toàn bộ Event Name, Envelope và Versioning.
+- align detailed OCR architecture with the Recognition module boundary;
+- use `RecognitionArtifact` rather than legacy OCR Result terminology where appropriate;
+- keep algorithms and provider mechanics in `01-architecture/ocr/`;
+- keep module ownership, public contracts, states, events and errors in `02-modules/recognition/`;
+- prevent detailed stages from owning Runtime scheduling, retry, cancellation, authority or publication;
+- align provider descriptions with capability-based Provider Manager boundaries.
 
 ---
 
-### Presentation Module
+### Recognition → Text Processing Boundary Review
 
-Trạng thái
+**Status:** Planned after OCR architecture synchronization
 
-Planned
+**Goal:**
 
-Phụ thuộc
+- verify the exact published Recognition Artifact consumed by Text Processing;
+- remove assumptions that Text Processing receives raw OCR strings;
+- preserve geometry, order, confidence, provenance and source traceability;
+- keep semantic reconstruction outside Recognition;
+- verify downstream WorkItem creation remains Runtime-orchestrated.
 
+---
+
+### Cross-Module Runtime v2 Terminology Review
+
+**Status:** Planned
+
+**Modules to review:**
+
+- Capture
+- Text Processing
 - Translation
-- Recognition
+- Presentation
+- Reading Session
+- Preferences
+- Diagnostics
+- UI Adapter
 
-Mục tiêu
+**Goal:**
 
-Xây dựng kiến trúc hiển thị:
+Remove or reconcile legacy concepts such as:
 
-- Side Panel
-- Overlay
-- Font Layout
-- Reader
-
----
-
-### Reading Module
-
-Trạng thái
-
-Planned
-
-Mục tiêu
-
-Quản lý Reading Session và trải nghiệm đọc.
-
-Bao gồm:
-
-- Reader State
-- Navigation
-- Scroll Tracking
-- Resume
-
----
-
-### Storage Module
-
-Trạng thái
-
-Planned
-
-Mục tiêu
-
-Thiết kế lưu trữ:
-
-- Glossary
-- Translation Memory
-- History
-- Cache Metadata
+```text
+request-owned lifecycle
+module-owned retry
+module-owned cancellation registry
+module terminal event as execution authority
+Result object containing task status
+direct downstream event triggering
+provider lifecycle owned by business module
+```
 
 ---
 
@@ -3741,87 +3962,94 @@ Thiết kế lưu trữ:
 
 ### Provider Architecture
 
-Mục tiêu
+Define:
 
-Định nghĩa:
+- Provider Manager boundary;
+- provider registry and capability discovery;
+- provider health/lifecycle;
+- credential resolution;
+- local/remote execution policies;
+- Recognition and Translation adapter contracts;
+- provider capacity and isolation.
 
-- OCR Provider
-- Translation Provider
-- Provider Registry
-- Provider Capability
+Detailed provider selection must remain separate from business semantics.
 
 ---
 
 ### Process Topology
 
-Mục tiêu
+Decide:
 
-Xác định:
-
-- Single Process
-- Multi Process
-- Worker Model
-
----
-
-### Persistence
-
-Mục tiêu
-
-Thiết kế lưu trữ:
-
-- SQLite
-- Local Files
-- Temporary Storage
+- single process or multi-process;
+- provider/model isolation;
+- native capture process requirements;
+- shared-memory versus file/reference transfer;
+- worker crash recovery;
+- GPU/native resource ownership.
 
 ---
 
-### Security & Privacy
+### Technology Selection
 
-Mục tiêu
+Decide only after architecture synchronization:
 
-Thiết kế:
+- desktop framework;
+- core language/runtime;
+- UI framework;
+- OCR/Recognition implementation candidates;
+- local database/persistence technology;
+- build system;
+- dependency enforcement;
+- testing stack.
 
-- Secret Storage
-- Consent
-- Privacy Mode
+---
+
+### Security and Privacy Implementation Plan
+
+Define implementation choices for:
+
+- secret storage;
+- remote-processing consent;
+- privacy modes;
+- protected diagnostics;
+- temporary Artifact cleanup;
+- support bundle redaction;
+- local-only guarantees.
 
 ---
 
 ## 29.4 Future
 
-Các nội dung dưới đây không thuộc MVP.
+Outside MVP:
 
-- Browser Extension
-- Plugin Marketplace
-- Story Library
-- Image Replacement
-- Inpainting
-- OCR Model Training
-- Distributed Runtime
-- Remote Synchronization
+- Browser Extension;
+- Plugin Marketplace;
+- Story Library;
+- Image Replacement;
+- Inpainting;
+- OCR model training;
+- distributed Runtime;
+- distributed Artifact Store;
+- cloud synchronization;
+- remote collaborative workspace;
+- dynamic third-party plugin loading.
 
 ---
 
-## 29.5 Điều kiện chuyển sang Implementation
+## 29.5 Conditions Before Implementation
 
-Implementation chỉ nên bắt đầu khi hoàn thành:
+Implementation should begin only after:
 
-- Event Standard
-- Presentation Module
-- Reading Module
-- Storage Module
-- Public Contract
+1. detailed Recognition/OCR architecture is synchronized;
+2. Recognition → Text Processing boundary is verified;
+3. remaining module documents are checked for Runtime v2 conflicts;
+4. public contracts and Event Convention are internally consistent;
+5. technology and process-topology decisions are recorded explicitly;
+6. MVP acceptance and test strategy are defined.
 
-Sau đó mới lựa chọn:
+The architecture is already broad enough for implementation planning, but starting production code before these synchronization steps may reintroduce conflicting ownership models.
 
-- Technology Stack
-- Framework
-- Programming Language
-- Build System
-- Testing Strategy
-
-Việc triển khai khi kiến trúc còn thiếu có thể dẫn tới phải refactor diện rộng ở các giai đoạn sau.
+---
 
 ## 30. Presentation Module Architecture Completed
 
@@ -4082,3 +4310,363 @@ No known architectural inconsistencies remain within the Presentation module.
 ### Next Recommended Step
 
 Continue with the next application module using the same documentation standard and ownership model established for Presentation.
+
+---
+
+# 31. Runtime v2 Architecture Consolidation Completed
+
+**Status:** ✅ Completed  
+**Completed:** 2026-08-03
+
+## 31.1 Purpose
+
+The Runtime document set was re-reviewed as one architecture rather than as isolated files.
+
+The consolidation removed remaining Stage-centric and request-centric assumptions and standardized Runtime around:
+
+```text
+Revision
+WorkItem
+Attempt
+Authority
+Candidate Artifact
+Ownership Transfer
+Publication
+Resource Lease
+Retention
+Logical Disposal
+Physical Disposal
+```
+
+## 31.2 Documents Consolidated
+
+```text
+doc/01-architecture/runtime/
+├── README.md
+├── RUNTIME_COMPONENTS.md
+├── PIPELINE_RUNTIME.md
+├── BUSINESS_PIPELINE_ORCHESTRATION.md
+├── SCHEDULER.md
+├── WORK_QUEUE.md
+├── CANCELLATION.md
+├── RETRY_POLICY.md
+├── ERROR_MODEL.md
+├── MEMORY_MODEL.md
+├── CACHE_POLICY.md
+├── RESOURCE_LIFECYCLE.md
+├── THREADING_MODEL.md
+├── PERFORMANCE_MODEL.md
+├── RUNTIME_OBSERVABILITY.md
+├── RUNTIME_CONFIG.md
+└── BOOT_SEQUENCE.md
+```
+
+`runtime/README.md` was created as the entry point for the complete Runtime document set.
+
+## 31.3 Major Changes
+
+### Work-centric Runtime
+
+The canonical execution flow is now:
+
+```text
+BusinessExecutionPlan
+    ↓
+WorkItem
+    ↓
+Attempt
+    ↓
+Attempt Completion
+```
+
+Business-specific stages remain module semantics, not Runtime-owned state taxonomy.
+
+### Centralized Authority
+
+Runtime Control is the single logical owner for:
+
+- Revision relevance;
+- WorkItem and Attempt acceptance;
+- cancellation authority;
+- retry coordination;
+- Candidate disposition;
+- terminal outcome acceptance;
+- publication coordination.
+
+### Candidate and Publication Boundary
+
+Workers and business modules produce Candidate Artifacts.
+
+```text
+Candidate Artifact
+    ↓
+Runtime Authority Validation
+    ↓
+Ownership Transfer
+    ↓
+Atomic Publication
+```
+
+A technically correct Candidate may still be rejected because it is stale, canceled, duplicate or unauthorized.
+
+### Resource Lifecycle
+
+Resource handling now distinguishes:
+
+```text
+creation
+registration
+payload ownership
+retention ownership
+Resource Lease
+logical disposal
+draining
+physical disposal
+```
+
+Loss of logical authority does not imply immediate physical disposal.
+
+### Performance and Observability
+
+The main performance measure is useful current output, not raw throughput.
+
+Runtime Observability now traces:
+
+```text
+Revision
+    ↓
+BusinessExecutionPlan
+    ↓
+WorkItem
+    ↓
+Attempt
+    ↓
+Authority Validation
+    ↓
+Ownership Transfer
+    ↓
+Publication
+    ↓
+Presentation Commit
+```
+
+### Configuration and Boot
+
+Runtime Configuration now includes explicit policy groups for:
+
+- scheduling;
+- queues;
+- retry;
+- cancellation;
+- authority;
+- publication;
+- resources;
+- leases;
+- cache;
+- Storage;
+- diagnostics.
+
+Boot now initializes dependency-aware Runtime v2 components before opening admission.
+
+## 31.4 Runtime v2 Invariants
+
+1. Business modules own semantics; Runtime owns orchestration.
+2. Worker never schedules downstream work directly.
+3. Retry always creates a new Attempt.
+4. Cancellation revokes authority before physical drain completes.
+5. Candidate creation does not imply publication.
+6. Artifact Store owns published shared payload.
+7. Resource Lease grants temporary use, not ownership.
+8. Retention and payload ownership are separate.
+9. Logical disposal and physical disposal are separate.
+10. Queue and concurrency remain bounded.
+11. Current Revision is prioritized.
+12. Observability failure does not break Runtime correctness.
+13. Runtime events do not replace state ownership.
+14. UI commit requires current authority.
+15. Performance optimizations never bypass authority or ownership.
+
+---
+
+# 32. Recognition Module Runtime v2 Synchronization Completed
+
+**Status:** ✅ Completed  
+**Completed:** 2026-08-03
+
+## 32.1 Documents Synchronized
+
+```text
+doc/02-modules/recognition/
+├── README.md
+├── MODULE.md
+├── CONTRACT.md
+├── STATES.md
+├── EVENTS.md
+└── ERRORS.md
+```
+
+## 32.2 Recognition Boundary
+
+Recognition is now defined as:
+
+```text
+image-based input
+    ↓
+structured spatial source content
+```
+
+It owns:
+
+- image Recognition semantics;
+- region and line models;
+- geometry and source-coordinate mapping;
+- initial reading order;
+- confidence and quality semantics;
+- normalized provider output;
+- Candidate Recognition Artifact construction;
+- Recognition compatibility metadata;
+- module warnings and errors.
+
+It does not own:
+
+- WorkItem/Attempt lifecycle;
+- Scheduler or Queue;
+- Runtime retry;
+- cancellation authority;
+- provider lifecycle;
+- Artifact publication;
+- Cache retention;
+- durable persistence;
+- semantic text reconstruction;
+- Translation;
+- Presentation.
+
+## 32.3 Contract Changes
+
+The old autonomous request/result model was replaced:
+
+```text
+RecognizeImage Request
+    ↓
+RecognitionResult
+```
+
+with:
+
+```text
+RecognitionAttemptInput
+    ↓
+RecognitionAttemptOutput
+    ↓
+CandidateRecognitionArtifact
+    ↓
+Runtime Authority Validation
+    ↓
+RecognitionArtifact
+```
+
+`RecognitionArtifact` is immutable and contains no task status, retry count, queue timing or terminal execution state.
+
+## 32.4 State Changes
+
+Recognition-owned states are now limited to:
+
+```text
+RecognitionAvailabilityState
+RecognitionPlanState
+RecognitionOperationPhase
+CandidateValidationState
+RecognitionQualityState
+RecognitionCompleteness
+ProviderExecutionObservation
+```
+
+Runtime owns WorkItem, Attempt, retry, cancellation and terminal outcome.
+
+Provider Manager owns provider lifecycle and health.
+
+Artifact Store owns publication and shared payload lifecycle.
+
+## 32.5 Event Changes
+
+Recognition no longer emits authoritative terminal lifecycle events such as:
+
+```text
+recognition.completed
+recognition.failed
+recognition.cancelled
+```
+
+Recognition may emit optional content-free facts:
+
+```text
+RECOGNITION_PLAN_CREATED
+RECOGNITION_PREPARATION_COMPLETED
+RECOGNITION_REGIONS_DETECTED
+RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
+RECOGNITION_READING_ORDER_RESOLVED
+RECOGNITION_CANDIDATE_VALIDATED
+RECOGNITION_WARNING_RECORDED
+RECOGNITION_MODULE_ERROR_RECORDED
+```
+
+These facts do not grant authority, publish Artifact or trigger Text Processing directly.
+
+## 32.6 Error Changes
+
+Recognition Errors now distinguish:
+
+```text
+RecognitionWarning
+RecognitionModuleError
+RetryHint
+ProviderErrorRef
+```
+
+Expected/degraded outcomes such as:
+
+- no readable text;
+- low confidence;
+- uncertain reading order;
+- inferred geometry;
+- safely suppressed overlapping regions;
+
+are warnings or quality/completeness metadata when a usable Candidate still exists.
+
+Runtime decides retry and Attempt disposition.
+
+## 32.7 Recognition Documents vs Detailed OCR Documents
+
+The project now keeps a clear division:
+
+```text
+doc/02-modules/recognition/
+    → module boundary, public contracts, states, events and errors
+
+doc/01-architecture/ocr/
+    → internal Recognition/OCR pipeline, preprocessing, detection,
+      provider mechanics, quality and reading-order algorithms
+```
+
+The next task is to synchronize the detailed `ocr/` documents with this completed module boundary.
+
+---
+
+# 33. Current Next Step
+
+Continue with:
+
+```text
+doc/01-architecture/ocr/PIPELINE.md
+```
+
+Review goals:
+
+1. align detailed pipeline with `RecognitionAttemptInput`;
+2. produce `CandidateRecognitionArtifact`, not legacy `RecognitionResult`;
+3. keep operation phases diagnostic and Attempt-local;
+4. prevent detailed OCR stages from owning scheduling, retry, cancellation or publication;
+5. preserve source-coordinate mapping;
+6. align provider selection with capability requirements and Provider Manager;
+7. verify output compatibility with Text Processing.
+

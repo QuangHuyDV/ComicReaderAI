@@ -4,9 +4,9 @@
 > **Module:** Translation
 > **Document:** Errors and Warnings
 > **Path:** `modules/translation/ERRORS.md`
-> **Version:** 0.1
+> **Version:** 0.2
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-07-25
+> **Last Updated:** 2026-08-03
 > **Source of Truth:**
 >
 > * `modules/translation/MODULE.md`
@@ -137,16 +137,34 @@ Translation owns normalized errors concerning:
 * configuration validation;
 * context resolution;
 * terminology resolution;
-* provider selection;
-* translation execution;
-* provider response parsing;
+* translation-specific provider eligibility and fallback eligibility;
+* provider response normalization at the Translation boundary;
 * output validation;
 * segment alignment;
-* retry orchestration;
+* translation-specific retry eligibility;
 * result assembly;
-* result publication;
-* variant activation;
+* publication validation;
+* variant compatibility and activation intent;
 * cache compatibility.
+
+Runtime owns original execution-control failures concerning:
+
+* queue admission and scheduling;
+* retry timing and backoff;
+* execution-attempt budgets;
+* worker execution and worker crashes;
+* generic timeout enforcement;
+* physical cancellation propagation;
+* resource admission and concurrency control;
+* Event Bus delivery retry.
+
+Provider Management owns original failures concerning:
+
+* provider registration and enablement;
+* provider instance lifecycle;
+* credential resolution and refresh;
+* provider health and capability discovery;
+* local-model residency.
 
 Translation does not own original errors concerning:
 
@@ -158,7 +176,22 @@ Translation does not own original errors concerning:
 * Knowledge database internals;
 * Presentation rendering.
 
-Errors received from other modules must be normalized at the Translation boundary when exposed as Translation failures.
+Errors received from Runtime, Provider Management or other modules may be normalized at the Translation boundary when exposed as Translation failures. Normalization does not transfer ownership of the original failure.
+
+### 5.1 Error Ownership Matrix
+
+| Concern or original failure | Original owner | Translation responsibility |
+|---|---|---|
+| Prepared source cannot be resolved | Text Processing or source storage boundary | Normalize as a Translation source error |
+| Queue admission expires | Runtime | Normalize the execution outcome when it terminates Translation work |
+| Worker crashes | Runtime | Associate the failure with the affected batch attempt |
+| Provider disabled or unavailable | Provider Management | Normalize eligibility or execution impact |
+| Provider response is malformed | Provider adapter / Translation boundary | Normalize and validate provider-neutral output |
+| Retry eligibility | Translation | Decide whether the same semantic work may be attempted again |
+| Retry timing, backoff and budget enforcement | Runtime | Consume the resulting runtime outcome |
+| Result alignment or assembly fails | Translation | Own and publish the normalized Translation failure |
+| Reading authority rejects a result | Reading Session | Record a non-authoritative or stale Translation outcome |
+| Presentation rendering fails | Presentation | No Translation error ownership |
 
 ---
 
@@ -188,6 +221,8 @@ TranslationError {
     translationBatchId
     translationResultId
     translationVariantId
+    translationIntentId
+    translationRevision
 
     preparedDocumentId
     contentRevision
@@ -400,10 +435,11 @@ Translation should not hardcode final localized UI wording into the domain error
 ```text
 Retryability {
     retryable
-    retryScope
-    retryAfter
-    maximumAdditionalAttempts
+    recommendedRetryScope
     requiresConfigurationChange
+
+    advisoryRetryAfter
+    advisoryMaximumAdditionalAttempts
 }
 ```
 
@@ -418,6 +454,8 @@ NEW_PROVIDER
 NEW_JOB
 MANUAL_ONLY
 ```
+
+`advisoryRetryAfter` and `advisoryMaximumAdditionalAttempts` are Translation recommendations only. Runtime owns actual retry timing, backoff, admission and execution-budget enforcement.
 
 ---
 
@@ -1550,7 +1588,7 @@ Partial provider output must not be accepted unless it passes normal structural 
 
 ## 72. TRANSLATION_QUEUE_TIMEOUT
 
-The job remained queued beyond the permitted queue duration.
+Runtime reported that execution admission or queue waiting exceeded the permitted deadline for this Translation job. Translation does not own the queue implementation.
 
 ```text
 category: TIMEOUT
@@ -1565,7 +1603,7 @@ State consequence:
 QUEUED → FAILED
 ```
 
-or rescheduling according to policy.
+or a new runtime admission request according to policy. Runtime owns whether and when execution is admitted again.
 
 ---
 
@@ -2349,7 +2387,7 @@ This is not a system failure.
 
 ## 120. TRANSLATION_STALE_RESULT_REJECTED
 
-A completed provider result was rejected because it no longer matched current authority.
+A completed provider result was rejected because it no longer matched current authority. Reading Session may be the authority that rejects the result when the active content revision or reading context has changed.
 
 ```text
 category: SUPERSESSION
@@ -2364,7 +2402,11 @@ Possible causes:
 * source revision changed;
 * cancellation completed;
 * attempt replaced;
-* target language changed.
+* target language changed;
+* Translation intent changed;
+* an older Translation revision lost authority.
+
+This outcome is lifecycle control, not necessarily a technical failure.
 
 ---
 
@@ -2487,7 +2529,7 @@ Possible causes:
 * variant activation failure;
 * transactional outbox failure.
 
-The system must avoid reporting completion before the result becomes retrievable.
+The result may already exist durably even when publication fails. The system must avoid reporting completion before the result becomes retrievable and the corresponding durable state can be queried.
 
 ---
 
@@ -2502,7 +2544,7 @@ severity: CRITICAL
 retryable: true
 ```
 
-No completion event may be published until durable storage succeeds.
+No `TranslationCompleted` or `TranslationCompletedWithWarnings` event may be published until durable storage succeeds.
 
 ---
 
@@ -2528,7 +2570,8 @@ The variant does not match the active:
 * prepared document;
 * content revision;
 * target language;
-* reading context.
+* reading context;
+* Translation intent.
 
 ```text
 category: VARIANT
@@ -2573,7 +2616,13 @@ retryable: true
 The invariant remains:
 
 ```text
-At most one compatible ACTIVE variant.
+At most one ACTIVE variant per:
+
+ReadingSessionId
+PreparedDocumentId
+ContentRevision
+TargetLanguage
+TranslationIntentId
 ```
 
 ---
@@ -2748,11 +2797,11 @@ The caller should reload authoritative state before retrying.
 
 ## 143. TRANSLATION_DUPLICATE_ACTIVE_ATTEMPT
 
-More than one active attempt exists where policy permits only one.
+More than one active attempt exists for the same Translation batch where policy permits only one active execution attempt.
 
 ```text
 category: CONCURRENCY
-scope: JOB
+scope: BATCH
 severity: CRITICAL
 retryable: false until reconciliation
 ```
@@ -4393,6 +4442,21 @@ This prevents unstable implementation details from leaking into contracts.
 
 ---
 
+## 250. Cross-Architecture Error Invariants
+
+The following ownership and authority rules apply to every Translation error:
+
+1. Translation policy errors must not be confused with Runtime execution failures.
+2. Runtime may enforce retry timing, timeout, cancellation and execution budgets without owning Translation semantic intent.
+3. A normalized Translation error may reference an original Runtime or Provider Management failure without transferring ownership.
+4. `TranslationIntentId` and `translationRevision` should be included whenever the failure can affect result authority or visible output.
+5. Reading Session owns whether a compatible Translation result is accepted for the current content revision.
+6. Publication failure does not imply result persistence failure, and persistence failure must prevent completion events.
+7. Active-variant conflicts are scoped by reading session, prepared content revision, target language and Translation intent.
+8. Duplicate active-attempt detection is evaluated within the owning Translation batch unless an explicit broader execution policy exists.
+
+---
+
 # Part XXXVIII — Related Documents
 
 ```text
@@ -4410,13 +4474,18 @@ docs/architecture/STATE_MACHINE.md
 docs/architecture/EVENT_BUS.md
 docs/architecture/MODULE_DEPENDENCY.md
 docs/architecture/DATA_FLOW.md
+docs/architecture/runtime/ERROR_MODEL.md
+docs/architecture/runtime/RETRY_POLICY.md
+docs/architecture/runtime/CANCELLATION.md
+docs/architecture/runtime/WORK_QUEUE.md
+docs/architecture/runtime/RUNTIME_OBSERVABILITY.md
 ```
 
 Upstream references:
 
 ```text
 modules/text-processing/MODULE.md
-modules/text-processing/CONTRACTS.md
+modules/text-processing/CONTRACT.md
 modules/text-processing/EVENTS.md
 modules/text-processing/STATES.md
 modules/text-processing/ERRORS.md

@@ -4,9 +4,9 @@
 > **Module:** Translation
 > **Document:** Public Contracts
 > **Path:** `modules/translation/CONTRACT.md`
-> **Version:** 0.1
+> **Version:** 0.2
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-07-25
+> **Last Updated:** 2026-08-03
 > **Source of Truth:** `modules/translation/MODULE.md`
 
 ---
@@ -59,13 +59,13 @@ StartTranslation
       ↓
 TranslationJob
       ↓
-TranslationAttempt[]
-      ↓
 TranslationBatch[]
+      ↓
+TranslationAttempt[]
       ↓
 TranslatedSegment[]
       ↓
-TranslationResult
+TranslationResultSnapshot
 ```
 
 The module does not accept raw OCR output as its canonical input.
@@ -119,6 +119,20 @@ A job may expose validated partial results when its publication policy permits.
 
 Changing translation providers must not require changes to calling modules.
 
+### 3.9 Runtime separation
+
+Translation contracts describe domain intent, semantic constraints, and publication requirements.
+
+They do not assign queue admission, worker scheduling, backoff execution, resource admission, or physical cancellation ownership to Translation.
+
+Those execution mechanics belong to Runtime Architecture.
+
+### 3.10 Immutable publication snapshots
+
+Public consumers receive immutable `TranslationResultSnapshot` values or stable references to them.
+
+Consumers must not reconstruct current Translation state from mutable provider streams.
+
 ---
 
 ## 4. Contract Categories
@@ -126,7 +140,8 @@ Changing translation providers must not require changes to calling modules.
 The public contract surface is divided into:
 
 ```text
-Identifiers
+Identifiers and Revisions
+Contract Ownership
 Commands
 Command Results
 Source References
@@ -162,7 +177,32 @@ Examples in this document are conceptual.
 
 ---
 
-## 6. TranslationJobId
+## 6. TranslationIntentId
+
+Identifies one immutable semantic translation intent.
+
+```text
+TranslationIntentId
+```
+
+The identity is derived from or associated with material semantic inputs such as:
+
+* prepared source identity;
+* selected segment identity;
+* source and target languages;
+* translation profile revision;
+* terminology and knowledge identity;
+* context identity;
+* provider locality or hard provider constraints;
+* publication semantics that affect the produced result.
+
+Equivalent execution retries preserve the same intent identity.
+
+A material semantic change creates a new intent identity.
+
+---
+
+## 7. TranslationJobId
 
 Identifies one logical translation request.
 
@@ -190,7 +230,7 @@ Examples include:
 
 ---
 
-## 7. TranslationAttemptId
+## 8. TranslationAttemptId
 
 Identifies one execution attempt within a translation job.
 
@@ -198,26 +238,27 @@ Identifies one execution attempt within a translation job.
 TranslationAttemptId
 ```
 
-Each attempt belongs to exactly one `TranslationJobId`.
+Each attempt belongs to exactly one `TranslationBatchId` and one parent `TranslationJobId`.
 
 ```text
 TranslationJob
-      ├── Attempt 1
-      ├── Attempt 2
-      └── Attempt 3
+      └── TranslationBatch
+              ├── Attempt 1
+              ├── Attempt 2
+              └── Attempt 3
 ```
 
 A new attempt may be created when:
 
-* a provider request times out;
-* a retryable failure occurs;
-* output validation fails;
-* a fallback provider is selected;
-* failed batches are retried.
+* execution of that batch times out;
+* a retryable batch failure occurs;
+* output validation for that batch fails;
+* a fallback provider is selected for that batch;
+* the same batch is re-executed under an allowed retry policy.
 
 ---
 
-## 8. TranslationBatchId
+## 9. TranslationBatchId
 
 Identifies one provider execution batch.
 
@@ -225,13 +266,23 @@ Identifies one provider execution batch.
 TranslationBatchId
 ```
 
-Each batch belongs to exactly one attempt.
+Each batch belongs to exactly one translation job.
 
-A batch contains one or more prepared segments.
+A batch contains one or more prepared segments and may have one or more execution attempts.
+
+```text
+TranslationBatch
+      ├── Attempt 1
+      └── Attempt 2
+```
+
+Batch identity remains stable across retries that preserve the same batch membership and semantic constraints.
+
+If batch membership or semantic construction changes materially, a new batch identity is required.
 
 ---
 
-## 9. TranslationResultId
+## 10. TranslationResultId
 
 Identifies one assembled translation result.
 
@@ -249,7 +300,29 @@ A result identifier must not be reused after the result content changes.
 
 ---
 
-## 10. TranslationVariantId
+## 11. TranslationRevision
+
+Represents the monotonic published Translation state for one translation intent and reading context.
+
+```text
+TranslationRevision
+- value: non-negative monotonic integer
+```
+
+Rules:
+
+* it increases whenever the published Translation snapshot changes;
+* it must not decrease;
+* an older revision must not replace a newer revision;
+* progressive segment completion may increase the revision;
+* selecting another active variant may increase the revision without changing `ContentRevision`;
+* retry execution that produces no published change does not need to increase the revision.
+
+`TranslationRevision` is owned by Translation.
+
+---
+
+## 12. TranslationVariantId
 
 Identifies one immutable translation variant.
 
@@ -267,7 +340,7 @@ Examples:
 
 ---
 
-## 11. TranslatedSegmentId
+## 12. TranslatedSegmentId
 
 Identifies one translated segment instance.
 
@@ -281,7 +354,7 @@ Different variants may contain different translated segment identifiers for the 
 
 ---
 
-## 12. External Identifiers
+## 14. External Identifiers
 
 Translation consumes identifiers owned by other modules.
 
@@ -303,7 +376,39 @@ Translation must not redefine their ownership.
 
 ---
 
-# Part II — Public Commands
+# Part II — Contract Ownership
+
+## 15. Contract Ownership Table
+
+| Contract or identity | Owner |
+|---|---|
+| `PreparedDocument` | Text Processing |
+| `PreparedSegment` | Text Processing |
+| `PreparedDocumentId` | Text Processing |
+| `PreparedSegmentId` | Text Processing |
+| `ContentRevision` | Reading Session |
+| `ReadingSessionId` | Reading Session |
+| `TranslationIntentId` | Translation |
+| `TranslationJob` | Translation |
+| `TranslationBatch` | Translation |
+| `TranslationAttempt` | Translation |
+| `TranslationVariant` | Translation |
+| `TranslationRevision` | Translation |
+| `TranslationResultSnapshot` | Translation |
+| provider registry and provider lifetime | Provider Management |
+| provider credentials and secret resolution | approved secure configuration boundary |
+| queue admission and execution scheduling | Runtime |
+| retry-budget and backoff execution | Runtime |
+| logical current-content acceptance | Reading Session |
+| `PresentationRevision` and `RenderPlan` | Presentation |
+
+Ownership means the named module defines canonical semantics and lifecycle.
+
+A consuming module may reference the contract but must not redefine its meaning.
+
+---
+
+# Part III — Public Commands
 
 ## 13. Public Command Set
 
@@ -398,6 +503,8 @@ StartTranslationCommand {
     metadata
 
     source
+    intentHint?
+    authorityContext
     configuration
     context
     knowledge
@@ -448,7 +555,34 @@ The module may resolve full prepared content through an approved Text Processing
 
 ---
 
-## 17. Prepared Document Reference
+## 17. TranslationAuthorityContext
+
+Carries the minimum authority information required to evaluate whether work may still become current.
+
+```text
+TranslationAuthorityContext {
+    readingSessionId?
+    sessionEpoch?
+
+    preparedDocumentId
+    contentRevision
+
+    expectedTranslationRevision?
+    requestedAt
+}
+```
+
+Rules:
+
+* `ContentRevision` authority belongs to Reading Session;
+* Translation performs defensive compatibility checks;
+* Reading Session makes the final decision that a Translation snapshot is current for the active reading context;
+* absence of `readingSessionId` is allowed for detached, offline, or imported translation work;
+* a session-bound result must never become current after its authority context is superseded.
+
+---
+
+## 18. Prepared Document Reference
 
 The preferred inter-module contract is reference-based:
 
@@ -493,10 +627,15 @@ PreparedDocumentSnapshot {
 
     structureMetadata
     sourceMetadata
+    upstreamLineage?
 }
 ```
 
 The snapshot must be immutable for the lifetime of the job.
+
+`upstreamLineage` may carry optional opaque references such as recognition result identity, recognition revision, observation revision, or source artifact identity.
+
+Translation may preserve this lineage but must not redefine upstream semantics.
 
 ---
 
@@ -620,6 +759,7 @@ The command returns an acknowledgement, not necessarily the completed translatio
 StartTranslationResult {
     commandId
 
+    translationIntentId
     translationJobId
 
     disposition
@@ -1159,57 +1299,60 @@ RELATED_REFERENCE
 
 ## 43. TranslationExecutionPolicy
 
+This contract expresses Translation-domain requirements and caller preferences.
+
+Runtime resolves them against global queue, resource, retry-budget, concurrency, and cancellation policies.
+
 ```text
 TranslationExecutionPolicy {
-    timeoutPolicy
-    retryPolicy
+    timeoutRequirements
+    retryRequirements
     batchingPolicy
-    cachePolicy
-    concurrencyPolicy
+    cacheRequirements
+    parallelismPreference
 
     allowPartialExecution
 }
 ```
 
+The resolved Runtime configuration may be stricter than caller preferences but must not violate hard semantic or privacy requirements.
+
 ---
 
-## 44. TimeoutPolicy
+## 44. TimeoutRequirements
 
 ```text
-TimeoutPolicy {
-    jobTimeout
-    attemptTimeout
-    batchTimeout
+TimeoutRequirements {
+    maximumUsefulJobDuration?
+    maximumBatchAttemptDuration?
+    expirationBehavior
 }
 ```
 
 Timeout values may be expressed as durations.
 
-A job timeout must not be shorter than mandatory batch execution requirements.
+Translation declares usefulness or semantic expiration boundaries.
+
+Runtime owns timer enforcement, worker interruption, abandonment handling, and timeout terminal outcomes.
 
 ---
 
-## 45. RetryPolicy
+## 45. RetryRequirements
 
 ```text
-RetryPolicy {
-    maximumAttempts
+RetryRequirements {
+    maximumAttemptsPerBatch
     retryableCategories[]
-    backoffStrategy
     retryFailedBatchesOnly
+    fallbackAllowed
 }
 ```
 
-Possible backoff strategies:
+Translation decides whether a translation-specific failure is eligible for retry or provider fallback.
 
-```text
-NONE
-FIXED
-EXPONENTIAL
-PROVIDER_RECOMMENDED
-```
+Runtime owns retry-budget enforcement, backoff execution, admission, and scheduling.
 
-Retries create new `TranslationAttemptId` values.
+Retries create new `TranslationAttemptId` values under the affected batch.
 
 They do not create a new logical job unless translation intent changes.
 
@@ -1249,10 +1392,10 @@ Caller values are constraints or preferences, not exact batch construction instr
 
 ---
 
-## 47. CachePolicy
+## 47. CacheRequirements
 
 ```text
-CachePolicy {
+CacheRequirements {
     mode
     maximumAge
     allowProviderIndependentReuse
@@ -1271,18 +1414,24 @@ REFRESH
 
 A cache hit must still satisfy revision and alignment safety.
 
+Translation owns semantic cache identity and eligibility.
+
+Runtime cache and artifact infrastructure own storage mechanics, eviction, budgets, and resource lifecycle.
+
 ---
 
-## 48. ConcurrencyPolicy
+## 48. ParallelismPreference
 
 ```text
-ConcurrencyPolicy {
-    maximumConcurrentBatches
-    providerConcurrencyLimit
+ParallelismPreference {
+    desiredConcurrentBatches?
+    allowParallelBatchExecution
 }
 ```
 
 Batch completion order must not alter final segment order.
+
+Runtime determines effective concurrency after provider limits, queue pressure, resource budgets, and current-revision priority are evaluated.
 
 ---
 
@@ -1355,9 +1504,11 @@ Visible interactive requests should normally outrank prefetch work.
 
 ```text
 TranslationJob {
+    translationIntentId
     translationJobId
 
     sourceIdentity
+    authorityContext
     configurationSnapshot
 
     contextIdentity
@@ -1369,11 +1520,11 @@ TranslationJob {
 
     status
 
-    activeAttemptId
-    attemptIds[]
+    batchIds[]
 
     activeResultId
     activeVariantId
+    translationRevision
 
     progress
 
@@ -1484,15 +1635,15 @@ Counts are authoritative.
 ```text
 TranslationAttempt {
     translationAttemptId
+    translationBatchId
     translationJobId
 
     attemptNumber
     reason
 
     providerSelection
+    executionSnapshotId
     status
-
-    batchIds[]
 
     startedAt
     completedAt
@@ -1549,7 +1700,7 @@ Provider credentials and raw configuration must never appear here.
 ```text
 TranslationBatch {
     translationBatchId
-    translationAttemptId
+    translationJobId
 
     sequence
 
@@ -1558,10 +1709,8 @@ TranslationBatch {
 
     status
 
-    providerExecutionMetadata
-
-    startedAt
-    completedAt
+    attemptIds[]
+    activeAttemptId?
 
     translatedSegmentIds[]
     normalizedFailure
@@ -1577,7 +1726,7 @@ A valid batch must:
 * contain at least one translatable prepared segment;
 * contain no duplicate prepared segment IDs;
 * preserve upstream sequence information;
-* belong to one attempt;
+* belong to one translation job;
 * not mix incompatible target languages;
 * not exceed resolved provider limits;
 * remain independently traceable.
@@ -1586,7 +1735,7 @@ A valid batch must:
 
 ## 62. Batch Sequence
 
-Batch sequence represents assembly order within an attempt.
+Batch sequence represents assembly order within a translation job.
 
 It must not be used as a substitute for prepared segment sequence.
 
@@ -1636,6 +1785,10 @@ ProviderExecutionMetadata {
 
 Raw provider request and response payloads are not public contracts.
 
+Provider execution metadata belongs to a specific `TranslationAttempt`.
+
+It must not be stored as mutable batch-level state shared across retries.
+
 ---
 
 ## 65. TranslationUsage
@@ -1665,14 +1818,15 @@ Estimated usage must be distinguishable from provider-reported usage.
 
 # Part XIV — Translation Results
 
-## 66. TranslationResult
+## 66. TranslationResultSnapshot
 
 ```text
-TranslationResult {
+TranslationResultSnapshot {
     translationResultId
+    translationIntentId
     translationJobId
 
-    resultRevision
+    translationRevision
 
     completion
 
@@ -1699,15 +1853,17 @@ TranslationResult {
 
 ---
 
-## 67. Result Revision
+## 67. Translation Revision
 
-Partial or progressive results may produce increasing result revisions.
+Partial publication, finalization, warning changes, or active-variant changes may produce increasing Translation revisions.
 
 ```text
-resultRevision = monotonically increasing within one job
+translationRevision = monotonically increasing
 ```
 
-A later revision must not contain an older source identity.
+A later revision must not contain an older source identity or overwrite a newer revision.
+
+The revision follows the semantics defined by `TranslationRevision`.
 
 ---
 
@@ -1739,14 +1895,18 @@ Detailed lifecycle meaning belongs in `STATES.md`.
 
 ## 69. Authoritative Result
 
-A result may be marked authoritative only when:
+A result may be technically publishable by Translation only when:
 
-* its source revision remains current according to publication policy;
+* its authority context remains compatible;
 * the job is not cancelled;
 * the job is not superseded;
 * required validation passed;
-* its variant is active;
+* its variant is eligible for activation;
 * publication policy permits its completion level.
+
+For session-bound work, Reading Session owns the final current-content acceptance decision.
+
+Therefore, `authoritative = true` means accepted for the specified reading context, not merely completed by a provider.
 
 ---
 
@@ -1927,9 +2087,11 @@ Variant B
 Only one variant should normally be active for a given:
 
 ```text
-reading context
+ReadingSessionId or detached reading context
 +
-prepared source revision
+PreparedDocumentId
++
+ContentRevision
 +
 target language
 ```
@@ -1952,6 +2114,8 @@ CancelTranslationCommand {
 
     reason
     scope
+    translationBatchId?
+    translationAttemptId?
 }
 ```
 
@@ -1959,7 +2123,8 @@ Possible scopes:
 
 ```text
 ENTIRE_JOB
-ACTIVE_ATTEMPT
+BATCH
+BATCH_ATTEMPT
 PENDING_BATCHES
 ```
 
@@ -2032,7 +2197,7 @@ Possible scopes:
 
 ```text
 FAILED_BATCHES
-ACTIVE_ATTEMPT
+SPECIFIC_BATCH
 ENTIRE_JOB
 ```
 
@@ -2385,6 +2550,8 @@ GetTranslationResult
 GetActiveTranslation
 ListTranslationVariants
 GetTranslationProgress
+GetTranslationVariant
+GetTranslationSnapshot
 ```
 
 Queries do not change translation state.
@@ -2420,7 +2587,7 @@ GetTranslationJobResult {
 GetTranslationResultQuery {
     translationJobId
 
-    resultRevision
+    translationRevision
     variantId
 
     includeWarnings
@@ -2428,7 +2595,7 @@ GetTranslationResultQuery {
 }
 ```
 
-When no revision or variant is supplied, the active authoritative result is returned.
+When no revision or variant is supplied, the newest accepted compatible `TranslationResultSnapshot` is returned.
 
 ---
 
@@ -2463,7 +2630,39 @@ Returns immutable variant summaries.
 
 ---
 
-## 104. GetTranslationProgressQuery
+## 104. GetTranslationVariantQuery
+
+```text
+GetTranslationVariantQuery {
+    translationVariantId
+    includeSegments
+    includeWarnings
+}
+```
+
+Returns one immutable variant or a stable variant reference.
+
+---
+
+## 105. GetTranslationSnapshotQuery
+
+```text
+GetTranslationSnapshotQuery {
+    readingSessionId?
+    preparedDocumentId
+    contentRevision
+    targetLanguage
+    translationRevision?
+}
+```
+
+Returns one immutable `TranslationResultSnapshot`.
+
+When `translationRevision` is omitted, the newest accepted compatible snapshot is returned.
+
+---
+
+## 106. GetTranslationProgressQuery
 
 ```text
 GetTranslationProgressQuery {
@@ -2528,10 +2727,13 @@ Cancelling an already cancelled or terminal job must not recreate work or change
 Before a result becomes authoritative, the module must verify at least:
 
 ```text
-ReadingSessionId
+ReadingSessionId or detached authority context
 PreparedDocumentId
 ContentRevision
+TranslationIntentId
 TranslationJobId
+TranslationRevision
+TranslationBatchId
 TranslationAttemptId
 ```
 
@@ -2553,6 +2755,10 @@ A result is stale when it no longer matches the authoritative source or translat
 A stale result may be retained for diagnostics.
 
 It must not overwrite current work.
+
+Translation performs defensive stale checks.
+
+Reading Session remains the final authority for whether a session-bound Translation snapshot is current.
 
 ---
 
@@ -2659,7 +2865,7 @@ Provider adapters are responsible for preserving this separation.
 Translation depends on stable definitions from:
 
 ```text
-modules/text-processing/CONTRACTS.md
+modules/text-processing/CONTRACT.md
 ```
 
 or the corresponding canonical contract file.
@@ -2684,6 +2890,8 @@ TranslatedSegmentId
 TranslatedText
 SourceSequence
 TranslationVariantId
+TranslationRevision
+TranslationResultSnapshot
 Completion
 Warnings
 ContentRevision
@@ -2804,13 +3012,15 @@ ProviderPolicy
 TerminologyPolicy
 ContextPolicy
 TranslationExecutionPolicy
+TranslationAuthorityContext
 TranslationPublicationPolicy
 
 TranslationJob
 TranslationAttempt
 TranslationBatch
 
-TranslationResult
+TranslationResultSnapshot
+TranslationRevision
 TranslatedSegment
 TranslationWarning
 TranslationStatistics
@@ -2886,15 +3096,16 @@ Translation creates:
 
 ```text
 TranslationJob
-    └── TranslationAttempt 1
-            ├── TranslationBatch 1
-            │       ├── Bubble 1
-            │       ├── Bubble 2
-            │       └── Bubble 3
-            │
-            └── TranslationBatch 2
-                    ├── Bubble 4
-                    └── Narration 1
+    ├── TranslationBatch 1
+    │       ├── Bubble 1
+    │       ├── Bubble 2
+    │       ├── Bubble 3
+    │       └── TranslationAttempt 1
+    │
+    └── TranslationBatch 2
+            ├── Bubble 4
+            ├── Narration 1
+            └── TranslationAttempt 1
 ```
 
 The result preserves:
@@ -2914,6 +3125,8 @@ Narration 1 → TranslatedSegment 5
 ```text
 TranslationJob A
       ↓
+TranslationBatch 1
+      ↓
 Attempt 1
       ↓
 Provider timeout
@@ -2922,7 +3135,7 @@ Attempt 2
       ↓
 Fallback provider
       ↓
-Completed result
+Completed batch result
 ```
 
 The same `TranslationJobId` is preserved.
@@ -2988,13 +3201,21 @@ docs/architecture/STATE_MACHINE.md
 docs/architecture/EVENT_BUS.md
 docs/architecture/MODULE_DEPENDENCY.md
 docs/architecture/DATA_FLOW.md
+
+docs/architecture/runtime/PIPELINE_RUNTIME.md
+docs/architecture/runtime/WORK_QUEUE.md
+docs/architecture/runtime/SCHEDULER.md
+docs/architecture/runtime/CANCELLATION.md
+docs/architecture/runtime/RETRY_POLICY.md
+docs/architecture/runtime/CACHE_POLICY.md
+docs/architecture/runtime/RUNTIME_COMPONENTS.md
 ```
 
 Upstream references:
 
 ```text
 modules/text-processing/MODULE.md
-modules/text-processing/CONTRACTS.md
+modules/text-processing/CONTRACT.md
 ```
 
 Future integration references:
@@ -3020,10 +3241,13 @@ TranslationBatch
     = provider execution unit
 
 TranslationAttempt
-    = one execution attempt
+    = one execution attempt for one batch
 
 TranslationJob
-    = one logical translation intent
+    = one logical translation request
+
+TranslationIntentId
+    = immutable semantic intent identity
 
 TranslatedSegment
     = aligned translated output
@@ -3039,9 +3263,9 @@ StartTranslationCommand
         ↓
 TranslationJob
         ↓
-TranslationAttempt
-        ↓
 TranslationBatch[]
+        ↓
+TranslationAttempt[]
         ↓
 Provider adapters
         ↓

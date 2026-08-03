@@ -1,264 +1,253 @@
 # Recognition Module Events
 
-> **Project:** CRAI
-> **Module:** Recognition
-> **Path:** `doc/02-modules/recognition/EVENTS.md`
-> **Version:** 0.1
-> **Status:** Architecture Draft
-> **Last Updated:** 2026-07-22
+> Project: CRAI  
+> Module: Recognition  
+> Path: `doc/02-modules/recognition/EVENTS.md`  
+> Version: 1.0  
+> Status: Architecture Draft
 
 ---
 
 ## 1. Purpose
 
-This document defines the event contract of the Recognition module.
+Tài liệu này định nghĩa event contract của Recognition Module theo Runtime v2.
 
-It specifies:
+Nó đặc tả:
 
-* events produced by Recognition;
-* events consumed by Recognition;
-* event payloads;
-* correlation rules;
-* ordering guarantees;
-* cancellation behavior;
-* stale-result behavior;
-* retry behavior;
-* event privacy rules;
-* delivery and idempotency expectations.
+- event ownership;
+- event categories;
+- shared event envelope;
+- Runtime correlation context;
+- Recognition domain facts;
+- Recognition progress facts;
+- warning/error facts;
+- diagnostic facts;
+- Candidate event boundary;
+- Runtime event boundary;
+- Provider Manager event boundary;
+- consumed-event policy;
+- ordering;
+- delivery và idempotency;
+- privacy;
+- publication failure behavior;
+- consumer expectations;
+- MVP event set;
+- testing;
+- invariants.
 
-This document focuses only on event-driven communication.
+Tài liệu này chỉ định nghĩa event-driven communication.
 
-Command and data contracts are defined separately in:
+Command/data contracts nằm trong:
 
 ```text
 doc/02-modules/recognition/CONTRACT.md
 ```
 
-Internal implementation details are defined separately in:
+Recognition state ownership nằm trong:
 
 ```text
-doc/02-modules/recognition/MODULE.md
+doc/02-modules/recognition/STATES.md
 ```
 
 ---
 
 ## 2. Event Role of Recognition
 
-Recognition is a processing module.
-
-It consumes requests referring to image content and produces events describing the progress and terminal outcome of recognition work.
+Recognition là processing module được Runtime invoke trong một Attempt.
 
 ```text
-Input Event or Command
-        ↓
-Recognition Processing
-        ↓
-Progress Events
-        ↓
-Exactly One Terminal Event
+Runtime Attempt
+    ↓
+Recognition Execution
+    ↓
+Optional Recognition Facts
+    ↓
+Candidate Submitted to Runtime
 ```
 
-Recognition events communicate processing state.
+Recognition events:
 
-They must not become a substitute for direct access to large recognition results.
+- report facts đã xảy ra;
+- hỗ trợ diagnostics, observability và optional progress;
+- không xác định Attempt terminal outcome;
+- không cấp authority;
+- không publish authoritative Artifact;
+- không trigger downstream work trực tiếp;
+- không thay Attempt Completion contract.
+
+Không có Recognition event nào bắt buộc cho correctness.
 
 ---
 
-## 3. Event Design Principles
+## 3. Event Ownership
 
-### 3.1 Events Represent Facts
+Recognition owns:
 
-Event names must describe something that has already happened.
+```text
+Recognition domain facts
+Recognition progress facts
+Recognition warning/error facts
+Recognition diagnostic facts
+```
+
+Recognition does not own:
+
+```text
+ATTEMPT_STARTED
+ATTEMPT_COMPLETED
+ATTEMPT_FAILED
+ATTEMPT_CANCELED
+ATTEMPT_ABANDONED
+AUTHORITY_REJECTED
+ARTIFACT_PUBLISHED
+PROVIDER_READY
+PROVIDER_DEGRADED
+PROVIDER_UNAVAILABLE
+CONFIG_ACTIVATED
+SESSION_STOPPED
+APPLICATION_SHUTDOWN_REQUESTED
+```
+
+Các event trên thuộc Runtime hoặc component owner tương ứng.
+
+---
+
+## 4. Event Design Principles
+
+### 4.1 Events Represent Facts
 
 Correct:
 
 ```text
-recognition.started
-recognition.completed
-recognition.failed
+RECOGNITION_PLAN_CREATED
+RECOGNITION_REGIONS_DETECTED
+RECOGNITION_CANDIDATE_VALIDATED
 ```
 
-Avoid command-like event names:
+Avoid:
 
 ```text
-recognition.start
-recognition.complete
-recognition.fail
+RECOGNITION_CREATE_PLAN
+RECOGNITION_DETECT_REGIONS
+RECOGNITION_VALIDATE_CANDIDATE
 ```
 
-Commands request behavior.
+### 4.2 Events Are Optional for Correctness
 
-Events report observed state changes.
+Recognition execution phải thành công ngay cả khi Event Bus unavailable.
+
+Candidate submission đi qua Attempt Completion, không qua event.
+
+### 4.3 Events Are Immutable
+
+Published event không được mutate.
+
+Correction hoặc additional fact cần event mới.
+
+### 4.4 Events Are Safe to Duplicate
+
+Every event has unique `EventId`.
+
+Consumers deduplicate by EventId.
+
+### 4.5 Events Are Not Globally Ordered
+
+Ordering chỉ causal/best-effort trong một Attempt hoặc Revision partition.
+
+### 4.6 Events Do Not Grant Authority
+
+Event occurrence không chứng minh:
+
+- Revision còn current;
+- Attempt được accepted;
+- Candidate được published;
+- downstream work được phép chạy.
+
+### 4.7 Large Payloads Travel by Reference
+
+Event Bus không carry:
+
+- image bytes;
+- Candidate payload;
+- Recognition Artifact payload;
+- provider raw response;
+- diagnostic image;
+- full recognized text.
+
+### 4.8 Privacy Is Contractual
+
+Normal Recognition events chứa operational metadata only.
 
 ---
 
-### 3.2 Exactly One Terminal Outcome
+## 5. Event Naming
 
-Every accepted recognition request must eventually produce exactly one terminal outcome:
+Canonical architectural names use:
 
 ```text
-recognition.completed
-recognition.failed
-recognition.cancelled
+UPPER_SNAKE_CASE
 ```
 
-A request must never publish more than one terminal event.
-
----
-
-### 3.3 Results Are Referenced
-
-Large recognition results should be passed by reference.
+Format:
 
 ```text
-recognition.completed
-    ↓
-RecognitionResultReference
-    ↓
-Consumer loads RecognitionResult
-```
-
-The Event Bus should not routinely carry:
-
-* complete OCR result objects;
-* raw images;
-* image buffers;
-* large provider payloads;
-* diagnostic image artifacts.
-
----
-
-### 3.4 Events Are Immutable
-
-An event must not be changed after publication.
-
-Corrections require a new event.
-
----
-
-### 3.5 Events Are Safe to Duplicate
-
-Consumers must assume the Event Bus may deliver an event more than once.
-
-Every event must have a unique `event_id`.
-
-Consumers must deduplicate using this identifier.
-
----
-
-### 3.6 Events Are Not Globally Ordered
-
-Ordering is guaranteed only within the lifecycle of one `request_id` where transport permits.
-
-Consumers must not assume ordering across different recognition requests.
-
----
-
-### 3.7 Privacy Is Part of the Contract
-
-Normal Recognition events must not contain:
-
-* image bytes;
-* complete recognized source text;
-* provider credentials;
-* authorization headers;
-* sensitive local paths;
-* full remote-provider responses.
-
----
-
-## 4. Event Naming Convention
-
-Recognition event names use lowercase dot-separated notation.
-
-```text
-recognition.<event>
+RECOGNITION_<FACT>
 ```
 
 Examples:
 
 ```text
-recognition.started
-recognition.completed
-recognition.failed
-recognition.cancelled
-recognition.regions_detected
+RECOGNITION_PLAN_CREATED
+RECOGNITION_PREPARATION_COMPLETED
+RECOGNITION_REGIONS_DETECTED
 ```
 
-Names must represent stable domain meaning.
+Transport adapters may map to topics such as:
 
-Implementation-stage names must not leak into public events unless they are part of the documented contract.
+```text
+recognition.plan_created
+```
+
+Canonical event identity remains the architectural name.
 
 ---
 
-## 5. Event Categories
-
-Recognition events are divided into four categories.
-
-### 5.1 Lifecycle Events
-
-Required events describing the request lifecycle.
+## 6. Event Categories
 
 ```text
-recognition.started
-recognition.completed
-recognition.failed
-recognition.cancelled
+Recognition Events
+├── Domain Facts
+├── Progress Facts
+├── Warning/Error Facts
+└── Diagnostic Facts
 ```
 
-### 5.2 Progress Events
-
-Optional events describing intermediate processing.
-
-```text
-recognition.preprocessing_completed
-recognition.regions_detected
-recognition.region_recognized
-recognition.reading_order_resolved
-```
-
-### 5.3 Provider Events
-
-Optional events describing provider operational changes.
-
-```text
-recognition.provider_ready
-recognition.provider_degraded
-recognition.provider_unavailable
-recognition.provider_configuration_changed
-```
-
-### 5.4 Diagnostic Events
-
-Internal or protected events intended for debugging and evaluation.
-
-```text
-recognition.diagnostic_recorded
-recognition.benchmark_sample_recorded
-```
-
-Diagnostic events must not be consumed by normal product workflows.
+No Recognition-owned lifecycle category exists.
 
 ---
 
-## 6. Event Envelope
-
-All public Recognition events use a shared envelope.
+## 7. Shared Event Envelope
 
 ```text
 RecognitionEventEnvelope<T>
-├── event_id: EventId
-├── event_name: string
-├── contract_version: string
-├── producer: ModuleId
-├── occurred_at: Timestamp
-├── trace_context: TraceContext
-├── partition_key?: string
-├── sequence_number?: integer
-└── payload: T
+├── EventId
+├── EventName
+├── ContractVersion
+├── ProducerModule
+├── OccurredAt
+├── TraceContext
+├── RuntimeContext
+├── PrivacyClassification
+├── PartitionKey?
+├── SequenceNumber?
+└── Payload
 ```
 
-### 6.1 Event ID
+---
+
+## 8. Envelope Fields
+
+### EventId
 
 ```text
 EventId = opaque string
@@ -266,1451 +255,823 @@ EventId = opaque string
 
 Requirements:
 
-1. globally unique within the event retention window;
+1. unique within retention window;
 2. immutable;
 3. not reused;
 4. safe for deduplication;
 5. not interpreted for business meaning.
 
----
+### EventName
 
-### 6.2 Producer
+Canonical Recognition event name.
 
-For public Recognition events:
-
-```text
-producer = recognition
-```
-
-Provider adapters must not publish public events under their own provider-specific namespace.
-
----
-
-### 6.3 Contract Version
+### ContractVersion
 
 ```text
-contract_version = 1.0.0
+1.0.0
 ```
 
-Consumers must reject unsupported major versions.
+Consumers reject unsupported major version.
+
+### ProducerModule
+
+```text
+recognition
+```
+
+Provider adapters do not publish Recognition public facts under provider-specific namespaces.
+
+### OccurredAt
+
+UTC timestamp.
+
+### PrivacyClassification
+
+```text
+OPERATIONAL_METADATA
+PROTECTED_DIAGNOSTIC_REFERENCE
+```
+
+Default:
+
+```text
+OPERATIONAL_METADATA
+```
 
 ---
 
-### 6.4 Trace Context
+## 9. Trace Context
 
 ```text
 TraceContext
-├── trace_id
-├── parent_span_id?
-├── correlation_id?
-└── baggage?
+├── TraceId
+├── ParentSpanId?
+├── CorrelationId?
+└── Baggage?
 ```
 
-Trace baggage must not contain source image data or recognized text.
+Baggage must not contain:
+
+- image data;
+- recognized text;
+- credential;
+- provider request body;
+- private source path.
 
 ---
 
-### 6.5 Partition Key
-
-Recommended partition key:
-
-```text
-request_id
-```
-
-This improves per-request event ordering where the Event Bus supports partitioned delivery.
-
----
-
-### 6.6 Sequence Number
-
-A per-request sequence number may be included.
-
-Example:
-
-```text
-recognition.started              sequence_number = 1
-recognition.regions_detected     sequence_number = 2
-recognition.completed            sequence_number = 3
-```
-
-Consumers must not rely solely on sequence numbers because transport delivery may still be duplicated or delayed.
-
----
-
-## 7. Shared Event Context
-
-Recognition lifecycle events should contain common correlation fields.
+## 10. Recognition Event Runtime Context
 
 ```text
 RecognitionEventContext
-├── request_id: RequestId
-├── recognition_id?: RecognitionId
-├── previous_recognition_id?: RecognitionId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── provider_id?: ProviderId
-└── attempt: integer
+├── ApplicationInstanceId
+├── SessionId?
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── CandidateArtifactId?
+├── ArtifactId?
+├── InputArtifactId?
+├── ProviderId?
+├── ConfigurationSnapshotId
+├── RecognitionOperation
+├── RecognitionProfile
+├── OperationPhase?
+└── BusinessStageId?
 ```
 
-### Field Meaning
+### Rules
 
-`request_id`
-
-Identifies one Recognition request lifecycle.
-
-`recognition_id`
-
-Identifies a completed immutable Recognition result.
-
-`previous_recognition_id`
-
-Links a retry result to a previous result.
-
-`session_id`
-
-Links work to a reading session when applicable.
-
-`source_id`
-
-Identifies the source or capture origin.
-
-`content_id`
-
-Identifies the logical content being processed.
-
-`frame_id`
-
-Identifies the exact observed frame.
-
-`provider_id`
-
-Identifies the selected provider.
-
-`attempt`
-
-Indicates the current provider or retry attempt inside one request.
+1. RevisionId, WorkItemId, AttemptId required.
+2. SessionId optional for standalone image.
+3. CandidateArtifactId only after Candidate exists.
+4. ArtifactId appears only in externally sourced Runtime/Artifact event, not ordinary Recognition Candidate fact.
+5. ProviderId optional before provider execution.
+6. No RequestId lifecycle identity is created by Recognition.
+7. No retry attempt integer; AttemptId is authoritative identity.
+8. No priority or queue class in Recognition event context.
 
 ---
 
-## 8. Required Produced Events
+## 11. Partition Key
 
-Recognition must produce the following events:
+Recommended:
 
 ```text
-recognition.started
-recognition.completed
-recognition.failed
-recognition.cancelled
+AttemptId
 ```
 
-These are the only events normal consumers may rely on.
+for Attempt-local facts.
 
-All other Recognition events are optional.
-
----
-
-# Produced Lifecycle Events
-
-## 9. `recognition.started`
-
-### 9.1 Meaning
-
-Published after:
-
-* the request has been accepted;
-* validation has passed;
-* provider selection has completed;
-* execution is about to begin.
-
-It must not be published merely because a request was received.
-
----
-
-### 9.2 Payload
+Alternative:
 
 ```text
-RecognitionStartedEvent
-├── request_id: RequestId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── provider_id: ProviderId
-├── recognition_mode: RecognitionMode
-├── priority: ProcessingPriority
-├── attempt: integer
-├── queued_duration_ms?: integer
-├── started_at: Timestamp
-└── provider_execution:
-    ├── execution_location
-    └── execution_device
+RevisionId
 ```
 
----
+for Revision-scoped diagnostics.
 
-### 9.3 Publication Rules
-
-1. Published once per accepted execution attempt.
-2. Must precede the terminal event for that attempt.
-3. Must not include the image reference.
-4. Must not include recognized text.
-5. Must expose remote execution through `execution_location`.
-6. May be omitted for synchronous in-process invocation only when the caller directly receives the result and no Event Bus lifecycle is expected.
-7. If an event-based request was accepted, this event is required.
+Selection must follow Event Convention.
 
 ---
 
-### 9.4 Example
+## 12. Sequence Number
 
-```json
-{
-  "event_id": "evt_rec_started_001",
-  "event_name": "recognition.started",
-  "contract_version": "1.0.0",
-  "producer": "recognition",
-  "occurred_at": "2026-07-22T03:15:42.190Z",
-  "partition_key": "req_20260722_0001",
-  "sequence_number": 1,
-  "trace_context": {
-    "trace_id": "trace_01"
-  },
-  "payload": {
-    "request_id": "req_20260722_0001",
-    "session_id": "session_01",
-    "source_id": "desktop_region_01",
-    "content_id": "page_104",
-    "frame_id": "frame_104_08",
-    "provider_id": "local_ocr_01",
-    "recognition_mode": "ComicPage",
-    "priority": "Interactive",
-    "attempt": 1,
-    "started_at": "2026-07-22T03:15:42.190Z",
-    "provider_execution": {
-      "execution_location": "LocalProcess",
-      "execution_device": "GPU"
-    }
-  }
-}
-```
+Optional monotonic sequence per partition.
 
----
-
-## 10. `recognition.completed`
-
-### 10.1 Meaning
-
-Published when Recognition has successfully created an immutable result.
-
-A successful result may:
-
-* contain recognized regions;
-* contain warnings;
-* contain no readable regions.
-
----
-
-### 10.2 Payload
+Example:
 
 ```text
-RecognitionCompletedEvent
-├── recognition_id: RecognitionId
-├── request_id: RequestId
-├── previous_recognition_id?: RecognitionId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── provider_id: ProviderId
-├── status: RecognitionStatus
-├── attempt: integer
-├── region_count: integer
-├── line_count: integer
-├── character_count: integer
-├── warning_count: integer
-├── total_duration_ms: integer
-├── result_reference: RecognitionResultReference
-└── completed_at: Timestamp
+RECOGNITION_PLAN_CREATED                  1
+RECOGNITION_PREPARATION_COMPLETED         2
+RECOGNITION_REGIONS_DETECTED              3
+RECOGNITION_CANDIDATE_VALIDATED           4
 ```
+
+Consumers must still tolerate:
+
+- duplicates;
+- delays;
+- missing optional facts;
+- out-of-order delivery.
 
 ---
 
-### 10.3 Recognition Status
+## 13. Domain Facts
+
+Core Recognition domain facts:
 
 ```text
-Completed
-CompletedWithWarnings
+RECOGNITION_PLAN_CREATED
+RECOGNITION_CANDIDATE_VALIDATED
+RECOGNITION_CANDIDATE_SUBMITTED
 ```
 
-An empty result may use:
+These describe semantic milestones only.
+
+---
+
+## 14. `RECOGNITION_PLAN_CREATED`
+
+### Meaning
+
+A valid immutable Recognition Plan has been built for an Attempt.
+
+### Payload
 
 ```text
-Completed
+RecognitionPlanCreatedEvent
+├── PlanId
+├── Strategy
+├── RecognitionOperation
+├── RecognitionProfile
+├── CapabilityRequirementSummary
+├── PreparationProfileId?
+├── CoordinatePolicyVersion
+├── ReadingOrderPolicyVersion
+├── QualityPolicyVersion
+├── PrivacyMode
+├── ExecutionClasses[]
+├── EstimatedResourceCost?
+└── CreatedAt
 ```
 
-with a `NoReadableTextDetected` warning inside the stored result.
+### Rules
+
+1. emitted after Plan state becomes READY;
+2. no provider credential;
+3. provider selection may still be external/pending;
+4. no image reference;
+5. no raw Recognition options containing sensitive fields;
+6. optional for correctness;
+7. does not mean Attempt has started provider execution.
 
 ---
 
-### 10.4 Result Reference
+## 15. `RECOGNITION_CANDIDATE_VALIDATED`
+
+### Meaning
+
+A Candidate Recognition Artifact passed Recognition semantic validation.
+
+### Payload
 
 ```text
-RecognitionResultReference
-├── reference_type
-├── reference_value
-├── expires_at?
-└── integrity_checksum?
+RecognitionCandidateValidatedEvent
+├── CandidateArtifactId
+├── ArtifactType
+├── Completeness
+├── QualityLevel
+├── RegionCount
+├── LineCount
+├── CharacterCount
+├── WarningCount
+├── ProviderProvenanceSummary
+├── CompatibilityMetadataVersion
+├── ValidationDurationMs
+└── ValidatedAt
 ```
 
-Supported reference types:
+### Rules
+
+1. no Candidate payload;
+2. no full recognized text;
+3. Candidate is not authoritative;
+4. Candidate is not published;
+5. event does not grant ownership transfer;
+6. event does not trigger Text Processing;
+7. Runtime may later reject Candidate;
+8. empty-valid Candidate is allowed.
+
+---
+
+## 16. `RECOGNITION_CANDIDATE_SUBMITTED`
+
+### Meaning
+
+Recognition submitted a valid Candidate through Attempt Completion to Runtime.
+
+### Payload
 
 ```text
-InMemoryResult
-TemporaryResultStore
-PersistentResultStore
-InlinePermitted
+RecognitionCandidateSubmittedEvent
+├── CandidateArtifactId
+├── ArtifactType
+├── SubmissionMode
+├── SubmittedAt
+└── DiagnosticsRef?
 ```
-
-`InlinePermitted` must only be used for small, trusted, in-process events.
-
----
-
-### 10.5 Publication Rules
-
-1. Published only after result validation succeeds.
-2. Published only after result storage or registration succeeds when a reference is required.
-3. Must be the only terminal event for the request.
-4. Must not be published after accepted cancellation.
-5. Must not include the full result by default.
-6. Must not include recognized text.
-7. Must contain the exact `frame_id` used for recognition.
-8. May complete after a newer frame has already been observed.
-9. Stale-result rejection belongs to the consumer or Session orchestration.
-10. Recognition must not suppress a valid result solely because it suspects it may be stale, unless cancellation was already accepted.
-
----
-
-### 10.6 Example
-
-```json
-{
-  "event_id": "evt_rec_completed_001",
-  "event_name": "recognition.completed",
-  "contract_version": "1.0.0",
-  "producer": "recognition",
-  "occurred_at": "2026-07-22T03:15:42.872Z",
-  "partition_key": "req_20260722_0001",
-  "sequence_number": 3,
-  "trace_context": {
-    "trace_id": "trace_01"
-  },
-  "payload": {
-    "recognition_id": "rec_20260722_0001",
-    "request_id": "req_20260722_0001",
-    "session_id": "session_01",
-    "source_id": "desktop_region_01",
-    "content_id": "page_104",
-    "frame_id": "frame_104_08",
-    "provider_id": "local_ocr_01",
-    "status": "CompletedWithWarnings",
-    "attempt": 1,
-    "region_count": 12,
-    "line_count": 18,
-    "character_count": 143,
-    "warning_count": 1,
-    "total_duration_ms": 682,
-    "result_reference": {
-      "reference_type": "TemporaryResultStore",
-      "reference_value": "recognition-result://rec_20260722_0001",
-      "expires_at": "2026-07-22T04:15:42.872Z"
-    },
-    "completed_at": "2026-07-22T03:15:42.872Z"
-  }
-}
-```
-
----
-
-## 11. `recognition.failed`
-
-### 11.1 Meaning
-
-Published when Recognition cannot produce a valid usable result.
-
-Examples:
-
-* image cannot be resolved;
-* preprocessing fails;
-* provider fails;
-* provider response is invalid;
-* coordinate mapping fails;
-* result assembly fails.
-
-No-text detection is not a failure.
-
----
-
-### 11.2 Payload
 
 ```text
-RecognitionFailedEvent
-├── request_id: RequestId
-├── recognition_id?: RecognitionId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── provider_id?: ProviderId
-├── attempt: integer
-├── error: RecognitionError
-├── partial_result_reference?: RecognitionResultReference
-└── failed_at: Timestamp
+SubmissionMode
+├── ATTEMPT_COMPLETION
+└── DIAGNOSTIC_EVALUATION
 ```
 
-A partial result reference is allowed only when partial-result policy explicitly permits it.
+### Rules
+
+1. submission is not publication;
+2. no ArtifactId yet;
+3. no downstream orchestration;
+4. Candidate must not be mutated afterward;
+5. Runtime disposition may be accepted or rejected;
+6. optional fact only.
 
 ---
 
-### 11.3 Publication Rules
-
-1. Published only when no acceptable final result can be produced.
-2. Must contain a normalized Recognition error.
-3. Must be the only terminal event for the request.
-4. Must not include complete provider error payloads.
-5. Must not include raw source text.
-6. Must not expose credentials.
-7. Must preserve `request_id`, `source_id`, and `content_id`.
-8. Should preserve `frame_id` when provided.
-9. Should expose whether the error is retryable.
-10. Must not be published after `recognition.cancelled`.
-
----
-
-### 11.4 Example
-
-```json
-{
-  "event_id": "evt_rec_failed_001",
-  "event_name": "recognition.failed",
-  "contract_version": "1.0.0",
-  "producer": "recognition",
-  "occurred_at": "2026-07-22T03:20:14.421Z",
-  "partition_key": "req_20260722_0003",
-  "sequence_number": 2,
-  "trace_context": {
-    "trace_id": "trace_03"
-  },
-  "payload": {
-    "request_id": "req_20260722_0003",
-    "session_id": "session_01",
-    "source_id": "desktop_region_01",
-    "content_id": "page_106",
-    "frame_id": "frame_106_02",
-    "provider_id": "remote_ocr_01",
-    "attempt": 1,
-    "error": {
-      "contract_version": "1.0.0",
-      "error_code": "ProviderTimeout",
-      "stage": "TextRecognition",
-      "message": "The recognition provider exceeded the request timeout.",
-      "retryable": true,
-      "request_id": "req_20260722_0003",
-      "provider_id": "remote_ocr_01",
-      "occurred_at": "2026-07-22T03:20:14.421Z",
-      "trace_context": {
-        "trace_id": "trace_03"
-      }
-    },
-    "failed_at": "2026-07-22T03:20:14.421Z"
-  }
-}
-```
-
----
-
-## 12. `recognition.cancelled`
-
-### 12.1 Meaning
-
-Published when a Recognition request has entered a terminal cancelled state.
-
-The provider process may or may not have been interrupted immediately.
-
-The important guarantee is that the request will no longer produce a completed result event.
-
----
-
-### 12.2 Payload
+## 17. Progress Facts
 
 ```text
-RecognitionCancelledEvent
-├── request_id: RequestId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── provider_id?: ProviderId
-├── attempt: integer
-├── reason: CancellationReason
-├── provider_interrupted: boolean
-├── cancellation_requested_at?: Timestamp
-└── cancelled_at: Timestamp
+RECOGNITION_PREPARATION_COMPLETED
+RECOGNITION_REGIONS_DETECTED
+RECOGNITION_REGION_PROCESSED
+RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
+RECOGNITION_READING_ORDER_RESOLVED
 ```
+
+Progress facts:
+
+- optional;
+- best-effort;
+- sampleable;
+- not required for correctness;
+- not authoritative;
+- not terminal;
+- not downstream triggers.
 
 ---
 
-### 12.3 Cancellation Reasons
+## 18. `RECOGNITION_PREPARATION_COMPLETED`
+
+### Payload
 
 ```text
-UserCancelled
-SessionStopped
-SourceChanged
-NewerFrameAvailable
-RequestSuperseded
-ApplicationShutdown
-Timeout
-ResourcePressure
+RecognitionPreparationCompletedEvent
+├── PreparationProfileId?
+├── OperationCount
+├── SourceWidth
+├── SourceHeight
+├── ProcessedWidth
+├── ProcessedHeight
+├── GeometryChanged
+├── DurationMs
+└── CompletedAt
 ```
 
----
+### Rules
 
-### 12.4 Publication Rules
-
-1. Published only after cancellation has been accepted.
-2. Must be the only terminal event for the request.
-3. Completion arriving later from a non-interruptible provider must be discarded.
-4. `provider_interrupted = false` does not permit later completion publication.
-5. Must not include partial OCR text.
-6. Must preserve the original request correlation fields.
-7. Repeated cancellation requests must not produce repeated terminal events.
-8. Cancellation before `recognition.started` may produce only `recognition.cancelled` if execution never started.
-9. Cancellation after completion returns an `AlreadyCompleted` command result and must not publish `recognition.cancelled`.
+1. no processed image;
+2. no temporary path;
+3. no provider secret;
+4. geometry-changing operations tracked internally;
+5. may be omitted under sampling.
 
 ---
 
-### 12.5 Example
+## 19. `RECOGNITION_REGIONS_DETECTED`
 
-```json
-{
-  "event_id": "evt_rec_cancelled_001",
-  "event_name": "recognition.cancelled",
-  "contract_version": "1.0.0",
-  "producer": "recognition",
-  "occurred_at": "2026-07-22T03:25:10.144Z",
-  "partition_key": "req_20260722_0004",
-  "sequence_number": 2,
-  "trace_context": {
-    "trace_id": "trace_04"
-  },
-  "payload": {
-    "request_id": "req_20260722_0004",
-    "session_id": "session_01",
-    "source_id": "desktop_region_01",
-    "content_id": "page_107",
-    "frame_id": "frame_107_04",
-    "provider_id": "local_ocr_01",
-    "attempt": 1,
-    "reason": "NewerFrameAvailable",
-    "provider_interrupted": false,
-    "cancellation_requested_at": "2026-07-22T03:25:10.139Z",
-    "cancelled_at": "2026-07-22T03:25:10.144Z"
-  }
-}
-```
-
----
-
-# Optional Progress Events
-
-## 13. Progress Event Policy
-
-Progress events are optional.
-
-Consumers must not require them for correctness.
-
-They may be enabled for:
-
-* debugging;
-* performance profiling;
-* progress UI;
-* provider evaluation;
-* long-running recognition jobs.
-
-Progress events may be disabled because of:
-
-* performance cost;
-* privacy policy;
-* transport volume;
-* provider limitations;
-* implementation simplicity.
-
----
-
-## 14. `recognition.preprocessing_completed`
-
-### 14.1 Meaning
-
-Published when image preprocessing has completed successfully.
-
-### 14.2 Payload
-
-```text
-RecognitionPreprocessingCompletedEvent
-├── request_id: RequestId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── provider_id: ProviderId
-├── preprocessing_profile_id?: PreprocessingProfileId
-├── operation_count: integer
-├── source_width: integer
-├── source_height: integer
-├── processed_width: integer
-├── processed_height: integer
-├── duration_ms: integer
-└── completed_at: Timestamp
-```
-
-### 14.3 Rules
-
-1. Must not include processed image data.
-2. Must not include temporary image paths.
-3. Must not be required by consumers.
-4. Must not be published after cancellation.
-5. Geometry-changing preprocessing must already be tracked internally.
-
----
-
-## 15. `recognition.regions_detected`
-
-### 15.1 Meaning
-
-Published after text-region detection completes.
-
-### 15.2 Payload
+### Payload
 
 ```text
 RecognitionRegionsDetectedEvent
-├── request_id: RequestId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── provider_id: ProviderId
-├── detected_region_count: integer
-├── low_confidence_region_count: integer
-├── detection_duration_ms: integer
-└── detected_at: Timestamp
+├── DetectedRegionCount
+├── LowConfidenceRegionCount
+├── OrientationSummary
+├── DetectionProviderId?
+├── DetectionDurationMs
+└── DetectedAt
 ```
 
-### 15.3 Optional Trusted Payload
-
-A trusted in-process channel may additionally carry:
+Trusted in-process extension may include bounded region summaries:
 
 ```text
-region_summaries:
-├── region_id
-├── geometry
-├── orientation
-└── confidence_level
+RegionSummary
+├── RegionId
+├── Geometry
+├── Orientation
+└── ConfidenceLevel
 ```
 
-It must not include recognized text.
+No recognized text.
 
 ---
 
-## 16. `recognition.region_recognized`
+## 20. `RECOGNITION_REGION_PROCESSED`
 
-### 16.1 Meaning
+### Meaning
 
-Published when one region has completed OCR.
+One bounded region operation completed.
 
-This event is useful for:
-
-* progressive UI;
-* long page processing;
-* diagnostics;
-* performance inspection.
-
-### 16.2 Payload
+### Payload
 
 ```text
-RecognitionRegionRecognizedEvent
-├── request_id: RequestId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── provider_id: ProviderId
-├── region_id: RegionId
-├── region_index: integer
-├── total_region_count: integer
-├── recognition_confidence_level: ConfidenceLevel
-├── character_count: integer
-├── duration_ms: integer
-└── recognized_at: Timestamp
+RecognitionRegionProcessedEvent
+├── RegionId
+├── RegionIndex
+├── TotalRegionCount
+├── ConfidenceLevel
+├── CharacterCount
+├── DurationMs
+└── ProcessedAt
 ```
 
-### 16.3 Rules
+### Rules
 
-1. Raw recognized text must not appear in normal Event Bus payloads.
-2. Event frequency must be bounded.
-3. Region events may arrive out of spatial order.
-4. Consumers must not treat this as a completed result.
-5. Region events may be lost without affecting correctness.
-6. A cancelled request may have emitted earlier region progress events.
-7. Consumers must discard partial progress after terminal cancellation or failure.
+1. bounded/sampled frequency;
+2. no text content;
+3. may arrive out of spatial order;
+4. not a partial Artifact;
+5. consumers do not start Translation from it;
+6. may be lost.
 
 ---
 
-## 17. `recognition.reading_order_resolved`
+## 21. `RECOGNITION_PROVIDER_OUTPUT_NORMALIZED`
 
-### 17.1 Meaning
+### Payload
 
-Published when initial reading order has been computed.
+```text
+RecognitionProviderOutputNormalizedEvent
+├── ProviderId
+├── ProviderRequestId?
+├── RegionCount
+├── LineCount
+├── ConfidenceAvailable
+├── GeometrySourceSummary
+├── WarningCount
+├── NormalizationDurationMs
+└── NormalizedAt
+```
 
-### 17.2 Payload
+ProviderRequestId should remain trace-only when cardinality/privacy policy requires.
+
+---
+
+## 22. `RECOGNITION_READING_ORDER_RESOLVED`
+
+### Payload
 
 ```text
 RecognitionReadingOrderResolvedEvent
-├── request_id: RequestId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── provider_id: ProviderId
-├── ordered_region_count: integer
-├── reading_direction: ReadingDirection
-├── order_source: ReadingOrderSource
-├── confidence_level: ConfidenceLevel
-├── warning_count: integer
-├── duration_ms: integer
-└── resolved_at: Timestamp
+├── OrderedRegionCount
+├── ReadingDirection
+├── OrderSource
+├── ConfidenceLevel
+├── WarningCount
+├── DurationMs
+└── ResolvedAt
 ```
 
-### 17.3 Rules
+### Rules
 
-1. Full order entries should remain in the final result.
-2. This event is informational.
-3. Uncertain order must be represented explicitly.
-4. Consumers must not start translation from this event unless a dedicated streaming workflow is later defined.
-
----
-
-# Provider Operational Events
-
-## 18. Provider Event Scope
-
-Provider events communicate operational availability.
-
-They do not communicate OCR quality.
-
-A provider may be operationally ready but unsuitable for CRAI's required content.
+1. full order remains in Candidate/Artifact;
+2. event is informational;
+3. uncertain order explicit;
+4. not a downstream trigger.
 
 ---
 
-## 19. `recognition.provider_ready`
+## 23. Warning and Error Facts
+
+```text
+RECOGNITION_WARNING_RECORDED
+RECOGNITION_MODULE_ERROR_RECORDED
+RECOGNITION_CANCELLATION_OBSERVED
+RECOGNITION_DEADLINE_OBSERVED
+```
+
+These facts do not define Runtime terminal outcomes.
+
+---
+
+## 24. `RECOGNITION_WARNING_RECORDED`
 
 ### Payload
 
 ```text
-RecognitionProviderReadyEvent
-├── provider_id: ProviderId
-├── provider_version: string
-├── execution_locations: ExecutionLocation[]
-├── supported_modes: RecognitionMode[]
-├── readiness_source: ProviderReadinessSource
-└── ready_at: Timestamp
-```
-
-Readiness sources:
-
-```text
-Initialization
-HealthCheck
-ConfigurationReload
-ManualRecovery
-```
-
----
-
-## 20. `recognition.provider_degraded`
-
-### Payload
-
-```text
-RecognitionProviderDegradedEvent
-├── provider_id: ProviderId
-├── degradation_code: string
-├── message: string
-├── affected_capabilities: RecognitionCapability[]
-├── requests_may_continue: boolean
-└── degraded_at: Timestamp
-```
-
-Examples:
-
-* GPU unavailable, CPU fallback active;
-* remote provider latency elevated;
-* some language model unavailable;
-* cancellation temporarily unsupported.
-
----
-
-## 21. `recognition.provider_unavailable`
-
-### Payload
-
-```text
-RecognitionProviderUnavailableEvent
-├── provider_id: ProviderId
-├── reason_code: string
-├── message: string
-├── retryable: boolean
-├── expected_recovery_at?: Timestamp
-└── unavailable_at: Timestamp
-```
-
-This event must not expose credentials or full provider errors.
-
----
-
-## 22. `recognition.provider_configuration_changed`
-
-### Payload
-
-```text
-RecognitionProviderConfigurationChangedEvent
-├── provider_id: ProviderId
-├── previous_configuration_version?: string
-├── new_configuration_version: string
-├── restart_required: boolean
-├── capability_change_detected: boolean
-└── changed_at: Timestamp
-```
-
-Sensitive configuration values must not be included.
-
----
-
-# Events Consumed by Recognition
-
-## 23. Consumed Event Policy
-
-Recognition should prefer direct commands for work that requires a clear response.
-
-Events are suitable when:
-
-* the producer and Recognition are decoupled;
-* asynchronous processing is expected;
-* multiple consumers may observe the same fact;
-* the workflow does not require immediate synchronous acknowledgment.
-
-Recognition must not create hidden behavior by subscribing to broad unrelated events.
-
----
-
-## 24. `source.image_imported`
-
-### Meaning
-
-A new image has been imported and may require recognition.
-
-### Expected Payload
-
-```text
-SourceImageImportedEvent
-├── source_id: SourceId
-├── content_id: ContentId
-├── image_reference: ImageReference
-├── coordinate_space: CoordinateSpace
-├── media_type: string
-├── imported_at: Timestamp
-├── recognition_requested: boolean
-├── recognition_options?: RecognitionOptions
-└── trace_context: TraceContext
-```
-
-### Consumption Rules
-
-1. Recognition acts only when `recognition_requested = true`.
-2. Import alone must not automatically trigger OCR unless product workflow explicitly defines it.
-3. The image reference must remain valid until completion.
-4. Recognition creates a new `request_id` only if orchestration has not already provided one.
-5. Prefer an orchestration-generated explicit request event for production flows.
-
----
-
-## 25. `observation.stable_frame_ready`
-
-### Meaning
-
-Observation has identified a stable frame suitable for processing.
-
-### Expected Payload
-
-```text
-StableFrameReadyEvent
-├── session_id: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id: FrameId
-├── image_reference: ImageReference
-├── coordinate_space: CoordinateSpace
-├── stability_score?: decimal
-├── region_of_interest?: Geometry
-├── recognition_options?: RecognitionOptions
-├── observed_at: Timestamp
-└── trace_context: TraceContext
-```
-
-### Consumption Rules
-
-1. Recognition must preserve `frame_id`.
-2. The exact image reference must correspond to that frame.
-3. A later frame may supersede this request.
-4. Recognition does not decide whether the frame remains current.
-5. Observation or Session may later request cancellation.
-6. Region-of-interest processing should use `RecognizeRegion`.
-7. Stable-frame events must not be processed multiple times without idempotency controls.
-
----
-
-## 26. `recognition.requested`
-
-### Meaning
-
-A module requests asynchronous recognition.
-
-This is the event equivalent of the Recognize command.
-
-### Expected Payload
-
-```text
-RecognitionRequestedEvent
-├── request_id: RequestId
-├── session_id?: SessionId
-├── source_id: SourceId
-├── content_id: ContentId
-├── frame_id?: FrameId
-├── image_reference: ImageReference
-├── source_coordinate_space: CoordinateSpace
-├── region?: Geometry
-├── options: RecognitionOptions
-├── priority: ProcessingPriority
-├── requested_at: Timestamp
-└── trace_context: TraceContext
-```
-
-### Consumption Rules
-
-1. `request_id` is required.
-2. Duplicate request IDs must be handled idempotently.
-3. Region presence selects region recognition behavior.
-4. Request validation failure produces `recognition.failed`.
-5. Accepted requests produce `recognition.started`.
-6. Event acceptance does not guarantee immediate execution.
-7. The image reference must remain valid until terminal outcome.
-8. The producer must not reuse `request_id` for different content.
-
----
-
-## 27. `recognition.cancellation_requested`
-
-### Meaning
-
-A request should stop because it is no longer needed or cannot continue.
-
-### Expected Payload
-
-```text
-RecognitionCancellationRequestedEvent
-├── request_id: RequestId
-├── reason: CancellationReason
-├── requested_at: Timestamp
-└── trace_context: TraceContext
-```
-
-### Consumption Rules
-
-1. Recognition resolves the active request by `request_id`.
-2. Cancellation is idempotent.
-3. Already completed requests remain completed.
-4. Accepted cancellation eventually produces `recognition.cancelled`.
-5. A provider result arriving later must be discarded.
-6. Request-not-found handling may be logged but should not produce a false terminal event.
-7. The cancellation event must not identify requests only by `frame_id`.
-
----
-
-## 28. `session.stopped`
-
-### Meaning
-
-A reading session has ended.
-
-### Expected Payload
-
-```text
-SessionStoppedEvent
-├── session_id: SessionId
-├── reason: SessionStopReason
-├── stopped_at: Timestamp
-└── trace_context: TraceContext
-```
-
-### Consumption Rules
-
-1. Recognition cancels active requests associated with the session.
-2. Independent imported-image recognition must not be cancelled.
-3. Completed results remain immutable.
-4. Temporary resources associated with active requests must be released.
-5. Each affected request produces its own cancellation terminal event.
-6. No aggregate Recognition cancellation event is required.
-
----
-
-## 29. `source.closed`
-
-### Meaning
-
-A source is no longer available.
-
-### Expected Payload
-
-```text
-SourceClosedEvent
-├── source_id: SourceId
-├── reason: SourceCloseReason
-├── closed_at: Timestamp
-└── trace_context: TraceContext
-```
-
-### Consumption Rules
-
-1. Active requests using the closed source should be cancelled.
-2. Already materialized image references may continue only when policy explicitly permits it.
-3. New requests for the source must be rejected.
-4. Recognition does not own source lifecycle state.
-5. Recognition should clear source-scoped temporary handles.
-
----
-
-## 30. `application.shutdown_requested`
-
-### Meaning
-
-The application is preparing to terminate.
-
-### Expected Payload
-
-```text
-ApplicationShutdownRequestedEvent
-├── shutdown_id: string
-├── reason: string
-├── deadline?: Timestamp
-└── requested_at: Timestamp
-```
-
-### Consumption Rules
-
-1. Stop accepting new requests.
-2. Cancel active requests.
-3. Release providers and models.
-4. Publish terminal cancellation events where practical.
-5. Do not wait indefinitely for non-interruptible providers.
-6. Avoid publishing provider-ready events during shutdown.
-7. Shutdown cleanup must be bounded.
-
----
-
-## 31. `configuration.recognition_changed`
-
-### Meaning
-
-Recognition-related configuration has changed.
-
-### Expected Payload
-
-```text
-RecognitionConfigurationChangedEvent
-├── configuration_version: string
-├── changed_sections: string[]
-├── restart_required: boolean
-├── changed_at: Timestamp
-└── trace_context: TraceContext
-```
-
-### Consumption Rules
-
-1. Validate new configuration before activation.
-2. Do not mutate configuration used by an active request.
-3. Active requests use their original configuration snapshot.
-4. New requests use the new validated configuration.
-5. Provider restart may be required.
-6. Provider operational events may be published after reload.
-7. Sensitive configuration values must not be included.
-
----
-
-# Event Lifecycle and State
-
-## 32. Normal Successful Lifecycle
-
-```text
-recognition.requested
-        ↓
-recognition.started
-        ↓
-[optional progress events]
-        ↓
-recognition.completed
-```
-
-Example:
-
-```text
-recognition.requested
-recognition.started
-recognition.preprocessing_completed
-recognition.regions_detected
-recognition.reading_order_resolved
-recognition.completed
-```
-
----
-
-## 33. Failure Lifecycle
-
-```text
-recognition.requested
-        ↓
-recognition.started
-        ↓
-[optional progress events]
-        ↓
-recognition.failed
-```
-
-Validation may fail before execution begins.
-
-In that case:
-
-```text
-recognition.requested
-        ↓
-recognition.failed
-```
-
-`recognition.started` is not required if execution never started.
-
----
-
-## 34. Cancellation Lifecycle
-
-### Before Execution
-
-```text
-recognition.requested
-        ↓
-recognition.cancellation_requested
-        ↓
-recognition.cancelled
-```
-
-### During Execution
-
-```text
-recognition.requested
-        ↓
-recognition.started
-        ↓
-recognition.regions_detected
-        ↓
-recognition.cancellation_requested
-        ↓
-recognition.cancelled
-```
-
-### Non-Interruptible Provider
-
-```text
-recognition.cancelled
-        ↓
-provider returns internally later
-        ↓
-result discarded
-```
-
-No additional completion event is published.
-
----
-
-## 35. Empty Result Lifecycle
-
-```text
-recognition.requested
-        ↓
-recognition.started
-        ↓
-recognition.completed
-```
-
-The referenced Recognition result contains:
-
-```text
-regions = []
-warnings = [NoReadableTextDetected]
-```
-
-Recognition must not publish `recognition.failed`.
-
----
-
-## 36. Retry Lifecycle
-
-A retry is a new request.
-
-```text
-Original Request
-    ↓
-recognition.failed
-    ↓
-Retry Requested with New request_id
-    ↓
-recognition.started
-    ↓
-recognition.completed
-```
-
-The completed result should contain:
-
-```text
-previous_recognition_id
-```
-
-when retrying a previous completed or partial result.
-
-Retries must not reuse the original request ID.
-
----
-
-## 37. Provider Fallback Lifecycle
-
-Fallback may occur inside one Recognition request.
-
-```text
-Attempt 1 Provider A
-    ↓ failure
-Attempt 2 Provider B
-    ↓ success
-recognition.completed
-```
-
-The final event includes:
-
-```text
-provider_id = Provider B
-attempt = 2
-```
-
-The result must include:
-
-```text
-fallback_index = 1
-warning = FallbackProviderUsed
-```
-
-Public `recognition.failed` must not be emitted for an internal attempt if fallback continues.
-
-Optional protected diagnostics may record failed attempts.
-
----
-
-# Ordering, Delivery, and Idempotency
-
-## 38. Per-Request Event Ordering
-
-Preferred ordering:
-
-```text
-started
-    ↓
-zero or more progress events
-    ↓
-one terminal event
-```
-
-The Event Bus should partition by `request_id`.
-
-Recognition must assign sequence numbers monotonically per request when supported.
-
----
-
-## 39. Delivery Guarantees
-
-The architecture must assume at-least-once event delivery.
-
-Possible effects:
-
-* duplicate started events;
-* duplicate completion events;
-* duplicate cancellation requests;
-* delayed progress events;
-* out-of-order delivery after retries;
-* terminal event arriving before an earlier progress event.
-
-Consumers must handle these safely.
-
----
-
-## 40. Consumer Deduplication
-
-Consumers should maintain:
-
-```text
-ProcessedEvent
-├── event_id
-├── processed_at
-└── handler_id
-```
-
-A duplicate `event_id` must not produce duplicate downstream work.
-
-For terminal events, consumers should also protect against duplicate handling by:
-
-```text
-request_id + terminal_event_type
-```
-
----
-
-## 41. Terminal Event Conflict Handling
-
-A consumer receiving conflicting terminal events for one request should:
-
-1. retain the first valid terminal event;
-2. reject subsequent conflicting terminal events;
-3. record a contract violation;
-4. avoid triggering downstream work twice;
-5. surface diagnostics.
-
-Recognition implementation tests must ensure this never happens under normal operation.
-
----
-
-## 42. Late Progress Events
-
-A delayed progress event may arrive after a terminal event.
-
-Consumers must ignore progress events for terminal requests.
-
-Example:
-
-```text
-recognition.completed
-        ↓
-delayed recognition.region_recognized
-        ↓
-ignored
-```
-
----
-
-## 43. Stale Recognition Results
-
-A result is stale when it belongs to an older frame or content version than the consumer currently needs.
-
-Recognition does not determine staleness.
-
-The consumer compares:
-
-```text
-session_id
-source_id
-content_id
-frame_id
-```
-
-Example:
-
-```text
-Current frame = frame_106
-Completed result frame = frame_105
-```
-
-Session orchestration may:
-
-* ignore the result;
-* discard the temporary reference;
-* retain it for diagnostics;
-* avoid starting Text Processing;
-* request cancellation earlier when possible.
-
-A stale result is not necessarily an invalid Recognition result.
-
----
-
-## 44. Event Correlation
-
-Primary correlation keys:
-
-```text
-request_id
-trace_id
-```
-
-Secondary context:
-
-```text
-session_id
-source_id
-content_id
-frame_id
-recognition_id
+RecognitionWarningRecordedEvent
+├── WarningCode
+├── Severity
+├── OperationPhase
+├── RegionId?
+├── ProviderId?
+├── Metadata?
+└── RecordedAt
 ```
 
 Rules:
 
-1. `request_id` correlates one processing lifecycle.
-2. `recognition_id` identifies one immutable result.
-3. `trace_id` correlates cross-module workflow.
-4. `frame_id` supports stale-result detection.
-5. `session_id` must not replace `request_id`.
-6. `content_id` must not replace `frame_id` when frame freshness matters.
+- no full text;
+- no provider raw response;
+- duplicates may be aggregated;
+- warning is not failure.
 
 ---
 
-# Privacy and Security
+## 25. `RECOGNITION_MODULE_ERROR_RECORDED`
 
-## 45. Public Event Privacy Classification
+### Meaning
 
-Recognition events should be classified as:
+Recognition produced a normalized module error.
+
+### Payload
 
 ```text
-Operational Metadata
+RecognitionModuleErrorRecordedEvent
+├── ErrorCode
+├── OperationPhase
+├── Retryability
+├── SuggestedStrategies[]
+├── ProviderErrorCode?
+├── ProviderId?
+├── DiagnosticsRef?
+└── RecordedAt
 ```
 
-They may contain:
+### Rules
 
-* identifiers;
-* counts;
-* durations;
-* provider identity;
-* warning count;
-* normalized error codes;
-* result references.
-
-They must not contain protected source content by default.
+1. not a terminal event;
+2. Runtime may retry, cancel, abandon or fail Attempt;
+3. no credential;
+4. no full provider response;
+5. no raw recognized text;
+6. does not emit `recognition.failed`.
 
 ---
 
-## 46. Prohibited Event Fields
+## 26. `RECOGNITION_CANCELLATION_OBSERVED`
 
-Public Recognition events must not contain:
+### Payload
+
+```text
+RecognitionCancellationObservedEvent
+├── OperationPhase
+├── ProviderCancellationRequested
+├── ProviderCancellationSupported
+├── LocalWorkStopped
+├── ObservedAt
+└── Metadata?
+```
+
+This fact means Recognition observed CancellationContext.
+
+It does not mean Runtime committed `ATTEMPT_CANCELED`.
+
+---
+
+## 27. `RECOGNITION_DEADLINE_OBSERVED`
+
+### Payload
+
+```text
+RecognitionDeadlineObservedEvent
+├── OperationPhase
+├── DeadlineSource
+├── RemainingBudgetMs?
+├── Expired
+├── ProviderTimeoutObserved
+└── ObservedAt
+```
+
+Runtime owns final timeout disposition.
+
+---
+
+## 28. Diagnostic Facts
+
+```text
+RECOGNITION_DIAGNOSTIC_RECORDED
+RECOGNITION_BENCHMARK_SAMPLE_RECORDED
+RECOGNITION_INVARIANT_VIOLATION_RECORDED
+```
+
+Diagnostic facts:
+
+- development/protected only;
+- not normal workflow inputs;
+- may contain references, not payloads;
+- bounded retention;
+- access controlled.
+
+---
+
+## 29. Candidate Event Boundary
+
+Recognition Candidate facts describe only:
+
+```text
+Candidate assembled
+Candidate validated
+Candidate submitted
+```
+
+They do not describe:
+
+```text
+Candidate accepted
+Ownership transferred
+Artifact published
+Artifact available
+Artifact retained
+Artifact evicted
+```
+
+Those belong to Runtime/Artifact Store/Resource Manager.
+
+---
+
+## 30. Runtime Event Boundary
+
+Runtime owns canonical execution events:
+
+```text
+WORKITEM_CREATED
+ATTEMPT_STARTED
+ATTEMPT_COMPLETED
+ATTEMPT_FAILED
+ATTEMPT_CANCELED
+ATTEMPT_ABANDONED
+AUTHORITY_ACCEPTED
+AUTHORITY_REJECTED
+LATE_COMPLETION_REJECTED
+```
+
+Recognition must not duplicate them with module-specific terminal lifecycle events.
+
+---
+
+## 31. Artifact Store Event Boundary
+
+Artifact Store owns:
+
+```text
+OWNERSHIP_TRANSFER_REQUESTED
+OWNERSHIP_TRANSFERRED
+ARTIFACT_PUBLISHED
+ARTIFACT_PUBLICATION_REJECTED
+RESOURCE_LOGICALLY_DISPOSED
+RESOURCE_PHYSICALLY_DISPOSED
+```
+
+Text Processing starts from orchestrated published Artifact availability, not Recognition Candidate events.
+
+---
+
+## 32. Provider Manager Event Boundary
+
+Provider Manager owns:
+
+```text
+PROVIDER_REGISTERED
+PROVIDER_READY
+PROVIDER_DEGRADED
+PROVIDER_UNAVAILABLE
+PROVIDER_CONFIGURATION_CHANGED
+PROVIDER_DRAINING
+PROVIDER_STOPPED
+```
+
+Recognition only observes provider snapshot/capability through contracts.
+
+It does not publish:
+
+```text
+recognition.provider_ready
+recognition.provider_degraded
+recognition.provider_unavailable
+```
+
+---
+
+## 33. Consumed Event Policy
+
+Recognition should not subscribe directly to broad workflow events.
+
+Recognition does not directly consume:
+
+```text
+source.image_imported
+observation.stable_frame_ready
+recognition.requested
+recognition.cancellation_requested
+session.stopped
+source.closed
+application.shutdown_requested
+configuration.recognition_changed
+```
+
+Runtime Control, Business Pipeline Orchestration, Configuration Service hoặc component owner handles these facts.
+
+Recognition receives explicit execution contracts:
+
+```text
+RecognitionAttemptInput
+ExecutionContextRef
+CancellationContextRef
+PrivacyContextRef
+ConfigurationSnapshotId
+ProviderAvailabilitySnapshot
+```
+
+---
+
+## 34. No Hidden Orchestration
+
+Recognition Event handlers must not:
+
+- create WorkItem;
+- create Attempt;
+- cancel Session;
+- start retry;
+- select current Revision;
+- publish Artifact;
+- trigger Text Processing;
+- mutate Provider Manager;
+- activate Configuration;
+- stop Runtime.
+
+Event subscription must never become hidden business pipeline orchestration.
+
+---
+
+## 35. Ordering
+
+Preferred causal order for one Attempt:
+
+```text
+RECOGNITION_PLAN_CREATED
+    ↓
+RECOGNITION_PREPARATION_COMPLETED
+    ↓
+RECOGNITION_REGIONS_DETECTED
+    ↓
+RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
+    ↓
+RECOGNITION_READING_ORDER_RESOLVED
+    ↓
+RECOGNITION_CANDIDATE_VALIDATED
+    ↓
+RECOGNITION_CANDIDATE_SUBMITTED
+```
+
+But:
+
+- phases may be skipped;
+- optional facts may be absent;
+- delivery may be delayed;
+- transport may duplicate;
+- Runtime correctness must not depend on this sequence.
+
+---
+
+## 36. Delivery Guarantees
+
+Assume at-least-once delivery when Event Bus persists/retries.
+
+Possible effects:
+
+- duplicate facts;
+- delayed facts;
+- missing sampled progress facts;
+- out-of-order facts;
+- fact arrives after Attempt terminal event;
+- Candidate fact arrives after Runtime rejected Completion.
+
+Consumers must handle safely.
+
+---
+
+## 37. Consumer Deduplication
+
+Consumers maintain:
+
+```text
+ProcessedEvent
+├── EventId
+├── HandlerId
+└── ProcessedAt
+```
+
+Duplicate EventId must not:
+
+- update UI twice;
+- create WorkItem;
+- append duplicate diagnostic row;
+- increment business counter twice.
+
+Aggregate metrics may deduplicate or use idempotent counters according to telemetry design.
+
+---
+
+## 38. Late Facts
+
+A Recognition fact may arrive after Runtime terminal outcome.
+
+Example:
+
+```text
+ATTEMPT_CANCELED
+    ↓
+delayed RECOGNITION_REGIONS_DETECTED
+```
+
+Consumer behavior:
+
+- keep for diagnostics if useful;
+- do not change Runtime state;
+- do not trigger downstream processing;
+- do not publish Artifact;
+- mark late when trace context allows.
+
+---
+
+## 39. Stale Completion
+
+Staleness is not decided by Recognition event consumer.
+
+Canonical flow:
+
+```text
+Attempt Completion
+    ↓
+Runtime Authority Validation
+    ↓
+Accepted or Rejected Stale
+```
+
+Recognition facts preserve:
+
+```text
+RevisionId
+WorkItemId
+AttemptId
+```
+
+Runtime owns stale rejection.
+
+---
+
+## 40. Privacy Classification
+
+Normal Recognition facts:
+
+```text
+OPERATIONAL_METADATA
+```
+
+Allowed:
+
+- Runtime IDs;
+- provider ID;
+- counts;
+- duration;
+- warning/error code;
+- confidence level;
+- quality/completeness;
+- CandidateArtifactId;
+- sanitized diagnostics reference.
+
+Forbidden:
 
 ```text
 image_bytes
@@ -1721,406 +1082,479 @@ complete_surface_text
 provider_api_key
 provider_access_token
 authorization_header
-remote_provider_full_response
+provider_full_response
 temporary_file_credentials
-user_glossary_content
 translated_text
+user_glossary_content
 ```
 
 ---
 
-## 47. Result Reference Security
+## 41. Geometry in Events
 
-A result reference must:
+Geometry may be included only when:
 
-1. be scoped to authorized consumers;
-2. expire when temporary;
-3. avoid predictable sensitive file paths;
-4. not expose direct unrestricted filesystem access;
-5. support integrity validation when crossing processes;
-6. be deleted or invalidated according to retention policy.
+- bounded;
+- required by a concrete trusted consumer;
+- privacy classification allows;
+- event channel is approved;
+- no text content accompanies it.
 
----
-
-## 48. Remote Provider Disclosure
-
-When remote processing occurs:
-
-* `recognition.started` exposes remote execution location;
-* `recognition.completed` exposes the remote provider identity;
-* the stored result includes `RemoteProviderUsed`;
-* normal events still do not include image or text content.
+Default public facts use counts/summaries only.
 
 ---
 
-## 49. Diagnostic Event Security
+## 42. Remote Provider Disclosure
 
-Protected diagnostic events may contain references to:
-
-* processed image artifacts;
-* provider raw response files;
-* region visualizations;
-* benchmark samples.
-
-They require:
-
-* explicit diagnostic mode;
-* access control;
-* bounded retention;
-* secure storage;
-* redaction;
-* auditability.
-
-Normal modules must not subscribe to diagnostic event streams.
-
----
-
-# Event Error Handling
-
-## 50. Event Publication Failure
-
-If Recognition completes processing but cannot publish the terminal event:
-
-1. persist or retain the terminal outcome;
-2. retry event publication according to Event Bus policy;
-3. use the same `event_id` for retries;
-4. do not rerun OCR solely because publication failed;
-5. record the publication failure;
-6. preserve idempotency.
-
----
-
-## 51. Result Storage Failure
-
-If Recognition creates a result but cannot store or register the result reference:
+When remote provider is used, safe facts may include:
 
 ```text
-recognition.failed
+ProviderId
+ExecutionLocation = REMOTE_SERVICE
+PrivacyClassification
+RemoteExecutionUsed = true
 ```
 
-should be published with:
+No image/text payload included.
+
+Remote provider use is primarily recorded in Candidate provenance and Runtime Observability.
+
+---
+
+## 43. Diagnostic Event Security
+
+Protected diagnostics may reference:
+
+- processed image Artifact;
+- provider raw-response Artifact;
+- region visualization Artifact;
+- benchmark sample;
+- comparison report.
+
+Requirements:
+
+- explicit diagnostic mode;
+- authorization;
+- secure Artifact reference;
+- bounded retention;
+- redaction;
+- auditability;
+- no direct unrestricted file path.
+
+Normal modules must not consume protected diagnostic stream.
+
+---
+
+## 44. Event Publication Failure
+
+If a Recognition fact cannot be published:
 
 ```text
-error_code = ResultAssemblyFailed
+Record bounded local diagnostic if possible
+    ↓
+Retry/drop according to Event Bus policy
+    ↓
+Continue Recognition correctness path
 ```
 
-or a more specific future storage-reference error.
+Rules:
 
-Recognition must not publish `recognition.completed` with an unusable reference.
+1. do not rerun Recognition;
+2. do not fail Attempt solely due to optional fact failure;
+3. do not block Runtime Control;
+4. do not block Candidate submission;
+5. reuse EventId for idempotent retry;
+6. increment dropped-event metric when applicable.
+
+Artifact publication failure is separate and belongs to Artifact Store.
 
 ---
 
-## 52. Consumed Event Validation Failure
+## 45. Event Bus Unavailable
 
-When `recognition.requested` is malformed:
+Recognition execution must continue if:
 
-Recognition should publish:
+- Attempt contract is in-process/direct;
+- Candidate can be submitted through Runtime Completion;
+- correctness does not require events.
+
+When Event Bus unavailable:
+
+- suppress optional facts;
+- preserve critical diagnostics locally if bounded;
+- report observability degradation;
+- do not invent terminal event fallback.
+
+---
+
+## 46. Consumer Expectations
+
+### Diagnostics
+
+May consume all Recognition facts.
+
+Uses:
+
+- phase timing;
+- region count;
+- warning/error rate;
+- quality/completeness distribution;
+- provider normalization behavior;
+- Candidate validation;
+- cancellation observation;
+- late fact detection.
+
+Diagnostics must not infer semantic OCR quality from operational success alone.
+
+### Presentation
+
+May consume safe progress summaries for optional developer/progress UI.
+
+Must not:
+
+- treat progress fact as authoritative result;
+- start Translation;
+- display full recognized text from Event Bus;
+- couple to provider details.
+
+### Text Processing
+
+Must not consume Recognition facts for correctness.
+
+Text Processing receives published `RecognitionArtifact` through Runtime orchestration.
+
+### Session / Business Orchestration
+
+Consumes Runtime lifecycle and authority events, not Recognition terminal events.
+
+### Provider Manager
+
+Does not consume Recognition facts to change provider lifecycle automatically unless an explicit Runtime health policy exists outside this module.
+
+---
+
+## 47. Event Contract Examples
+
+### Plan Created
+
+```json
+{
+  "event_id": "evt_rec_plan_001",
+  "event_name": "RECOGNITION_PLAN_CREATED",
+  "contract_version": "1.0.0",
+  "producer_module": "recognition",
+  "occurred_at": "2026-08-03T01:15:42.190Z",
+  "privacy_classification": "OPERATIONAL_METADATA",
+  "partition_key": "attempt_01",
+  "sequence_number": 1,
+  "trace_context": {
+    "trace_id": "trace_01"
+  },
+  "runtime_context": {
+    "application_instance_id": "app_01",
+    "session_id": "session_01",
+    "revision_id": "revision_104",
+    "work_item_id": "work_recognition_104",
+    "attempt_id": "attempt_01",
+    "configuration_snapshot_id": "config_42",
+    "recognition_operation": "RECOGNIZE_IMAGE",
+    "recognition_profile": "COMIC_PAGE",
+    "operation_phase": "PLANNING"
+  },
+  "payload": {
+    "plan_id": "plan_rec_104_01",
+    "strategy": "COMBINED_RECOGNITION",
+    "recognition_operation": "RECOGNIZE_IMAGE",
+    "recognition_profile": "COMIC_PAGE",
+    "preparation_profile_id": "comic_default_v1",
+    "coordinate_policy_version": "1",
+    "reading_order_policy_version": "comic_mixed_v1",
+    "quality_policy_version": "interactive_v1",
+    "privacy_mode": "LOCAL_ONLY",
+    "execution_classes": ["GPU", "CPU"],
+    "created_at": "2026-08-03T01:15:42.190Z"
+  }
+}
+```
+
+### Candidate Validated
+
+```json
+{
+  "event_id": "evt_rec_candidate_valid_001",
+  "event_name": "RECOGNITION_CANDIDATE_VALIDATED",
+  "contract_version": "1.0.0",
+  "producer_module": "recognition",
+  "occurred_at": "2026-08-03T01:15:42.871Z",
+  "privacy_classification": "OPERATIONAL_METADATA",
+  "partition_key": "attempt_01",
+  "sequence_number": 5,
+  "trace_context": {
+    "trace_id": "trace_01"
+  },
+  "runtime_context": {
+    "application_instance_id": "app_01",
+    "session_id": "session_01",
+    "revision_id": "revision_104",
+    "work_item_id": "work_recognition_104",
+    "attempt_id": "attempt_01",
+    "candidate_artifact_id": "candidate_recognition_104",
+    "provider_id": "local_recognition_01",
+    "configuration_snapshot_id": "config_42",
+    "recognition_operation": "RECOGNIZE_IMAGE",
+    "recognition_profile": "COMIC_PAGE",
+    "operation_phase": "VALIDATING_CANDIDATE"
+  },
+  "payload": {
+    "candidate_artifact_id": "candidate_recognition_104",
+    "artifact_type": "RECOGNITION_ARTIFACT",
+    "completeness": "COMPLETE",
+    "quality_level": "DEGRADED",
+    "region_count": 12,
+    "line_count": 18,
+    "character_count": 143,
+    "warning_count": 1,
+    "provider_provenance_summary": {
+      "provider_id": "local_recognition_01",
+      "execution_location": "LOCAL_PROCESS",
+      "execution_class": "GPU"
+    },
+    "compatibility_metadata_version": "1",
+    "validation_duration_ms": 3,
+    "validated_at": "2026-08-03T01:15:42.871Z"
+  }
+}
+```
+
+---
+
+## 48. MVP Event Set
+
+MVP correctness requires no Recognition-specific event.
+
+Recommended optional MVP facts:
 
 ```text
-recognition.failed
+RECOGNITION_CANDIDATE_VALIDATED
+RECOGNITION_WARNING_RECORDED
+RECOGNITION_MODULE_ERROR_RECORDED
 ```
 
-when sufficient correlation data exists.
-
-When even `request_id` or routing context is missing:
-
-* reject the event;
-* route it to dead-letter handling;
-* record a safe validation error;
-* do not invent identifiers silently.
-
----
-
-## 53. Dead-Letter Policy
-
-Events may be sent to a dead-letter stream when:
-
-* contract major version is unsupported;
-* payload cannot be parsed;
-* required identity is missing;
-* event repeatedly fails processing;
-* result reference is invalid;
-* privacy validation fails.
-
-Dead-letter entries must not expose protected image or text content.
-
----
-
-# Consumer Expectations
-
-## 54. Text Processing Consumer
-
-Text Processing should consume:
+Development-only optional facts:
 
 ```text
-recognition.completed
+RECOGNITION_PLAN_CREATED
+RECOGNITION_PREPARATION_COMPLETED
+RECOGNITION_REGIONS_DETECTED
+RECOGNITION_READING_ORDER_RESOLVED
 ```
 
-Then:
-
-1. verify the result belongs to the expected frame;
-2. retrieve the result from `result_reference`;
-3. validate result version;
-4. consume regions using explicit reading order;
-5. handle empty results;
-6. preserve raw Recognition output;
-7. perform semantic cleanup separately;
-8. avoid parsing provider metadata for core logic.
-
-Text Processing must not consume progress events for correctness.
+Do not add an event without a concrete consumer.
 
 ---
 
-## 55. Session Consumer
+## 49. Deferred Event Extensions
 
-Session or Orchestration should consume:
+Potential future facts:
 
 ```text
-recognition.started
-recognition.completed
-recognition.failed
-recognition.cancelled
+RECOGNITION_PARTIAL_CANDIDATE_VALIDATED
+RECOGNITION_LONG_PAGE_CHUNK_PROCESSED
+RECOGNITION_PROVIDER_COMPARISON_RECORDED
+RECOGNITION_QUALITY_EVALUATED
+RECOGNITION_STREAM_SEGMENT_RECEIVED
+RECOGNITION_MANUAL_REVIEW_REQUESTED
 ```
 
-It uses them to:
+Deferred because they introduce:
 
-* update session processing state;
-* reject stale results;
-* cancel obsolete requests;
-* decide whether to continue to Text Processing;
-* surface recoverable failures;
-* retry according to policy.
-
----
-
-## 56. Presentation Consumer
-
-Presentation may consume lifecycle summaries for user feedback.
-
-Examples:
-
-```text
-recognition.started
-recognition.failed
-recognition.cancelled
-```
-
-Presentation should normally receive final translated content through higher-level workflow events rather than directly consuming Recognition results.
-
-Presentation must not become coupled to provider details.
+- streaming semantics;
+- partial Artifact lifecycle;
+- extra retention;
+- consumer complexity;
+- stronger ordering requirements.
 
 ---
 
-## 57. Diagnostics Consumer
+## 50. Testing Requirements
 
-Diagnostics may consume all Recognition events.
+### Envelope
 
-It may calculate:
+- unique EventId;
+- supported ContractVersion;
+- UTC timestamp;
+- producer_module = recognition;
+- Runtime context complete;
+- no credential;
+- privacy classification present.
 
-* latency distribution;
-* failure rates;
-* cancellation rates;
-* provider fallback rates;
-* no-text rates;
-* average region counts;
-* provider health changes.
+### Domain Facts
 
-It must not infer OCR quality from operational success alone.
+- Plan fact after READY Plan;
+- Candidate valid fact after semantic validation;
+- Candidate submit fact only once;
+- empty-valid Candidate summary;
+- partial Candidate summary;
+- no authoritative publication implication.
 
----
+### Progress Facts
 
-# Testing
+- optional facts may be omitted;
+- duplicate delivery safe;
+- out-of-order delivery safe;
+- bounded region facts;
+- no text content;
+- no image content.
 
-## 58. Event Contract Tests
+### Warning/Error Facts
 
-Required tests:
+- warning separate from error;
+- module error not terminal event;
+- cancellation observed not Attempt canceled;
+- deadline observed not terminal state;
+- retry hint sanitized.
 
-### Lifecycle
+### Boundaries
 
-* request produces started then completed;
-* request produces started then failed;
-* request produces started then cancelled;
-* validation failure produces failed without started;
-* empty OCR result produces completed;
-* exactly one terminal event;
-* no completion after cancellation.
-
-### Ordering
-
-* per-request sequence numbers increase;
-* duplicate delivery is safe;
-* late progress event is ignored;
-* different requests may complete out of order;
-* terminal conflict is detected.
-
-### Correlation
-
-* request ID preserved;
-* frame ID preserved;
-* source and content IDs preserved;
-* retry uses new request ID;
-* retry result links previous recognition ID;
-* trace context propagates.
+- no Recognition terminal lifecycle event;
+- no provider lifecycle event;
+- no WorkItem creation from fact;
+- no Text Processing trigger;
+- no Artifact publication from fact.
 
 ### Privacy
 
-* no image bytes in events;
-* no complete OCR text in events;
-* no provider credentials in errors;
-* no temporary sensitive paths;
-* remote execution is disclosed.
+- no image bytes;
+- no complete OCR text;
+- no raw provider response;
+- no credentials;
+- no temporary sensitive path;
+- remote use disclosed safely.
 
-### Result References
+### Failure
 
-* completed event points to valid result;
-* expired result reference is handled;
-* storage failure does not produce completed;
-* duplicate completion does not duplicate downstream work.
-
-### Cancellation
-
-* cancellation before start;
-* cancellation during preprocessing;
-* cancellation during provider execution;
-* non-interruptible provider result discarded;
-* repeated cancellation is idempotent;
-* completed request cannot be cancelled retroactively.
+- Event Bus unavailable does not fail Recognition;
+- event retry uses same EventId;
+- dropped fact recorded;
+- Candidate submission unaffected.
 
 ---
 
-## 59. Event Invariants
+## 51. Event Invariants
 
-The following invariants must always hold.
-
-1. Every public event has a unique `event_id`.
-2. Every public event declares a contract version.
-3. Every Recognition lifecycle event contains `request_id`.
-4. Every accepted request has exactly one terminal event.
-5. A completed request never later becomes cancelled.
-6. A cancelled request never later becomes completed.
-7. A failed request never later becomes completed under the same request ID.
-8. Retries use new request IDs.
-9. Full image data is never included in public Recognition events.
-10. Complete recognized text is never included in normal events.
-11. Provider credentials never appear in events.
-12. Completion references a valid immutable result.
-13. Progress events are optional.
-14. Consumers do not depend on progress events for correctness.
-15. Stale-result handling is performed outside Recognition.
-16. Recognition preserves frame identity.
-17. Duplicate event delivery does not produce duplicate work.
-18. Event names describe completed facts.
-19. Provider-specific SDK types never appear in event payloads.
-20. Terminal event publication is idempotent.
-21. Event timestamps use UTC.
-22. Event payloads remain backward-compatible within the major version.
-23. Local-only execution never generates remote-provider metadata.
-24. Remote execution is visible in lifecycle metadata.
-25. No-text detection produces completion, not failure.
-
----
-
-## 60. MVP Event Set
-
-The MVP requires only the following produced events:
-
-```text
-recognition.started
-recognition.completed
-recognition.failed
-recognition.cancelled
-```
-
-The MVP may consume:
-
-```text
-recognition.requested
-recognition.cancellation_requested
-observation.stable_frame_ready
-session.stopped
-application.shutdown_requested
-```
-
-The MVP does not require:
-
-```text
-recognition.preprocessing_completed
-recognition.regions_detected
-recognition.region_recognized
-recognition.reading_order_resolved
-recognition.provider_degraded
-recognition.diagnostic_recorded
-```
-
-Optional events should be added only when a concrete consumer requires them.
+1. Recognition facts are immutable.
+2. Every fact has unique EventId.
+3. Every fact declares ContractVersion.
+4. Every fact contains RevisionId, WorkItemId and AttemptId.
+5. Recognition emits no terminal Attempt event.
+6. Recognition emits no authoritative Artifact publication event.
+7. Recognition emits no provider lifecycle event.
+8. Recognition facts do not create WorkItem.
+9. Recognition facts do not trigger retry.
+10. Recognition facts do not cancel Session.
+11. Recognition facts do not grant authority.
+12. Candidate validated does not mean published.
+13. Candidate submitted does not mean accepted.
+14. Progress facts are optional.
+15. Consumers do not depend on progress facts for correctness.
+16. Duplicate delivery does not duplicate business work.
+17. Global ordering is not assumed.
+18. Late facts do not change Runtime state.
+19. Raw image never appears in normal facts.
+20. Complete recognized text never appears in normal facts.
+21. Provider credentials never appear.
+22. Provider SDK types never appear.
+23. Event publication failure does not rerun Recognition.
+24. Event publication failure does not block Candidate submission.
+25. Remote execution is disclosed safely.
+26. Geometry payload is bounded and opt-in.
+27. Warning is not failure.
+28. Module error fact is not terminal outcome.
+29. Cancellation observed is not cancellation authority.
+30. Text Processing consumes published Artifact, not Recognition event.
+31. ArtifactRef appears only when external owner has published it.
+32. CandidateArtifactId may appear before publication.
+33. Recognition does not consume broad workflow events directly.
+34. Runtime correctness is Event Bus independent.
+35. Diagnostic events have stricter access and retention.
+36. Transport topic naming does not replace canonical event identity.
+37. Unknown event minor additions are handled safely.
+38. Unsupported major version is rejected.
+39. Event metadata remains bounded.
+40. No hidden orchestration through subscriptions.
 
 ---
 
-## 61. Deferred Event Extensions
-
-Potential future events:
-
-```text
-recognition.partial_result_available
-recognition.long_page_chunk_completed
-recognition.provider_benchmark_completed
-recognition.model_loaded
-recognition.model_unloaded
-recognition.region_retry_completed
-recognition.quality_evaluation_completed
-recognition.manual_correction_received
-recognition.result_expired
-recognition.result_evicted
-```
-
-These are deferred because they introduce additional lifecycle and storage complexity.
-
-They must not be added without a documented use case.
-
----
-
-## 62. Related Documents
+## 52. Related Documents
 
 ```text
 doc/02-modules/recognition/README.md
 doc/02-modules/recognition/MODULE.md
 doc/02-modules/recognition/CONTRACT.md
-docs/architecture/EVENT_BUS.md
-docs/architecture/STATE_MACHINE.md
-docs/architecture/DATA_FLOW.md
-docs/architecture/MODULE_DEPENDENCY.md
+doc/02-modules/recognition/STATES.md
+doc/02-modules/recognition/ERRORS.md
+
+doc/01-architecture/core/EVENT_BUS.md
+doc/01-architecture/core/EVENT_CONVENTION.md
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/RUNTIME_OBSERVABILITY.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RETRY_POLICY.md
+
+doc/01-architecture/ocr/PIPELINE.md
+doc/01-architecture/ocr/QUALITY.md
+doc/01-architecture/ocr/PROVIDERS.md
 ```
 
 ---
 
-## 63. Summary
+## 53. Summary
 
-Recognition events communicate the lifecycle of image-to-text processing without exposing large or sensitive content.
-
-The essential event sequence is:
+Recognition events now communicate optional module facts:
 
 ```text
-recognition.started
-        ↓
-recognition.completed
-    or recognition.failed
-    or recognition.cancelled
+Plan Created
+    ↓
+Progress Facts
+    ↓
+Candidate Validated
+    ↓
+Candidate Submitted
 ```
 
-The event contract guarantees:
+They do not communicate authoritative execution lifecycle.
 
-* one terminal outcome per request;
-* stable request correlation;
-* explicit frame identity;
-* safe duplicate delivery;
-* immutable event facts;
-* result references instead of large payloads;
-* no raw image data in normal events;
-* no complete OCR text in normal events;
-* cancellation-safe completion behavior;
-* provider-independent communication;
-* separation between Recognition processing and downstream Text Processing.
+Runtime owns:
 
-Recognition progress events are optional.
+```text
+Attempt Outcome
+Authority
+Cancellation
+Retry
+```
 
-Only lifecycle events form the stable public contract required by other CRAI modules.
+Artifact Store owns:
+
+```text
+Ownership Transfer
+Publication
+Artifact Availability
+```
+
+Provider Manager owns:
+
+```text
+Provider Lifecycle
+Provider Health
+Provider Capacity
+```
+
+The central rule is:
+
+```text
+Recognition events explain what Recognition observed or produced.
+
+They never decide whether the work still matters,
+and they never publish the authoritative result.
+```

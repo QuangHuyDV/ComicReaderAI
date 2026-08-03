@@ -4,9 +4,9 @@
 > **Module:** Translation
 > **Document:** State Machines
 > **Path:** `modules/translation/STATES.md`
-> **Version:** 0.1
+> **Version:** 0.2
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-07-25
+> **Last Updated:** 2026-08-03
 > **Source of Truth:**
 >
 > * `modules/translation/MODULE.md`
@@ -72,6 +72,33 @@ OCR job
 ```
 
 External entity state may influence Translation transitions but remains owned by its original module.
+
+### 2.1 Runtime execution ownership
+
+Runtime owns queue admission, scheduling, worker execution, retry timing, concurrency enforcement, backpressure, and physical cancellation coordination.
+
+Translation owns the domain lifecycle reflected by these state machines. Therefore, states such as `QUEUED`, `RUNNING`, and `RETRY_SCHEDULED` represent Translation's observed domain condition; they do not imply that Translation implements its own scheduler or worker runtime.
+
+```text
+Translation decides what work is valid and required.
+Runtime decides when and how execution proceeds.
+```
+
+### 2.2 State Ownership Matrix
+
+| State machine | Owner |
+|---|---|
+| `TranslationJobState` | Translation |
+| `TranslationBatchState` | Translation |
+| `TranslationAttemptState` | Translation |
+| `TranslationResultState` | Translation |
+| `TranslationVariantState` | Translation |
+| Queue admission and scheduler state | Runtime |
+| Worker and physical execution state | Runtime |
+| Retry timer and backoff state | Runtime |
+| Cancellation coordination state | Runtime |
+| `ReadingSessionState` | Reading Session |
+| Presentation lifecycle state | Presentation |
 
 ---
 
@@ -178,6 +205,21 @@ Provider execution completion does not automatically mean the result is authorit
 Result assembly, validation, source-revision verification and publication checks must occur first.
 
 ---
+
+## 4.7 Canonical aggregate hierarchy
+
+The canonical execution hierarchy is:
+
+```text
+TranslationJob
+    ├── TranslationBatch A
+    │       ├── TranslationAttempt 1
+    │       └── TranslationAttempt 2
+    └── TranslationBatch B
+            └── TranslationAttempt 1
+```
+
+`TranslationBatch` is the stable provider execution unit derived from a selected segment set. `TranslationAttempt` is one immutable physical execution attempt for that batch. When retry changes batch membership, a replacement batch with a new `TranslationBatchId` is created.
 
 # Part I — Translation Job State Machine
 
@@ -405,7 +447,7 @@ At least one structurally validated translated segment must exist.
 
 ## 11. RETRY_SCHEDULED
 
-A previous attempt or batch failed, and another attempt has been scheduled.
+A previous batch attempt failed, and Translation has requested another eligible execution. Runtime owns the actual retry timer, backoff, admission, and execution start.
 
 At this point:
 
@@ -1211,7 +1253,7 @@ At this point:
 * completed segments are explicit;
 * missing segments are explicit;
 * failed segments are explicit;
-* `resultRevision` is assigned;
+* `translationRevision` is assigned;
 * publication depends on policy.
 
 Valid outgoing transitions:
@@ -1279,7 +1321,8 @@ At this point:
 
 * final alignment passed;
 * result is retrievable;
-* compatible Presentation consumers may use it;
+* it is eligible for Reading Session authority acceptance;
+* Presentation may use it only after the relevant Reading Session or equivalent authority accepts the matching translation snapshot;
 * an active variant may reference it.
 
 Valid outgoing transitions:
@@ -1544,7 +1587,7 @@ INACTIVE
 
 ## 56. Job and Attempt Relationship
 
-A running attempt normally requires an active parent job.
+A running batch attempt normally requires an active parent job and an active parent batch.
 
 Allowed parent states:
 
@@ -1569,19 +1612,20 @@ INVALIDATED
 
 ---
 
-## 57. Attempt and Batch Relationship
+## 57. Batch and Attempt Relationship
 
-A running batch requires an active parent attempt.
+A running attempt belongs to exactly one batch and requires that batch to remain eligible for execution.
 
 ```text
-TranslationBatch.RUNNING
-    requires TranslationAttempt in:
+TranslationAttempt.RUNNING
+    requires TranslationBatch in:
 
+READY
 RUNNING
-PARTIALLY_COMPLETED
+VALIDATING
 ```
 
-A batch cannot return to active execution after its parent attempt becomes terminal.
+A batch may have multiple immutable attempts over time. A failed, cancelled, or superseded attempt never returns to `RUNNING`; retry creates a new `TranslationAttemptId` under the same logical batch or under a replacement batch when membership changes.
 
 ---
 
@@ -2369,6 +2413,8 @@ TranslationJobId
 TranslationAttemptId
 PreparedDocumentId
 ContentRevision
+TranslationIntentId
+TranslationRevision
 ```
 
 Where relevant:
@@ -2491,9 +2537,9 @@ Examples:
 
 ```text
 jobStateRevision
-attemptStateRevision
 batchStateRevision
-resultRevision
+attemptStateRevision
+translationRevision
 variantStateRevision
 ```
 

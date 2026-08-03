@@ -3,9 +3,9 @@
 > **Project:** CRAI
 > **Module:** Translation
 > **Path:** `modules/translation/README.md`
-> **Version:** 0.1
+> **Version:** 0.2
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-07-25
+> **Last Updated:** 2026-08-03
 
 ---
 
@@ -37,11 +37,11 @@ The architecture remains language-neutral and must not hardcode these language p
 Translation runs after source content has been acquired, extracted and normalized.
 
 ```text
-Content Source
+Source
       ↓
-Content Acquisition
+Observation
       ↓
-Content Extraction
+Recognition
       ↓
 Text Processing
       ↓
@@ -74,17 +74,19 @@ StartTranslation
         ↓
 TranslationJob
         ↓
-TranslationAttempt
-        ↓
 TranslationBatch[]
+        ↓
+TranslationAttempt[]
         ↓
 Provider Adapter
         ↓
 TranslatedSegment[]
         ↓
-TranslationResult
+TranslationResultSnapshot
         ↓
 TranslationVariant
+        ↓
+Reading Session acceptance
         ↓
 Presentation
 ```
@@ -152,7 +154,7 @@ Examples:
 
 ```text
 TranslationAttempt
-    = one execution attempt within a job
+    = one execution attempt for one translation batch
 ```
 
 Automatic retry and provider fallback create new attempts.
@@ -161,9 +163,10 @@ They do not automatically create new translation jobs.
 
 ```text
 TranslationJob
-      ├── Attempt 1
-      ├── Attempt 2
-      └── Attempt 3
+      └── TranslationBatch
+              ├── Attempt 1
+              ├── Attempt 2
+              └── Attempt 3
 ```
 
 ---
@@ -197,16 +200,16 @@ TranslationResult
     = assembled aligned output
 ```
 
-A result contains:
+A result snapshot contains:
 
 * translated segments;
 * missing segment identities;
 * failed segment identities;
 * warnings;
 * source revision information;
-* result revision;
+* `TranslationRevision`;
 * usage and execution statistics;
-* authority status.
+* acceptance eligibility and authority metadata.
 
 A result may exist without being authoritative.
 
@@ -238,13 +241,12 @@ A correction creates a new variant.
 Translation owns:
 
 * translation job lifecycle;
-* translation attempt lifecycle;
-* translation batch construction;
-* provider orchestration;
-* provider-neutral requests;
-* provider selection;
-* retry policy;
-* fallback policy;
+* translation batch lifecycle;
+* translation attempt lifecycle within each batch;
+* provider-neutral execution requirements;
+* translation-specific provider selection intent;
+* retry eligibility;
+* fallback eligibility;
 * translation context assembly;
 * terminology application;
 * output parsing;
@@ -252,12 +254,14 @@ Translation owns:
 * source-to-result alignment;
 * partial result assembly;
 * final result assembly;
-* result authority checks;
+* result compatibility and acceptance eligibility checks;
 * translation variants;
 * translation cache coordination;
 * normalized translation errors;
 * translation events;
 * translation observability metadata.
+
+Runtime owns scheduling, queue admission, worker execution, retry timing, backoff, execution budgets, resource admission and physical cancellation mechanics. Translation supplies domain policy and execution requirements but does not implement a private scheduler.
 
 ---
 
@@ -299,7 +303,7 @@ The two pipelines merge after Text Processing.
 ```text
 Web page or document
         ↓
-Content Extraction
+Source / Observation
         ↓
 Text Processing
         ↓
@@ -313,7 +317,9 @@ Translation
 ```text
 Image or comic page
         ↓
-OCR
+Observation
+        ↓
+Recognition
         ↓
 Text Processing
         ↓
@@ -534,6 +540,8 @@ Retry operates within the same logical job.
 ```text
 TranslationJob
       ↓
+TranslationBatch
+      ↓
 Attempt 1
       ↓ failure
 Attempt 2
@@ -640,7 +648,7 @@ Often preferable for:
 
 Provider output is not automatically authoritative.
 
-Before publication, Translation verifies:
+Before a result is offered for acceptance, Translation verifies:
 
 ```text
 TranslationJobId
@@ -656,7 +664,7 @@ Variant identity
 
 A result arriving late may be retained diagnostically.
 
-It must not overwrite newer authoritative work.
+Translation determines compatibility and acceptance eligibility. Reading Session owns the final decision about whether a result becomes current for the active reading context. Presentation must not treat Translation completion alone as visible authority.
 
 ---
 
@@ -741,8 +749,11 @@ Translation maintains separate state machines for:
 
 ```text
 TranslationJob
-TranslationAttempt
+    ↓
 TranslationBatch
+    ↓
+TranslationAttempt
+
 TranslationResult
 TranslationVariant
 ```
@@ -942,10 +953,10 @@ Translation supports:
 Default rule:
 
 ```text
-one active attempt per job
+one active attempt per TranslationBatch unless policy explicitly allows otherwise
 ```
 
-Multiple batches may run concurrently within that attempt.
+Multiple batches may run concurrently within one job. Each batch owns its own execution-attempt history.
 
 Final ordering always follows:
 
@@ -1109,6 +1120,8 @@ GetTranslationResult
 GetActiveTranslation
 ListTranslationVariants
 GetTranslationProgress
+GetTranslationSnapshot
+GetTranslationVariant
 ```
 
 See:
@@ -1128,6 +1141,7 @@ TranslationCommandService
 TranslationQueryService
 
 TranslationJobManager
+TranslationBatchManager
 TranslationAttemptManager
 TranslationBatchPlanner
 
@@ -1144,9 +1158,9 @@ TranslationAlignmentValidator
 TranslationResultAssembler
 TranslationVariantManager
 
-TranslationRetryCoordinator
-TranslationCancellationCoordinator
-TranslationAuthorityChecker
+TranslationRetryPolicyEvaluator
+TranslationCancellationPolicy
+TranslationAcceptanceEligibilityChecker
 
 TranslationCacheGateway
 TranslationEventPublisher
@@ -1184,7 +1198,7 @@ modules/translation/
 ├── application/
 │   ├── commands/
 │   ├── queries/
-│   ├── orchestration/
+│   ├── coordination/
 │   └── services/
 │
 ├── providers/
@@ -1291,7 +1305,7 @@ The Translation module must always preserve these rules.
 
 13. Translation variants are immutable.
 
-14. At most one compatible variant is active for one reading context.
+14. At most one compatible variant is active for one `ReadingSessionId + PreparedDocumentId + ContentRevision + TargetLanguage + TranslationIntentId` scope.
 
 15. Cache reuse must satisfy semantic and alignment compatibility.
 
@@ -1466,21 +1480,15 @@ The following decisions remain open before implementation:
 
 ### Job authority representation
 
-Choose between:
+The architecture uses separate concepts:
 
 ```text
-one combined job state
-```
-
-and:
-
-```text
-executionState
+execution state
 +
-authorityState
+acceptance / authority context
 ```
 
-Separating them may preserve historical completion more accurately.
+Translation owns execution-domain truth and acceptance eligibility. Reading Session owns whether a compatible result becomes current for the active reading context.
 
 ---
 
@@ -1498,11 +1506,13 @@ or:
 TranslationSegmentsCompleted
 ```
 
-Recommended default:
+Default decision:
 
 ```text
 TranslationSegmentsCompleted
 ```
+
+Use grouped segment-completion events by default. Individual segment events remain optional for bounded low-latency scenarios.
 
 ---
 
@@ -1572,7 +1582,7 @@ The initial Translation architecture set now contains:
 [x] README.md
 ```
 
-The module is sufficiently defined for:
+The module architecture is internally synchronized and sufficiently defined for:
 
 * cross-module review;
 * provider feasibility analysis;
@@ -1602,6 +1612,11 @@ docs/architecture/STATE_MACHINE.md
 docs/architecture/EVENT_BUS.md
 docs/architecture/MODULE_DEPENDENCY.md
 docs/architecture/DATA_FLOW.md
+docs/architecture/runtime/PIPELINE_RUNTIME.md
+docs/architecture/runtime/WORK_QUEUE.md
+docs/architecture/runtime/RETRY_POLICY.md
+docs/architecture/runtime/CANCELLATION.md
+docs/architecture/runtime/RUNTIME_OBSERVABILITY.md
 ```
 
 Related module documentation:
@@ -1628,11 +1643,11 @@ Input:
 Logical request:
     TranslationJob
 
-Execution retry:
-    TranslationAttempt
-
-Provider request:
+Execution unit:
     TranslationBatch
+
+Execution attempt:
+    TranslationAttempt
 
 Aligned output:
     TranslatedSegment[]
@@ -1651,6 +1666,8 @@ PreparedSegment[]
         ↓
 TranslationBatch[]
         ↓
+TranslationAttempt[]
+        ↓
 Provider Adapter
         ↓
 Validated TranslatedSegment[]
@@ -1661,11 +1678,11 @@ TranslationResult
 Retry:
 
 ```text
-Attempt FAILED
+Batch Attempt FAILED
         ↓
 Job RETRY_SCHEDULED
         ↓
-New Attempt
+New Attempt for the affected batch
 ```
 
 Cancellation:
@@ -1722,10 +1739,10 @@ PreparedSegment
     = alignment unit
 
 TranslationBatch
-    = execution unit
+    = provider execution unit
 
 TranslationAttempt
-    = retry unit
+    = one execution attempt for a batch
 
 TranslationJob
     = logical intent

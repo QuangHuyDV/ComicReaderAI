@@ -4,13 +4,14 @@
 > **Module:** Translation
 > **Document:** Integration Events
 > **Path:** `modules/translation/EVENTS.md`
-> **Version:** 0.1
+> **Version:** 0.2
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-07-25
+> **Last Updated:** 2026-08-03
 > **Source of Truth:**
 >
 > * `modules/translation/MODULE.md`
 > * `modules/translation/CONTRACT.md`
+> * `modules/translation/STATES.md`
 
 ---
 
@@ -157,13 +158,37 @@ Translation publishes five primary event categories:
 
 ```text
 Job Events
-Attempt Events
 Batch Events
+Attempt Events
 Result Events
 Variant and Correction Events
 ```
 
+The execution hierarchy is:
+
+```text
+TranslationJob
+    └── TranslationBatch[]
+            └── TranslationAttempt[]
+```
+
 Additional operational events may be kept internal.
+
+## 3.1 Event Ownership Matrix
+
+| Event or event family | Owner | Notes |
+|---|---|---|
+| Translation job events | Translation | Domain lifecycle facts only |
+| Translation batch events | Translation | Batch planning and accepted-output facts |
+| Translation attempt events | Translation | One execution attempt for one batch |
+| Translation result events | Translation | Revisioned result and publication-eligibility facts |
+| Translation variant events | Translation | Variant creation, activation and invalidation |
+| Prepared-document events | Text Processing | Translation may consume but must not redefine them |
+| Reading-session events | Reading Session | Own source authority and reading-context changes |
+| Provider availability events | Provider Management | Own provider health and availability facts |
+| Queue, worker and retry-timer events | Runtime | Operational execution facts, not Translation domain ownership |
+
+Translation must not publish events for entities owned by another module. It may only react to those events through validated commands or internal policies.
 
 ---
 
@@ -177,13 +202,13 @@ TranslationJobQueued
 TranslationJobStarted
 TranslationProgressUpdated
 
-TranslationAttemptStarted
-TranslationAttemptFailed
-TranslationAttemptCompleted
-
 TranslationBatchStarted
 TranslationBatchCompleted
 TranslationBatchFailed
+
+TranslationAttemptStarted
+TranslationAttemptFailed
+TranslationAttemptCompleted
 
 TranslationPartialResultAvailable
 TranslationSegmentCompleted
@@ -438,6 +463,7 @@ Most Translation event payloads include:
 
 ```text
 TranslationEventIdentity {
+    translationIntentId
     translationJobId
 
     readingSessionId
@@ -447,6 +473,7 @@ TranslationEventIdentity {
 
     targetLanguage
 
+    translationRevision
     activeVariantId
 }
 ```
@@ -468,8 +495,9 @@ translationJobId
 Where applicable, they must also include:
 
 ```text
+translationIntentId
 translationResultId
-resultRevision
+translationRevision
 translationVariantId
 targetLanguage
 ```
@@ -628,7 +656,7 @@ PREFETCH
 BACKGROUND
 ```
 
-This event may be internal if consumers do not need queue visibility.
+This is an optional operational event. Runtime owns the actual queue and scheduler state. Translation may expose a reflected job-level fact when a concrete consumer needs it, but this event must not be required by the public domain contract.
 
 ---
 
@@ -646,9 +674,8 @@ Payload:
 
 ```text
 TranslationJobStartedPayload {
+    translationIntentId
     translationJobId
-
-    translationAttemptId
 
     startedAt
 
@@ -659,9 +686,9 @@ TranslationJobStartedPayload {
 
 ### Meaning
 
-At least one attempt is now active or is being prepared.
+Logical execution for the job has begun. At least one batch is eligible for execution or preparation.
 
-It does not mean that a provider request has already been sent.
+It does not mean that a provider request has already been sent, and it does not bind the job lifecycle to one specific attempt.
 
 ---
 
@@ -681,7 +708,7 @@ Payload:
 TranslationProgressUpdatedPayload {
     translationJobId
 
-    activeAttemptId
+    activeAttemptIds[]
 
     progress
 
@@ -705,7 +732,7 @@ Publish only when:
 
 ### Coalescing
 
-Implementations may coalesce rapid progress updates.
+Implementations may coalesce rapid progress updates. `activeAttemptIds` is optional operational detail and must not be required to reconstruct authoritative progress.
 
 ---
 
@@ -872,7 +899,7 @@ This event may be public for:
 * debugging;
 * distributed workers.
 
-For simple deployments, it may remain internal.
+For the MVP and simple deployments, it should remain internal by default. Publish it only when detailed observability, debugging or distributed execution has a concrete consumer.
 
 ---
 
@@ -974,12 +1001,13 @@ Payload:
 
 ```text
 TranslationSegmentCompletedPayload {
+    translationIntentId
     translationJobId
     translationAttemptId
     translationBatchId
 
     translationResultId
-    resultRevision
+    translationRevision
 
     translationVariantId
 
@@ -1010,7 +1038,7 @@ The event should prefer a result reference:
 ```text
 translatedTextReference {
     translationResultId
-    resultRevision
+    translationRevision
     translatedSegmentId
 }
 ```
@@ -1052,12 +1080,13 @@ Payload:
 
 ```text
 TranslationSegmentsCompletedPayload {
+    translationIntentId
     translationJobId
     translationAttemptId
     translationBatchId
 
     translationResultId
-    resultRevision
+    translationRevision
     translationVariantId
 
     preparedDocumentId
@@ -1095,10 +1124,11 @@ Payload:
 
 ```text
 TranslationPartialResultAvailablePayload {
+    translationIntentId
     translationJobId
 
     translationResultId
-    resultRevision
+    translationRevision
     translationVariantId
 
     preparedDocumentId
@@ -1112,7 +1142,8 @@ TranslationPartialResultAvailablePayload {
 
     warnings[]
 
-    authoritative
+    eligibleForAcceptance
+    acceptedSegmentSubset
     publicationAllowed
 
     availableAt
@@ -1121,9 +1152,9 @@ TranslationPartialResultAvailablePayload {
 
 ### authoritative
 
-Normally `false` until publication policy permits activation.
+Normally `eligibleForAcceptance` is false until Translation validation and publication policy permit Reading Session evaluation.
 
-For progressive mode, a partial result may be authoritative for only the completed segment subset.
+For progressive mode, Reading Session may accept only the completed segment subset. Translation does not unilaterally make that subset current.
 
 ---
 
@@ -1162,10 +1193,11 @@ Payload:
 
 ```text
 TranslationCompletedPayload {
+    translationIntentId
     translationJobId
 
     translationResultId
-    resultRevision
+    translationRevision
     translationVariantId
 
     preparedDocumentId
@@ -1180,7 +1212,8 @@ TranslationCompletedPayload {
 
     statistics
 
-    authoritative
+    eligibleForAcceptance
+    acceptedByReadingSession
     activated
 
     completedAt
@@ -1198,6 +1231,8 @@ This event is published only after:
 * supersession check;
 * final publication decision.
 
+`TranslationCompleted` means Translation finished and produced a retrievable final result that is eligible for Reading Session evaluation. It does not by itself prove that the result became current visible content. Reading Session remains the final authority for the active content revision and reading context.
+
 ---
 
 ## 40. TranslationCompletedWithWarnings
@@ -1214,10 +1249,11 @@ Payload:
 
 ```text
 TranslationCompletedWithWarningsPayload {
+    translationIntentId
     translationJobId
 
     translationResultId
-    resultRevision
+    translationRevision
     translationVariantId
 
     preparedDocumentId
@@ -1229,7 +1265,8 @@ TranslationCompletedWithWarningsPayload {
 
     resultReference
 
-    authoritative
+    eligibleForAcceptance
+    acceptedByReadingSession
     activated
 
     completedAt
@@ -1302,7 +1339,7 @@ TranslationFailedPayload {
 
 ## 42. TranslationRetryScheduled
 
-Published when another attempt has been scheduled for the same job.
+Published when Translation has determined that another execution attempt is required for the same logical job. Runtime owns when that attempt is admitted and actually begins.
 
 Event type:
 
@@ -1577,6 +1614,7 @@ Payload:
 
 ```text
 TranslationVariantCreatedPayload {
+    translationIntentId
     translationJobId
     translationVariantId
 
@@ -1621,6 +1659,7 @@ Payload:
 
 ```text
 TranslationVariantActivatedPayload {
+    translationIntentId
     translationJobId
     translationVariantId
 
@@ -1638,7 +1677,7 @@ TranslationVariantActivatedPayload {
 }
 ```
 
-Presentation and Reading Session may use this event to refresh displayed translation.
+Reading Session owns whether this activation is current for the reading context. Presentation may use the event only after validating the referenced session, source revision, target language, intent and translation revision.
 
 ---
 
@@ -2064,7 +2103,7 @@ Large data should be referenced using:
 
 ```text
 translationResultId
-resultRevision
+translationRevision
 translationVariantId
 translatedSegmentId
 ```
@@ -2364,9 +2403,9 @@ TranslationJobQueued
         ↓
 TranslationJobStarted
         ↓
-TranslationAttemptStarted
-        ↓
 TranslationBatchStarted
+        ↓
+TranslationAttemptStarted
         ↓
 TranslationBatchCompleted
         ↓
@@ -2620,11 +2659,15 @@ One job cannot simultaneously be completed, failed, and cancelled.
 
 Administrative invalidation may occur after a completed state.
 
+## 114. Invariant 15 — Reading Session owns visible authority
+
+Translation completion and eligibility events do not by themselves change the active Reading Session content. Consumers must validate reading-session authority before updating visible state.
+
 ---
 
 # Part XXV — Open Decisions
 
-## 114. Event Granularity
+## 115. Event Granularity
 
 The project must later decide whether the default progressive event is:
 
@@ -2648,7 +2691,7 @@ because batch-level grouping reduces Event Bus traffic while retaining progressi
 
 ---
 
-## 115. Embedded Text
+## 116. Embedded Text
 
 The project must decide whether translated text is embedded in progressive events.
 
@@ -2664,7 +2707,7 @@ persistent or distributed event
 
 ---
 
-## 116. Batch Event Visibility
+## 117. Batch Event Visibility
 
 Batch events may remain internal for the MVP unless:
 
@@ -2674,7 +2717,7 @@ Batch events may remain internal for the MVP unless:
 
 ---
 
-## 117. Progress Throttling
+## 118. Progress Throttling
 
 The exact throttling policy remains open.
 
@@ -2686,7 +2729,7 @@ Recommended baseline:
 
 ---
 
-## 118. Completion and Variant Event Order
+## 119. Completion and Variant Event Order
 
 Recommended order:
 
@@ -2704,7 +2747,7 @@ The exact transactional implementation must preserve retrievability.
 
 ---
 
-## 119. Event Retention
+## 120. Event Retention
 
 Retention remains to be defined for:
 
@@ -2733,13 +2776,17 @@ docs/architecture/EVENT_BUS.md
 docs/architecture/STATE_MACHINE.md
 docs/architecture/MODULE_DEPENDENCY.md
 docs/architecture/DATA_FLOW.md
+docs/architecture/runtime/PIPELINE_RUNTIME.md
+docs/architecture/runtime/WORK_QUEUE.md
+docs/architecture/runtime/RETRY_POLICY.md
+docs/architecture/runtime/CANCELLATION.md
 ```
 
 Upstream module references:
 
 ```text
 modules/text-processing/MODULE.md
-modules/text-processing/CONTRACTS.md
+modules/text-processing/CONTRACT.md
 modules/text-processing/EVENTS.md
 ```
 
@@ -2754,7 +2801,7 @@ modules/provider-management/EVENTS.md
 
 ---
 
-# 120. Summary
+# 121. Summary
 
 The Translation module publishes events for five main concerns:
 
@@ -2770,6 +2817,10 @@ The core event flow is:
 
 ```text
 TranslationJobCreated
+        ↓
+TranslationJobStarted
+        ↓
+TranslationBatchStarted
         ↓
 TranslationAttemptStarted
         ↓

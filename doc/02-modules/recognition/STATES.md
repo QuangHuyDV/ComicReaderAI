@@ -1,71 +1,90 @@
 # Recognition Module States
 
-> **Project:** CRAI
-> **Module:** Recognition
-> **Path:** `doc/02-modules/recognition/STATES.md`
-> **Version:** 0.1
-> **Status:** Architecture Draft
-> **Last Updated:** 2026-07-22
+> Project: CRAI  
+> Module: Recognition  
+> Path: `doc/02-modules/recognition/STATES.md`  
+> Version: 1.0  
+> Status: Architecture Draft
 
 ---
 
 ## 1. Purpose
 
-This document defines the state model of the Recognition module.
+Tài liệu này định nghĩa state model mà Recognition Module thực sự sở hữu.
 
-It specifies:
+Recognition state model bao phủ:
 
-* request lifecycle states;
-* provider lifecycle states;
-* module-level availability states;
-* valid state transitions;
-* transition triggers;
-* transition guards;
-* terminal states;
-* cancellation behavior;
-* timeout behavior;
-* retry behavior;
-* fallback behavior;
-* concurrency constraints;
-* state invariants.
+- Recognition capability availability;
+- Recognition Plan lifecycle;
+- Recognition operation phases;
+- Candidate Recognition Artifact validation;
+- Recognition quality;
+- Recognition completeness;
+- provider-execution observations;
+- cancellation checkpoint behavior;
+- deadline behavior;
+- resource-state interaction;
+- external Runtime disposition observation;
+- invalid transitions;
+- concurrency constraints;
+- diagnostics;
+- recovery;
+- MVP state model;
+- state invariants.
 
-This document focuses on state ownership and state transitions.
+Tài liệu này không định nghĩa canonical lifecycle của:
 
-Related contracts are defined in:
+- WorkItem;
+- Attempt;
+- Provider Manager;
+- Scheduler;
+- Work Queue;
+- Retry Policy;
+- Runtime cancellation authority;
+- Artifact publication;
+- Artifact retention;
+- Resource disposal;
+- Reading Session;
+- Translation;
+- Presentation.
 
-```text
-doc/02-modules/recognition/CONTRACT.md
-doc/02-modules/recognition/EVENTS.md
-doc/02-modules/recognition/MODULE.md
-```
+Các lifecycle đó thuộc Runtime hoặc module owner tương ứng.
 
 ---
 
 ## 2. State Ownership
 
-Recognition owns the following state categories:
+Recognition owns:
 
 ```text
-Recognition Module State
-Recognition Provider State
-Recognition Request State
-Recognition Attempt State
-Recognition Result State
+RecognitionAvailabilityState
+RecognitionPlanState
+RecognitionOperationPhase
+CandidateValidationState
+RecognitionQualityState
+RecognitionCompleteness
+ProviderExecutionObservation
 ```
 
 Recognition does not own:
 
 ```text
-Reading Session State
-Source Lifecycle State
-Observation State
-Current Frame Selection
-Translation State
-Presentation State
-Storage Retention State
+WorkItemState
+AttemptState
+QueueState
+SchedulerState
+ProviderLifecycleState
+ProviderHealthState
+CancellationState
+RetryState
+PublicationState
+ArtifactLifecycleState
+RetentionState
+StorageState
+SessionState
 ```
 
-Recognition may react to external state changes but must not become their source of truth.
+Recognition có thể đọc external state snapshot nhưng không trở thành source of truth.
 
 ---
 
@@ -73,2354 +92,1776 @@ Recognition may react to external state changes but must not become their source
 
 ```text
 Recognition Module
-├── Module Availability State
-├── Provider Registry State
-│   └── Provider Lifecycle State
-├── Active Request Registry
-│   └── Recognition Request State
-│       └── Recognition Attempt State
-└── Completed Result Registry
-    └── Recognition Result State
+├── Recognition Availability
+├── Attempt-Local Recognition Plan
+├── Attempt-Local Operation Phase
+├── Attempt-Local Candidate Validation
+├── Recognition Quality
+├── Recognition Completeness
+└── External State Observations
+    ├── Provider Availability Snapshot
+    ├── Cancellation Context
+    ├── Deadline Context
+    ├── Resource Pressure
+    └── Runtime Candidate Disposition
 ```
 
-Each request is isolated by:
+Không tồn tại:
 
 ```text
-request_id
+Recognition Request Registry
+Recognition Attempt Registry
+Recognition Result Registry
+Recognition Cancellation Registry
+Recognition Retry Registry
 ```
 
-Each completed immutable result is isolated by:
-
-```text
-recognition_id
-```
+Runtime v2 đã sở hữu các lifecycle đó.
 
 ---
 
 ## 4. State Machine Principles
 
-### 4.1 State Transitions Are Explicit
+### 4.1 Explicit Transitions
 
-State changes must occur through documented transitions.
+Mọi Recognition-owned state transition phải explicit và testable.
 
-Implementation code must not mutate request state arbitrarily.
+### 4.2 Attempt-Local State
 
----
+Plan, operation phase và Candidate validation là Attempt-local.
 
-### 4.2 Terminal States Are Final
+Chúng không sống lâu hơn Attempt execution context.
 
-Terminal request states are:
+### 4.3 No Runtime Authority
 
-```text
-Completed
-Failed
-Cancelled
-```
+Recognition state không quyết định:
 
-A request cannot leave a terminal state.
+- Attempt success;
+- current Revision;
+- cancellation terminal outcome;
+- retry;
+- publication;
+- Artifact availability.
 
----
-
-### 4.3 Exactly One Terminal State
-
-Every accepted request must end in exactly one terminal state.
-
----
-
-### 4.4 Provider State and Request State Are Separate
-
-A provider can become degraded while an existing request remains active.
-
-A request failure does not automatically make the provider unavailable.
-
----
-
-### 4.5 Session Relevance Is External
-
-A completed Recognition result may be stale for the current session.
-
-That does not change its Recognition state from `Completed`.
-
----
-
-### 4.6 Results Are Immutable
-
-A completed result cannot transition back into processing.
-
-A retry creates a new request and later a new result.
-
----
-
-## 5. Module Availability State
-
-The Recognition module has one top-level availability state.
+### 4.4 Candidate Is Not Published Artifact
 
 ```text
-RecognitionModuleState
-├── Uninitialized
-├── Initializing
-├── Ready
-├── Degraded
-├── Unavailable
-├── ShuttingDown
-└── Stopped
+Candidate VALID
+    ≠
+Published Recognition Artifact
 ```
+
+Sau submission, Runtime và Artifact Store xử lý ownership transfer/publication.
+
+### 4.5 Operation Phase Is Diagnostic
+
+Operation phase không phải Runtime state machine.
+
+Nó chỉ hỗ trợ:
+
+- metrics;
+- cancellation checkpoint;
+- error localization;
+- resource cleanup;
+- debugging.
+
+### 4.6 Provider State Is External
+
+Recognition không quản lý provider lifecycle.
+
+Nó chỉ quan sát capability/availability snapshot từ Provider Manager.
 
 ---
 
-## 6. Module State Definitions
+## 5. Recognition Availability State
 
-### 6.1 `Uninitialized`
+```text
+RecognitionAvailabilityState
+├── UNINITIALIZED
+├── INITIALIZING
+├── AVAILABLE
+├── DEGRADED
+├── UNAVAILABLE
+├── DRAINING
+└── STOPPED
+```
 
-Recognition has not started initialization.
+Availability state mô tả Recognition capability boundary, không phải provider lifecycle.
+
+---
+
+## 6. `UNINITIALIZED`
+
+Recognition capability chưa được đăng ký đầy đủ trong Runtime.
 
 Characteristics:
 
-* no providers loaded;
-* no requests accepted;
-* configuration may not yet be validated;
-* active-request registry is unavailable.
+- contract chưa active;
+- profile registry chưa ready;
+- quality/normalization policy chưa ready;
+- module không nhận execution.
 
 Allowed next states:
 
 ```text
-Initializing
-Stopped
+INITIALIZING
+STOPPED
 ```
 
 ---
 
-### 6.2 `Initializing`
+## 7. `INITIALIZING`
 
-Recognition is validating configuration and preparing provider infrastructure.
+Recognition đang chuẩn bị module-owned structures:
 
-Possible activities:
+- contract validation;
+- Recognition Profile registry;
+- Recognition Plan builders;
+- normalization rules;
+- quality policy;
+- provider capability requirements;
+- module diagnostics.
 
-* loading configuration;
-* building provider registry;
-* checking provider capabilities;
-* loading local models;
-* checking runtime dependencies;
-* initializing cancellation registry;
-* initializing schedulers.
+Recognition không initialize:
+
+- Scheduler;
+- Work Queue;
+- Provider Manager;
+- cancellation registry;
+- Artifact Store.
 
 Allowed next states:
 
 ```text
-Ready
-Degraded
-Unavailable
-ShuttingDown
+AVAILABLE
+DEGRADED
+UNAVAILABLE
+DRAINING
 ```
 
 ---
 
-### 6.3 `Ready`
+## 8. `AVAILABLE`
 
-Recognition can accept normal requests.
+Recognition có thể thực thi các operation được support.
 
 Requirements:
 
-* configuration is valid;
-* scheduler is available;
-* at least one eligible provider is ready;
-* request registry is operational;
-* result publication path is operational.
+- module contract valid;
+- Recognition Plan builder ready;
+- at least one provider-capability path externally available;
+- Candidate validation available;
+- required Runtime dependencies ready.
 
 Allowed next states:
 
 ```text
-Degraded
-Unavailable
-ShuttingDown
+DEGRADED
+UNAVAILABLE
+DRAINING
 ```
 
 ---
 
-### 6.4 `Degraded`
+## 9. `DEGRADED`
 
-Recognition can accept only some requests or must use reduced capability.
+Recognition vẫn usable nhưng capability hoặc quality bị hạn chế.
 
 Examples:
 
-* GPU provider unavailable but CPU provider available;
-* vertical-text provider unavailable;
-* remote provider unavailable but local provider ready;
-* result store unavailable for asynchronous large results;
-* provider latency exceeds threshold;
-* only one provider remains healthy.
+- vertical text unavailable;
+- only CPU execution available;
+- line geometry unavailable;
+- only one provider capability path usable;
+- partial quality policy active;
+- remote path disabled;
+- resource pressure requires reduced profile.
+
+Recognition may execute only requests whose requirements remain satisfiable.
 
 Allowed next states:
 
 ```text
-Ready
-Unavailable
-ShuttingDown
+AVAILABLE
+UNAVAILABLE
+DRAINING
 ```
-
-Request acceptance depends on capability-specific guards.
 
 ---
 
-### 6.5 `Unavailable`
+## 10. `UNAVAILABLE`
 
-Recognition cannot accept useful requests.
+Recognition không thể đáp ứng useful execution.
 
 Examples:
 
-* no eligible provider available;
-* critical configuration invalid;
-* scheduler failed;
-* result registration unavailable;
-* provider registry failed;
-* required local runtime unavailable.
+- no eligible Recognition provider capability;
+- module contract invalid;
+- required image primitive unavailable;
+- Candidate validation unavailable;
+- critical Runtime dependency unavailable.
+
+Recognition does not reject WorkItem directly.
+
+Runtime receives a capability-unavailable response/guard result.
 
 Allowed next states:
 
 ```text
-Initializing
-Degraded
-Ready
-ShuttingDown
+INITIALIZING
+DEGRADED
+AVAILABLE
+DRAINING
 ```
-
-New requests must be rejected with a normalized error.
 
 ---
 
-### 6.6 `ShuttingDown`
+## 11. `DRAINING`
 
-Recognition is stopping.
+Recognition không nhận new execution nhưng Attempt-local work đang cleanup hoặc finish.
 
 Behavior:
 
-* rejects new requests;
-* requests cancellation of active work;
-* releases providers;
-* flushes terminal events where practical;
-* performs bounded cleanup.
+- no new execution;
+- existing execution observes cancellation/deadline;
+- Attempt-local resources released;
+- Candidate submission may be denied by Runtime authority;
+- module-owned structures remain until drain ends.
 
 Allowed next state:
 
 ```text
-Stopped
+STOPPED
 ```
-
-No transition back to `Ready` is allowed during the same shutdown sequence.
 
 ---
 
-### 6.7 `Stopped`
+## 12. `STOPPED`
 
-Recognition has released runtime resources.
+Recognition module-owned runtime structures đã released.
 
 Characteristics:
 
-* no requests accepted;
-* providers stopped;
-* schedulers stopped;
-* active request registry empty;
-* transient buffers released.
+- no new execution;
+- no active module-owned Attempt-local state;
+- no pending Candidate validation;
+- no module-owned temporary resources.
 
 Allowed next state:
 
 ```text
-Initializing
+INITIALIZING
 ```
 
-only through a new startup sequence.
+chỉ qua new startup sequence.
 
 ---
 
-## 7. Module State Diagram
+## 13. Availability Transition Diagram
 
 ```text
-Uninitialized
+UNINITIALIZED
       ↓
-Initializing
-   ┌──┼───────────────┐
-   ↓  ↓               ↓
-Ready Degraded    Unavailable
-  ↕      ↕            ↕
-  └──────┴────────────┘
-          ↓
-    ShuttingDown
-          ↓
-       Stopped
+INITIALIZING
+  ┌────┼──────────┐
+  ↓    ↓          ↓
+AVAILABLE DEGRADED UNAVAILABLE
+   ↕       ↕         ↕
+   └───────┴─────────┘
+            ↓
+         DRAINING
+            ↓
+          STOPPED
 ```
 
-More precisely:
+---
+
+## 14. Availability Guards
+
+Transition to `AVAILABLE` requires:
 
 ```text
-Uninitialized → Initializing
-
-Initializing → Ready
-Initializing → Degraded
-Initializing → Unavailable
-Initializing → ShuttingDown
-
-Ready → Degraded
-Ready → Unavailable
-Ready → ShuttingDown
-
-Degraded → Ready
-Degraded → Unavailable
-Degraded → ShuttingDown
-
-Unavailable → Initializing
-Unavailable → Degraded
-Unavailable → Ready
-Unavailable → ShuttingDown
-
-ShuttingDown → Stopped
-
-Stopped → Initializing
+contract_valid
+plan_builder_ready
+candidate_validator_ready
+runtime_dependencies_ready
+at_least_one_capability_path_available
 ```
 
----
-
-# Provider State
-
-## 8. Provider Lifecycle State
-
-Each Recognition provider has an independent state.
+Transition to `DEGRADED` allowed when:
 
 ```text
-RecognitionProviderState
-├── Unregistered
-├── Registered
-├── Initializing
-├── Ready
-├── Degraded
-├── Unavailable
-├── Misconfigured
-├── ShuttingDown
-└── Stopped
+core_execution_possible
+but
+one_or_more_declared_capabilities_unavailable
 ```
 
----
-
-## 9. Provider State Definitions
-
-### 9.1 `Unregistered`
-
-The provider is not present in the active registry.
-
-No request may select it.
-
----
-
-### 9.2 `Registered`
-
-The provider adapter has been discovered and registered but is not initialized.
-
-Allowed next states:
+Transition to `UNAVAILABLE` when:
 
 ```text
-Initializing
-Misconfigured
-Stopped
+no_satisfiable_recognition_capability_path
 ```
 
 ---
 
-### 9.3 `Initializing`
+## 15. External Provider Availability Snapshot
 
-The provider is preparing required resources.
-
-Examples:
-
-* loading model files;
-* creating API clients;
-* allocating GPU memory;
-* checking credentials;
-* performing health checks.
-
-Allowed next states:
+Recognition may read:
 
 ```text
-Ready
-Degraded
-Unavailable
-Misconfigured
-ShuttingDown
+ProviderAvailabilitySnapshot
+├── ProviderId
+├── Availability
+├── Capabilities
+├── ExecutionClasses
+├── CapacityAvailable
+├── PrivacyClassification
+├── DegradedCapabilities[]
+└── SnapshotVersion
 ```
-
----
-
-### 9.4 `Ready`
-
-The provider is operational for its declared capabilities.
-
-This does not guarantee it is suitable for every request.
-
-Selection still depends on:
-
-* language;
-* script;
-* orientation;
-* mode;
-* privacy policy;
-* execution device;
-* image limits.
-
----
-
-### 9.5 `Degraded`
-
-The provider remains usable with reduced capability or quality of service.
-
-Examples:
-
-* GPU fallback to CPU;
-* increased latency;
-* line geometry unavailable;
-* language model partially unavailable;
-* cancellation unsupported;
-* remote rate limit approaching.
-
-The degraded capabilities must be exposed separately.
-
----
-
-### 9.6 `Unavailable`
-
-The provider cannot process requests at the moment.
-
-Possible causes:
-
-* service outage;
-* local runtime crash;
-* model loading failure;
-* network unavailable;
-* resource exhaustion;
-* unhealthy process.
-
-The provider may later recover.
-
----
-
-### 9.7 `Misconfigured`
-
-The provider configuration is invalid.
-
-Examples:
-
-* missing model path;
-* invalid API credentials;
-* unsupported device setting;
-* incompatible runtime version;
-* missing dependency.
-
-Automatic retries should be limited.
-
-Configuration change is normally required.
-
----
-
-### 9.8 `ShuttingDown`
-
-The provider is releasing resources.
-
-New requests must not select it.
-
-Existing requests may:
-
-* finish within a bounded deadline;
-* be cancelled;
-* have their late output discarded.
-
----
-
-### 9.9 `Stopped`
-
-The provider has released runtime resources.
-
-It cannot process requests until reinitialized.
-
----
-
-## 10. Provider State Diagram
 
 ```text
-Unregistered
-     ↓
-Registered
-     ↓
-Initializing
- ┌────┼──────────────┬────────────────┐
- ↓    ↓              ↓                ↓
-Ready Degraded   Unavailable     Misconfigured
- ↕      ↕            ↕                │
- └──────┴────────────┘                │
-          ↓                           │
-     ShuttingDown ←───────────────────┘
-          ↓
-        Stopped
+ProviderAvailability
+├── HEALTHY
+├── DEGRADED
+├── UNAVAILABLE
+└── DRAINING
 ```
+
+This is external state owned by Provider Manager.
+
+Recognition must not mutate it.
 
 ---
 
-## 11. Provider Selection Guards
+## 16. Provider Eligibility Guard
 
-A provider may be selected only when:
-
-```text
-provider.state ∈ {Ready, Degraded}
-```
-
-and all request requirements are satisfied.
-
-Additional guards:
+A provider path is eligible only when:
 
 ```text
-provider supports requested media type
-provider supports requested mode
-provider supports required language or script
-provider supports required orientation
-provider satisfies local-only policy
-provider is not excluded
-provider image limits are not exceeded
-provider concurrency capacity is available
-provider is not shutting down
+availability ∈ {HEALTHY, DEGRADED}
+capabilities satisfy RecognitionCapabilityRequirements
+privacy policy satisfied
+image limits satisfied
+execution class compatible
+capacity available or Runtime may wait
+provider not draining
 ```
 
-A degraded provider may be selected only if its degraded capabilities still satisfy the request.
+Recognition may build capability requirements.
+
+Provider selection authority remains external.
 
 ---
 
-# Request State
-
-## 12. Recognition Request Lifecycle
-
-Each request has the following state model:
+## 17. Recognition Plan State
 
 ```text
-RecognitionRequestState
-├── Received
-├── Validating
-├── Rejected
-├── Queued
-├── SelectingProvider
-├── Preparing
-├── Preprocessing
-├── Detecting
-├── Recognizing
-├── PostProcessing
-├── ResolvingReadingOrder
-├── MappingCoordinates
-├── AssemblingResult
-├── PublishingResult
-├── Cancelling
-├── Completed
-├── Failed
-└── Cancelled
+RecognitionPlanState
+├── NOT_CREATED
+├── BUILDING
+├── VALIDATING
+├── READY
+└── INVALID
 ```
+
+Plan state is Attempt-local.
 
 ---
 
-## 13. Request State Categories
+## 18. `NOT_CREATED`
 
-### Pre-Execution
-
-```text
-Received
-Validating
-Rejected
-Queued
-SelectingProvider
-```
-
-### Active Processing
-
-```text
-Preparing
-Preprocessing
-Detecting
-Recognizing
-PostProcessing
-ResolvingReadingOrder
-MappingCoordinates
-AssemblingResult
-PublishingResult
-```
-
-### Cancellation
-
-```text
-Cancelling
-Cancelled
-```
-
-### Terminal
-
-```text
-Rejected
-Completed
-Failed
-Cancelled
-```
-
-`Rejected` is terminal but represents a request that was never accepted for execution.
-
-For event semantics, a rejected asynchronous request may still publish `recognition.failed`.
-
----
-
-## 14. `Received`
-
-The request has entered the Recognition boundary.
-
-No processing guarantee exists yet.
-
-Stored state may include:
-
-```text
-request_id
-received_at
-request_context
-image_reference
-options
-```
+No Recognition Plan exists.
 
 Allowed next state:
 
 ```text
-Validating
+BUILDING
 ```
 
 ---
 
-## 15. `Validating`
+## 19. `BUILDING`
 
-Recognition validates:
+Recognition derives plan from:
 
-* contract version;
-* identifiers;
-* image reference;
-* image dimensions;
-* coordinate space;
-* region bounds;
-* timeout;
-* provider policy;
-* privacy policy;
-* module availability.
+- RecognitionAttemptInput;
+- Recognition Profile;
+- Capability Requirements;
+- privacy context;
+- configuration snapshot;
+- provider availability snapshot;
+- resource constraints.
 
 Allowed next states:
 
 ```text
-Rejected
-Queued
-SelectingProvider
-Cancelling
+VALIDATING
+INVALID
 ```
-
-Direct transition to `SelectingProvider` is allowed when queueing is unnecessary.
 
 ---
 
-## 16. `Rejected`
+## 20. `VALIDATING`
 
-The request cannot be accepted.
+Plan is checked for:
+
+- supported operation;
+- valid profile;
+- coherent image preparation;
+- satisfiable capability requirements;
+- valid coordinate strategy;
+- valid quality policy;
+- privacy compatibility;
+- executable strategy;
+- bounded resource estimate.
+
+Allowed next states:
+
+```text
+READY
+INVALID
+```
+
+---
+
+## 21. `READY`
+
+Plan is immutable and may be executed.
+
+Properties:
+
+- strategy fixed for this Attempt;
+- policy versions fixed;
+- capability requirements fixed;
+- coordinate transform policy fixed;
+- quality policy fixed.
+
+No transition back to `BUILDING`.
+
+---
+
+## 22. `INVALID`
+
+Plan cannot be executed.
 
 Examples:
 
-* invalid contract;
-* invalid image;
-* unsupported major version;
-* invalid region;
-* contradictory privacy policy;
-* module unavailable;
-* duplicate active request ID.
+- impossible capability combination;
+- unsupported profile;
+- privacy conflict;
+- invalid preparation chain;
+- unsupported geometry requirement;
+- no executable strategy.
 
-Properties:
+`INVALID` is terminal for that plan instance.
 
-* no provider execution occurred;
-* no recognition result exists;
-* rejection reason is normalized;
-* state is terminal.
+Runtime still owns Attempt terminal outcome.
 
 ---
 
-## 17. `Queued`
-
-The request has been accepted but is waiting for execution capacity.
-
-Possible reasons:
-
-* provider concurrency limit;
-* scheduler priority;
-* GPU serialization;
-* memory pressure;
-* earlier interactive request;
-* model initialization.
-
-Allowed next states:
+## 23. Plan Transition Diagram
 
 ```text
-SelectingProvider
-Preparing
-Cancelling
-Failed
-```
-
-Timeout policy must define whether queue time counts toward request timeout.
-
----
-
-## 18. `SelectingProvider`
-
-Recognition evaluates provider eligibility.
-
-Activities:
-
-* filter providers;
-* evaluate required capabilities;
-* evaluate privacy constraints;
-* evaluate execution device;
-* evaluate provider health;
-* evaluate fallback policy;
-* reserve capacity.
-
-Allowed next states:
-
-```text
-Preparing
-Queued
-Failed
-Cancelling
-```
-
-If no provider is eligible:
-
-```text
-Failed
-```
-
-with:
-
-```text
-NoEligibleProvider
-```
-
----
-
-## 19. `Preparing`
-
-Recognition resolves and normalizes image input.
-
-Activities:
-
-* resolve image reference;
-* validate image checksum;
-* decode image;
-* create request-scoped buffers;
-* initialize transform chain;
-* build preprocessing plan.
-
-Allowed next states:
-
-```text
-Preprocessing
-Detecting
-Recognizing
-Failed
-Cancelling
-```
-
-Direct transition to `Detecting` or `Recognizing` is allowed when preprocessing is unnecessary.
-
----
-
-## 20. `Preprocessing`
-
-Recognition applies configured image transformations.
-
-Examples:
-
-* resize;
-* upscale;
-* grayscale;
-* contrast adjustment;
-* denoise;
-* deskew;
-* rotation;
-* threshold.
-
-Allowed next states:
-
-```text
-Detecting
-Recognizing
-Failed
-Cancelling
-```
-
-Every geometry-changing operation must update the transform chain before leaving this state.
-
----
-
-## 21. `Detecting`
-
-Recognition detects text regions.
-
-This state may be skipped when:
-
-* the request is a direct single-region request;
-* the provider performs combined detection and recognition;
-* the provider accepts the whole image directly.
-
-Allowed next states:
-
-```text
-Recognizing
-PostProcessing
-Failed
-Cancelling
-```
-
-`PostProcessing` may follow when combined OCR already returned text.
-
----
-
-## 22. `Recognizing`
-
-Recognition converts image regions into text.
-
-Possible execution models:
-
-```text
-single combined OCR call
-multiple region OCR calls
-batched region OCR
-provider streaming
-provider ensemble
-```
-
-Allowed next states:
-
-```text
-PostProcessing
-Failed
-Cancelling
-```
-
-Cancellation must be checked between region operations where practical.
-
----
-
-## 23. `PostProcessing`
-
-Recognition normalizes provider output.
-
-Activities may include:
-
-* provider type conversion;
-* deterministic surface cleanup;
-* duplicate suppression;
-* invalid-region filtering;
-* region merging when non-semantic;
-* confidence normalization;
-* warning generation.
-
-Allowed next states:
-
-```text
-ResolvingReadingOrder
-MappingCoordinates
-AssemblingResult
-Failed
-Cancelling
-```
-
-Semantic text correction is forbidden in this state.
-
----
-
-## 24. `ResolvingReadingOrder`
-
-Recognition computes initial reading order.
-
-Activities:
-
-* preserve provider order;
-* apply spatial rules;
-* apply orientation rules;
-* create explicit order entries;
-* generate uncertainty warnings.
-
-Allowed next states:
-
-```text
-MappingCoordinates
-AssemblingResult
-Failed
-Cancelling
-```
-
-This state may be skipped only when:
-
-* no regions exist; or
-* order is already valid and explicitly supplied.
-
----
-
-## 25. `MappingCoordinates`
-
-Recognition maps processed geometry back to source coordinate space.
-
-Activities:
-
-* apply inverse transforms;
-* validate geometry bounds;
-* map line geometry;
-* map polygon geometry;
-* record inferred geometry.
-
-Allowed next states:
-
-```text
-AssemblingResult
-Failed
-Cancelling
-```
-
-A mapping failure must not publish a result with untrusted public geometry.
-
----
-
-## 26. `AssemblingResult`
-
-Recognition builds the immutable result object.
-
-Activities:
-
-* assign `recognition_id`;
-* assemble provider identity;
-* attach warnings;
-* attach metrics;
-* validate identifiers;
-* validate reading order;
-* validate geometry;
-* calculate counts;
-* finalize timestamps.
-
-Allowed next states:
-
-```text
-PublishingResult
-Completed
-Failed
-Cancelling
-```
-
-Direct `Completed` is allowed for synchronous in-process execution without result registration or Event Bus publication.
-
----
-
-## 27. `PublishingResult`
-
-Recognition registers or stores the result and publishes the terminal completion event.
-
-Activities:
-
-* register result reference;
-* persist temporary result when needed;
-* publish `recognition.completed`;
-* record publication outcome.
-
-Allowed next states:
-
-```text
-Completed
-Failed
-Cancelling
-```
-
-If terminal publication fails transiently, the state may remain here while retrying publication with the same event identity.
-
-OCR must not be rerun solely because publication failed.
-
----
-
-## 28. `Cancelling`
-
-Cancellation has been accepted and termination is in progress.
-
-Activities:
-
-* set cancellation flag;
-* stop scheduler work;
-* invoke provider cancellation if supported;
-* discard late provider output;
-* release request resources;
-* publish cancellation terminal event.
-
-Allowed next states:
-
-```text
-Cancelled
-```
-
-A request in `Cancelling` must not transition to:
-
-```text
-Completed
-Failed
-```
-
-unless cancellation acceptance itself is rolled back before becoming effective, which is not recommended.
-
----
-
-## 29. `Completed`
-
-Recognition successfully produced and exposed an immutable result.
-
-Properties:
-
-* `recognition_id` exists;
-* exactly one completion terminal outcome exists;
-* result is immutable;
-* request resources are released;
-* provider reservation is released;
-* late cancellation has no effect.
-
-Terminal state.
-
----
-
-## 30. `Failed`
-
-Recognition could not produce an acceptable result.
-
-Properties:
-
-* normalized error exists;
-* exactly one failure terminal outcome exists;
-* no valid completed result is exposed;
-* request resources are released;
-* retry may create a new request.
-
-Terminal state.
-
----
-
-## 31. `Cancelled`
-
-Recognition work is no longer active and no completion will be published.
-
-Properties:
-
-* cancellation reason exists;
-* request resources are released or scheduled for bounded cleanup;
-* provider may have been interrupted or merely detached;
-* late provider output is ignored;
-* retry requires a new request.
-
-Terminal state.
-
----
-
-# Request Transition Model
-
-## 32. Primary Successful Path
-
-```text
-Received
+NOT_CREATED
     ↓
-Validating
+BUILDING
     ↓
-Queued
-    ↓
-SelectingProvider
-    ↓
-Preparing
-    ↓
-Preprocessing
-    ↓
-Detecting
-    ↓
-Recognizing
-    ↓
-PostProcessing
-    ↓
-ResolvingReadingOrder
-    ↓
-MappingCoordinates
-    ↓
-AssemblingResult
-    ↓
-PublishingResult
-    ↓
-Completed
+VALIDATING
+   ┌┴───────┐
+   ↓        ↓
+ READY    INVALID
 ```
 
 ---
 
-## 33. Simplified Combined OCR Path
+## 24. Plan Invariants
+
+1. One Attempt has at most one active Recognition Plan.
+2. READY plan immutable.
+3. INVALID plan never executes.
+4. Plan does not contain credential values.
+5. Plan does not own provider lifecycle.
+6. Plan preserves configuration snapshot identity.
+7. Plan cannot weaken privacy.
+8. Plan cannot grant Runtime authority.
+9. Plan can reference capability requirements, not provider SDK objects.
+10. Plan version remains stable during Attempt.
+
+---
+
+## 25. Recognition Operation Phase
 
 ```text
-Received
-    ↓
-Validating
-    ↓
-SelectingProvider
-    ↓
-Preparing
-    ↓
-Preprocessing
-    ↓
-Recognizing
-    ↓
-PostProcessing
-    ↓
-ResolvingReadingOrder
-    ↓
-MappingCoordinates
-    ↓
-AssemblingResult
-    ↓
-Completed
+RecognitionOperationPhase
+├── NOT_STARTED
+├── VALIDATING
+├── PLANNING
+├── ACQUIRING_INPUT
+├── PREPARING
+├── DETECTING
+├── RECOGNIZING
+├── NORMALIZING
+├── MAPPING_COORDINATES
+├── RESOLVING_READING_ORDER
+├── ASSEMBLING_CANDIDATE
+├── VALIDATING_CANDIDATE
+├── FINALIZING
+└── FINISHED
 ```
 
-`Detecting` is skipped because the provider performs combined OCR.
+Phase describes current module operation.
+
+It is not a terminal lifecycle.
 
 ---
 
-## 34. Single Region Path
+## 26. Primary Operation Path
 
 ```text
-Received
+NOT_STARTED
     ↓
-Validating
+VALIDATING
     ↓
-SelectingProvider
+PLANNING
     ↓
-Preparing
+ACQUIRING_INPUT
     ↓
-Preprocessing
+PREPARING
     ↓
-Recognizing
+DETECTING
     ↓
-PostProcessing
+RECOGNIZING
     ↓
-MappingCoordinates
+NORMALIZING
     ↓
-AssemblingResult
+MAPPING_COORDINATES
     ↓
-Completed
-```
-
-Page-level detection and reading-order resolution may be unnecessary.
-
----
-
-## 35. Empty Result Path
-
-```text
-Received
+RESOLVING_READING_ORDER
     ↓
-Validating
+ASSEMBLING_CANDIDATE
     ↓
-SelectingProvider
+VALIDATING_CANDIDATE
     ↓
-Preparing
+FINALIZING
     ↓
-Preprocessing
+FINISHED
+```
+
+Some phases may be skipped according to plan.
+
+---
+
+## 27. Combined Recognition Path
+
+```text
+VALIDATING
     ↓
-Detecting
+PLANNING
     ↓
-PostProcessing
+ACQUIRING_INPUT
     ↓
-AssemblingResult
+PREPARING
     ↓
-Completed
-```
-
-Final result:
-
-```text
-regions = []
-reading_order = []
-warning = NoReadableTextDetected
-```
-
-This is not a failure.
-
----
-
-## 36. Validation Failure Path
-
-```text
-Received
+RECOGNIZING
     ↓
-Validating
+NORMALIZING
     ↓
-Rejected
+MAPPING_COORDINATES
+    ↓
+RESOLVING_READING_ORDER
+    ↓
+ASSEMBLING_CANDIDATE
+    ↓
+VALIDATING_CANDIDATE
+    ↓
+FINALIZING
 ```
 
-Possible reasons:
+`DETECTING` is skipped because provider performs combined recognition.
+
+---
+
+## 28. Single-Region Path
 
 ```text
-InvalidRequest
-DuplicateRequestId
-InvalidImageReference
-InvalidCoordinateSpace
-InvalidRegion
-Unsupported contract version
-Invalid provider policy
+VALIDATING
+    ↓
+PLANNING
+    ↓
+ACQUIRING_INPUT
+    ↓
+PREPARING
+    ↓
+RECOGNIZING
+    ↓
+NORMALIZING
+    ↓
+MAPPING_COORDINATES
+    ↓
+ASSEMBLING_CANDIDATE
+    ↓
+VALIDATING_CANDIDATE
+    ↓
+FINALIZING
 ```
+
+Reading-order phase may be skipped when one region exists.
 
 ---
 
-## 37. Processing Failure Path
-
-Any active processing state may transition to `Failed`.
-
-Example:
+## 29. Empty-Valid Path
 
 ```text
-Recognizing
-    ↓ ProviderTimeout
-Failed
+DETECTING or RECOGNIZING
+    ↓
+NORMALIZING
+    ↓
+ASSEMBLING_CANDIDATE
+    ↓
+VALIDATING_CANDIDATE
+    ↓
+FINALIZING
 ```
 
-General failure transitions:
+Candidate:
 
 ```text
-Queued → Failed
-SelectingProvider → Failed
-Preparing → Failed
-Preprocessing → Failed
-Detecting → Failed
-Recognizing → Failed
-PostProcessing → Failed
-ResolvingReadingOrder → Failed
-MappingCoordinates → Failed
-AssemblingResult → Failed
-PublishingResult → Failed
+Completeness = EMPTY_VALID
+Regions = []
+ReadingOrder = []
+Warning = NO_READABLE_TEXT_DETECTED
 ```
 
----
-
-## 38. Cancellation Path
-
-Cancellation may be requested from any non-terminal state.
-
-```text
-Received → Cancelling
-Validating → Cancelling
-Queued → Cancelling
-SelectingProvider → Cancelling
-Preparing → Cancelling
-Preprocessing → Cancelling
-Detecting → Cancelling
-Recognizing → Cancelling
-PostProcessing → Cancelling
-ResolvingReadingOrder → Cancelling
-MappingCoordinates → Cancelling
-AssemblingResult → Cancelling
-PublishingResult → Cancelling
-```
-
-Then:
-
-```text
-Cancelling → Cancelled
-```
-
-Cancellation during terminal publication requires atomic terminal-state coordination.
+This is not module failure.
 
 ---
 
-## 39. Terminal Race Rules
+## 30. Phase Entry Rules
 
-Possible races:
+Before entering an expensive phase:
 
-```text
-Completion vs Cancellation
-Failure vs Cancellation
-Timeout vs Provider Completion
-Shutdown vs Completion
-```
-
-The first successfully committed terminal transition wins.
-
-Conceptual operation:
-
-```text
-compare_and_set(
-    current_state ∈ non_terminal_states,
-    target_terminal_state
-)
-```
-
-Once committed:
-
-```text
-Completed
-Failed
-Cancelled
-```
-
-all competing terminal transitions must be rejected.
+1. check CancellationContext;
+2. check ExecutionContext deadline;
+3. validate prerequisite output;
+4. verify required Resource Lease;
+5. verify plan remains READY;
+6. record phase start;
+7. verify privacy constraints;
+8. avoid new work when module is DRAINING.
 
 ---
 
-## 40. Completion and Cancellation Race
+## 31. Phase Exit Rules
 
-Example:
+Before leaving a phase:
 
-```text
-Provider returns result
-Cancellation request arrives
-```
-
-Rule:
-
-* if completion terminal transition commits first, request becomes `Completed`;
-* if cancellation commits first, request becomes `Cancelled`;
-* no second terminal event may be published.
-
-The state commit and terminal event intent should be recorded atomically where practical.
-
----
-
-# Attempt State
-
-## 41. Recognition Attempt Model
-
-One request may contain multiple provider attempts when fallback is allowed.
-
-```text
-RecognitionAttemptState
-├── Pending
-├── Starting
-├── Running
-├── Succeeded
-├── Failed
-├── Cancelled
-└── Discarded
-```
-
-Each attempt is identified by:
-
-```text
-request_id + attempt_number
-```
-
----
-
-## 42. Attempt State Definitions
-
-### `Pending`
-
-Attempt is planned but has not started.
-
-### `Starting`
-
-Provider capacity is reserved and execution is being prepared.
-
-### `Running`
-
-Provider processing is active.
-
-### `Succeeded`
-
-Provider produced a valid candidate output.
-
-This does not necessarily mean the full request is completed.
-
-### `Failed`
-
-Provider attempt failed.
-
-Fallback may still continue.
-
-### `Cancelled`
-
-Provider execution was interrupted.
-
-### `Discarded`
-
-Provider produced or may later produce output that must not be used.
-
-Examples:
-
-* request already cancelled;
-* newer fallback attempt already won;
-* timeout terminal state already committed;
-* provider output arrived too late.
-
----
-
-## 43. Attempt Transition Diagram
-
-```text
-Pending
-   ↓
-Starting
-   ↓
-Running
- ┌─┼───────────────┐
- ↓ ↓               ↓
-Succeeded        Failed
-                  ↓
-             next attempt
-
-Running → Cancelled
-Running → Discarded
-Succeeded → Discarded
-```
-
-A successful attempt may still be discarded when the request terminal state was already committed elsewhere.
-
----
-
-## 44. Provider Fallback State Flow
-
-```text
-Request: SelectingProvider
-        ↓
-Attempt 1: Running
-        ↓
-Attempt 1: Failed
-        ↓
-Fallback Allowed?
-   ┌────┴─────┐
-   │          │
-  No         Yes
-   │          │
-Request     Attempt 2
-Failed       Running
-                ↓
-             Succeeded
-                ↓
-         Request continues
-```
-
-Internal attempt failures must not emit public terminal failure when fallback remains active.
-
----
-
-## 45. Fallback Guards
-
-Fallback is allowed only when:
-
-```text
-fallback_allowed = true
-attempt_count <= maximum_fallback_count
-error.retryable = true
-another eligible provider exists
-privacy policy remains satisfied
-timeout budget remains
-request is not cancelling
-module is not shutting down
-```
-
-Fallback must not silently change:
-
-* local-only requirement;
-* remote-processing permission;
-* required language;
-* required orientation;
-* requested mode.
-
----
-
-# Result State
-
-## 46. Recognition Result Lifecycle
-
-Recognition results have a simpler state model.
-
-```text
-RecognitionResultState
-├── Building
-├── Validating
-├── Registered
-├── Available
-├── Expired
-├── Evicted
-└── Invalid
-```
-
----
-
-## 47. Result State Definitions
-
-### 47.1 `Building`
-
-The result object is being assembled.
-
-It is not visible to consumers.
-
----
-
-### 47.2 `Validating`
-
-The result is undergoing contract validation.
-
-Checks include:
-
-* geometry;
-* IDs;
-* reading order;
-* confidence;
-* metrics;
-* provider identity;
-* timestamps.
-
----
-
-### 47.3 `Registered`
-
-The immutable result has been accepted by the result registry or temporary store.
-
-A completion event may now safely reference it.
-
----
-
-### 47.4 `Available`
-
-The result can be retrieved by authorized consumers.
-
-Recognition does not define how long availability lasts.
-
----
-
-### 47.5 `Expired`
-
-The result reference has passed its lifetime.
-
-The immutable result may have been removed.
-
-Consumers should not assume it remains retrievable.
-
----
-
-### 47.6 `Evicted`
-
-The result was removed before normal expiry.
-
-Possible causes:
-
-* cache pressure;
-* storage policy;
-* session cleanup;
-* privacy cleanup;
-* explicit invalidation.
-
----
-
-### 47.7 `Invalid`
-
-Result validation failed.
-
-An invalid result must never be published as completed.
-
----
-
-## 48. Result State Diagram
-
-```text
-Building
-   ↓
-Validating
- ┌─┴────────┐
- ↓          ↓
-Registered Invalid
-   ↓
-Available
- ┌─┴───────┐
- ↓         ↓
-Expired  Evicted
-```
-
-`Invalid`, `Expired`, and `Evicted` are terminal for that result instance.
-
----
-
-## 49. Result Availability and Request Completion
-
-A request may transition to `Completed` only when:
-
-```text
-result.state ∈ {Registered, Available}
-```
-
-for reference-based asynchronous workflows.
-
-A request must not become `Completed` when:
-
-```text
-result.state = Invalid
-```
-
-or when no valid result reference can be produced.
-
----
-
-# Transition Guards and Actions
-
-## 50. State Transition Record
-
-Every meaningful request transition should produce an internal transition record.
-
-```text
-RecognitionStateTransition
-├── request_id
-├── previous_state
-├── next_state
-├── trigger
-├── occurred_at
-├── attempt?
-├── provider_id?
-├── trace_id
-└── metadata?
-```
-
-These records are internal diagnostics.
-
-They are not necessarily public events.
-
----
-
-## 51. Transition Triggers
-
-Possible triggers:
-
-```text
-RequestReceived
-ValidationPassed
-ValidationFailed
-SchedulerQueued
-ExecutionCapacityAvailable
-ProviderSelected
-ImageResolved
-PreprocessingCompleted
-RegionsDetected
-RecognitionCompleted
-PostProcessingCompleted
-ReadingOrderResolved
-CoordinatesMapped
-ResultAssembled
-ResultRegistered
-CompletionPublished
-FailureOccurred
-CancellationRequested
-CancellationAccepted
-ProviderCancelled
-TimeoutExpired
-ShutdownRequested
-ProviderUnavailable
-FallbackSelected
-```
-
----
-
-## 52. Transition Actions
-
-State transitions may execute actions such as:
-
-```text
-reserve provider capacity
-register cancellation token
-start stage timer
-publish lifecycle event
-release image buffer
-release provider capacity
-discard late provider output
-register result reference
-normalize error
-record metrics
-schedule fallback
-```
-
-Actions must be idempotent where transition retries are possible.
-
----
-
-## 53. Stage Entry Rules
-
-On entering an active processing state:
-
-1. check cancellation;
-2. check request timeout;
-3. record stage start time;
-4. validate required previous outputs;
-5. verify request remains non-terminal.
-
----
-
-## 54. Stage Exit Rules
-
-Before leaving an active processing state:
-
-1. store stage output;
+1. validate phase output;
 2. record duration;
-3. validate stage output;
-4. check cancellation;
-5. release stage-local resources when no longer needed;
-6. determine the next state explicitly.
+3. check cancellation/deadline;
+4. release no-longer-needed Attempt-local resource;
+5. preserve traceability;
+6. determine next phase explicitly;
+7. normalize warnings/errors;
+8. update diagnostic phase only after output is safe.
 
 ---
 
-# Timeouts
+## 32. Phase Skipping Rules
 
-## 55. Timeout State Behavior
+A phase may be skipped only when plan explicitly states it.
 
-Timeout is not a dedicated request state.
-
-It is a trigger that normally causes:
+Examples:
 
 ```text
-Current Non-Terminal State
-        ↓
-Cancelling
-        ↓
-Cancelled
+DETECTING skipped
+    → combined provider or single-region input
+
+PREPARING skipped
+    → provider accepts source view directly
+
+RESOLVING_READING_ORDER skipped
+    → no regions or explicit valid order already present
 ```
 
-or:
+Silent phase skipping is forbidden.
+
+---
+
+## 33. Phase Failure
+
+Any phase may produce:
 
 ```text
-Current Non-Terminal State
-        ↓
-Failed
+RecognitionModuleError
 ```
 
-depending on timeout policy.
-
-Recommended behavior:
+The phase then moves to:
 
 ```text
-provider timeout → Failed
-request supersession timeout → Cancelled
-shutdown deadline → Cancelled
+FINALIZING
+    ↓
+FINISHED
 ```
+
+Recognition does not transition to Runtime `FAILED`.
+
+Runtime receives module error through Attempt Completion.
+
+---
+
+## 34. Cancellation During Phase
+
+When cancellation observed:
+
+```text
+Current Phase
+    ↓
+Stop Starting New Expensive Work
+    ↓
+Request Provider Cancellation if Supported
+    ↓
+Release Attempt-Local Resources
+    ↓
+FINALIZING
+    ↓
+FINISHED
+```
+
+Recognition reports cancellation observed.
+
+Runtime decides Attempt outcome.
+
+---
+
+## 35. Candidate Validation State
+
+```text
+CandidateValidationState
+├── NOT_CREATED
+├── ASSEMBLING
+├── VALIDATING
+├── VALID
+├── INVALID
+└── SUBMITTED_TO_RUNTIME
+```
+
+This is the main Recognition-owned Candidate state machine.
+
+---
+
+## 36. `NOT_CREATED`
+
+No Candidate exists.
+
+Allowed next state:
+
+```text
+ASSEMBLING
+```
+
+---
+
+## 37. `ASSEMBLING`
+
+Recognition builds Candidate from normalized outputs.
+
+Activities:
+
+- assign CandidateArtifactId;
+- attach InputArtifactRef;
+- attach provider provenance;
+- attach source coordinate space;
+- attach regions/lines;
+- attach ReadingOrder;
+- attach warnings;
+- attach quality/completeness;
+- attach compatibility metadata;
+- attach integrity metadata.
+
+Allowed next states:
+
+```text
+VALIDATING
+INVALID
+```
+
+---
+
+## 38. `VALIDATING`
+
+Candidate validation checks:
+
+- identity;
+- Artifact type;
+- owner module;
+- region/line ID uniqueness;
+- line-region references;
+- reading-order references;
+- geometry bounds;
+- confidence ranges;
+- completeness consistency;
+- provider provenance;
+- transform chain;
+- compatibility metadata;
+- privacy-safe metadata;
+- no provider SDK object;
+- no Runtime Attempt status.
+
+Allowed next states:
+
+```text
+VALID
+INVALID
+```
+
+---
+
+## 39. `VALID`
+
+Candidate passed Recognition semantic validation.
+
+Properties:
+
+- immutable;
+- source-space geometry valid;
+- provider-independent;
+- content-safe metadata;
+- ready for Runtime submission.
+
+Allowed next state:
+
+```text
+SUBMITTED_TO_RUNTIME
+```
+
+---
+
+## 40. `INVALID`
+
+Candidate cannot be submitted as valid Recognition output.
+
+Examples:
+
+- invalid geometry;
+- dangling RegionId;
+- duplicate LineId;
+- impossible completeness;
+- missing provider provenance;
+- invalid compatibility metadata;
+- provider SDK object leaked;
+- privacy violation.
+
+`INVALID` is terminal for that Candidate instance.
+
+Recognition returns module error.
+
+---
+
+## 41. `SUBMITTED_TO_RUNTIME`
+
+Candidate has crossed Recognition boundary.
+
+After this transition:
+
+- Recognition does not own publication;
+- Recognition does not mutate Candidate;
+- Runtime may accept or reject;
+- Artifact Store may receive ownership;
+- rejected Candidate follows cleanup path.
+
+No transition back to `ASSEMBLING`.
+
+---
+
+## 42. Candidate Transition Diagram
+
+```text
+NOT_CREATED
+    ↓
+ASSEMBLING
+    ↓
+VALIDATING
+   ┌┴────────┐
+   ↓         ↓
+ VALID     INVALID
+   ↓
+SUBMITTED_TO_RUNTIME
+```
+
+---
+
+## 43. External Candidate Disposition
+
+After submission, Recognition may observe:
+
+```text
+RuntimeCandidateDisposition
+├── ACCEPTED
+├── REJECTED_STALE
+├── REJECTED_CANCELED
+├── REJECTED_DUPLICATE
+├── REJECTED_INVALID
+└── REJECTED_RUNTIME_FAILURE
+```
+
+This is external Runtime state.
+
+Recognition must not treat it as CandidateValidationState.
+
+---
+
+## 44. Candidate Ownership Boundary
+
+```text
+ASSEMBLING / VALIDATING / VALID
+    → Recognition-side producer ownership
+
+SUBMITTED_TO_RUNTIME
+    → transfer pending
+
+ACCEPTED
+    → Artifact Store ownership
+
+REJECTED_*
+    → Candidate cleanup required
+```
+
+Recognition never owns published Artifact payload.
+
+---
+
+## 45. Recognition Quality State
+
+```text
+RecognitionQualityState
+├── UNKNOWN
+├── ACCEPTABLE
+├── DEGRADED
+└── UNUSABLE
+```
+
+### UNKNOWN
+
+Insufficient quality information.
+
+### ACCEPTABLE
+
+Output meets configured quality policy.
+
+### DEGRADED
+
+Output usable with warnings.
+
+### UNUSABLE
+
+Output cannot satisfy Recognition semantic requirements.
+
+---
+
+## 46. Quality Transition Rules
+
+Quality is derived, not freely mutated.
+
+```text
+Provider Output
+    ↓
+Normalization
+    ↓
+Quality Evaluation
+    ↓
+UNKNOWN / ACCEPTABLE / DEGRADED / UNUSABLE
+```
+
+Quality may be recalculated during Candidate validation.
+
+A Candidate with `UNUSABLE` quality normally becomes `INVALID` unless explicit diagnostic operation allows otherwise.
+
+---
+
+## 47. Recognition Completeness
+
+```text
+RecognitionCompleteness
+├── COMPLETE
+├── PARTIAL
+├── EMPTY_VALID
+└── UNKNOWN
+```
+
+Completeness is Artifact metadata, not execution status.
+
+### COMPLETE
+
+Expected Recognition output produced.
+
+### PARTIAL
+
+Some usable regions produced, some unavailable.
+
+### EMPTY_VALID
+
+No readable text detected successfully.
+
+### UNKNOWN
+
+Completeness cannot be determined.
+
+---
+
+## 48. Quality and Completeness Matrix
+
+| Completeness | Possible Quality |
+|---|---|
+| COMPLETE | ACCEPTABLE, DEGRADED |
+| PARTIAL | DEGRADED, UNUSABLE |
+| EMPTY_VALID | ACCEPTABLE, DEGRADED |
+| UNKNOWN | UNKNOWN, DEGRADED, UNUSABLE |
+
+`EMPTY_VALID` is not automatically degraded.
+
+---
+
+## 49. Provider Execution Observation
+
+```text
+ProviderExecutionObservation
+├── NOT_STARTED
+├── STARTING
+├── RUNNING
+├── OUTPUT_RECEIVED
+├── ERROR_RECEIVED
+├── CANCELLATION_REQUESTED
+└── PHYSICALLY_FINISHED
+```
+
+This is observational, not authoritative.
+
+Provider Manager owns lifecycle/health.
+
+Runtime owns Attempt outcome.
+
+---
+
+## 50. Provider Observation Flow
+
+Typical:
+
+```text
+NOT_STARTED
+    ↓
+STARTING
+    ↓
+RUNNING
+   ┌┴─────────────┐
+   ↓              ↓
+OUTPUT_RECEIVED ERROR_RECEIVED
+   └──────┬───────┘
+          ↓
+PHYSICALLY_FINISHED
+```
+
+Cancellation:
+
+```text
+RUNNING
+    ↓
+CANCELLATION_REQUESTED
+    ↓
+PHYSICALLY_FINISHED
+```
+
+Provider may still produce late callback after cancellation request.
+
+---
+
+## 51. Duplicate Provider Callback
+
+Provider callback must be deduplicated by adapter/request identity.
+
+Rules:
+
+1. first normalized output/error is retained for module processing;
+2. duplicate callback does not restart phase;
+3. duplicate callback does not create second Candidate;
+4. duplicate callback does not change Runtime outcome;
+5. duplicate callback resources are released safely;
+6. diagnostics record duplication.
+
+---
+
+## 52. Cancellation Behavior
+
+Recognition reads external CancellationContext.
+
+Possible observations:
+
+```text
+NOT_REQUESTED
+REQUESTED
+ACKNOWLEDGED_BY_MODULE
+PROVIDER_CANCEL_REQUESTED
+PROVIDER_CANCEL_UNSUPPORTED
+```
+
+Recognition does not own canonical cancellation state.
+
+---
+
+## 53. Cancellation Checkpoints
+
+Required checkpoints:
+
+- before Plan execution;
+- before Input Lease acquisition;
+- before image preparation;
+- after image preparation;
+- before provider execution;
+- between bounded region batches;
+- after provider completion;
+- before coordinate mapping;
+- before Candidate assembly;
+- before Candidate submission.
+
+---
+
+## 54. Non-Cancelable Provider
+
+```text
+Cancellation Requested
+    ↓
+Provider Cannot Stop
+    ↓
+Recognition Stops New Local Work
+    ↓
+Runtime May Mark Attempt Abandoned
+    ↓
+Provider Finishes Physically
+    ↓
+Late Output Rejected
+    ↓
+Resources Released
+```
+
+Recognition must not wait indefinitely for physical provider completion.
+
+---
+
+## 55. Deadline Behavior
+
+Deadline belongs to Runtime ExecutionContext.
+
+Recognition only observes:
+
+```text
+DeadlineAvailable
+RemainingBudget
+DeadlineExceeded
+```
+
+Before expensive phase:
+
+```text
+remaining_budget >= phase_minimum_budget
+```
+
+If not:
+
+- do not start phase;
+- return normalized module/provider timeout information;
+- allow Runtime to decide failed/canceled outcome.
 
 ---
 
 ## 56. Timeout Sources
 
+Possible external sources:
+
 ```text
-QueueTimeout
-RequestDeadline
-ProviderTimeout
-StageTimeout
-ShutdownDeadline
-ResourceWaitTimeout
+ATTEMPT_DEADLINE
+PROVIDER_TIMEOUT
+RESOURCE_WAIT_TIMEOUT
+SHUTDOWN_DEADLINE
 ```
 
-Each timeout must record its source.
+Queue timeout is not Recognition-owned.
 
 ---
 
-## 57. Timeout Guards
+## 57. Resource Interaction
 
-Before every expensive stage:
-
-```text
-remaining_timeout_budget > minimum_stage_budget
-```
-
-If insufficient:
+Recognition uses:
 
 ```text
-Failed(RequestExpired)
+Input Artifact Lease
+Attempt-Local Buffers
+Provider Request Resource
+Candidate Artifact Resource
 ```
 
-or:
+Recognition does not own:
 
 ```text
-Cancelled(Timeout)
+Published Artifact Retention
+Cache Retention
+Physical Artifact Disposal
+Provider Model Lifetime
 ```
-
-must occur before starting the stage.
 
 ---
 
-# Retry State
-
-## 58. Retry Is Not a State Transition
-
-A retry does not move a terminal request back to an active state.
-
-Incorrect:
+## 58. Resource-State Interaction
 
 ```text
-Failed → Recognizing
-```
-
-Correct:
-
-```text
-Request A: Failed
-
-Request B:
-Received
+Acquire Input Lease
     ↓
-Validating
+Use Immutable Input
     ↓
-...
+Create Attempt-Local Resources
+    ↓
+Execute Recognition
+    ↓
+Create Candidate
+    ↓
+Submit or Cleanup
+    ↓
+Release Attempt-Local Resources
+    ↓
+Release Input Lease
 ```
 
-A retry must create:
+Resource Manager owns canonical resource lifecycle.
+
+---
+
+## 59. Resource Cleanup State
+
+Recognition may track Attempt-local cleanup observation:
 
 ```text
-new request_id
-new terminal lifecycle
-new recognition_id on success
+CleanupObservation
+├── NOT_REQUIRED
+├── PENDING
+├── RUNNING
+├── COMPLETED
+└── FAILED
+```
+
+This does not replace Resource Lifecycle state.
+
+Cleanup failure is returned/recorded through Runtime Error Model.
+
+---
+
+## 60. Runtime Disposition Observation
+
+Recognition may receive/observe:
+
+```text
+AttemptDisposition
+├── ACCEPTED
+├── FAILED
+├── CANCELED
+├── ABANDONED
+├── REJECTED_STALE
+└── REJECTED_DUPLICATE
+```
+
+Recognition cannot mutate this disposition.
+
+It may use it only for:
+
+- cleanup;
+- diagnostics;
+- provider late-output handling.
+
+---
+
+## 61. Invalid Transitions
+
+Forbidden:
+
+```text
+Availability STOPPED → AVAILABLE without INITIALIZING
+Availability DRAINING → AVAILABLE
+Plan READY → BUILDING
+Plan INVALID → READY
+Candidate VALID → ASSEMBLING
+Candidate INVALID → VALID
+Candidate SUBMITTED_TO_RUNTIME → ASSEMBLING
+Operation FINISHED → RECOGNIZING
+Quality UNUSABLE → ACCEPTABLE without reevaluation
+Provider OUTPUT_RECEIVED → RUNNING
 ```
 
 ---
 
-## 59. Retry Relationship
+## 62. Invalid Transition Handling
 
-A retry request may reference:
+When attempted:
 
-```text
-previous_request_id
-previous_recognition_id
-retry_reason
-retry_scope
-```
-
-The original request and result remain unchanged.
-
----
-
-# Concurrency State
-
-## 60. Active Request Registry
-
-Recognition maintains a bounded registry.
-
-```text
-ActiveRecognitionRequest
-├── request_id
-├── current_state
-├── current_attempt
-├── provider_id?
-├── cancellation_status
-├── deadline?
-├── priority
-├── acquired_resources[]
-└── transition_version
-```
-
----
-
-## 61. Transition Version
-
-Each request may maintain a monotonic transition version.
-
-```text
-transition_version = integer
-```
-
-It supports:
-
-* compare-and-set transitions;
-* race detection;
-* duplicate callback suppression;
-* terminal-state protection.
-
----
-
-## 62. Concurrency Rules
-
-1. State changes for one request must be serialized logically.
-2. Provider callbacks must verify current request state.
-3. Late callbacks must not overwrite terminal state.
-4. One request may own only one active terminal transition.
-5. Fallback attempts may overlap only when explicitly designed.
-6. Result assembly must use one winning attempt.
-7. Cancellation must be visible to all active stages.
-8. Provider capacity must be released exactly once.
-9. Image buffers must be released exactly once.
-10. Terminal events must be emitted exactly once.
-
----
-
-## 63. Duplicate Callback Handling
-
-Provider SDKs may invoke callbacks more than once.
-
-Recognition must ignore duplicate callbacks after:
-
-```text
-attempt.state ∈ {
-    Succeeded,
-    Failed,
-    Cancelled,
-    Discarded
-}
-```
-
-A duplicate callback must not change request state.
-
----
-
-# State and Events
-
-## 64. State-to-Event Mapping
-
-| State transition                        | Public event                       |
-| --------------------------------------- | ---------------------------------- |
-| Accepted execution → first active stage | `recognition.started`              |
-| Any non-terminal state → `Completed`    | `recognition.completed`            |
-| Any non-terminal state → `Failed`       | `recognition.failed`               |
-| Any non-terminal state → `Cancelled`    | `recognition.cancelled`            |
-| Provider → `Ready`                      | `recognition.provider_ready`       |
-| Provider → `Degraded`                   | `recognition.provider_degraded`    |
-| Provider → `Unavailable`                | `recognition.provider_unavailable` |
-
-Internal stage transitions do not require public events.
-
----
-
-## 65. Event Publication Does Not Define State Alone
-
-State must be committed before or atomically with terminal event intent.
-
-Incorrect:
-
-```text
-publish recognition.completed
-then set state = Completed
-```
-
-Risk:
-
-* cancellation may win between publication and state mutation.
-
-Preferred:
-
-```text
-commit terminal state and event record
-then publish event idempotently
-```
-
----
-
-## 66. Progress Events and State
-
-Progress events may correspond to stage exits:
-
-```text
-Preprocessing → recognition.preprocessing_completed
-Detecting → recognition.regions_detected
-Recognizing region → recognition.region_recognized
-ResolvingReadingOrder → recognition.reading_order_resolved
-```
-
-These events are optional and do not alter the public lifecycle guarantees.
-
----
-
-# Recovery
-
-## 67. Process Recovery
-
-After an application crash, in-memory requests may be lost.
-
-Recovery policy depends on deployment mode.
-
-For desktop MVP:
-
-```text
-active in-memory request → considered interrupted
-temporary image buffer → cleaned on startup
-temporary result → validated or removed
-provider model → reinitialized
-```
-
-Recognition should not automatically recreate old requests unless orchestration explicitly resubmits them.
-
----
-
-## 68. Orphan Request Detection
-
-On startup, persisted request records in non-terminal states may be marked:
-
-```text
-Failed
-```
-
-with:
-
-```text
-InternalError
-ProcessInterrupted
-```
-
-if persistent request tracking is later introduced.
-
-For MVP, persistent active-request state is not required.
-
----
-
-## 69. Orphan Result Detection
-
-A stored result without a valid completion record may be:
-
-* retained temporarily for diagnostics;
-* registered during recovery if validation succeeds;
-* removed according to cleanup policy.
-
-Recognition must not publish a new completion event without an idempotent recovery design.
-
----
-
-# State Persistence
-
-## 70. Persistent Versus Ephemeral State
-
-### Ephemeral
-
-```text
-current request stage
-image buffers
-provider request handle
-cancellation token
-stage-local output
-GPU resource handle
-active timer
-```
-
-### Potentially Persistent
-
-```text
-completed RecognitionResult
-terminal outcome record
-event publication record
-provider configuration version
-benchmark results
-diagnostic references
-```
-
-The MVP should keep active processing state ephemeral.
-
----
-
-## 71. State Snapshot
-
-An internal request snapshot may be represented as:
-
-```text
-RecognitionRequestSnapshot
-├── request_id
-├── state
-├── state_version
-├── attempt
-├── provider_id?
-├── started_at?
-├── deadline?
-├── cancellation_requested
-├── terminal_outcome?
-├── result_id?
-├── error_code?
-└── updated_at
-```
-
-Snapshots must not contain raw image bytes or complete recognized text.
-
----
-
-# Invalid Transitions
-
-## 72. Invalid Transition Examples
-
-The following transitions are forbidden:
-
-```text
-Completed → Recognizing
-Completed → Cancelled
-Failed → Completed
-Failed → Recognizing
-Cancelled → Completed
-Cancelled → Failed
-Rejected → Queued
-PublishingResult → Recognizing
-Stopped → Ready
-ShuttingDown → Ready
-Provider Stopped → Ready without initialization
-Result Invalid → Available
-Result Expired → Available
-```
-
----
-
-## 73. Invalid Transition Handling
-
-When invalid transition is attempted:
-
-1. reject the transition;
+1. reject transition;
 2. preserve current state;
-3. record a contract violation;
-4. avoid publishing an event;
-5. release duplicate callback resources if needed;
-6. surface diagnostics.
-
-An invalid transition must not crash the entire application unless state corruption is unrecoverable.
-
----
-
-# State Invariants
-
-## 74. Module Invariants
-
-1. `Ready` requires at least one usable provider.
-2. `Stopped` has no active requests.
-3. `ShuttingDown` accepts no new requests.
-4. `Unavailable` rejects normal requests.
-5. Module state does not depend on one individual request result.
+3. record contract violation;
+4. avoid Candidate publication implication;
+5. release duplicate resources if needed;
+6. surface diagnostics;
+7. do not crash whole application unless corruption is unrecoverable.
 
 ---
 
-## 75. Provider Invariants
+## 63. Concurrency Rules
 
-1. Only `Ready` or eligible `Degraded` providers may receive new work.
-2. `ShuttingDown` providers receive no new work.
-3. `Misconfigured` providers are not selected.
-4. Provider capabilities remain versioned.
-5. Provider state changes do not mutate completed results.
-6. Provider state must not expose credentials.
-
----
-
-## 76. Request Invariants
-
-1. Every request has exactly one current state.
-2. Every request has a monotonic state version.
-3. Every accepted request reaches exactly one terminal state.
-4. Terminal states are immutable.
-5. A cancelled request never publishes completion.
-6. A failed request never publishes completion under the same request ID.
-7. A completed request has a valid immutable result.
-8. A request never executes two winning provider attempts.
-9. Request state is isolated by `request_id`.
-10. Request hints remain unchanged during one execution unless explicitly copied into an internal derived plan.
-11. Privacy policy cannot be weakened during fallback.
-12. The original source identity remains stable throughout processing.
-13. Frame identity remains stable throughout processing.
-14. Stage output must be validated before the next dependent state.
-15. Every acquired resource is released exactly once.
+1. One Attempt owns one Recognition execution context.
+2. Plan transitions serialized logically.
+3. Operation phase transitions serialized logically.
+4. Candidate validation transitions serialized logically.
+5. Provider callbacks normalized before phase mutation.
+6. Duplicate callback cannot create duplicate Candidate.
+7. Candidate submission occurs at most once.
+8. Attempt-local resource release is idempotent.
+9. Input Lease released exactly once.
+10. Recognition never races Runtime authority mutation.
+11. Recognition never owns terminal CAS.
+12. Region-level concurrency bounded.
+13. Provider concurrency controlled externally.
+14. Shutdown prevents new execution.
+15. External disposition may arrive after local FINISHED.
 
 ---
 
-## 77. Result Invariants
-
-1. A published result passed contract validation.
-2. A result has exactly one `recognition_id`.
-3. Result state never returns to `Building`.
-4. Raw recognized text is immutable.
-5. Public geometry remains in source coordinate space.
-6. An invalid result is never exposed as completed.
-7. Expiry does not mutate historical event meaning.
-8. User correction creates a separate object.
-
----
-
-## 78. Event-State Invariants
-
-1. `recognition.started` is emitted at most once per execution lifecycle.
-2. Exactly one terminal lifecycle event is emitted.
-3. Terminal event type matches terminal request state.
-4. Terminal event publication is idempotent.
-5. Progress events never change terminal state.
-6. Late progress events are ignored by terminal consumers.
-7. Public events contain no raw image bytes.
-8. Public events contain no complete OCR text.
-
----
-
-# MVP State Model
-
-## 79. Required MVP Module States
+## 64. Diagnostic Transition Record
 
 ```text
-Uninitialized
-Initializing
-Ready
-Degraded
-Unavailable
-ShuttingDown
-Stopped
+RecognitionStateTransition
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── StateCategory
+├── PreviousState
+├── NextState
+├── Trigger
+├── OccurredAt
+├── ProviderId?
+├── OperationPhase?
+├── TraceId
+└── Metadata?
+```
+
+No raw image or full recognized text.
+
+---
+
+## 65. Transition Triggers
+
+Recognition-owned triggers:
+
+```text
+MODULE_INITIALIZE_REQUESTED
+MODULE_INITIALIZED
+MODULE_DEGRADED
+MODULE_UNAVAILABLE
+MODULE_DRAIN_REQUESTED
+MODULE_STOPPED
+
+PLAN_BUILD_STARTED
+PLAN_BUILT
+PLAN_VALID
+PLAN_INVALID
+
+PHASE_ENTERED
+PHASE_COMPLETED
+PHASE_SKIPPED
+PHASE_ERROR
+CANCELLATION_OBSERVED
+DEADLINE_OBSERVED
+
+CANDIDATE_ASSEMBLY_STARTED
+CANDIDATE_ASSEMBLED
+CANDIDATE_VALID
+CANDIDATE_INVALID
+CANDIDATE_SUBMITTED
+```
+
+Runtime terminal triggers are not Recognition-owned.
+
+---
+
+## 66. State and Events
+
+Recognition-specific diagnostic facts may correspond to:
+
+```text
+Plan READY
+    → RECOGNITION_PLAN_CREATED
+
+PREPARING finished
+    → RECOGNITION_PREPARATION_COMPLETED
+
+DETECTING finished
+    → RECOGNITION_REGIONS_DETECTED
+
+NORMALIZING finished
+    → RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
+
+RESOLVING_READING_ORDER finished
+    → RECOGNITION_READING_ORDER_RESOLVED
+
+Candidate VALID
+    → RECOGNITION_CANDIDATE_VALIDATED
+
+Candidate SUBMITTED_TO_RUNTIME
+    → RECOGNITION_CANDIDATE_CREATED
+```
+
+These facts:
+
+- do not grant authority;
+- do not define Attempt outcome;
+- do not trigger downstream work directly;
+- are optional for correctness.
+
+---
+
+## 67. Recovery
+
+Recognition-owned active state is ephemeral.
+
+After process crash:
+
+```text
+Plan state
+Operation phase
+Candidate assembly state
+Provider execution observation
+Attempt-local resources
+```
+
+are not restored directly.
+
+Runtime may:
+
+- mark Attempt interrupted;
+- create new Attempt;
+- reacquire input Artifact;
+- rebuild Recognition Plan;
+- re-execute Recognition.
+
+---
+
+## 68. Candidate Recovery
+
+Candidate not yet accepted by Artifact Store:
+
+- is not published;
+- should not be resurrected automatically;
+- may be cleaned by recovery process;
+- must not generate publication event after restart without explicit idempotent transfer design.
+
+Published Artifact recovery belongs to Artifact Store/Storage.
+
+---
+
+## 69. Provider Recovery
+
+Provider model/client recovery belongs to Provider Manager.
+
+Recognition only receives updated availability snapshot.
+
+Recognition does not transition provider from unavailable to ready.
+
+---
+
+## 70. State Persistence
+
+MVP persists none of the active Recognition-owned state.
+
+Ephemeral:
+
+```text
+Recognition Plan
+Operation Phase
+Attempt-Local Buffers
+Provider Request Observation
+Candidate Assembly State
+Cancellation Observation
+Cleanup Observation
+```
+
+Potentially persistent objects:
+
+```text
+Published Recognition Artifact
+Benchmark Results
+Sanitized Diagnostics
+Provider Configuration Versions
+```
+
+Their persistence owner is not Recognition state machine.
+
+---
+
+## 71. MVP State Model
+
+Required:
+
+```text
+RecognitionAvailabilityState
+├── UNINITIALIZED
+├── INITIALIZING
+├── AVAILABLE
+├── DEGRADED
+├── UNAVAILABLE
+├── DRAINING
+└── STOPPED
+```
+
+```text
+RecognitionPlanState
+├── NOT_CREATED
+├── BUILDING
+├── VALIDATING
+├── READY
+└── INVALID
+```
+
+```text
+RecognitionOperationPhase
+├── VALIDATING
+├── PLANNING
+├── ACQUIRING_INPUT
+├── PREPARING
+├── DETECTING
+├── RECOGNIZING
+├── NORMALIZING
+├── MAPPING_COORDINATES
+├── RESOLVING_READING_ORDER
+├── ASSEMBLING_CANDIDATE
+├── VALIDATING_CANDIDATE
+├── FINALIZING
+└── FINISHED
+```
+
+```text
+CandidateValidationState
+├── NOT_CREATED
+├── ASSEMBLING
+├── VALIDATING
+├── VALID
+├── INVALID
+└── SUBMITTED_TO_RUNTIME
 ```
 
 ---
 
-## 80. Required MVP Provider States
+## 72. MVP Simplification
+
+Implementation may store operation phase as diagnostic enum only.
+
+It must not create a second Runtime lifecycle.
+
+Minimal control flow:
 
 ```text
-Registered
-Initializing
-Ready
-Unavailable
-Misconfigured
-Stopped
-```
-
-`Degraded` may initially be represented only through capability status if implementation simplicity requires it.
-
----
-
-## 81. Required MVP Request States
-
-The MVP may implement the following simplified state set:
-
-```text
-Received
-Validating
-Queued
-Processing
-AssemblingResult
-Cancelling
-Completed
-Failed
-Cancelled
-```
-
-Where:
-
-```text
-Processing
-=
-Preparing
-+ Preprocessing
-+ Detecting
-+ Recognizing
-+ PostProcessing
-+ ResolvingReadingOrder
-+ MappingCoordinates
-```
-
-Detailed internal stages should still be recorded in metrics even if they are not modeled as separate runtime enum values.
-
----
-
-## 82. Recommended MVP Request Diagram
-
-```text
-Received
+Plan
     ↓
-Validating
- ┌──┴──────────┐
- ↓             ↓
-Failed       Queued
-               ↓
-           Processing
-         ┌─────┼─────────┐
-         ↓     ↓         ↓
- Assembling  Failed   Cancelling
-     ↓                    ↓
- Completed            Cancelled
+Execute Phases
+    ↓
+Validate Candidate
+    ↓
+Submit to Runtime
+    ↓
+Cleanup
 ```
 
 ---
 
-## 83. When to Expand MVP States
+## 73. When to Expand State Detail
 
-Split `Processing` into detailed states when at least one of these becomes necessary:
+Expand only when needed for:
 
-* stage-specific cancellation;
-* progress UI;
-* provider fallback by stage;
-* stage-specific timeout;
-* detailed recovery;
-* stage-specific metrics;
-* independent detector and OCR providers;
-* long-page chunking;
-* distributed processing;
-* debugging state corruption.
+- stage-specific cancellation;
+- independent detector/recognizer;
+- long-page chunking;
+- provider streaming;
+- partial Candidate;
+- complex resource cleanup;
+- distributed provider execution;
+- advanced diagnostics;
+- benchmark comparison;
+- process isolation.
 
----
-
-# Testing
-
-## 84. State Transition Tests
-
-Required tests:
-
-### Module State
-
-* startup reaches `Ready`;
-* startup with partial provider availability reaches `Degraded`;
-* startup without providers reaches `Unavailable`;
-* shutdown rejects new requests;
-* shutdown reaches `Stopped`;
-* stopped module can reinitialize.
-
-### Provider State
-
-* registered provider initializes;
-* valid provider becomes ready;
-* invalid credentials produce misconfigured;
-* provider outage produces unavailable;
-* provider recovery returns to ready;
-* shutting-down provider receives no new work.
-
-### Request State
-
-* successful full lifecycle;
-* validation rejection;
-* queue then execution;
-* no-text completion;
-* provider failure;
-* preprocessing failure;
-* result validation failure;
-* cancellation before execution;
-* cancellation during provider execution;
-* cancellation during result assembly;
-* timeout;
-* fallback success;
-* fallback exhaustion;
-* duplicate callback;
-* late provider response;
-* duplicate cancellation;
-* completion/cancellation race.
-
-### Result State
-
-* building to available;
-* invalid result rejected;
-* completion requires valid reference;
-* expiry;
-* eviction;
-* immutable result behavior.
+Expansion must remain Attempt-local.
 
 ---
 
-## 85. Property Tests
+## 74. Availability Invariants
 
-Useful state-machine properties:
+1. AVAILABLE requires at least one satisfiable capability path.
+2. DRAINING accepts no new execution.
+3. STOPPED has no module-owned active state.
+4. UNAVAILABLE does not create Recognition Plan for normal execution.
+5. Availability does not depend on one Attempt result.
+6. Provider state is not owned by Recognition.
+7. Capability degradation is explicit.
+8. Privacy policy cannot be weakened by degraded mode.
+
+---
+
+## 75. Plan Invariants
+
+1. Every execution uses zero or one Plan.
+2. READY Plan immutable.
+3. INVALID Plan never executes.
+4. Plan preserves config snapshot identity.
+5. Plan contains no credentials.
+6. Plan references capabilities, not provider SDK types.
+7. Plan cannot alter Runtime priority.
+8. Plan cannot alter Runtime deadline.
+9. Plan cannot grant authority.
+10. Plan cannot schedule retry.
+
+---
+
+## 76. Phase Invariants
+
+1. One current phase per Recognition execution.
+2. Phase transition order explicit.
+3. Skipped phase documented by Plan.
+4. Expensive phase checks cancellation/deadline.
+5. Phase output validated before dependent phase.
+6. Geometry-changing phase updates transform chain.
+7. Semantic text correction forbidden.
+8. FINISHED does not imply Runtime success.
+9. Phase failure returns module error.
+10. Phase state remains Attempt-local.
+
+---
+
+## 77. Candidate Invariants
+
+1. One Candidate instance has one validation state.
+2. Candidate ID unique.
+3. Candidate immutable after VALID.
+4. INVALID Candidate never submitted as valid.
+5. SUBMITTED Candidate not mutated.
+6. Candidate does not include Runtime terminal status.
+7. Candidate geometry source-space valid.
+8. Candidate ReadingOrder references existing regions.
+9. Candidate contains no credential.
+10. Candidate contains no provider SDK object.
+11. Candidate rejection triggers cleanup.
+12. Candidate submission does not imply publication.
+
+---
+
+## 78. Quality and Completeness Invariants
+
+1. UNKNOWN confidence is not zero.
+2. Warning is not failure.
+3. EMPTY_VALID is valid success candidate.
+4. PARTIAL explicit.
+5. UNUSABLE normally invalidates Candidate.
+6. Quality derived from configured policy.
+7. Provider confidence normalized before use.
+8. Quality does not claim translation correctness.
+9. Completeness is Artifact metadata.
+10. User corrections do not mutate quality state of original Artifact.
+
+---
+
+## 79. External-State Invariants
+
+1. Runtime owns WorkItem state.
+2. Runtime owns Attempt state.
+3. Runtime owns cancellation authority.
+4. Runtime Retry Policy owns retry.
+5. Provider Manager owns provider lifecycle.
+6. Artifact Store owns publication.
+7. Resource Manager owns physical resource lifecycle.
+8. Cache Policy owns retention.
+9. Recognition never maintains parallel request registry.
+10. Recognition never commits terminal outcome.
+
+---
+
+## 80. Testing Requirements
+
+### Availability
+
+- initialize to AVAILABLE;
+- initialize to DEGRADED;
+- initialize to UNAVAILABLE;
+- drain rejects new execution;
+- stop clears module-owned state;
+- reinitialize from STOPPED.
+
+### Plan
+
+- valid Plan path;
+- invalid capability combination;
+- privacy conflict;
+- immutable READY Plan;
+- INVALID cannot execute;
+- config snapshot preserved.
+
+### Operation Phases
+
+- combined path;
+- composed path;
+- single-region path;
+- empty-valid path;
+- skipped phase recorded;
+- cancellation at every checkpoint;
+- deadline before expensive phase;
+- phase error;
+- phase output validation;
+- transform update.
+
+### Candidate
+
+- valid Candidate;
+- invalid geometry;
+- duplicate RegionId;
+- invalid ReadingOrder;
+- incomplete compatibility metadata;
+- Candidate immutable after VALID;
+- submit once;
+- reject and cleanup.
+
+### Provider Observation
+
+- normal output;
+- provider error;
+- duplicate callback;
+- cancellation supported;
+- cancellation unsupported;
+- late callback;
+- physical completion after Runtime abandonment.
+
+### Concurrency
+
+- duplicate Candidate submission;
+- provider callback vs cancellation;
+- cleanup vs late callback;
+- module drain vs Candidate assembly;
+- external Runtime rejection after local VALID;
+- input Lease released once.
+
+---
+
+## 81. Property Tests
 
 ```text
-terminal_state_count(request) <= 1
+candidate_submission_count <= 1
 ```
 
 ```text
-state_version always increases
+READY plan never returns to BUILDING
 ```
 
 ```text
-Completed implies valid recognition_id
-```
-
-```text
-Cancelled implies no completed event
-```
-
-```text
-Failed implies no completed result
-```
-
-```text
-provider selected implies provider was eligible
+VALID candidate never returns to ASSEMBLING
 ```
 
 ```text
@@ -2428,134 +1869,125 @@ public geometry always fits source coordinate space
 ```
 
 ```text
-active request resources released at terminal state
+FINISHED does not imply published Artifact
 ```
-
----
-
-## 86. Race Tests
-
-Concurrency tests must cover:
 
 ```text
-cancel vs provider success
-cancel vs provider failure
-timeout vs provider success
-shutdown vs result publication
-fallback success vs first provider late success
-duplicate provider callback
-duplicate terminal publication
-result storage success vs cancellation
+all acquired Attempt-local resources are released
 ```
-
-Each race must produce one deterministic terminal outcome.
-
----
-
-# Open Decisions
-
-## 87. Unresolved State Decisions
-
-The following remain open:
-
-* whether `Rejected` is a separate state or a subtype of `Failed`;
-* whether queue time counts toward request timeout;
-* whether cancellation transitions through `Cancelling` in all implementations;
-* whether result publication state must be persisted;
-* whether provider degradation requires a dedicated state in MVP;
-* whether provider attempts may overlap;
-* whether progress states are runtime enums or diagnostic labels;
-* whether active request snapshots should survive process restart;
-* whether timeout ends in `Failed` or `Cancelled`;
-* whether result expiry events are required;
-* how long terminal request state remains in memory;
-* how provider recovery backoff is represented;
-* whether model loading has separate provider substates;
-* whether GPU resource pressure changes module state or scheduler state.
-
-These should be resolved through implementation needs and prototype behavior.
-
----
-
-## 88. Recommended Decisions for MVP
-
-Recommended initial choices:
 
 ```text
-Rejected = Failed before execution
-queue time counts toward total request timeout
-all accepted cancellations pass through Cancelling
-provider attempts do not overlap
-active request state remains in memory only
-timeout during OCR ends in Failed
-superseded frame ends in Cancelled
-terminal request records remain briefly for deduplication
-provider model loading stays inside Initializing
+Recognition never changes Runtime Attempt state
 ```
 
-These choices minimize complexity while preserving correctness.
+```text
+Recognition never mutates Provider Manager state
+```
 
 ---
 
-## 89. Related Documents
+## 82. Open Decisions
+
+- Is availability state a distinct runtime object or derived capability view?
+- Should `DEGRADED` be one state or capability flags only?
+- Should `VALIDATING_CANDIDATE` remain a phase and state simultaneously?
+- Do partial Candidates need substate?
+- Should provider execution observation be persisted in trace only?
+- Should quality reevaluation happen during Text Processing?
+- Should Plan expose selected provider ID or only capability path reference?
+- How is long-page chunk state represented?
+- Do streaming providers require `PARTIAL_OUTPUT_RECEIVED` observation?
+- When does Candidate ownership transfer begin exactly?
+- Which cleanup failures invalidate module availability?
+- Is `DRAINING` controlled directly by Runtime Container?
+
+---
+
+## 83. Recommended MVP Decisions
+
+```text
+Availability state is explicit.
+DEGRADED is retained.
+Operation phases are diagnostic enums.
+Candidate validation is explicit.
+No active Recognition state persists.
+Provider execution observations stay in trace/snapshot.
+Provider attempts do not overlap in MVP.
+Partial Candidate support is optional.
+Runtime owns all terminal outcomes.
+Candidate transfer begins on submit.
+```
+
+---
+
+## 84. Related Documents
 
 ```text
 doc/02-modules/recognition/README.md
 doc/02-modules/recognition/MODULE.md
 doc/02-modules/recognition/CONTRACT.md
 doc/02-modules/recognition/EVENTS.md
-docs/architecture/STATE_MACHINE.md
-docs/architecture/EVENT_BUS.md
-docs/architecture/DATA_FLOW.md
-docs/architecture/MODULE_DEPENDENCY.md
+doc/02-modules/recognition/ERRORS.md
+
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RETRY_POLICY.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+doc/01-architecture/runtime/THREADING_MODEL.md
+
+doc/01-architecture/ocr/PIPELINE.md
+doc/01-architecture/ocr/PREPROCESS.md
+doc/01-architecture/ocr/DETECTION.md
+doc/01-architecture/ocr/RECOGNITION.md
+doc/01-architecture/ocr/READING_ORDER.md
+doc/01-architecture/ocr/QUALITY.md
+doc/01-architecture/ocr/PROVIDERS.md
 ```
 
 ---
 
-## 90. Summary
+## 85. Summary
 
-The Recognition state model separates:
-
-```text
-module availability
-provider availability
-request processing
-provider attempts
-result availability
-```
-
-The central request lifecycle is:
+Recognition state model now focuses only on state that Recognition actually owns:
 
 ```text
-Received
-    ↓
-Validating
-    ↓
-Queued
-    ↓
-Processing
-    ↓
-AssemblingResult
-    ↓
-Completed
+Recognition Availability
+        ↓
+Recognition Plan
+        ↓
+Recognition Operation Phases
+        ↓
+Candidate Validation
+        ↓
+Submitted to Runtime
 ```
 
-with alternative terminal outcomes:
+Runtime owns:
 
 ```text
-Failed
-Cancelled
+WorkItem
+Attempt
+Authority
+Cancellation
+Retry
+Publication
+Artifact Lifecycle
 ```
 
-The most important guarantees are:
+Provider Manager owns:
 
-* exactly one terminal state per accepted request;
-* terminal states never change;
-* retries create new requests;
-* cancellation suppresses late completion;
-* provider state is separate from request state;
-* stale session relevance is decided outside Recognition;
-* completed results are immutable;
-* state commits and terminal event publication are coordinated;
-* late callbacks cannot overwrite terminal outcomes;
-* resource ownership ends at terminal state.
+```text
+Provider Lifecycle
+Provider Health
+Provider Capacity
+```
+
+The key boundary is:
+
+```text
+Recognition may produce a valid Candidate.
+
+Only Runtime can decide whether that Candidate matters.
+
+Only Artifact Store can publish and own the accepted Artifact.
+```

@@ -3,9 +3,9 @@
 > **Project:** CRAI
 > **Module:** Translation
 > **Document:** Module Definition
-> **Version:** 0.1
+> **Version:** 0.2
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-07-25
+> **Last Updated:** 2026-08-03
 
 ---
 
@@ -45,14 +45,14 @@ Structurally aligned translated content
 
 ## 2. Architectural Position
 
-The Translation module sits after Text Processing and before Presentation.
+The Translation module sits after Text Processing and before Presentation. Image-originated content reaches Text Processing through Recognition, while text-originated content may reach Text Processing directly.
 
 ```text
-Content Source
+Source
       ↓
-Content Acquisition
+Observation
       ↓
-Content Extraction
+Recognition        (image-originated content only)
       ↓
 Text Processing
       ↓
@@ -129,19 +129,23 @@ The Translation module owns the following responsibilities.
 
 The module creates and manages translation jobs.
 
-A translation job represents one attempt to translate a specific immutable source revision using a specific translation configuration.
+A translation job represents one logical request to translate a specific immutable prepared-content revision under a specific translation intent and immutable configuration snapshot.
+
+A translation attempt represents one physical execution attempt performed for a translation batch within that logical job.
 
 The module controls:
 
 * job creation;
 * validation;
-* scheduling;
+* translation work planning;
+* execution-request submission to Runtime;
 * batching;
-* provider execution;
-* timeout handling;
-* retry handling;
-* fallback handling;
-* cancellation;
+* provider requirement resolution;
+* provider execution request construction;
+* translation-specific timeout policy;
+* translation-specific retry eligibility;
+* translation-specific fallback policy;
+* logical cancellation intent and authority invalidation;
 * result assembly;
 * result publication.
 
@@ -269,11 +273,11 @@ It prevents structurally unsafe or obviously unusable results from becoming auth
 
 ### 4.7 Retry and fallback
 
-The module may retry a translation when execution fails or output is invalid.
+The module may recommend retry when execution fails or output is invalid.
 
-It may also route subsequent attempts to another provider.
+It may also recommend a subsequent attempt through another provider when policy allows. Runtime owns retry-budget enforcement, backoff, admission, and attempt scheduling.
 
-Retry and fallback decisions must consider:
+Translation-specific retry and fallback recommendations must consider:
 
 * error category;
 * retryability;
@@ -322,6 +326,43 @@ Provider metadata must be normalized before leaving the module.
 
 ---
 
+## 4.10 Runtime execution boundary
+
+Translation owns translation-domain intent and policy. Runtime owns generic execution mechanics.
+
+```text
+Translation decides what should be attempted
+        ↓
+Runtime decides when and how the attempt executes
+```
+
+Translation owns:
+
+* translation-job domain state;
+* batch construction;
+* context construction;
+* translation-specific validation;
+* retry eligibility and fallback recommendation;
+* result assembly;
+* translation variants;
+* translation revision publication.
+
+Runtime owns:
+
+* queue admission;
+* scheduling;
+* worker execution;
+* generic timeout enforcement;
+* retry-budget enforcement and backoff;
+* cancellation propagation;
+* resource and concurrency admission;
+* backpressure;
+* attempt terminal outcome recording.
+
+Translation must not create a second scheduler, retry engine, cancellation coordinator, or provider-lifecycle manager inside the module.
+
+---
+
 ## 5. Non-Responsibilities
 
 The Translation module does not own the following responsibilities.
@@ -337,7 +378,7 @@ It does not:
 * fetch comic images;
 * manage browser permissions.
 
-These belong to Content Acquisition or platform integration components.
+These belong to Source, Observation, or platform integration components.
 
 ---
 
@@ -352,7 +393,7 @@ It does not:
 * detect image captions;
 * determine reading order from an image.
 
-These belong to Content Extraction.
+These belong primarily to Recognition, with source-specific extraction responsibilities remaining upstream.
 
 ---
 
@@ -444,6 +485,34 @@ TranslationResult
 ```
 
 These units must not be treated as interchangeable.
+
+---
+
+## 6.1 Identity and revision ownership
+
+Translation owns the following identities and revisions:
+
+```text
+TranslationIntentId
+TranslationJobId
+TranslationBatchId
+TranslationAttemptId
+TranslationVariantId
+TranslationRevision
+```
+
+Their meanings are distinct:
+
+* `TranslationIntentId` identifies the logical translation request intent.
+* `TranslationJobId` identifies one job created for that intent and prepared-content revision.
+* `TranslationBatchId` identifies one independently executable provider unit.
+* `TranslationAttemptId` identifies one physical execution attempt for a batch.
+* `TranslationVariantId` identifies one immutable translated variant.
+* `TranslationRevision` identifies the published version of Translation-owned state.
+
+Changing the active translation variant increases `TranslationRevision` without changing `ContentRevision`. Presentation may then create a new `PresentationRevision`.
+
+Reading Session owns `ContentRevision`. Translation must never generate or mutate it.
 
 ---
 
@@ -894,7 +963,10 @@ The adapter must not decide:
 * whether a result becomes authoritative;
 * whether another provider should be tried;
 * how results are presented;
-* how glossaries are stored.
+* how glossaries are stored;
+* retry budget, backoff, queue admission, or worker scheduling.
+
+Provider Management owns provider registry, provider-instance lifecycle, credential resolution, availability, health, connection reuse, model residency, and reusable provider resources. Translation consumes provider descriptors and leases through stable boundaries.
 
 Those decisions belong to the Translation core or surrounding modules.
 
@@ -913,7 +985,7 @@ Examples:
 * batch translation;
 * deterministic parameters;
 * token usage reporting;
-* cancellation;
+* logical cancellation intent and authority invalidation;
 * model selection;
 * low-latency mode.
 
@@ -1014,16 +1086,15 @@ A result may additionally contain:
 
 Not every completed provider request becomes the active translation result.
 
-Before publication, the module must verify:
+Before producing a publishable candidate, the module must verify:
 
 * the translation job is still active;
-* the source revision is still relevant;
-* the result has not been cancelled;
-* the result has not been superseded;
+* the result has not been logically cancelled;
+* the result has not been superseded inside Translation;
 * output validation passed;
 * publication policy allows partial output.
 
-Only then may the result become authoritative.
+Reading Session remains the final authority for whether the candidate still belongs to the current content revision. A technically completed translation is not automatically the current visible translation.
 
 ---
 
@@ -1044,9 +1115,14 @@ The minimum stale-result check should compare:
 
 ```text
 ReadingSessionId
+SessionEpoch?
 PreparedDocumentId
 ContentRevision
+TranslationIntentId
 TranslationJobId
+TranslationRevision
+ConfigurationSnapshotId
+KnowledgeSnapshotId?
 ```
 
 Additional revision information may also participate.
@@ -1094,7 +1170,7 @@ It may still retain diagnostic metadata.
 
 ## 34. Retry Semantics
 
-A retry is a new execution attempt.
+A retry is a new execution attempt. Runtime creates and schedules the physical attempt after Translation determines that retry is semantically allowed and the retry policy admits it.
 
 The architecture should distinguish:
 
@@ -1112,9 +1188,11 @@ Recommended model:
 
 ```text
 TranslationJob
-      ├── Attempt 1
-      ├── Attempt 2
-      └── Attempt 3
+      ├── TranslationBatch A
+      │       ├── TranslationAttempt 1
+      │       └── TranslationAttempt 2
+      └── TranslationBatch B
+              └── TranslationAttempt 1
 ```
 
 This is preferable to creating an unrelated job for every provider retry.
@@ -1123,7 +1201,7 @@ A new job should be created when the user or system starts a logically new trans
 
 A new attempt should be created when the same logical request is re-executed.
 
-This distinction must be reflected in `CONTRACTS.md`.
+This distinction must be reflected in `CONTRACT.md`.
 
 ---
 
@@ -1356,17 +1434,19 @@ equivalent completed request
 reuse cached result
 ```
 
-Idempotency rules will be formalized in `CONTRACTS.md`.
+Idempotency rules will be formalized in `CONTRACT.md`.
 
 ---
 
 ## 46. Concurrency
 
-The module may execute:
+The module may request execution for:
 
 * multiple jobs concurrently;
 * multiple batches within one job concurrently;
 * multiple provider attempts concurrently where policy allows.
+
+Runtime owns actual concurrency admission, queueing, worker placement, backpressure, and resource limits.
 
 Concurrency must preserve:
 
@@ -1659,7 +1739,7 @@ PREFETCH
 BACKGROUND
 ```
 
-The module may schedule higher-priority work first.
+The module may attach priority intent to translation work. Runtime decides actual queue ordering and execution admission.
 
 Priority must not change semantic output contracts.
 
@@ -1698,7 +1778,7 @@ Expected command categories include:
 * invalidate translation;
 * retry failed work.
 
-Exact command contracts belong in `CONTRACTS.md`.
+Exact command contracts belong in `CONTRACT.md`.
 
 ---
 
@@ -1866,9 +1946,9 @@ The MVP Translation module should support:
 * provider abstraction;
 * at least one remote provider adapter;
 * stable segment alignment;
-* timeout handling;
+* translation-specific timeout policy;
 * basic retry;
-* cancellation;
+* logical cancellation intent and authority invalidation;
 * stale-result rejection;
 * normalized errors;
 * basic terminology injection;
@@ -2045,13 +2125,13 @@ The remaining Translation documents should be created in this order:
 ```text
 MODULE.md
     ↓
-CONTRACTS.md
+CONTRACT.md
+    ↓
+STATES.md
     ↓
 EVENTS.md
     ↓
 ERRORS.md
-    ↓
-STATES.md
     ↓
 README.md
 ```
@@ -2062,17 +2142,17 @@ Responsibilities:
 MODULE.md
     Defines boundaries and architectural decisions.
 
-CONTRACTS.md
+CONTRACT.md
     Defines public commands and data models.
-
-EVENTS.md
-    Defines published integration events.
-
-ERRORS.md
-    Defines normalized failures and warnings.
 
 STATES.md
     Defines lifecycle states and transitions.
+
+EVENTS.md
+    Defines published integration events aligned with state transitions.
+
+ERRORS.md
+    Defines normalized failures and warnings.
 
 README.md
     Provides the concise module entry point.
@@ -2091,9 +2171,19 @@ docs/architecture/STATE_MACHINE.md
 docs/architecture/EVENT_BUS.md
 docs/architecture/MODULE_DEPENDENCY.md
 docs/architecture/DATA_FLOW.md
+docs/architecture/runtime/PIPELINE_RUNTIME.md
+docs/architecture/runtime/SCHEDULER.md
+docs/architecture/runtime/WORK_QUEUE.md
+docs/architecture/runtime/CANCELLATION.md
+docs/architecture/runtime/RETRY_POLICY.md
+docs/architecture/runtime/RUNTIME_COMPONENTS.md
 
+modules/reading-session/MODULE.md
+modules/presentation/MODULE.md
+modules/provider-management/MODULE.md
+modules/knowledge/MODULE.md
 modules/text-processing/MODULE.md
-modules/text-processing/CONTRACTS.md
+modules/text-processing/CONTRACT.md
 modules/text-processing/EVENTS.md
 modules/text-processing/ERRORS.md
 modules/text-processing/STATES.md
@@ -2103,7 +2193,7 @@ modules/text-processing/README.md
 Future related documents:
 
 ```text
-modules/translation/CONTRACTS.md
+modules/translation/CONTRACT.md
 modules/translation/EVENTS.md
 modules/translation/ERRORS.md
 modules/translation/STATES.md
