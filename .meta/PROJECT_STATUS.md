@@ -77,8 +77,9 @@ Implementation
 | Capability Analysis | ✅ Complete | Core capabilities and their boundaries are documented. |
 | Core Architecture | ✅ Complete | State, event, dependency and data-flow foundations are defined. |
 | Runtime Architecture | ✅ Runtime v2 synchronized | Runtime documents now use the same WorkItem/Attempt, authority, Candidate Artifact, ownership, publication, Lease, retention and disposal model. |
-| Business Module Architecture | 🟡 Cross-module synchronization | All principal module document sets exist. Storage and Recognition have completed the latest consolidation; remaining modules may still require Runtime v2 terminology review. |
+| Business Module Architecture | ✅ Complete | Core business modules (including Translation, Presentation and Provider Management) have completed the standard document set. Cross-module Runtime v2 terminology review remains an ongoing maintenance task. |
 | Detailed Recognition/OCR Architecture | 🟡 Next review area | The detailed `doc/01-architecture/ocr/` documents exist but have not yet been reconciled with the newly completed Recognition module contracts. |
+| Infrastructure Architecture | 🟡 In Progress | Configuration Infrastructure module document set has been completed and Infrastructure documentation has started. |
 | Technology Selection | ⏳ Not Started | Frameworks, languages, providers and process topology have not been finalized. |
 | Implementation | ❌ Not Started | No production implementation has begun. |
 
@@ -132,10 +133,12 @@ Presentation Commit
 | Capture | ✅ Documented | Module overview, contract, events, states and errors exist; later Runtime v2 terminology review may still be needed. |
 | Recognition | ✅ Runtime v2 synchronized | `README.md`, `MODULE.md`, `CONTRACT.md`, `STATES.md`, `EVENTS.md` and `ERRORS.md` now share the Candidate Artifact and Runtime authority model. |
 | Text Processing | ✅ Documented | Produces normalized and structured source data for Translation; cross-check against the new Recognition Artifact boundary remains a later synchronization task. |
-| Translation | ✅ Documented | Owns translation semantics and translation output, not presentation layout. |
-| Presentation | ✅ Documented | Module documentation and architecture review have been completed. |
+| Translation | ✅ Complete | Standard document set completed and synchronized. |
+| Presentation | ✅ Complete | Standard document set completed. |
 | Reading / Reading Session | ✅ Documented | Reading/session responsibilities and lifecycle have been designed. |
 | Storage | ✅ Complete | Storage was consolidated as a Persistence Capability with README, contracts, models, migration, states, events and errors. |
+| Provider Management | ✅ Complete | Standard document set (README, MODULE, CONTRACT, STATES, EVENTS, ERRORS) completed. |
+| Configuration Infrastructure | ✅ Complete | MODULE, CONTRACT, STATES, EVENTS, ERRORS and README completed. |
 | Preferences | ✅ Documented | Module document set exists. |
 | Diagnostics | ✅ Documented | Module document set exists. |
 | UI Adapter | ✅ Documented | Module document set exists and remains separate from Presentation semantics. |
