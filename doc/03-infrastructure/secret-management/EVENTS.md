@@ -1,3665 +1,3942 @@
-# Configuration Events
+# Secret Management Events
 
-> **Project:** CRAI
+> **Project:** CRAI  
+> **Layer:** Infrastructure  
+> **Module:** Secret Management  
+> **Document:** Integration Events  
+> **Path:** `03-infrastructure/secret-management/EVENTS.md`  
+> **Version:** 0.1  
+> **Status:** Architecture Draft  
+> **Last Updated:** 2026-08-05  
+> **Source of Truth:**
 >
-> **Layer:** Infrastructure
->
-> **Module:** Configuration
->
-> **Document:** Event Specification
->
-> **Path:** `03-infrastructure/configuration/EVENTS.md`
->
-> **Status:** Architecture Draft
+> - `03-infrastructure/secret-management/MODULE.md`
+> - `03-infrastructure/secret-management/CONTRACT.md`
+> - `03-infrastructure/secret-management/STATES.md`
+> - `03-infrastructure/configuration/MODULE.md`
+> - `03-infrastructure/configuration/CONTRACT.md`
+> - `02-modules/provider-management/MODULE.md`
+> - `02-modules/provider-management/CONTRACT.md`
+> - `02-modules/provider-management/STATES.md`
+> - `02-modules/provider-management/EVENTS.md`
+> - `docs/architecture/EVENT_BUS.md`
+> - `docs/architecture/DATA_FLOW.md`
+> - `docs/architecture/runtime/RUNTIME_OBSERVABILITY.md`
+> - `docs/architecture/runtime/ERROR_MODEL.md`
 
 ---
 
-# 1. Purpose
+## 1. Purpose
 
-This document defines every event published by the Configuration Infrastructure module.
+This document defines the integration events published and consumed by the Secret Management infrastructure module.
 
-It specifies:
+The events communicate facts that have already occurred, including:
 
-- event taxonomy
-- event ownership
-- event ordering
-- event lifecycle
-- event payloads
-- event versioning
-- event visibility
-- delivery guarantees
+- secret descriptor registration and lifecycle changes;
+- secret revision activation, supersession, expiration, revocation, and deletion;
+- normalized secret availability changes;
+- secret lease lifecycle;
+- secure backend lifecycle;
+- backend lock, unlock, degradation, unavailability, and compromise;
+- secret validation outcomes;
+- rotation lifecycle and outcomes;
+- migration lifecycle and outcomes;
+- removal and deletion outcomes;
+- user-action requirements;
+- uncertain operations and reconciliation;
+- security-policy enforcement;
+- redaction and exposure prevention;
+- safe administrative and observability signals.
 
-This document intentionally excludes:
+These events allow Configuration, Provider Management, Runtime, Administration, Presentation, Observability, and approved infrastructure consumers to react without coupling to Secret Management internals.
 
-- commands
-- queries
-- lifecycle states
-- errors
+This document does not define:
 
-Those belong to:
-
-```
-CONTRACT.md
-
-STATES.md
-
-ERRORS.md
-```
-
----
-
-# 2. Event Philosophy
-
-Configuration Infrastructure is event-driven.
-
-Every meaningful state transition should produce an observable event.
-
-Events are:
-
-- immutable
-- append-only
-- versioned
-- replayable
-- transport-neutral
-- implementation-independent
-
-Events describe:
-
-```
-What happened
-```
-
-never
-
-```
-What should happen
-```
+- commands;
+- query contracts;
+- raw secret transport;
+- operating-system keychain callbacks;
+- provider-native authentication callbacks;
+- detailed state-transition validation;
+- detailed error catalogs;
+- persistence tables;
+- UI wording;
+- Runtime work events;
+- Provider Management provider events;
+- audit-log storage implementation.
 
 ---
 
-# 3. Event Goals
+## 2. Event Principles
 
-Configuration events exist to:
+### 2.1 Events represent facts
 
-- notify consumers
-- synchronize infrastructure
-- support diagnostics
-- support audit
-- support replay
-- support observability
+Event names use past-tense semantics.
 
-Events never exist solely for UI updates.
+Correct:
 
----
-
-# 4. Event Categories
-
-Configuration publishes:
-
-```
-Source Events
-
-Reload Events
-
-Candidate Events
-
-Snapshot Events
-
-Revision Events
-
-Validation Events
-
-Compatibility Events
-
-Migration Events
-
-Override Events
-
-Consumer Events
-
-Diagnostic Events
+```text
+SecretRegistered
+SecretRevisionActivated
+SecretAvailabilityChanged
+SecretLeaseRevoked
+SecretBackendLocked
+SecretRotationCompleted
 ```
 
----
+Incorrect:
 
-# 5. Event Ownership
-
-Configuration owns every event related to:
-
-- configuration lifecycle
-- configuration publication
-- configuration history
-- configuration metadata
-
-Consumer modules own events describing:
-
-- business behavior
-- runtime execution
-- translation
-- recognition
-- presentation
-
----
-
-# 6. Event Characteristics
-
-Every event must satisfy:
-
-✓ immutable
-
-✓ timestamped
-
-✓ versioned
-
-✓ replay-safe
-
-✓ serializable
-
-✓ transport neutral
-
-✓ secret safe
-
----
-
-# 7. Event Envelope
-
-Every Configuration event conceptually uses the same envelope.
-
+```text
+RegisterSecret
+ActivateRevision
+ResolveSecret
+RevokeLease
+UnlockBackend
+RotateSecret
 ```
-ConfigurationEvent
 
-{
+The incorrect forms express commands.
 
+---
+
+### 2.2 Events are immutable
+
+After publication, an event must never be modified.
+
+A correction or later transition requires a new event.
+
+---
+
+### 2.3 State commits before publication
+
+Correct order:
+
+```text
+Validate transition
+    ↓
+Persist authoritative state
+    ↓
+Commit
+    ↓
+Publish safe event
+```
+
+An event must not claim a transition that was not committed.
+
+---
+
+### 2.4 Events never transport secret material
+
+No Secret Management event may contain:
+
+- raw API keys;
+- access tokens;
+- refresh tokens;
+- passwords;
+- client secrets;
+- private keys;
+- certificate private material;
+- authorization headers;
+- decrypted compound credentials;
+- secret handles;
+- secret leases containing handles;
+- backend decrypted payloads;
+- raw environment values;
+- provider-native credential objects;
+- material fingerprints derived unsafely from the secret;
+- raw aliases when policy marks them sensitive.
+
+Sensitive administrative inputs use direct trusted contracts, never Event Bus.
+
+---
+
+### 2.5 Events use safe identity
+
+Events may include:
+
+```text
+secretId
+safeReference
+referenceId
+secretRevision
+secretLeaseId
+secretBackendId
+operationId
+rotationId
+migrationId
+validationId
+consumerId
+providerId
+```
+
+Safe reference display must follow redaction policy.
+
+---
+
+### 2.6 Events are compact facts, not snapshots
+
+Events should contain:
+
+- stable identifiers;
+- previous and current states when useful;
+- revision information;
+- reason codes;
+- bounded safe metadata;
+- references to queryable descriptors;
+- timestamps;
+- correlation context.
+
+Events should not copy:
+
+- full descriptors;
+- full policy definitions;
+- full validation evidence;
+- full backend configuration;
+- full operation histories;
+- large audit trails.
+
+---
+
+### 2.7 Events may be delivered more than once
+
+Consumers must be idempotent.
+
+Recommended deduplication keys:
+
+```text
+eventId
+```
+
+or:
+
+```text
+entityId + stateVersion + eventType
+```
+
+A duplicate event must not create duplicate revocation, rotation, deletion, or user prompts.
+
+---
+
+### 2.8 Ordering is entity-scoped
+
+Ordering should be preserved per relevant entity where practical:
+
+```text
+SecretId
+SecretLeaseId
+SecretBackendId
+SecretRotationId
+SecretMigrationId
+```
+
+Global ordering across all secrets is not required.
+
+---
+
+### 2.9 Events do not replace queries
+
+Consumers needing current truth must query Secret Management.
+
+Events describe what happened.
+
+They are not guaranteed to contain the complete latest descriptor or policy.
+
+---
+
+### 2.10 Events do not grant authority
+
+Receiving an event does not authorize:
+
+- secret resolution;
+- lease acquisition;
+- secret enumeration;
+- backend unlock;
+- rotation;
+- removal;
+- export.
+
+Authority remains governed by direct contracts and access policy.
+
+---
+
+### 2.11 Events are backend-neutral
+
+Public and shared events must not expose:
+
+- Windows Credential Manager objects;
+- macOS Keychain objects;
+- Linux Secret Service objects;
+- external secret-manager SDK objects;
+- platform-native error payloads;
+- platform credential file locations.
+
+Normalized backend type and state may be included.
+
+---
+
+### 2.12 Events are consumer-neutral
+
+Secret events must not assume that every secret belongs to Translation.
+
+The same model supports:
+
+- Translation providers;
+- Recognition providers;
+- remote configuration;
+- application authentication;
+- future infrastructure consumers;
+- session-only tokens;
+- certificates and signing keys.
+
+---
+
+## 3. Event Visibility Classes
+
+Secret Management events use explicit visibility.
+
+```text
+PUBLIC_INTERNAL
+RESTRICTED_SECURITY
+OBSERVABILITY_ONLY
+AUDIT_ONLY
+LOCAL_COMPONENT_ONLY
+```
+
+### 3.1 PUBLIC_INTERNAL
+
+Visible to approved application modules through the internal Event Bus.
+
+Examples:
+
+- safe availability changes;
+- descriptor registration;
+- revision activation;
+- rotation completion;
+- provider-relevant credential changes.
+
+### 3.2 RESTRICTED_SECURITY
+
+Visible only to explicitly authorized security, lifecycle, and administration subscribers.
+
+Examples:
+
+- backend compromise;
+- exposure attempt blocked;
+- access-policy violation;
+- security revocation;
+- suspicious consumer mismatch.
+
+These events must not be broadcast on a general unrestricted topic.
+
+### 3.3 OBSERVABILITY_ONLY
+
+Operational signals consumed by metrics, tracing, or diagnostics.
+
+Examples:
+
+- lease count changes;
+- backend initialization duration;
+- validation latency class;
+- candidate cleanup failure summary.
+
+### 3.4 AUDIT_ONLY
+
+Administrative facts requiring durable restricted audit retention.
+
+Examples:
+
+- secret registered by an actor;
+- access policy changed;
+- secret removed;
+- export approved;
+- provider-side revocation requested.
+
+Audit-only events may use a dedicated restricted sink rather than the normal Event Bus.
+
+### 3.5 LOCAL_COMPONENT_ONLY
+
+High-frequency or highly sensitive lifecycle details used only inside Secret Management.
+
+Examples:
+
+- lease request entered evaluation;
+- material candidate stored;
+- backend handle opened;
+- internal buffer cleanup completed.
+
+These should normally remain internal callbacks or local telemetry.
+
+---
+
+## 4. Event Envelope
+
+Secret Management uses the CRAI event envelope.
+
+```text
+SecretManagementEventEnvelope {
     eventId
-
     eventType
-
     eventVersion
 
-    aggregateId
-
-    aggregateType
-
-    aggregateRevision
-
     occurredAt
+    publishedAt
 
-    producer
+    sourceModule = "secret-management"
+    sourceComponent?
+
+    correlationId
+    causationId?
+    operationId?
+
+    applicationInstanceId
+    processInstanceId?
+
+    secretId?
+    secretRevision?
+    secretLeaseId?
+    secretBackendId?
+    rotationId?
+    migrationId?
+    validationId?
+
+    sessionId?
+    providerId?
+    consumerId?
+
+    visibility
+    securityClassification
 
     payload
-
+    metadata
 }
 ```
 
-The envelope is conceptual.
-
-Transport implementations may wrap it differently.
-
 ---
 
-# 8. Event Identity
+## 5. Envelope Rules
 
-Every event owns:
+### 5.1 Required fields
 
-```
-ConfigurationEventId
-```
+Every event requires:
 
-Properties
-
-- globally unique
-- immutable
-- never reused
-
----
-
-# 9. Aggregate Types
-
-Supported aggregate types.
-
-```
-ConfigurationSource
-
-ConfigurationCandidate
-
-ConfigurationSnapshot
-
-ConfigurationRevision
-
-ConfigurationOverride
-
-Validation
-
-Compatibility
-
-Migration
-
-Reload
-```
-
-Each event references exactly one aggregate.
-
----
-
-# 10. Aggregate Revision
-
-Every event belongs to exactly one aggregate revision.
-
-Aggregate revision differs from:
-
-```
-Configuration Revision
-```
-
-Some aggregates have their own revision.
-
----
-
-# 11. Event Timestamp
-
-Every event records:
-
-```
-occurredAt
-```
-
-Timestamp represents:
-
-```
-When the event occurred
-```
-
-not
-
-```
-When the event was delivered
-```
-
----
-
-# 12. Event Ordering
-
-Ordering is guaranteed:
-
-```
-Within one aggregate
-```
-
-Ordering is **not** guaranteed globally across different aggregates.
-
----
-
-# 13. Event Version
-
-Every event carries:
-
-```
+```text
+eventId
+eventType
 eventVersion
-```
-
-Rules
-
-```
-Major
-
-↓
-
-Breaking payload change
-
-Minor
-
-↓
-
-Backward compatible change
-```
-
----
-
-# 14. Event Visibility
-
-Configuration events may be:
-
-```
-Internal
-
-Infrastructure
-
-Administrative
-
-Public
-```
-
-The visibility level determines intended consumers.
-
----
-
-# 15. Event Replay
-
-Every event must support replay.
-
-Replay must reconstruct:
-
-- lifecycle
-- state transitions
-- revision history
-
-Replay must never trigger duplicate side effects.
-
----
-
-# Part I — Configuration Source Events
-
-# 16. Source Event Philosophy
-
-Configuration Sources are long-lived infrastructure objects.
-
-Every lifecycle transition should publish an event.
-
----
-
-# 17. ConfigurationSourceRegistered
-
-Published when:
-
-```
-New Source Registered
-```
-
-Payload
-
-```
-sourceId
-
-sourceType
-
-precedence
-
-reloadMode
-```
-
----
-
-# 18. ConfigurationSourceEnabled
-
-Published when:
-
-```
-DISABLED
-
-↓
-
-ENABLED
-```
-
-Payload
-
-```
-sourceId
-
-enabledAt
-```
-
----
-
-# 19. ConfigurationSourceDisabled
-
-Published when:
-
-```
-ENABLED
-
-↓
-
-DISABLED
-```
-
-Payload
-
-```
-sourceId
-
-reason
-```
-
----
-
-# 20. ConfigurationSourceLoadingStarted
-
-Published when loading begins.
-
-Payload
-
-```
-sourceId
-
-reloadId
-```
-
----
-
-# 21. ConfigurationSourceLoaded
-
-Published after successful load.
-
-Payload
-
-```
-sourceId
-
-sourceRevision
-
-metadata
-```
-
-No parsed configuration values are included.
-
----
-
-# 22. ConfigurationSourceLoadFailed
-
-Published when loading fails.
-
-Payload
-
-```
-sourceId
-
-failureCode
-
-retryable
-```
-
-Secret values must never appear.
-
----
-
-# 23. ConfigurationSourceRemoved
-
-Published when:
-
-```
-Source
-
-↓
-
-REMOVED
-```
-
-Payload
-
-```
-sourceId
-```
-
-Terminal lifecycle event.
-
----
-
-# 24. Source Event Ordering
-
-Ordering
-
-```
-Registered
-
-↓
-
-Enabled
-
-↓
-
-LoadingStarted
-
-↓
-
-Loaded
-
-↓
-
-Disabled
-
-↓
-
-Removed
-```
-
-Failure events may replace successful loading.
-
----
-
-# 25. Source Event Invariants
-
-Source events guarantee:
-
-✓ one aggregate
-
-✓ deterministic ordering
-
-✓ immutable payload
-
-✓ replay safety
-
----
-
-# Part II — Reload Events
-
-# 26. Reload Philosophy
-
-Reload is an orchestration process.
-
-Reload events describe workflow progression.
-
----
-
-# 27. ConfigurationReloadRequested
-
-Published when reload is requested.
-
-Payload
-
-```
-reloadId
-
-requestedBy
-
-reason
-```
-
----
-
-# 28. ConfigurationReloadStarted
-
-Published when execution begins.
-
-Payload
-
-```
-reloadId
-```
-
----
-
-# 29. ConfigurationDiscoveryStarted
-
-Published when source discovery begins.
-
-Payload
-
-```
-reloadId
-```
-
----
-
-# 30. ConfigurationDiscoveryCompleted
-
-Published after successful discovery.
-
-Payload
-
-```
-reloadId
-
-discoveredSources
-```
-# 31. ConfigurationLoadingStarted
-
-Published when source loading begins.
-
-Payload
-
-```
-reloadId
-
-sourceCount
-```
-
-Loading starts after discovery completes.
-
----
-
-# 32. ConfigurationLoadingCompleted
-
-Published when every enabled source has been successfully loaded.
-
-Payload
-
-```
-reloadId
-
-loadedSources
-
-failedSources
-```
-
-Loaded sources are not yet authoritative.
-
----
-
-# 33. ConfigurationLoadingFailed
-
-Published when loading cannot complete.
-
-Payload
-
-```
-reloadId
-
-failureCode
-
-failedSource
-```
-
-Publication cannot continue.
-
----
-
-# 34. ConfigurationNormalizationStarted
-
-Published when normalization begins.
-
-Payload
-
-```
-reloadId
-```
-
----
-
-# 35. ConfigurationNormalizationCompleted
-
-Published after canonical representation has been created.
-
-Payload
-
-```
-reloadId
-
-normalizedSources
-```
-
----
-
-# 36. ConfigurationNormalizationFailed
-
-Published when canonical representation cannot be produced.
-
-Payload
-
-```
-reloadId
-
-failureCode
-```
-
----
-
-# 37. ConfigurationMergeStarted
-
-Published when merge processing begins.
-
-Payload
-
-```
-reloadId
-```
-
----
-
-# 38. ConfigurationMergeCompleted
-
-Published after merge finishes successfully.
-
-Payload
-
-```
-reloadId
-
-effectiveSectionCount
-```
-
-Merged values are not yet published.
-
----
-
-# 39. ConfigurationMergeFailed
-
-Published when merge fails.
-
-Payload
-
-```
-reloadId
-
-failureCode
-```
-
----
-
-# 40. ConfigurationBindingStarted
-
-Published before typed binding begins.
-
-Payload
-
-```
-reloadId
-```
-
----
-
-# 41. ConfigurationBindingCompleted
-
-Published after every section has been successfully bound.
-
-Payload
-
-```
-reloadId
-
-boundSections
-```
-
----
-
-# 42. ConfigurationBindingFailed
-
-Published when typed binding fails.
-
-Payload
-
-```
-reloadId
-
-failureCode
-```
-
----
-
-# 43. ConfigurationReloadCompleted
-
-Published after a successful publication.
-
-Payload
-
-```
-reloadId
-
-configurationRevision
-
-snapshotId
-```
-
-This indicates a new active configuration exists.
-
----
-
-# 44. ConfigurationReloadFailed
-
-Published when reload terminates unsuccessfully.
-
-Payload
-
-```
-reloadId
-
-failureStage
-
-failureCode
-```
-
----
-
-# 45. ConfigurationReloadCancelled
-
-Published when reload is intentionally cancelled.
-
-Payload
-
-```
-reloadId
-
-reason
-```
-
----
-
-# 46. Reload Event Ordering
-
-Normal ordering.
-
-```
-ReloadRequested
-
-↓
-
-ReloadStarted
-
-↓
-
-DiscoveryStarted
-
-↓
-
-DiscoveryCompleted
-
-↓
-
-LoadingStarted
-
-↓
-
-LoadingCompleted
-
-↓
-
-NormalizationStarted
-
-↓
-
-NormalizationCompleted
-
-↓
-
-MergeStarted
-
-↓
-
-MergeCompleted
-
-↓
-
-BindingStarted
-
-↓
-
-BindingCompleted
-
-↓
-
-ReloadCompleted
-```
-
-Failures terminate the sequence immediately.
-
----
-
-# 47. Reload Event Invariants
-
-Reload events guarantee:
-
-✓ one reload identifier
-
-✓ deterministic ordering
-
-✓ append-only history
-
-✓ replay safety
-
----
-
-# Part III — Candidate Events
-
-# 48. Candidate Event Philosophy
-
-Candidates are temporary configuration objects.
-
-Only one candidate may eventually become the next active snapshot.
-
----
-
-# 49. ConfigurationCandidateCreated
-
-Published when a new candidate is created.
-
-Payload
-
-```
-candidateId
-
-reloadId
-```
-
----
-
-# 50. ConfigurationCandidateValidationStarted
-
-Published before validation begins.
-
-Payload
-
-```
-candidateId
-```
-
----
-
-# 51. ConfigurationCandidateValidated
-
-Published after successful validation.
-
-Payload
-
-```
-candidateId
-
-validationId
-```
-
-Validation success does not imply publication.
-
----
-
-# 52. ConfigurationCandidateCompatibilityStarted
-
-Published before compatibility evaluation.
-
-Payload
-
-```
-candidateId
-```
-
----
-
-# 53. ConfigurationCandidateCompatible
-
-Published when compatibility succeeds.
-
-Payload
-
-```
-candidateId
-
-compatibilityId
-```
-
----
-
-# 54. ConfigurationCandidateRejected
-
-Published when candidate becomes terminal.
-
-Payload
-
-```
-candidateId
-
-reason
-```
-
-Candidate rejection prevents publication.
-
----
-
-# 55. ConfigurationCandidatePublished
-
-Published immediately before the candidate becomes the active snapshot.
-
-Payload
-
-```
-candidateId
-
-snapshotId
-
-configurationRevision
-```
-
-This event bridges Candidate and Snapshot lifecycles.
-
----
-
-# 56. Candidate Event Ordering
-
-```
-CandidateCreated
-
-↓
-
-ValidationStarted
-
-↓
-
-CandidateValidated
-
-↓
-
-CompatibilityStarted
-
-↓
-
-CandidateCompatible
-
-↓
-
-CandidatePublished
-```
-
-or
-
-```
-CandidateCreated
-
-↓
-
-CandidateRejected
-```
-
----
-
-# 57. Candidate Event Invariants
-
-Candidate events guarantee:
-
-✓ publication at most once
-
-✓ deterministic lifecycle
-
-✓ immutable payload
-
----
-
-# Part IV — Snapshot Events
-
-# 58. Snapshot Philosophy
-
-Snapshot events describe authoritative configuration history.
-
-Only published snapshots generate snapshot events.
-
----
-
-# 59. ConfigurationSnapshotCreated
-
-Published when an immutable snapshot object is created.
-
-Payload
-
-```
-snapshotId
-
-revision
-```
-
----
-
-# 60. ConfigurationSnapshotPublished
-
-Published when a snapshot becomes authoritative.
-
-Payload
-
-```
-snapshotId
-
-configurationRevision
-
+occurredAt
 publishedAt
+sourceModule
+correlationId
+applicationInstanceId
+visibility
+securityClassification
+payload
 ```
 
-This event informs consumers that a new active configuration is available.
+### 5.2 Optional identity fields
+
+Identity fields are included only when relevant and safe.
+
+### 5.3 Metadata
+
+Metadata must be:
+
+- bounded;
+- low-cardinality where used for metrics;
+- redacted;
+- free from secret material;
+- serializable;
+- documented when stable.
+
+### 5.4 Security classification
+
+Recommended values:
+
+```text
+INTERNAL
+CONFIDENTIAL_METADATA
+RESTRICTED_SECURITY
+```
+
+No event is allowed to carry raw secret material regardless of classification.
 
 ---
 
-# 61. ConfigurationSnapshotActivated
+## 6. Event Type Naming
 
-Published when:
+Canonical format:
 
-```
-Snapshot
-
-↓
-
-ACTIVE
+```text
+secret-management.<entity>.<past-tense-fact>
 ```
 
-Payload
+Examples:
 
+```text
+secret-management.secret.registered
+secret-management.revision.activated
+secret-management.availability.changed
+secret-management.lease.revoked
+secret-management.backend.locked
+secret-management.rotation.completed
 ```
-snapshotId
 
-revision
-```
+Event types are lowercase and hyphenated where necessary.
 
-Only one snapshot may be activated for a revision.
+Conceptual class names use PascalCase.
 
 ---
 
-# 62. ConfigurationSnapshotRetained
+## 7. Event Versioning
 
-Published when an active snapshot becomes historical.
+Each event type has an independent version.
 
-Payload
-
-```
-snapshotId
-
-revision
+```text
+eventType: secret-management.rotation.completed
+eventVersion: 1
 ```
 
-Historical snapshots remain queryable.
+Rules:
+
+- additive optional fields may remain compatible;
+- removing or changing field meaning requires a new version;
+- secret-safety rules cannot be weakened by versioning;
+- consumers must ignore unknown optional fields;
+- consumers must reject unsupported incompatible major versions safely;
+- persisted events retain original meaning.
 
 ---
 
-# 63. ConfigurationSnapshotExpired
+## 8. Common Safe Payload Fields
 
-Published when retention expires.
+Events may reuse:
 
-Payload
-
+```text
+SecretIdentityPayload {
+    secretId
+    referenceId?
+    safeReference?
+    kind?
+    scope?
+    providerId?
+    currentRevision?
+}
 ```
-snapshotId
+
+```text
+StateTransitionPayload {
+    previousState
+    currentState
+    reasonCode
+    stateVersion
+    changedAt
+}
 ```
 
-Expired snapshots are no longer available through normal history queries.
+```text
+OperationIdentityPayload {
+    operationId
+    operationType
+    status
+    actorId?
+}
+```
+
+`actorId` must use an internal safe identity.
 
 ---
 
-# 64. Snapshot Event Ordering
+# Part I — Descriptor Events
 
+## 9. SecretRegistrationStarted
+
+Published after a descriptor enters `REGISTERING`, when external consumers genuinely need to know that creation is in progress.
+
+Event type:
+
+```text
+secret-management.secret.registration-started
 ```
-SnapshotCreated
 
-↓
+Recommended visibility:
 
-SnapshotPublished
+```text
+AUDIT_ONLY or LOCAL_COMPONENT_ONLY
+```
 
-↓
+Payload:
 
-SnapshotActivated
+```text
+SecretRegistrationStartedPayload {
+    secretId
+    referenceId
+    kind
+    scope
+    backendId?
+    operationId
+    startedAt
+}
+```
 
-↓
+Must not include material input.
 
-SnapshotRetained
+---
 
-↓
+## 10. SecretRegistered
 
-SnapshotExpired
+Published after initial descriptor and revision activation succeeds.
+
+Event type:
+
+```text
+secret-management.secret.registered
+```
+
+Payload:
+
+```text
+SecretRegisteredPayload {
+    secretId
+    referenceId
+    safeReference?
+    kind
+    scope
+    backendId
+    activeRevision
+    persistenceMode
+    providerId?
+    registeredAt
+}
+```
+
+Recommended visibility:
+
+```text
+PUBLIC_INTERNAL
+AUDIT_ONLY copy where required
+```
+
+Expected consumers:
+
+- Configuration diagnostics;
+- Provider Management;
+- Administration;
+- Observability.
+
+---
+
+## 11. SecretRegistrationFailed
+
+Published only as a safe operational event when registration failed after an accepted operation.
+
+Event type:
+
+```text
+secret-management.secret.registration-failed
+```
+
+Payload:
+
+```text
+SecretRegistrationFailedPayload {
+    operationId
+    secretId?
+    referenceId?
+    normalizedErrorCode
+    failureStage
+    retryable
+    userActionRequired
+    failedAt
+}
+```
+
+Recommended visibility:
+
+```text
+OBSERVABILITY_ONLY
+AUDIT_ONLY when administrative
+```
+
+Detailed error data belongs in error handling, not the event.
+
+---
+
+## 12. SecretSuspended
+
+Published after descriptor state becomes `SUSPENDED`.
+
+Event type:
+
+```text
+secret-management.secret.suspended
+```
+
+Payload:
+
+```text
+SecretSuspendedPayload {
+    secretId
+    referenceId
+    currentRevision?
+    previousState
+    currentState = SUSPENDED
+    reasonCode
+    activeLeasePolicy
+    suspendedAt
+}
+```
+
+Recommended visibility:
+
+```text
+PUBLIC_INTERNAL
+```
+
+Provider Management may stop selecting affected provider paths.
+
+---
+
+## 13. SecretReactivated
+
+Published after explicit recovery returns a suspended or revoked descriptor to `ACTIVE`.
+
+Event type:
+
+```text
+secret-management.secret.reactivated
+```
+
+Payload:
+
+```text
+SecretReactivatedPayload {
+    secretId
+    referenceId
+    previousState
+    currentState = ACTIVE
+    activeRevision
+    recoveryReason
+    reactivatedAt
+}
+```
+
+Reactivation must never imply reuse of revoked material unless policy explicitly verified reinstatement.
+
+---
+
+## 14. SecretRevoked
+
+Published after the descriptor becomes `REVOKED`.
+
+Event type:
+
+```text
+secret-management.secret.revoked
+```
+
+Payload:
+
+```text
+SecretRevokedPayload {
+    secretId
+    referenceId
+    previousState
+    currentState = REVOKED
+    revokedRevision?
+    reasonCode
+    revocationClass
+    activeLeasePolicy
+    providerRevocationStatus?
+    revokedAt
+}
+```
+
+Possible revocation classes:
+
+```text
+ADMINISTRATIVE
+SECURITY
+PROVIDER_REPORTED
+POLICY
+EXPIRATION_ESCALATION
+BACKEND_COMPROMISE
+ACCOUNT_DISCONNECTED
+```
+
+Recommended visibility:
+
+```text
+PUBLIC_INTERNAL
+RESTRICTED_SECURITY for security details
+AUDIT_ONLY
 ```
 
 ---
 
-# 65. Snapshot Event Invariants
+## 15. SecretRemovalStarted
 
-Snapshot events guarantee:
+Published after descriptor state becomes `REMOVING`.
 
-✓ immutable snapshot identity
+Event type:
 
-✓ append-only history
-
-✓ exactly one activation
-
-✓ replay-safe publication
-
-# Part V — Configuration Revision Events
-
-# 66. Revision Event Philosophy
-
-Configuration Revisions represent the authoritative history of configuration evolution.
-
-Unlike snapshots, revisions describe:
-
-- historical progression;
-- publication order;
-- audit sequence.
-
-Every accepted revision publishes events.
-
----
-
-# 67. ConfigurationRevisionAllocated
-
-Published when a new revision number is reserved.
-
-Payload
-
-```
-configurationRevision
-
-candidateId
+```text
+secret-management.secret.removal-started
 ```
 
-Allocation does not imply publication.
+Payload:
 
----
-
-# 68. ConfigurationRevisionPublished
-
-Published when a revision becomes authoritative.
-
-Payload
-
-```
-configurationRevision
-
-snapshotId
-
-publishedAt
+```text
+SecretRemovalStartedPayload {
+    secretId
+    referenceId
+    previousState
+    currentState = REMOVING
+    removalMode
+    activeLeasePolicy
+    providerRevocationRequested
+    startedAt
+}
 ```
 
-This is the primary synchronization event for consumers.
+Recommended visibility:
 
----
-
-# 69. ConfigurationRevisionSuperseded
-
-Published when a newer revision replaces the current revision.
-
-Payload
-
-```
-previousRevision
-
-newRevision
-```
-
-Historical revisions remain immutable.
-
----
-
-# 70. ConfigurationRevisionExpired
-
-Published when historical retention removes a revision.
-
-Payload
-
-```
-configurationRevision
-```
-
-Expiration never changes historical audit records.
-
----
-
-# 71. Revision Event Ordering
-
-```
-RevisionAllocated
-
-↓
-
-RevisionPublished
-
-↓
-
-RevisionSuperseded
-
-↓
-
-RevisionExpired
+```text
+AUDIT_ONLY
+PUBLIC_INTERNAL when consumers must stop use
 ```
 
 ---
 
-# 72. Revision Event Invariants
+## 16. SecretRemoved
 
-Revision events guarantee:
+Published after descriptor reaches `REMOVED`.
 
-✓ globally ordered revisions
+Event type:
 
-✓ immutable publication history
+```text
+secret-management.secret.removed
+```
 
-✓ deterministic replay
+Payload:
+
+```text
+SecretRemovedPayload {
+    secretId
+    referenceId
+    previousState
+    currentState = REMOVED
+    lastRevision
+    removalAssurance
+    providerRevocationStatus?
+    descriptorRetained
+    removedAt
+}
+```
+
+Must not claim physical erasure beyond recorded assurance.
+
+---
+
+## 17. SecretTombstoned
+
+Published after descriptor metadata is reduced to a tombstone.
+
+Event type:
+
+```text
+secret-management.secret.tombstoned
+```
+
+Payload:
+
+```text
+SecretTombstonedPayload {
+    secretId
+    referenceHash?
+    lastRevision
+    removalAssurance
+    tombstonedAt
+    retentionExpiresAt?
+}
+```
+
+Recommended visibility:
+
+```text
+AUDIT_ONLY
+```
+
+---
+
+# Part II — Revision Events
+
+## 18. SecretRevisionCandidateCreated
+
+Published only when candidate lifecycle visibility is required.
+
+Event type:
+
+```text
+secret-management.revision.candidate-created
+```
+
+Recommended visibility:
+
+```text
+LOCAL_COMPONENT_ONLY or OBSERVABILITY_ONLY
+```
+
+Payload:
+
+```text
+SecretRevisionCandidateCreatedPayload {
+    secretId
+    candidateRevision
+    operationId
+    candidateSource
+    createdAt
+}
+```
+
+Must not include candidate material or material-derived fragments.
+
+---
+
+## 19. SecretRevisionReady
+
+Published after a candidate enters `READY`.
+
+Event type:
+
+```text
+secret-management.revision.ready
+```
+
+Recommended visibility:
+
+```text
+LOCAL_COMPONENT_ONLY
+```
+
+Payload:
+
+```text
+SecretRevisionReadyPayload {
+    secretId
+    candidateRevision
+    validationStatus
+    readyAt
+}
+```
+
+---
+
+## 20. SecretRevisionActivated
+
+Published after a revision becomes authoritative.
+
+Event type:
+
+```text
+secret-management.revision.activated
+```
+
+Payload:
+
+```text
+SecretRevisionActivatedPayload {
+    secretId
+    referenceId
+    previousActiveRevision?
+    currentActiveRevision
+    activationReason
+    backendId
+    activatedAt
+}
+```
+
+Recommended visibility:
+
+```text
+PUBLIC_INTERNAL
+AUDIT_ONLY
+```
+
+Provider Management may rebuild credential-bound clients or create new leases against the new revision.
+
+---
+
+## 21. SecretRevisionSuperseded
+
+Published after an older revision becomes `SUPERSEDED`.
+
+Event type:
+
+```text
+secret-management.revision.superseded
+```
+
+Payload:
+
+```text
+SecretRevisionSupersededPayload {
+    secretId
+    supersededRevision
+    successorRevision
+    existingLeasePolicy
+    supersededAt
+}
+```
+
+No new lease may bind to the superseded revision.
+
+---
+
+## 22. SecretRevisionExpired
+
+Published after a revision becomes `EXPIRED`.
+
+Event type:
+
+```text
+secret-management.revision.expired
+```
+
+Payload:
+
+```text
+SecretRevisionExpiredPayload {
+    secretId
+    referenceId
+    revision
+    expiresAt
+    renewable
+    refreshPolicy?
+    activeLeasePolicy
+    detectedAt
+}
+```
+
+Expected consumers:
+
+- Provider Management;
+- Administration;
+- lifecycle automation;
+- observability.
+
+---
+
+## 23. SecretRevisionRevoked
+
+Published after a specific revision becomes `REVOKED`.
+
+Event type:
+
+```text
+secret-management.revision.revoked
+```
+
+Payload:
+
+```text
+SecretRevisionRevokedPayload {
+    secretId
+    revision
+    reasonCode
+    activeLeasePolicy
+    revokedAt
+}
+```
+
+Recommended visibility:
+
+```text
+PUBLIC_INTERNAL
+RESTRICTED_SECURITY where applicable
+```
+
+---
+
+## 24. SecretRevisionInvalidated
+
+Published after authoritative evidence marks a revision `INVALID`.
+
+Event type:
+
+```text
+secret-management.revision.invalidated
+```
+
+Payload:
+
+```text
+SecretRevisionInvalidatedPayload {
+    secretId
+    revision
+    validationId?
+    invalidationClass
+    normalizedReasonCode
+    descriptorAction
+    leaseAction
+    invalidatedAt
+}
+```
+
+Must not include raw validation evidence.
+
+---
+
+## 25. SecretRevisionDeletionStarted
+
+Event type:
+
+```text
+secret-management.revision.deletion-started
+```
+
+Recommended visibility:
+
+```text
+AUDIT_ONLY or LOCAL_COMPONENT_ONLY
+```
+
+Payload:
+
+```text
+SecretRevisionDeletionStartedPayload {
+    secretId
+    revision
+    backendId
+    requestedAssurance
+    startedAt
+}
+```
+
+---
+
+## 26. SecretRevisionDeleted
+
+Event type:
+
+```text
+secret-management.revision.deleted
+```
+
+Payload:
+
+```text
+SecretRevisionDeletedPayload {
+    secretId
+    revision
+    backendId
+    effectiveAssurance
+    verificationStatus
+    deletedAt
+}
+```
+
+Recommended visibility:
+
+```text
+AUDIT_ONLY
+```
+
+---
+
+# Part III — Availability Events
+
+## 27. SecretAvailabilityChanged
+
+Published when normalized availability changes materially.
+
+Event type:
+
+```text
+secret-management.availability.changed
+```
+
+Payload:
+
+```text
+SecretAvailabilityChangedPayload {
+    secretId
+    referenceId
+    providerId?
+    previousAvailability
+    currentAvailability
+    revision?
+    backendId?
+    reasonCode
+    requiresUserAction
+    retryAfter?
+    changedAt
+}
+```
+
+Possible values:
+
+```text
+UNKNOWN
+AVAILABLE
+UNAVAILABLE
+MISSING
+LOCKED
+EXPIRED
+REVOKED
+INVALID
+BACKEND_UNAVAILABLE
+ACCESS_RESTRICTED
+ROTATION_REQUIRED
+USER_ACTION_REQUIRED
+```
+
+Must not include:
+
+- secret values;
+- token fragments;
+- sensitive aliases;
+- raw backend paths;
+- provider-native authentication responses.
+
+---
+
+## 28. Availability Event Granularity
+
+Availability events should be published only when:
+
+- state changes;
+- reason class changes materially;
+- user-action requirement changes;
+- retry-after changes enough to affect behavior;
+- active revision changes and availability projection changes.
+
+Do not publish on every resolution attempt.
+
+---
+
+## 29. Availability Event Consumers
+
+Consumers may:
+
+- stop selecting a provider credential path;
+- update safe UI status;
+- request user action;
+- invalidate provider-client pools;
+- trigger health reevaluation;
+- update diagnostics.
+
+Consumers must not:
+
+- resolve material from the event;
+- treat availability as access authority;
+- infer that a backend contains a specific raw value;
+- log sensitive reference aliases.
+
+---
+
+## 30. SecretUserActionRequired
+
+Published when resolution or operation requires user interaction.
+
+Event type:
+
+```text
+secret-management.user-action.required
+```
+
+Payload:
+
+```text
+SecretUserActionRequiredPayload {
+    secretId?
+    referenceId?
+    operationId
+    actionType
+    reasonCode
+    interactionOwner
+    expiresAt?
+    requestedAt
+}
+```
+
+Possible action types:
+
+```text
+DEVICE_UNLOCK
+BIOMETRIC
+SYSTEM_PROMPT
+APPLICATION_CONFIRMATION
+EXTERNAL_AUTH_FLOW
+CREDENTIAL_REENTRY
+```
+
+Recommended visibility:
+
+```text
+PUBLIC_INTERNAL
+```
+
+Presentation may react.
+
+The event must not contain prompt secrets or provider authentication URLs containing sensitive parameters.
+
+---
+
+## 31. SecretUserActionResolved
+
+Event type:
+
+```text
+secret-management.user-action.resolved
+```
+
+Payload:
+
+```text
+SecretUserActionResolvedPayload {
+    operationId
+    actionType
+    outcome
+    resolvedAt
+}
+```
+
+Possible outcomes:
+
+```text
+COMPLETED
+CANCELED
+TIMED_OUT
+FAILED
+```
+
+No user-entered secret value may be included.
+
+---
+
+# Part IV — Lease Events
+
+## 32. Lease Event Visibility Rule
+
+Lease events are sensitive operational metadata.
+
+Default:
+
+```text
+SecretLeaseGranted
+SecretLeaseActivated
+SecretLeaseReleased
+    → LOCAL_COMPONENT_ONLY or OBSERVABILITY_ONLY
+
+SecretLeaseExpired
+SecretLeaseRevoked
+SecretLeaseAbandoned
+    → restricted PUBLIC_INTERNAL when consumers must react
+```
+
+General modules should not subscribe to all lease activity.
+
+---
+
+## 33. SecretLeaseGranted
+
+Event type:
+
+```text
+secret-management.lease.granted
+```
+
+Payload:
+
+```text
+SecretLeaseGrantedPayload {
+    secretLeaseId
+    secretId
+    revision
+    consumerId
+    purposeCode
+    grantedDuration
+    expiresAt
+    grantedAt
+}
+```
+
+Must not include `SecretHandle`.
+
+---
+
+## 34. SecretLeaseActivated
+
+Event type:
+
+```text
+secret-management.lease.activated
+```
+
+Payload:
+
+```text
+SecretLeaseActivatedPayload {
+    secretLeaseId
+    secretId
+    revision
+    consumerId
+    purposeCode
+    activatedAt
+}
+```
+
+Recommended visibility:
+
+```text
+OBSERVABILITY_ONLY
+```
+
+---
+
+## 35. SecretLeaseReleased
+
+Event type:
+
+```text
+secret-management.lease.released
+```
+
+Payload:
+
+```text
+SecretLeaseReleasedPayload {
+    secretLeaseId
+    secretId
+    revision
+    consumerId
+    releaseReason
+    activeDuration?
+    releasedAt
+}
+```
+
+Repeated release must not create repeated semantic effects.
+
+---
+
+## 36. SecretLeaseExpired
+
+Event type:
+
+```text
+secret-management.lease.expired
+```
+
+Payload:
+
+```text
+SecretLeaseExpiredPayload {
+    secretLeaseId
+    secretId
+    revision
+    consumerId
+    purposeCode
+    expiredAt
+    externalOperationMayContinue
+}
+```
+
+This event does not imply cancellation of an already accepted remote request.
+
+---
+
+## 37. SecretLeaseRevoked
+
+Event type:
+
+```text
+secret-management.lease.revoked
+```
+
+Payload:
+
+```text
+SecretLeaseRevokedPayload {
+    secretLeaseId
+    secretId
+    revision
+    consumerId
+    revocationReason
+    effectiveAt
+    externalOperationMayContinue
+}
+```
+
+Expected consumers may:
+
+- stop future handle use;
+- dispose credential-bound clients;
+- cancel provider operations where supported;
+- update Runtime cleanup.
+
+---
+
+## 38. SecretLeaseRejected
+
+Event type:
+
+```text
+secret-management.lease.rejected
+```
+
+Recommended visibility:
+
+```text
+OBSERVABILITY_ONLY
+```
+
+Payload:
+
+```text
+SecretLeaseRejectedPayload {
+    operationId
+    secretId?
+    referenceId?
+    consumerId
+    purposeCode
+    normalizedReasonCode
+    userActionRequired
+    rejectedAt
+}
+```
+
+Do not expose hidden secret existence to unauthorized observability consumers.
+
+---
+
+## 39. SecretLeaseAbandoned
+
+Event type:
+
+```text
+secret-management.lease.abandoned
+```
+
+Payload:
+
+```text
+SecretLeaseAbandonedPayload {
+    secretLeaseId
+    secretId
+    revision
+    consumerId
+    abandonmentReason
+    logicalAuthorityRemoved
+    cleanupPending
+    abandonedAt
+}
+```
+
+Recommended visibility:
+
+```text
+RESTRICTED_SECURITY or OBSERVABILITY_ONLY
+```
+
+---
+
+# Part V — Backend Events
+
+## 40. SecretBackendRegistered
+
+Event type:
+
+```text
+secret-management.backend.registered
+```
+
+Payload:
+
+```text
+SecretBackendRegisteredPayload {
+    secretBackendId
+    backendType
+    capabilitySummary
+    registeredAt
+}
+```
+
+Capability summary must not expose sensitive platform paths or encryption configuration.
+
+---
+
+## 41. SecretBackendInitializationStarted
+
+Event type:
+
+```text
+secret-management.backend.initialization-started
+```
+
+Recommended visibility:
+
+```text
+OBSERVABILITY_ONLY
+```
+
+Payload:
+
+```text
+SecretBackendInitializationStartedPayload {
+    secretBackendId
+    backendType
+    startedAt
+}
+```
+
+---
+
+## 42. SecretBackendAvailable
+
+Event type:
+
+```text
+secret-management.backend.available
+```
+
+Payload:
+
+```text
+SecretBackendAvailablePayload {
+    secretBackendId
+    backendType
+    previousState
+    currentState = AVAILABLE
+    recoveryReason?
+    availableAt
+}
+```
+
+---
+
+## 43. SecretBackendLocked
+
+Event type:
+
+```text
+secret-management.backend.locked
+```
+
+Payload:
+
+```text
+SecretBackendLockedPayload {
+    secretBackendId
+    backendType
+    previousState
+    currentState = LOCKED
+    reasonCode
+    userPresenceMode?
+    affectedSecretCountClass?
+    lockedAt
+}
+```
+
+Use a count class or bounded count where disclosure is sensitive.
+
+Must not enumerate secret aliases.
+
+---
+
+## 44. SecretBackendUnlocked
+
+Event type:
+
+```text
+secret-management.backend.unlocked
+```
+
+Payload:
+
+```text
+SecretBackendUnlockedPayload {
+    secretBackendId
+    previousState = LOCKED
+    currentState = AVAILABLE
+    unlockMethodClass
+    unlockedAt
+}
+```
+
+Must not include biometric or credential details.
+
+---
+
+## 45. SecretBackendDegraded
+
+Event type:
+
+```text
+secret-management.backend.degraded
+```
+
+Payload:
+
+```text
+SecretBackendDegradedPayload {
+    secretBackendId
+    backendType
+    previousState
+    currentState = DEGRADED
+    degradedCapabilities[]
+    reasonCode
+    degradedAt
+}
+```
+
+---
+
+## 46. SecretBackendUnavailable
+
+Event type:
+
+```text
+secret-management.backend.unavailable
+```
+
+Payload:
+
+```text
+SecretBackendUnavailablePayload {
+    secretBackendId
+    backendType
+    previousState
+    currentState = UNAVAILABLE
+    normalizedReasonCode
+    retryAfter?
+    unavailableAt
+}
+```
+
+---
+
+## 47. SecretBackendCompromised
+
+Event type:
+
+```text
+secret-management.backend.compromised
+```
+
+Payload:
+
+```text
+SecretBackendCompromisedPayload {
+    secretBackendId
+    backendType
+    previousState
+    currentState = COMPROMISED
+    compromiseClass
+    affectedScopeClass
+    leaseAction
+    descriptorAction
+    detectedAt
+}
+```
+
+Recommended visibility:
+
+```text
+RESTRICTED_SECURITY
+AUDIT_ONLY
+```
+
+Detailed evidence must remain in restricted security diagnostics.
+
+---
+
+## 48. SecretBackendShutdownStarted
+
+Event type:
+
+```text
+secret-management.backend.shutdown-started
+```
+
+Recommended visibility:
+
+```text
+OBSERVABILITY_ONLY
+```
+
+Payload:
+
+```text
+SecretBackendShutdownStartedPayload {
+    secretBackendId
+    activeLeaseCountClass
+    pendingOperationCountClass
+    startedAt
+}
+```
+
+---
+
+## 49. SecretBackendTerminated
+
+Event type:
+
+```text
+secret-management.backend.terminated
+```
+
+Payload:
+
+```text
+SecretBackendTerminatedPayload {
+    secretBackendId
+    terminationReason
+    abandonedLeaseCountClass?
+    terminatedAt
+}
+```
 
 ---
 
 # Part VI — Validation Events
 
-# 73. Validation Event Philosophy
+## 50. SecretValidationStarted
 
-Validation events expose structural evaluation progress.
+Event type:
 
-They never expose configuration values.
-
----
-
-# 74. ConfigurationValidationStarted
-
-Published when validation begins.
-
-Payload
-
-```
-validationId
-
-candidateId
+```text
+secret-management.validation.started
 ```
 
----
+Recommended visibility:
 
-# 75. ConfigurationValidationSucceeded
-
-Published after successful validation.
-
-Payload
-
-```
-validationId
-
-candidateId
-
-warningCount
+```text
+LOCAL_COMPONENT_ONLY or OBSERVABILITY_ONLY
 ```
 
-Warnings may still exist.
+Payload:
 
----
-
-# 76. ConfigurationValidationFailed
-
-Published when validation terminates unsuccessfully.
-
-Payload
-
-```
-validationId
-
-candidateId
-
-violationCount
-```
-
-Individual violations belong to diagnostics.
-
----
-
-# 77. ConfigurationValidationWarningDetected
-
-Published when validation completes with warnings.
-
-Payload
-
-```
-validationId
-
-warningCount
-```
-
-Warnings do not block publication.
-
----
-
-# 78. Validation Event Ordering
-
-```
-ValidationStarted
-
-↓
-
-ValidationSucceeded
-
-or
-
-ValidationFailed
-```
-
-Optional warning events may appear after success.
-
----
-
-# 79. Validation Event Invariants
-
-Validation events guarantee:
-
-✓ immutable validation result
-
-✓ deterministic ordering
-
-✓ no secret values
-
----
-
-# Part VII — Compatibility Events
-
-# 80. Compatibility Event Philosophy
-
-Compatibility evaluates whether validated configuration may be used.
-
-Compatibility is independent from validation.
-
----
-
-# 81. ConfigurationCompatibilityStarted
-
-Published when compatibility evaluation begins.
-
-Payload
-
-```
-compatibilityId
-
-candidateId
+```text
+SecretValidationStartedPayload {
+    validationId
+    secretId
+    revision
+    validationMode
+    providerId?
+    startedAt
+}
 ```
 
 ---
 
-# 82. ConfigurationCompatible
+## 51. SecretValidationCompleted
 
-Published when compatibility succeeds.
+Event type:
 
-Payload
-
-```
-compatibilityId
-
-status
+```text
+secret-management.validation.completed
 ```
 
-Status may be
+Payload:
 
+```text
+SecretValidationCompletedPayload {
+    validationId
+    secretId
+    revision
+    validationMode
+    status
+    providerId?
+    expiresAt?
+    renewable?
+    safeReasonCode?
+    checkedAt
+}
 ```
-COMPATIBLE
 
-COMPATIBLE_WITH_WARNINGS
+Possible statuses:
+
+```text
+VALID
+INVALID
+UNKNOWN
+EXPIRED
+REVOKED
+UNAVAILABLE
+ACCESS_DENIED
+VALIDATION_DEFERRED
+```
+
+Raw provider evidence is prohibited.
+
+---
+
+## 52. SecretValidationDeferred
+
+Event type:
+
+```text
+secret-management.validation.deferred
+```
+
+Payload:
+
+```text
+SecretValidationDeferredPayload {
+    validationId
+    secretId
+    revision
+    deferReason
+    userActionRequired
+    retryAfter?
+    deferredAt
+}
 ```
 
 ---
 
-# 83. ConfigurationMigrationRequired
+## 53. SecretValidationFailed
 
-Published when migration is required.
+Infrastructure-level validation failure.
 
-Payload
+Event type:
 
-```
-compatibilityId
-
-targetSchemaVersion
+```text
+secret-management.validation.failed
 ```
 
-Publication pauses until migration completes.
+Payload:
+
+```text
+SecretValidationFailedPayload {
+    validationId
+    secretId
+    revision
+    validationMode
+    normalizedErrorCode
+    retryable
+    failedAt
+}
+```
+
+A failed validation operation does not automatically mean the secret is invalid.
 
 ---
 
-# 84. ConfigurationIncompatible
+# Part VII — Rotation Events
 
-Published when configuration cannot be used.
+## 54. SecretRotationStarted
 
-Payload
+Published after rotation state enters an accepted running state.
 
+Event type:
+
+```text
+secret-management.rotation.started
 ```
-compatibilityId
 
-reasonCode
+Payload:
+
+```text
+SecretRotationStartedPayload {
+    rotationId
+    operationId
+    secretId
+    currentRevision
+    rotationMode
+    activationMode
+    existingLeasePolicy
+    startedAt
+}
 ```
 
-Candidate becomes terminal.
+Recommended visibility:
+
+```text
+PUBLIC_INTERNAL
+AUDIT_ONLY
+```
 
 ---
 
-# 85. Compatibility Event Ordering
+## 55. SecretRotationCandidateReady
 
+Event type:
+
+```text
+secret-management.rotation.candidate-ready
 ```
-CompatibilityStarted
 
-↓
+Recommended visibility:
 
-Compatible
+```text
+LOCAL_COMPONENT_ONLY
+```
 
-or
+Payload:
 
-MigrationRequired
-
-or
-
-Incompatible
+```text
+SecretRotationCandidateReadyPayload {
+    rotationId
+    secretId
+    candidateRevision
+    validationStatus
+    readyAt
+}
 ```
 
 ---
 
-# 86. Compatibility Event Invariants
+## 56. SecretRotationActivated
 
-Compatibility events guarantee:
+Published after the new revision activates, before all lease-policy cleanup necessarily completes.
 
-✓ explicit compatibility outcome
+Event type:
 
-✓ immutable payload
+```text
+secret-management.rotation.activated
+```
 
-✓ deterministic evaluation
+Payload:
+
+```text
+SecretRotationActivatedPayload {
+    rotationId
+    secretId
+    previousRevision
+    currentRevision
+    existingLeasePolicy
+    activatedAt
+}
+```
+
+Provider Management may begin rebuilding clients against the new revision.
+
+---
+
+## 57. SecretRotationCompleted
+
+Event type:
+
+```text
+secret-management.rotation.completed
+```
+
+Payload:
+
+```text
+SecretRotationCompletedPayload {
+    rotationId
+    operationId
+    secretId
+    previousRevision
+    currentRevision
+    activationState
+    affectedLeaseCountClass?
+    revokedLeaseCountClass?
+    requiresConsumerRefresh
+    completedAt
+}
+```
+
+No material fingerprint or token fragment may be included.
+
+---
+
+## 58. SecretRotationPartiallyCompleted
+
+Event type:
+
+```text
+secret-management.rotation.partially-completed
+```
+
+Payload:
+
+```text
+SecretRotationPartiallyCompletedPayload {
+    rotationId
+    secretId
+    activeRevision
+    incompleteStage
+    normalizedWarningCode
+    oldRevisionCleanupPending
+    leaseCleanupPending
+    reconciliationRequired
+    occurredAt
+}
+```
+
+The active revision field prevents consumers from assuming the entire rotation failed.
+
+---
+
+## 59. SecretRotationFailed
+
+Event type:
+
+```text
+secret-management.rotation.failed
+```
+
+Payload:
+
+```text
+SecretRotationFailedPayload {
+    rotationId
+    operationId
+    secretId
+    retainedActiveRevision?
+    failureStage
+    normalizedErrorCode
+    retryable
+    candidateCleanupPending
+    failedAt
+}
+```
+
+A safe failure preserves the prior active revision.
+
+---
+
+## 60. SecretRotationCanceled
+
+Event type:
+
+```text
+secret-management.rotation.canceled
+```
+
+Payload:
+
+```text
+SecretRotationCanceledPayload {
+    rotationId
+    secretId
+    retainedActiveRevision
+    cancellationStage
+    candidateCleanupPending
+    canceledAt
+}
+```
+
+Use only when the outcome is known.
+
+---
+
+## 61. SecretRotationBecameUncertain
+
+Event type:
+
+```text
+secret-management.rotation.became-uncertain
+```
+
+Payload:
+
+```text
+SecretRotationBecameUncertainPayload {
+    rotationId
+    secretId
+    uncertaintyStage
+    knownActiveRevision?
+    candidateRevision?
+    automaticRetryBlocked = true
+    reconciliationRequired = true
+    occurredAt
+}
+```
+
+Recommended visibility:
+
+```text
+RESTRICTED_SECURITY
+PUBLIC_INTERNAL for lifecycle coordination
+```
+
+---
+
+## 62. SecretRotationReconciled
+
+Event type:
+
+```text
+secret-management.rotation.reconciled
+```
+
+Payload:
+
+```text
+SecretRotationReconciledPayload {
+    rotationId
+    secretId
+    resolution
+    activeRevision?
+    cleanupRequired
+    reconciledAt
+}
+```
+
+Possible resolutions:
+
+```text
+ROTATION_CONFIRMED
+ROTATION_NOT_APPLIED
+CANDIDATE_ONLY
+MANUAL_ACTION_REQUIRED
+STILL_UNCERTAIN
+```
 
 ---
 
 # Part VIII — Migration Events
 
-# 87. Migration Event Philosophy
+## 63. SecretMigrationStarted
 
-Migration transforms configuration between schema versions.
+Event type:
 
-Migration never mutates existing revisions.
-
----
-
-# 88. ConfigurationMigrationStarted
-
-Published when migration execution begins.
-
-Payload
-
-```
-migrationId
-
-fromVersion
-
-toVersion
+```text
+secret-management.migration.started
 ```
 
----
+Payload:
 
-# 89. ConfigurationMigrationCompleted
-
-Published after successful migration.
-
-Payload
-
+```text
+SecretMigrationStartedPayload {
+    migrationId
+    operationId
+    secretId
+    revision
+    sourceBackendId
+    destinationBackendId
+    existingLeasePolicy
+    startedAt
+}
 ```
-migrationId
 
-candidateId
-```
+Recommended visibility:
 
-The migrated configuration still requires validation.
-
----
-
-# 90. ConfigurationMigrationFailed
-
-Published when migration fails.
-
-Payload
-
-```
-migrationId
-
-failureCode
+```text
+AUDIT_ONLY
+PUBLIC_INTERNAL when consumers must freeze access
 ```
 
 ---
 
-# 91. ConfigurationMigrationCancelled
+## 64. SecretMigrationDestinationValidated
 
-Published when migration is intentionally cancelled.
+Event type:
 
-Payload
-
-```
-migrationId
-
-reason
+```text
+secret-management.migration.destination-validated
 ```
 
----
+Recommended visibility:
 
-# 92. Migration Event Ordering
-
+```text
+LOCAL_COMPONENT_ONLY
 ```
-MigrationStarted
 
-↓
+Payload:
 
-MigrationCompleted
-
-or
-
-MigrationFailed
-
-or
-
-MigrationCancelled
+```text
+SecretMigrationDestinationValidatedPayload {
+    migrationId
+    secretId
+    revision
+    destinationBackendId
+    validatedAt
+}
 ```
 
 ---
 
-# 93. Migration Event Invariants
+## 65. SecretMigrationSwitched
 
-Migration events guarantee:
+Published after descriptor binding switches to the destination.
 
-✓ immutable migration history
+Event type:
 
-✓ deterministic execution
-
-✓ replay safety
-
----
-
-# Part IX — Override Events
-
-# 94. Override Event Philosophy
-
-Overrides temporarily replace effective configuration values.
-
-Override events describe override lifecycle only.
-
-They never expose overridden values.
-
----
-
-# 95. ConfigurationOverrideCreated
-
-Published when an override is created.
-
-Payload
-
+```text
+secret-management.migration.switched
 ```
-overrideId
 
-scope
+Payload:
 
-targetSection
+```text
+SecretMigrationSwitchedPayload {
+    migrationId
+    secretId
+    revision
+    previousBackendId
+    currentBackendId
+    sourceCleanupPending
+    switchedAt
+}
 ```
 
 ---
 
-# 96. ConfigurationOverrideValidated
+## 66. SecretMigrationCompleted
 
-Published after successful override validation.
+Event type:
 
-Payload
-
-```
-overrideId
+```text
+secret-management.migration.completed
 ```
 
----
+Payload:
 
-# 97. ConfigurationOverrideActivated
-
-Published when the override becomes effective.
-
-Payload
-
-```
-overrideId
-
-configurationRevision
-```
-
----
-
-# 98. ConfigurationOverrideExpired
-
-Published when override lifetime ends.
-
-Payload
-
-```
-overrideId
+```text
+SecretMigrationCompletedPayload {
+    migrationId
+    operationId
+    secretId
+    revision
+    sourceBackendId
+    destinationBackendId
+    sourceCleanupAssurance
+    completedAt
+}
 ```
 
 ---
 
-# 99. ConfigurationOverrideRemoved
+## 67. SecretMigrationPartiallyCompleted
 
-Published when an override is explicitly removed.
+Event type:
 
-Payload
-
-```
-overrideId
-
-removedBy
+```text
+secret-management.migration.partially-completed
 ```
 
----
+Payload:
 
-# 100. Override Event Ordering
-
-```
-OverrideCreated
-
-↓
-
-OverrideValidated
-
-↓
-
-OverrideActivated
-
-↓
-
-OverrideExpired
-
-or
-
-OverrideRemoved
+```text
+SecretMigrationPartiallyCompletedPayload {
+    migrationId
+    secretId
+    activeBackendId
+    incompleteStage
+    sourceCleanupPending
+    normalizedWarningCode
+    reconciliationRequired
+    occurredAt
+}
 ```
 
 ---
 
-# 101. Override Event Invariants
+## 68. SecretMigrationFailed
 
-Override events guarantee:
+Event type:
 
-✓ explicit lifetime
-
-✓ deterministic precedence
-
-✓ immutable audit trail
-
----
-
-# Part X — Consumer Events
-
-# 102. Consumer Event Philosophy
-
-Consumer events describe adoption of published configuration.
-
-Configuration publishes acceptance records.
-
-Consumers determine their own acceptance decisions.
-
----
-
-# 103. ConfigurationConsumerPending
-
-Published immediately after publication.
-
-Payload
-
+```text
+secret-management.migration.failed
 ```
-consumerId
 
-configurationRevision
+Payload:
+
+```text
+SecretMigrationFailedPayload {
+    migrationId
+    secretId
+    retainedBackendId?
+    failureStage
+    normalizedErrorCode
+    retryable
+    destinationCleanupPending
+    failedAt
+}
 ```
 
 ---
 
-# 104. ConfigurationConsumerAccepted
+## 69. SecretMigrationBecameUncertain
 
-Published when a consumer adopts the published revision.
+Event type:
 
-Payload
-
-```
-consumerId
-
-configurationRevision
+```text
+secret-management.migration.became-uncertain
 ```
 
----
+Payload:
 
-# 105. ConfigurationConsumerDeferred
-
-Published when a consumer postpones adoption.
-
-Payload
-
-```
-consumerId
-
-configurationRevision
-
-reason
+```text
+SecretMigrationBecameUncertainPayload {
+    migrationId
+    secretId
+    uncertaintyStage
+    knownBackendId?
+    automaticRetryBlocked = true
+    reconciliationRequired = true
+    occurredAt
+}
 ```
 
 ---
 
-# 106. ConfigurationConsumerRejected
+## 70. SecretMigrationReconciled
 
-Published when a consumer rejects adoption.
+Event type:
 
-Payload
-
+```text
+secret-management.migration.reconciled
 ```
-consumerId
 
-configurationRevision
+Payload:
 
-reasonCode
+```text
+SecretMigrationReconciledPayload {
+    migrationId
+    secretId
+    activeBackendId?
+    sourcePresent?
+    destinationPresent?
+    resolution
+    cleanupRequired
+    reconciledAt
+}
+```
+
+Presence values must be safe booleans and must not reveal secret material.
+
+---
+
+# Part IX — Removal Events
+
+## 71. SecretExternalRevocationRequested
+
+Event type:
+
+```text
+secret-management.external-revocation.requested
+```
+
+Recommended visibility:
+
+```text
+AUDIT_ONLY
+```
+
+Payload:
+
+```text
+SecretExternalRevocationRequestedPayload {
+    operationId
+    secretId
+    providerId?
+    revision
+    requestedAt
+}
 ```
 
 ---
 
-# 107. ConfigurationConsumerRequiresComponentRestart
+## 72. SecretExternalRevocationCompleted
 
-Published when the consumer requires a component restart.
+Event type:
 
-Payload
-
-```
-consumerId
-
-componentId
+```text
+secret-management.external-revocation.completed
 ```
 
----
+Payload:
 
-# 108. ConfigurationConsumerRequiresApplicationRestart
-
-Published when application restart is required.
-
-Payload
-
+```text
+SecretExternalRevocationCompletedPayload {
+    operationId
+    secretId
+    providerId?
+    revision
+    status
+    completedAt
+}
 ```
-consumerId
 
-configurationRevision
-```
+Possible statuses:
 
----
-
-# 109. Consumer Event Ordering
-
-```
-Pending
-
-↓
-
-Accepted
-
-or
-
-Deferred
-
-or
-
-Rejected
-
-or
-
-RequiresComponentRestart
-
-or
-
-RequiresApplicationRestart
+```text
+CONFIRMED
+NOT_SUPPORTED
+NOT_REQUIRED
 ```
 
 ---
 
-# 110. Consumer Event Invariants
+## 73. SecretExternalRevocationFailed
 
-Consumer events guarantee:
+Event type:
 
-✓ one consumer
-
-✓ one revision
-
-✓ immutable acceptance history
-
----
-
-# Part XI — Diagnostic Events
-
-# 111. Diagnostic Event Philosophy
-
-Diagnostic events expose operational information about the Configuration Infrastructure.
-
-Diagnostic events are:
-
-- informational;
-- immutable;
-- non-authoritative;
-- safe for observability.
-
-Diagnostic events must never expose:
-
-- raw secrets;
-- effective secret values;
-- private credentials;
-- confidential user information.
-
----
-
-# 112. ConfigurationDiagnosticGenerated
-
-Published when a new diagnostic snapshot is generated.
-
-Payload
-
-```
-diagnosticId
-
-configurationRevision
-
-generatedAt
+```text
+secret-management.external-revocation.failed
 ```
 
-Diagnostic generation does not imply configuration changes.
+Payload:
 
----
-
-# 113. ConfigurationWarningDetected
-
-Published when a non-blocking configuration warning is detected.
-
-Payload
-
-```
-warningCode
-
-sectionId
-
-severity
-```
-
-Warnings are informational.
-
----
-
-# 114. ConfigurationNoticeGenerated
-
-Published when an informational notice is produced.
-
-Payload
-
-```
-noticeCode
-
-configurationRevision
-```
-
-Notices are intended for administrators.
-
----
-
-# 115. ConfigurationHealthChanged
-
-Published when overall Configuration Infrastructure health changes.
-
-Payload
-
-```
-previousHealth
-
-currentHealth
-
-reason
-```
-
-Possible health values
-
-```
-HEALTHY
-
-DEGRADED
-
-FAILED
+```text
+SecretExternalRevocationFailedPayload {
+    operationId
+    secretId
+    providerId?
+    revision
+    normalizedErrorCode
+    uncertain
+    retryable
+    failedAt
+}
 ```
 
 ---
 
-# 116. ConfigurationDiagnosticsCleared
+## 74. SecretRemovalPartiallyCompleted
 
-Published when obsolete diagnostics are removed.
+Event type:
 
-Payload
-
-```
-removedDiagnosticCount
+```text
+secret-management.secret.removal-partially-completed
 ```
 
-Removing diagnostics never changes configuration state.
+Payload:
+
+```text
+SecretRemovalPartiallyCompletedPayload {
+    operationId
+    secretId
+    descriptorState
+    materialDeletionStatus
+    externalRevocationStatus
+    tombstoneStatus
+    reconciliationRequired
+    occurredAt
+}
+```
 
 ---
 
-# 117. Diagnostic Event Ordering
+# Part X — Operation and Reconciliation Events
 
-```
-DiagnosticGenerated
+## 75. SecretOperationDeferred
 
-↓
+Event type:
 
-WarningDetected
-
-↓
-
-NoticeGenerated
+```text
+secret-management.operation.deferred
 ```
 
-Health events may occur independently.
+Payload:
+
+```text
+SecretOperationDeferredPayload {
+    operationId
+    operationType
+    secretId?
+    deferReason
+    userActionRequired
+    retryAfter?
+    deferredAt
+}
+```
 
 ---
 
-# 118. Diagnostic Event Invariants
+## 76. SecretOperationBecameUncertain
 
-Diagnostic events guarantee:
+Generic event for operations other than rotation or migration.
 
-✓ read-only information
+Event type:
 
-✓ revision awareness
+```text
+secret-management.operation.became-uncertain
+```
 
-✓ secret safety
+Payload:
 
-✓ replay compatibility
+```text
+SecretOperationBecameUncertainPayload {
+    operationId
+    operationType
+    secretId?
+    uncertaintyStage
+    automaticRetryBlocked
+    reconciliationRequired
+    occurredAt
+}
+```
 
 ---
 
-# Part XII — Event Delivery
+## 77. SecretReconciliationRequired
 
-# 119. Delivery Philosophy
+Event type:
 
-Configuration events are infrastructure events.
+```text
+secret-management.reconciliation.required
+```
 
-Consumers should treat them as notifications.
+Payload:
 
-Consumers must not assume synchronous processing.
+```text
+SecretReconciliationRequiredPayload {
+    operationId
+    operationType
+    secretId?
+    reconciliationId
+    reasonCode
+    recommendedAction
+    requiredAt
+}
+```
+
+Recommended visibility:
+
+```text
+RESTRICTED_SECURITY
+AUDIT_ONLY
+```
 
 ---
 
-# 120. Delivery Semantics
+## 78. SecretReconciliationCompleted
 
-Recommended delivery guarantees.
+Event type:
 
+```text
+secret-management.reconciliation.completed
 ```
-At Least Once
+
+Payload:
+
+```text
+SecretReconciliationCompletedPayload {
+    reconciliationId
+    operationId
+    operationType
+    secretId?
+    resolution
+    resultingDescriptorState?
+    resultingRevision?
+    resultingBackendId?
+    completedAt
+}
 ```
-
-Consumers must therefore support duplicate events.
-
-Exactly-once delivery is not required by the architecture.
 
 ---
 
-# 121. Duplicate Delivery
+## 79. SecretManualActionRequired
 
-Duplicate event delivery is permitted.
+Used when reconciliation cannot complete automatically.
 
-Consumers should identify duplicates using:
+Event type:
 
+```text
+secret-management.reconciliation.manual-action-required
 ```
+
+Payload:
+
+```text
+SecretManualActionRequiredPayload {
+    reconciliationId
+    operationId
+    secretId?
+    reasonCode
+    safeActionHints[]
+    requiredAt
+}
+```
+
+No secret value or unsafe provider URL may appear.
+
+---
+
+# Part XI — Security Events
+
+## 80. SecretAccessDenied
+
+Published only when needed for restricted security monitoring or audit.
+
+Event type:
+
+```text
+secret-management.access.denied
+```
+
+Payload:
+
+```text
+SecretAccessDeniedPayload {
+    operationId
+    secretId?
+    referenceId?
+    consumerId
+    purposeCode
+    denialClass
+    existenceHidden
+    deniedAt
+}
+```
+
+Recommended visibility:
+
+```text
+RESTRICTED_SECURITY
+```
+
+Do not reveal secret existence when `existenceHidden = true`.
+
+---
+
+## 81. SecretConsumerMismatchDetected
+
+Event type:
+
+```text
+secret-management.security.consumer-mismatch-detected
+```
+
+Payload:
+
+```text
+SecretConsumerMismatchDetectedPayload {
+    operationId
+    secretLeaseId?
+    secretId?
+    expectedConsumerId?
+    actualConsumerId
+    attemptedPurposeCode
+    blocked
+    detectedAt
+}
+```
+
+Recommended visibility:
+
+```text
+RESTRICTED_SECURITY
+AUDIT_ONLY
+```
+
+---
+
+## 82. SecretPurposeViolationDetected
+
+Event type:
+
+```text
+secret-management.security.purpose-violation-detected
+```
+
+Payload:
+
+```text
+SecretPurposeViolationDetectedPayload {
+    operationId
+    secretLeaseId?
+    secretId?
+    consumerId
+    grantedPurposeCode?
+    attemptedPurposeCode
+    blocked
+    detectedAt
+}
+```
+
+---
+
+## 83. SecretExposureBlocked
+
+Published when an operation attempted to expose material through a prohibited boundary and was blocked.
+
+Event type:
+
+```text
+secret-management.security.exposure-blocked
+```
+
+Payload:
+
+```text
+SecretExposureBlockedPayload {
+    operationId?
+    secretId?
+    consumerId?
+    boundaryType
+    findingClass
+    blocked = true
+    detectedAt
+}
+```
+
+Possible boundary types:
+
+```text
+EVENT
+LOG
+TRACE
+METRIC
+DIAGNOSTIC
+CONFIGURATION
+UI
+CLIPBOARD
+FILE
+EXCEPTION
+SERIALIZATION
+CHILD_PROCESS
+```
+
+Possible finding classes:
+
+```text
+KNOWN_SECRET_VALUE
+AUTHORIZATION_HEADER
+PRIVATE_KEY_BLOCK
+TOKEN_PATTERN
+PASSWORD_FIELD
+SENSITIVE_QUERY_PARAMETER
+UNSAFE_REFERENCE
+UNKNOWN_HIGH_ENTROPY_VALUE
+```
+
+The event must not include the matched value.
+
+---
+
+## 84. SecretExportApproved
+
+Event type:
+
+```text
+secret-management.export.approved
+```
+
+Recommended visibility:
+
+```text
+AUDIT_ONLY
+```
+
+Payload:
+
+```text
+SecretExportApprovedPayload {
+    operationId
+    secretId
+    revision
+    consumerId
+    targetType
+    targetIdentityClass
+    purposeCode
+    expiresAt?
+    approvedAt
+}
+```
+
+---
+
+## 85. SecretExportBlocked
+
+Event type:
+
+```text
+secret-management.export.blocked
+```
+
+Payload:
+
+```text
+SecretExportBlockedPayload {
+    operationId
+    secretId?
+    consumerId
+    targetType
+    purposeCode
+    denialClass
+    blockedAt
+}
+```
+
+Recommended visibility:
+
+```text
+RESTRICTED_SECURITY
+AUDIT_ONLY
+```
+
+---
+
+## 86. SecretPolicyChanged
+
+Published after access policy changes.
+
+Event type:
+
+```text
+secret-management.policy.changed
+```
+
+Payload:
+
+```text
+SecretPolicyChangedPayload {
+    secretId
+    previousPolicyRevision
+    currentPolicyRevision
+    changeClass
+    activeLeaseAction
+    changedAt
+}
+```
+
+No full policy or consumer list should be copied into the event by default.
+
+---
+
+# Part XII — Redaction Events
+
+## 87. SecretRedactionFindingDetected
+
+High-frequency findings should normally be aggregated.
+
+Event type:
+
+```text
+secret-management.redaction.finding-detected
+```
+
+Recommended visibility:
+
+```text
+OBSERVABILITY_ONLY or RESTRICTED_SECURITY
+```
+
+Payload:
+
+```text
+SecretRedactionFindingDetectedPayload {
+    operationId?
+    boundaryType
+    findingClass
+    blocked
+    sourceComponent
+    detectedAt
+}
+```
+
+No matched text may be included.
+
+---
+
+## 88. SecretRedactionFailureDetected
+
+Published when redaction infrastructure itself fails.
+
+Event type:
+
+```text
+secret-management.redaction.failure-detected
+```
+
+Payload:
+
+```text
+SecretRedactionFailureDetectedPayload {
+    operationId?
+    boundaryType
+    failureClass
+    outputBlocked
+    detectedAt
+}
+```
+
+Recommended visibility:
+
+```text
+RESTRICTED_SECURITY
+```
+
+Fail-safe behavior should normally block sensitive output.
+
+---
+
+# Part XIII — Consumed Events
+
+## 89. Events Consumed by Secret Management
+
+Secret Management may consume safe events from other modules.
+
+It must not accept raw secret material through those events.
+
+---
+
+## 90. Configuration Revision Activated
+
+Potential source event:
+
+```text
+configuration.snapshot.activated
+```
+
+Secret Management may react when:
+
+- secret-reference syntax changes;
+- access-policy references change;
+- backend configuration changes;
+- environment-reference policy changes;
+- validation policy changes.
+
+Configuration events contain references only.
+
+They do not carry secret material.
+
+---
+
+## 91. Provider Authentication Outcome Reported
+
+Potential source event:
+
+```text
+provider-management.credential.authentication-outcome-reported
+```
+
+Preferred integration remains a direct command when correctness depends on acceptance.
+
+An event may carry a normalized fact:
+
+```text
+ProviderCredentialAuthenticationOutcomePayload {
+    providerId
+    credentialReferenceId
+    credentialRevision
+    outcomeClass
+    occurredAt
+}
+```
+
+Secret Management may update validation evidence or availability.
+
+It must not infer global invalidity from one unrelated provider failure.
+
+---
+
+## 92. Provider Client Disposed
+
+Potential source event:
+
+```text
+provider-management.client.disposed
+```
+
+Secret Management may use it to confirm that a credential-bound client no longer holds lease authority.
+
+Lease release should still use the direct lease contract.
+
+---
+
+## 93. Runtime Attempt Canceled
+
+Potential source event:
+
+```text
+runtime.attempt.canceled
+```
+
+Secret Management may trigger cleanup only when the event safely references a known lease or operation.
+
+Direct cancellation propagation remains preferred for timely cleanup.
+
+---
+
+## 94. Application Shutdown Started
+
+Potential source event:
+
+```text
+application.shutdown.started
+```
+
+Secret Management should:
+
+- stop new leases;
+- release or revoke active leases;
+- cancel safe candidates;
+- preserve uncertain operation records;
+- clear memory caches;
+- shut down backends.
+
+---
+
+## 95. Network Availability Changed
+
+Potential source event:
+
+```text
+platform.network.availability-changed
+```
+
+May trigger:
+
+- deferred validation;
+- external backend recovery;
+- refresh retry eligibility;
+- reconciliation attempts.
+
+Network restoration must not automatically retry non-idempotent uncertain rotation.
+
+---
+
+## 96. User Presence Completed
+
+Potential direct result or restricted event:
+
+```text
+presentation.user-presence.completed
+```
+
+The payload must contain only:
+
+- operation identity;
+- outcome;
+- trusted platform result reference.
+
+It must not contain user-entered secret material.
+
+Secret material entry uses a direct trusted channel.
+
+---
+
+# Part XIV — Consumer Guidance
+
+## 97. Configuration Consumer Rules
+
+Configuration may consume:
+
+- `SecretRegistered`;
+- `SecretRemoved`;
+- `SecretAvailabilityChanged`;
+- `SecretPolicyChanged`.
+
+Configuration may update diagnostics or reference validation.
+
+It must not persist material.
+
+---
+
+## 98. Provider Management Consumer Rules
+
+Provider Management may consume:
+
+- `SecretAvailabilityChanged`;
+- `SecretRevisionActivated`;
+- `SecretRevisionExpired`;
+- `SecretRevisionRevoked`;
+- `SecretRevoked`;
+- `SecretLeaseRevoked`;
+- `SecretRotationActivated`;
+- `SecretRotationCompleted`;
+- `SecretBackendCompromised`.
+
+Provider Management may:
+
+- stop selecting paths;
+- rebuild clients;
+- drain or revoke provider leases;
+- reevaluate provider availability;
+- request a new secret lease.
+
+It must not resolve raw credentials from events.
+
+---
+
+## 99. Runtime Consumer Rules
+
+Runtime may consume:
+
+- lease revocation;
+- backend compromise;
+- operation uncertainty;
+- application shutdown coordination.
+
+Runtime may:
+
+- cancel affected work;
+- stop dispatch;
+- trigger cleanup.
+
+Runtime must not carry secret material in WorkItems.
+
+---
+
+## 100. Presentation Consumer Rules
+
+Presentation may consume:
+
+- `SecretUserActionRequired`;
+- safe availability changes;
+- safe operation outcomes;
+- safe validation summaries.
+
+Presentation must not receive:
+
+- secret handles;
+- raw backend objects;
+- raw provider authentication payloads;
+- secret values in events.
+
+Secret entry occurs through a trusted direct form boundary.
+
+---
+
+## 101. Observability Consumer Rules
+
+Observability may consume:
+
+- normalized operation outcomes;
+- durations;
+- state transitions;
+- counts;
+- error codes;
+- security finding classes.
+
+It must not store:
+
+- raw aliases where sensitive;
+- account emails;
+- material fingerprints;
+- secret values;
+- authorization data;
+- full provider responses.
+
+---
+
+# Part XV — Publication and Delivery
+
+## 102. Transactional Publication
+
+Where durable state exists, publication should use an outbox or equivalent safe mechanism:
+
+```text
+Commit state + pending event record
+    ↓
+Publish event
+    ↓
+Mark event delivered
+```
+
+The Event Bus itself may remain in-process for MVP, but authoritative state must not depend on subscriber success.
+
+---
+
+## 103. Subscriber Failure
+
+Subscriber failure must not roll back committed Secret Management state.
+
+Failures should be:
+
+- isolated;
+- observable;
+- retried only under Event Bus policy;
+- prevented from exposing secret metadata;
+- prevented from blocking security revocation.
+
+Critical local security actions should not rely solely on asynchronous subscribers.
+
+---
+
+## 104. Delivery Semantics
+
+MVP may use:
+
+```text
+in-process
+typed events
+asynchronous handlers
+at-most-once or best-effort delivery
+```
+
+Consumers needing correctness must query current state after receiving an event.
+
+Future durable infrastructure may support stronger delivery.
+
+Event schemas must remain compatible with duplicate delivery.
+
+---
+
+## 105. Priority
+
+Suggested priorities:
+
+```text
+CRITICAL
+    backend compromised
+    secret revoked for security
+    lease revoked for security
+    exposure blocked
+    policy violation
+
+HIGH
+    active revision expired
+    availability became revoked or invalid
+    rotation became uncertain
+    migration became uncertain
+
+NORMAL
+    secret registered
+    revision activated
+    rotation completed
+    migration completed
+    backend available
+
+LOW
+    observability-only lease lifecycle
+    validation started
+    candidate cleanup
+```
+
+Priority does not permit bypassing visibility restrictions.
+
+---
+
+## 106. Throttling
+
+Throttle or aggregate:
+
+- repeated backend unavailable checks;
+- repeated lock observations;
+- repeated access denials from the same safe identity;
+- lease metrics;
+- redaction findings;
+- repeated availability recomputation with unchanged state;
+- validation progress.
+
+Never throttle away the first critical security transition.
+
+---
+
+## 107. Coalescing
+
+Allowed:
+
+```text
+BackendUnavailable repeated 100 times
+    → one state-change event + aggregated metric
+
+Availability recomputed but unchanged
+    → no event
+```
+
+Not allowed:
+
+```text
+SecretRevoked
+SecretRevisionActivated
+SecretRemoved
+BackendCompromised
+```
+
+These distinct facts must remain explicit.
+
+---
+
+## 108. Event Retention
+
+Retention depends on visibility:
+
+```text
+PUBLIC_INTERNAL
+    short or bounded operational retention
+
+OBSERVABILITY_ONLY
+    telemetry retention policy
+
+RESTRICTED_SECURITY
+    restricted security retention
+
+AUDIT_ONLY
+    durable audit retention
+
+LOCAL_COMPONENT_ONLY
+    normally no durable retention
+```
+
+Retention stores only safe event payloads.
+
+---
+
+# Part XVI — Privacy and Security Validation
+
+## 109. Pre-Publication Inspection
+
+Every event must pass:
+
+```text
+Schema validation
+    ↓
+Visibility validation
+    ↓
+Sensitive-type rejection
+    ↓
+Redaction inspection
+    ↓
+Metadata cardinality check
+    ↓
+Publish
+```
+
+---
+
+## 110. Sensitive Type Rejection
+
+Serialization must reject payload fields typed as:
+
+```text
+SecretMaterialInput
+SecretHandle
+SecretLease with handle
+SecureBuffer
+PrivateKeyMaterial
+AuthorizationObject
+PlatformCredentialObject
+DecryptedBackendEntry
+```
+
+---
+
+## 111. Unsafe Field Names
+
+Event schema review should reject or scrutinize fields such as:
+
+```text
+apiKey
+accessToken
+refreshToken
+password
+clientSecret
+privateKey
+authorization
+rawCredential
+secretValue
+decryptedPayload
+tokenBody
+```
+
+A normalized boolean or state field may use a related name only when clearly non-material, for example:
+
+```text
+accessTokenExpired = true
+```
+
+---
+
+## 112. Reference Privacy
+
+`safeReference` is optional.
+
+When aliases are sensitive, use:
+
+```text
+referenceId
+referenceHash
+displayClass
+```
+
+instead of full canonical reference.
+
+---
+
+## 113. Account Metadata
+
+Events should not expose full account emails, tenant names, or user identifiers by default.
+
+Use safe hints only where explicitly approved.
+
+---
+
+# Part XVII — Idempotency and Race Handling
+
+## 114. Duplicate Event Handling
+
+Consumers should track:
+
+```text
 eventId
+entity stateVersion
+revision
+lease terminal state
+operation terminal state
 ```
 
-Duplicate processing must not produce different observable results.
+Examples:
 
----
-
-# 122. Delivery Ordering
-
-Ordering guarantees exist only:
-
-```
-Within One Aggregate
-```
-
-Example
-
-```
-Snapshot A
-
-↓
-
-Created
-
-↓
-
-Published
-
-↓
-
-Activated
-```
-
-Ordering across unrelated aggregates is undefined.
-
----
-
-# 123. Event Loss
-
-Consumers must tolerate missed events.
-
-Recovery mechanism:
-
-```
-Query Current State
-```
-
-Events are notifications.
-
-Current state remains authoritative.
-
----
-
-# 124. Delivery Retry
-
-Infrastructure may retry delivery.
-
-Retry policy is implementation-specific.
-
-Retry must never modify payload.
-
----
-
-# 125. Delivery Timeout
-
-Consumers should avoid assuming immediate delivery.
-
-Timeout handling belongs to:
-
-```
-Infrastructure
-
-Messaging
-
-Runtime
-```
-
-not Configuration.
-
----
-
-# 126. Delivery Cancellation
-
-Once published:
-
-```
-Events cannot be cancelled.
-```
-
-Compensating events must be published instead.
-
----
-
-# 127. Delivery Summary
-
-Delivery guarantees:
-
-✓ immutable payload
-
-✓ duplicate tolerance
-
-✓ replay support
-
-✓ aggregate ordering
-
----
-
-# Part XIII — Event Versioning
-
-# 128. Event Versioning Philosophy
-
-Every event evolves independently.
-
-Version evolution must preserve compatibility whenever practical.
-
----
-
-# 129. EventVersion
-
-Every event contains:
-
-```
-eventVersion
-```
-
-Conceptually
-
-```
-major
-
-minor
-```
-
----
-
-# 130. Major Version
-
-Increase when:
-
-- removing fields;
-- changing semantics;
-- incompatible payload.
-
----
-
-# 131. Minor Version
-
-Increase when:
-
-- adding optional fields;
-- adding metadata;
-- backward-compatible extensions.
-
----
-
-# 132. Payload Evolution
-
-Recommended evolution strategy.
-
-```
-Old Payload
-
-↓
-
-Optional Field
-
-↓
-
-New Payload
-```
-
-Avoid mandatory field additions whenever possible.
-
----
-
-# 133. Deprecated Events
-
-Deprecated events remain readable.
-
-They should not be produced by new implementations.
-
-Replacement events should be documented.
-
----
-
-# 134. Event Compatibility
-
-Consumers should ignore unknown optional fields.
-
-Consumers must reject unsupported major versions.
-
----
-
-# 135. Versioning Summary
-
-Versioning guarantees:
-
-✓ explicit evolution
-
-✓ compatibility awareness
-
-✓ deterministic replay
-
----
-
-# Part XIV — Event Replay
-
-# 136. Replay Philosophy
-
-Events support rebuilding state history.
-
-Replay exists for:
-
-- diagnostics;
-- testing;
-- recovery;
-- audit.
-
-Replay is not business execution.
-
----
-
-# 137. Replay Source
-
-Replay reads:
-
-```
-Historical Events
-```
-
-Replay never mutates:
-
-```
-Historical Events
-```
-
----
-
-# 138. Replay Ordering
-
-Replay preserves aggregate ordering.
-
-Example
-
-```
-Created
-
-↓
-
-Validated
-
-↓
-
-Published
-```
-
-Events must never replay out of order for one aggregate.
-
----
-
-# 139. Replay Idempotency
-
-Replaying the same event sequence multiple times must produce identical state.
-
-Replay has no external side effects.
-
----
-
-# 140. Replay Snapshot
-
-Replay may terminate at:
-
-```
-Snapshot Revision N
-```
-
-instead of the newest revision.
-
-Partial replay is supported.
-
----
-
-# 141. Replay Summary
-
-Replay guarantees:
-
-✓ deterministic reconstruction
-
-✓ immutable history
-
-✓ side-effect free processing
-
----
-
-# Part XV — Event Security
-
-# 142. Event Security Philosophy
-
-Configuration events must be safe to distribute.
-
-Events are not secret transport.
-
----
-
-# 143. Secret Rule
-
-Events never contain:
-
-- API keys;
-- passwords;
-- tokens;
-- private keys;
-- decrypted credentials.
-
-Only references may appear.
-
----
-
-# 144. Sensitive Metadata
-
-Potentially sensitive metadata includes:
-
-- filesystem paths;
-- provider account identifiers;
-- local model locations.
-
-Redaction policy applies.
-
----
-
-# 145. Administrative Visibility
-
-Administrative events may expose additional metadata.
-
-Ordinary consumers should receive only public event payloads.
-
-Visibility policy belongs to Security Infrastructure.
-
----
-
-# 146. Event Authenticity
-
-If supported, events may include authenticity metadata.
-
-Examples
-
-```
-signature
-
-producerId
-```
-
-Authenticity metadata is optional.
-
----
-
-# 147. Event Integrity
-
-Events must be immutable after publication.
-
-Payload modification is forbidden.
-
-Corrections require new events.
-
----
-
-# 148. Security Summary
-
-Security guarantees:
-
-✓ immutable payload
-
-✓ secret isolation
-
-✓ redaction compatibility
-
-✓ replay safety
-
----
-
-# Part XVI — Event Ownership Matrix
-
-# 149. Ownership Philosophy
-
-Every Configuration event has exactly one publisher.
-
-Consumers never publish Configuration lifecycle events.
-
----
-
-# 150. Ownership Matrix
-
-| Event Category | Owner |
-|---------------|-------|
-| Source Events | Configuration |
-| Reload Events | Configuration |
-| Candidate Events | Configuration |
-| Snapshot Events | Configuration |
-| Revision Events | Configuration |
-| Validation Events | Configuration |
-| Compatibility Events | Configuration |
-| Migration Events | Configuration |
-| Override Events | Configuration |
-| Diagnostic Events | Configuration |
-| Consumer Acceptance Events | Configuration Infrastructure (published from consumer state changes) |
-
----
-
-# 151. Cross-Module Ownership
-
-Examples
-
-```
-Configuration
-
-↓
-
-SnapshotPublished
-
-Runtime
-
-↓
-
-WorkerStarted
-
-Translation
-
-↓
-
-TranslationCompleted
-```
-
-Each module publishes only its own domain events.
-
----
-
-# 152. Ownership Invariants
-
-Ownership guarantees:
-
-✓ one publisher
-
-✓ one aggregate owner
-
-✓ explicit responsibility
-
----
-
-# Part XVII — Global Event Ordering
-
-# 153. High-Level Ordering
-
-Normal execution:
-
-```
-Source Events
-
-↓
-
-Reload Events
-
-↓
-
-Candidate Events
-
-↓
-
-Validation Events
-
-↓
-
-Compatibility Events
-
-↓
-
-Snapshot Events
-
-↓
-
-Revision Events
-
-↓
-
-Consumer Events
-
-↓
-
-Diagnostic Events
-```
-
-Some events may execute in parallel.
-
-Ordering is guaranteed only within each aggregate.
-
----
-
-# 154. Publication Ordering
-
-Publication always follows:
-
-```
-CandidatePublished
-
-↓
-
-SnapshotPublished
-
-↓
-
-RevisionPublished
-
-↓
-
-ConsumerPending
-```
-
-This ordering is architecturally significant.
-
----
-
-# 155. Override Ordering
-
-Overrides create future configuration revisions.
-
-They never modify historical events.
-
----
-
-# 156. Migration Ordering
-
-Migration always precedes publication.
-
-Migration events never occur after publication for the same candidate.
-
----
-
-# 157. Ordering Summary
-
-Ordering guarantees:
-
-✓ deterministic aggregate ordering
-
-✓ append-only history
-
-✓ replay compatibility
-
----
-
-# Part XVIII — Global Event Invariants
-
-# 158. Invariant 1
-
-Every event has exactly one publisher.
-
----
-
-# 159. Invariant 2
-
-Every event references exactly one aggregate.
-
----
-
-# 160. Invariant 3
-
-Every event is immutable.
-
----
-
-# 161. Invariant 4
-
-Every event is timestamped.
-
----
-
-# 162. Invariant 5
-
-Every event is versioned.
-
----
-
-# 163. Invariant 6
-
-Every event is replay-safe.
-
----
-
-# 164. Invariant 7
-
-Every event is secret-safe.
-
----
-
-# 165. Invariant 8
-
-Historical events are never modified.
-
----
-
-# 166. Invariant 9
-
-Compensation requires new events.
-
----
-
-# 167. Invariant 10
-
-Events describe facts.
-
-They never contain commands.
-
----
-
-# Part XIX — Event Specification Summary
-
-# 168. Event Categories Covered
-
-This document specifies:
-
-```
-✓ Source Events
-
-✓ Reload Events
-
-✓ Candidate Events
-
-✓ Snapshot Events
-
-✓ Revision Events
-
-✓ Validation Events
-
-✓ Compatibility Events
-
-✓ Migration Events
-
-✓ Override Events
-
-✓ Consumer Events
-
-✓ Diagnostic Events
-```
-
----
-
-# 169. Architectural Guarantees
-
-Configuration Events guarantee:
-
-✓ immutable event history
-
-✓ deterministic aggregate ordering
-
-✓ transport neutrality
-
-✓ replay safety
-
-✓ version awareness
-
-✓ explicit ownership
-
-✓ secret isolation
-
-✓ append-only evolution
-
----
-
-# 170. Relationship to Other Documents
-
-The complete Configuration specification consists of:
-
-```
-MODULE.md
-
-↓
-
-CONTRACT.md
-
-↓
-
-STATES.md
-
-↓
-
-EVENTS.md
-
-↓
-
-ERRORS.md
-
-↓
-
-README.md
-```
-
-Each document defines one independent architectural aspect.
-
----
-
-# 171. End of Event Specification
-
-This document defines the authoritative event model for the Configuration Infrastructure module.
-
-Every future implementation must preserve:
-
-- event semantics;
-- ownership boundaries;
-- ordering guarantees;
-- replay guarantees;
-- versioning rules;
-- security rules;
-
-regardless of implementation language, runtime, messaging technology, or storage backend.
-
----
-
-# Part XI — Diagnostic Events
-
-# 111. Diagnostic Event Philosophy
-
-Diagnostic events expose operational information about the Configuration Infrastructure.
-
-Diagnostic events are:
-
-- informational;
-- immutable;
-- non-authoritative;
-- safe for observability.
-
-Diagnostic events must never expose:
-
-- raw secrets;
-- effective secret values;
-- private credentials;
-- confidential user information.
-
----
-
-# 112. ConfigurationDiagnosticGenerated
-
-Published when a new diagnostic snapshot is generated.
-
-Payload
-
-```
-diagnosticId
-
-configurationRevision
-
-generatedAt
-```
-
-Diagnostic generation does not imply configuration changes.
-
----
-
-# 113. ConfigurationWarningDetected
-
-Published when a non-blocking configuration warning is detected.
-
-Payload
-
-```
-warningCode
-
-sectionId
-
-severity
-```
-
-Warnings are informational.
-
----
-
-# 114. ConfigurationNoticeGenerated
-
-Published when an informational notice is produced.
-
-Payload
-
-```
-noticeCode
-
-configurationRevision
-```
-
-Notices are intended for administrators.
-
----
-
-# 115. ConfigurationHealthChanged
-
-Published when overall Configuration Infrastructure health changes.
-
-Payload
-
-```
-previousHealth
-
-currentHealth
-
-reason
-```
-
-Possible health values
-
-```
-HEALTHY
-
-DEGRADED
-
-FAILED
-```
-
----
-
-# 116. ConfigurationDiagnosticsCleared
-
-Published when obsolete diagnostics are removed.
-
-Payload
-
-```
-removedDiagnosticCount
-```
-
-Removing diagnostics never changes configuration state.
-
----
-
-# 117. Diagnostic Event Ordering
-
-```
-DiagnosticGenerated
-
-↓
-
-WarningDetected
-
-↓
-
-NoticeGenerated
-```
-
-Health events may occur independently.
-
----
-
-# 118. Diagnostic Event Invariants
-
-Diagnostic events guarantee:
-
-✓ read-only information
-
-✓ revision awareness
-
-✓ secret safety
-
-✓ replay compatibility
-
----
-
-# Part XII — Event Delivery
-
-# 119. Delivery Philosophy
-
-Configuration events are infrastructure events.
-
-Consumers should treat them as notifications.
-
-Consumers must not assume synchronous processing.
-
----
-
-# 120. Delivery Semantics
-
-Recommended delivery guarantees.
-
-```
-At Least Once
-```
-
-Consumers must therefore support duplicate events.
-
-Exactly-once delivery is not required by the architecture.
+- duplicate `SecretLeaseRevoked` must not revoke twice;
+- duplicate `SecretRevisionActivated` must not rebuild unlimited client pools;
+- duplicate `SecretUserActionRequired` must not open repeated prompts;
+- duplicate `SecretRemoved` must not trigger repeated provider revocation.
 
 ---
 
-# 121. Duplicate Delivery
+## 115. Out-of-Order Events
 
-Duplicate event delivery is permitted.
+Consumers compare:
 
-Consumers should identify duplicates using:
+- state version;
+- revision;
+- occurredAt;
+- entity identity.
 
-```
-eventId
-```
-
-Duplicate processing must not produce different observable results.
-
----
-
-# 122. Delivery Ordering
-
-Ordering guarantees exist only:
-
-```
-Within One Aggregate
-```
+Example:
 
-Example
-
+```text
+Revision R5 activated
+then delayed R4 superseded event arrives
 ```
-Snapshot A
-
-↓
 
-Created
+The consumer must not revert to R4.
 
-↓
+---
 
-Published
+## 116. Availability Race
 
-↓
+Availability may change rapidly:
 
-Activated
+```text
+LOCKED → AVAILABLE → BACKEND_UNAVAILABLE
 ```
 
-Ordering across unrelated aggregates is undefined.
+Consumers should use the event as a hint and query current state before an important action.
 
 ---
-
-# 123. Event Loss
 
-Consumers must tolerate missed events.
+## 117. Rotation Race
 
-Recovery mechanism:
+Possible event order by entity:
 
+```text
+SecretRotationStarted
+SecretRevisionActivated
+SecretRevisionSuperseded
+SecretRotationCompleted
 ```
-Query Current State
-```
 
-Events are notifications.
+`SecretRevisionActivated` may precede cleanup completion.
 
-Current state remains authoritative.
+Consumers must distinguish activation from full rotation completion.
 
 ---
-
-# 124. Delivery Retry
 
-Infrastructure may retry delivery.
+## 118. Removal Race
 
-Retry policy is implementation-specific.
+`SecretRemoved` must not be published before new access is blocked and material-deletion outcome is known enough to report safe state.
 
-Retry must never modify payload.
+A later `SecretRemovalPartiallyCompleted` or cleanup event may clarify external revocation or tombstone status.
 
 ---
 
-# 125. Delivery Timeout
+# Part XVIII — Event Catalog Summary
 
-Consumers should avoid assuming immediate delivery.
+## 119. Descriptor Events
 
-Timeout handling belongs to:
-
-```
-Infrastructure
-
-Messaging
-
-Runtime
+```text
+SecretRegistrationStarted
+SecretRegistered
+SecretRegistrationFailed
+SecretSuspended
+SecretReactivated
+SecretRevoked
+SecretRemovalStarted
+SecretRemoved
+SecretTombstoned
 ```
-
-not Configuration.
-
----
-
-# 126. Delivery Cancellation
 
-Once published:
+## 120. Revision Events
 
+```text
+SecretRevisionCandidateCreated
+SecretRevisionReady
+SecretRevisionActivated
+SecretRevisionSuperseded
+SecretRevisionExpired
+SecretRevisionRevoked
+SecretRevisionInvalidated
+SecretRevisionDeletionStarted
+SecretRevisionDeleted
 ```
-Events cannot be cancelled.
-```
-
-Compensating events must be published instead.
-
----
-
-# 127. Delivery Summary
-
-Delivery guarantees:
-
-✓ immutable payload
-
-✓ duplicate tolerance
 
-✓ replay support
+## 121. Availability and User Action Events
 
-✓ aggregate ordering
-
----
-
-# Part XIII — Event Versioning
-
-# 128. Event Versioning Philosophy
-
-Every event evolves independently.
-
-Version evolution must preserve compatibility whenever practical.
-
----
-
-# 129. EventVersion
-
-Every event contains:
-
-```
-eventVersion
+```text
+SecretAvailabilityChanged
+SecretUserActionRequired
+SecretUserActionResolved
 ```
 
-Conceptually
+## 122. Lease Events
 
+```text
+SecretLeaseGranted
+SecretLeaseActivated
+SecretLeaseReleased
+SecretLeaseExpired
+SecretLeaseRevoked
+SecretLeaseRejected
+SecretLeaseAbandoned
 ```
-major
-
-minor
-```
-
----
 
-# 130. Major Version
+## 123. Backend Events
 
-Increase when:
-
-- removing fields;
-- changing semantics;
-- incompatible payload.
-
----
-
-# 131. Minor Version
-
-Increase when:
-
-- adding optional fields;
-- adding metadata;
-- backward-compatible extensions.
-
----
-
-# 132. Payload Evolution
-
-Recommended evolution strategy.
-
+```text
+SecretBackendRegistered
+SecretBackendInitializationStarted
+SecretBackendAvailable
+SecretBackendLocked
+SecretBackendUnlocked
+SecretBackendDegraded
+SecretBackendUnavailable
+SecretBackendCompromised
+SecretBackendShutdownStarted
+SecretBackendTerminated
 ```
-Old Payload
-
-↓
 
-Optional Field
+## 124. Validation Events
 
-↓
-
-New Payload
+```text
+SecretValidationStarted
+SecretValidationCompleted
+SecretValidationDeferred
+SecretValidationFailed
 ```
-
-Avoid mandatory field additions whenever possible.
-
----
 
-# 133. Deprecated Events
+## 125. Rotation Events
 
-Deprecated events remain readable.
-
-They should not be produced by new implementations.
-
-Replacement events should be documented.
-
----
-
-# 134. Event Compatibility
-
-Consumers should ignore unknown optional fields.
-
-Consumers must reject unsupported major versions.
-
----
-
-# 135. Versioning Summary
-
-Versioning guarantees:
-
-✓ explicit evolution
-
-✓ compatibility awareness
-
-✓ deterministic replay
-
----
-
-# Part XIV — Event Replay
-
-# 136. Replay Philosophy
-
-Events support rebuilding state history.
-
-Replay exists for:
-
-- diagnostics;
-- testing;
-- recovery;
-- audit.
-
-Replay is not business execution.
-
----
-
-# 137. Replay Source
-
-Replay reads:
-
-```
-Historical Events
+```text
+SecretRotationStarted
+SecretRotationCandidateReady
+SecretRotationActivated
+SecretRotationCompleted
+SecretRotationPartiallyCompleted
+SecretRotationFailed
+SecretRotationCanceled
+SecretRotationBecameUncertain
+SecretRotationReconciled
 ```
 
-Replay never mutates:
+## 126. Migration Events
 
+```text
+SecretMigrationStarted
+SecretMigrationDestinationValidated
+SecretMigrationSwitched
+SecretMigrationCompleted
+SecretMigrationPartiallyCompleted
+SecretMigrationFailed
+SecretMigrationBecameUncertain
+SecretMigrationReconciled
 ```
-Historical Events
-```
-
----
-
-# 138. Replay Ordering
 
-Replay preserves aggregate ordering.
+## 127. Removal and External Revocation Events
 
-Example
-
+```text
+SecretExternalRevocationRequested
+SecretExternalRevocationCompleted
+SecretExternalRevocationFailed
+SecretRemovalPartiallyCompleted
 ```
-Created
-
-↓
 
-Validated
+## 128. Operation and Reconciliation Events
 
-↓
-
-Published
+```text
+SecretOperationDeferred
+SecretOperationBecameUncertain
+SecretReconciliationRequired
+SecretReconciliationCompleted
+SecretManualActionRequired
 ```
-
-Events must never replay out of order for one aggregate.
-
----
-
-# 139. Replay Idempotency
-
-Replaying the same event sequence multiple times must produce identical state.
 
-Replay has no external side effects.
+## 129. Security and Redaction Events
 
----
-
-# 140. Replay Snapshot
-
-Replay may terminate at:
-
+```text
+SecretAccessDenied
+SecretConsumerMismatchDetected
+SecretPurposeViolationDetected
+SecretExposureBlocked
+SecretExportApproved
+SecretExportBlocked
+SecretPolicyChanged
+SecretRedactionFindingDetected
+SecretRedactionFailureDetected
 ```
-Snapshot Revision N
-```
-
-instead of the newest revision.
-
-Partial replay is supported.
-
----
-
-# 141. Replay Summary
-
-Replay guarantees:
-
-✓ deterministic reconstruction
-
-✓ immutable history
-
-✓ side-effect free processing
-
----
-
-# Part XV — Event Security
-
-# 142. Event Security Philosophy
-
-Configuration events must be safe to distribute.
-
-Events are not secret transport.
-
----
-
-# 143. Secret Rule
-
-Events never contain:
 
-- API keys;
-- passwords;
-- tokens;
-- private keys;
-- decrypted credentials.
-
-Only references may appear.
-
----
-
-# 144. Sensitive Metadata
-
-Potentially sensitive metadata includes:
-
-- filesystem paths;
-- provider account identifiers;
-- local model locations.
-
-Redaction policy applies.
-
 ---
 
-# 145. Administrative Visibility
+# Part XIX — MVP Event Boundary
 
-Administrative events may expose additional metadata.
+## 130. Required MVP Events
 
-Ordinary consumers should receive only public event payloads.
-
-Visibility policy belongs to Security Infrastructure.
-
----
-
-# 146. Event Authenticity
-
-If supported, events may include authenticity metadata.
-
-Examples
-
-```
-signature
+The desktop MVP should implement:
 
-producerId
+```text
+SecretRegistered
+SecretRevisionActivated
+SecretRevisionSuperseded
+SecretRevisionExpired
+SecretRevisionRevoked
+SecretAvailabilityChanged
+SecretLeaseRevoked
+SecretLeaseExpired
+SecretBackendAvailable
+SecretBackendLocked
+SecretBackendUnavailable
+SecretBackendCompromised
+SecretValidationCompleted
+SecretRotationStarted
+SecretRotationCompleted
+SecretRotationFailed
+SecretRotationBecameUncertain
+SecretRevoked
+SecretRemovalStarted
+SecretRemoved
+SecretUserActionRequired
+SecretExposureBlocked
 ```
-
-Authenticity metadata is optional.
-
----
-
-# 147. Event Integrity
-
-Events must be immutable after publication.
-
-Payload modification is forbidden.
-
-Corrections require new events.
-
----
-
-# 148. Security Summary
-
-Security guarantees:
-
-✓ immutable payload
-
-✓ secret isolation
-
-✓ redaction compatibility
-
-✓ replay safety
-
----
-
-# Part XVI — Event Ownership Matrix
-
-# 149. Ownership Philosophy
-
-Every Configuration event has exactly one publisher.
-
-Consumers never publish Configuration lifecycle events.
-
----
-
-# 150. Ownership Matrix
-
-| Event Category | Owner |
-|---------------|-------|
-| Source Events | Configuration |
-| Reload Events | Configuration |
-| Candidate Events | Configuration |
-| Snapshot Events | Configuration |
-| Revision Events | Configuration |
-| Validation Events | Configuration |
-| Compatibility Events | Configuration |
-| Migration Events | Configuration |
-| Override Events | Configuration |
-| Diagnostic Events | Configuration |
-| Consumer Acceptance Events | Configuration Infrastructure (published from consumer state changes) |
 
 ---
-
-# 151. Cross-Module Ownership
-
-Examples
-
-```
-Configuration
-
-↓
-
-SnapshotPublished
-
-Runtime
-
-↓
 
-WorkerStarted
+## 131. Optional MVP Operational Events
 
-Translation
-
-↓
-
-TranslationCompleted
+```text
+SecretLeaseGranted
+SecretLeaseActivated
+SecretLeaseReleased
+SecretValidationStarted
+SecretBackendInitializationStarted
+SecretRotationCandidateReady
+SecretRevisionCandidateCreated
 ```
-
-Each module publishes only its own domain events.
-
----
-
-# 152. Ownership Invariants
-
-Ownership guarantees:
-
-✓ one publisher
 
-✓ one aggregate owner
+These may remain local telemetry.
 
-✓ explicit responsibility
-
 ---
-
-# Part XVII — Global Event Ordering
-
-# 153. High-Level Ordering
-
-Normal execution:
-
-```
-Source Events
-
-↓
-
-Reload Events
 
-↓
+## 132. Deferred Events
 
-Candidate Events
+May be deferred:
 
-↓
-
-Validation Events
-
-↓
-
-Compatibility Events
-
-↓
-
-Snapshot Events
-
-↓
-
-Revision Events
-
-↓
-
-Consumer Events
-
-↓
-
-Diagnostic Events
+```text
+advanced external secret-manager events
+hardware security module events
+cross-device synchronization events
+organization policy events
+encrypted backup events
+complex certificate lifecycle events
+child-process transfer events
+automatic provider provisioning events
 ```
-
-Some events may execute in parallel.
 
-Ordering is guaranteed only within each aggregate.
-
 ---
-
-# 154. Publication Ordering
 
-Publication always follows:
-
-```
-CandidatePublished
+# Part XX — Event Decisions
 
-↓
+## 133. Decisions
 
-SnapshotPublished
+### Decision 1 — No raw material in any event
 
-↓
+Visibility class never permits secret material.
 
-RevisionPublished
+### Decision 2 — Facts publish after commit
 
-↓
+State remains authoritative.
 
-ConsumerPending
-```
+### Decision 3 — Availability is the main shared integration signal
 
-This ordering is architecturally significant.
+Consumers use normalized availability rather than backend internals.
 
----
+### Decision 4 — Lease events are restricted by default
 
-# 155. Override Ordering
+High-frequency access metadata is not broadcast widely.
 
-Overrides create future configuration revisions.
+### Decision 5 — Security events use restricted channels
 
-They never modify historical events.
+Compromise, mismatch, export, and exposure events are not general public events.
 
----
+### Decision 6 — Audit and Event Bus may be separate
 
-# 156. Migration Ordering
+Durable administrative audit may use a dedicated restricted sink.
 
-Migration always precedes publication.
+### Decision 7 — Activation and completion are distinct
 
-Migration events never occur after publication for the same candidate.
+Rotation or migration activation can occur before cleanup completes.
 
----
+### Decision 8 — Uncertainty is explicit
 
-# 157. Ordering Summary
+Potentially committed operations publish uncertainty and block blind retry.
 
-Ordering guarantees:
+### Decision 9 — User-action events carry no user input
 
-✓ deterministic aggregate ordering
+They contain only action class and operation identity.
 
-✓ append-only history
+### Decision 10 — References are redacted by policy
 
-✓ replay compatibility
+Full canonical references are optional, not automatic.
 
----
+### Decision 11 — Provider Management receives normalized credential facts
 
-# Part XVIII — Global Event Invariants
+It never receives material through events.
 
-# 158. Invariant 1
+### Decision 12 — Events do not grant access
 
-Every event has exactly one publisher.
+Every material access still requires direct policy evaluation and lease acquisition.
 
 ---
-
-# 159. Invariant 2
 
-Every event references exactly one aggregate.
+# Part XXI — Open Decisions
 
----
+## 134. Visibility Decisions
 
-# 160. Invariant 3
+Still to finalize:
 
-Every event is immutable.
+- exact subscribers for lease events;
+- whether `SecretRegistered` is general internal or administration-only;
+- whether backend lock events are visible to Presentation directly;
+- whether access-denied events use security sink only;
+- exact audit/event dual-write strategy;
+- provider-specific event routing.
 
 ---
-
-# 161. Invariant 4
 
-Every event is timestamped.
+## 135. Granularity Decisions
 
----
-
-# 162. Invariant 5
+Still to finalize:
 
-Every event is versioned.
+- validation progress events;
+- rotation progress granularity;
+- migration progress granularity;
+- cleanup events;
+- tombstone events;
+- external revocation progress;
+- backend capability-change events;
+- active lease count events.
 
 ---
-
-# 163. Invariant 6
-
-Every event is replay-safe.
 
----
+## 136. Retention Decisions
 
-# 164. Invariant 7
+Still to finalize:
 
-Every event is secret-safe.
+- audit retention;
+- security-event retention;
+- lease-event retention;
+- local telemetry buffer size;
+- event redaction review retention;
+- reconciliation history retention.
 
 ---
-
-# 165. Invariant 8
 
-Historical events are never modified.
-
----
+## 137. Delivery Decisions
 
-# 166. Invariant 9
+Still to finalize:
 
-Compensation requires new events.
+- MVP at-most-once versus local retry;
+- persistent outbox timing;
+- restricted security channel implementation;
+- audit sink durability;
+- subscriber authorization;
+- event encryption at rest;
+- cross-process event transport.
 
 ---
 
-# 167. Invariant 10
+# Part XXII — Related Documents
 
-Events describe facts.
+## 138. Related Documents
 
-They never contain commands.
+```text
+.meta/MODULES.md
+.meta/MODULES_RULE.md
 
----
+docs/architecture/STATE_MACHINE.md
+docs/architecture/EVENT_BUS.md
+docs/architecture/MODULE_DEPENDENCY.md
+docs/architecture/DATA_FLOW.md
 
-# Part XIX — Event Specification Summary
+docs/architecture/runtime/CANCELLATION.md
+docs/architecture/runtime/RESOURCE_LIFECYCLE.md
+docs/architecture/runtime/ERROR_MODEL.md
+docs/architecture/runtime/RUNTIME_OBSERVABILITY.md
 
-# 168. Event Categories Covered
+03-infrastructure/configuration/MODULE.md
+03-infrastructure/configuration/CONTRACT.md
 
-This document specifies:
+03-infrastructure/secret-management/MODULE.md
+03-infrastructure/secret-management/CONTRACT.md
+03-infrastructure/secret-management/STATES.md
 
+02-modules/provider-management/MODULE.md
+02-modules/provider-management/CONTRACT.md
+02-modules/provider-management/STATES.md
+02-modules/provider-management/EVENTS.md
 ```
-✓ Source Events
-
-✓ Reload Events
-
-✓ Candidate Events
-
-✓ Snapshot Events
-
-✓ Revision Events
-
-✓ Validation Events
-
-✓ Compatibility Events
-
-✓ Migration Events
 
-✓ Override Events
+Future Secret Management documents:
 
-✓ Consumer Events
-
-✓ Diagnostic Events
+```text
+03-infrastructure/secret-management/ERRORS.md
+03-infrastructure/secret-management/README.md
 ```
 
 ---
-
-# 169. Architectural Guarantees
-
-Configuration Events guarantee:
-
-✓ immutable event history
-
-✓ deterministic aggregate ordering
-
-✓ transport neutrality
-
-✓ replay safety
-
-✓ version awareness
 
-✓ explicit ownership
+## 139. Summary
 
-✓ secret isolation
+Secret Management events communicate safe lifecycle facts while preserving the strict boundary around secret material.
 
-✓ append-only evolution
+The publication flow is:
 
----
-
-# 170. Relationship to Other Documents
-
-The complete Configuration specification consists of:
-
+```text
+State transition validated
+    ↓
+Authoritative state committed
+    ↓
+Payload schema validated
+    ↓
+Sensitive types rejected
+    ↓
+Redaction inspection
+    ↓
+Visibility selected
+    ↓
+Event published
 ```
-MODULE.md
-
-↓
-
-CONTRACT.md
-
-↓
-
-STATES.md
 
-↓
+The principal shared integration flow is:
 
-EVENTS.md
-
-↓
-
-ERRORS.md
-
-↓
-
-README.md
+```text
+Secret state changes
+    ↓
+SecretAvailabilityChanged
+    ↓
+Provider Management / Configuration / Presentation react
+    ↓
+Consumer queries current safe state
+    ↓
+Any actual access uses direct lease contract
 ```
-
-Each document defines one independent architectural aspect.
-
----
-
-# 171. End of Event Specification
-
-This document defines the authoritative event model for the Configuration Infrastructure module.
 
-Every future implementation must preserve:
+The event model guarantees:
 
-- event semantics;
-- ownership boundaries;
-- ordering guarantees;
-- replay guarantees;
-- versioning rules;
-- security rules;
+- events represent past facts;
+- events are immutable;
+- state commits before publication;
+- raw secret material never enters Event Bus;
+- events never grant access authority;
+- availability is normalized;
+- lease metadata is restricted;
+- security signals use restricted visibility;
+- audit may use a separate durable sink;
+- activation and cleanup completion remain distinguishable;
+- uncertain external outcomes are explicit;
+- consumers are idempotent;
+- safe identity and revision preserve traceability;
+- backend-native details remain internal.
 
-regardless of implementation language, runtime, messaging technology, or storage backend.
+This document is the event source of truth for subsequent Secret Management errors and implementation documentation.

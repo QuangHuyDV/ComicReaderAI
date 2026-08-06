@@ -1,3270 +1,3617 @@
-# Configuration States
+# Secret Management States
 
-> **Project:** CRAI
+> **Project:** CRAI  
+> **Layer:** Infrastructure  
+> **Module:** Secret Management  
+> **Document:** State Machines  
+> **Path:** `03-infrastructure/secret-management/STATES.md`  
+> **Version:** 0.1  
+> **Status:** Architecture Draft  
+> **Last Updated:** 2026-08-05  
+> **Source of Truth:**
 >
-> **Layer:** Infrastructure
->
-> **Module:** Configuration
->
-> **Document:** State Specification
->
-> **Path:** `03-infrastructure/configuration/STATES.md`
->
-> **Status:** Architecture Draft
+> - `03-infrastructure/secret-management/MODULE.md`
+> - `03-infrastructure/secret-management/CONTRACT.md`
+> - `03-infrastructure/configuration/MODULE.md`
+> - `03-infrastructure/configuration/CONTRACT.md`
+> - `02-modules/provider-management/MODULE.md`
+> - `02-modules/provider-management/CONTRACT.md`
+> - `02-modules/provider-management/STATES.md`
+> - `docs/architecture/STATE_MACHINE.md`
+> - `docs/architecture/DATA_FLOW.md`
+> - `docs/architecture/runtime/RESOURCE_LIFECYCLE.md`
+> - `docs/architecture/runtime/ERROR_MODEL.md`
 
 ---
 
-# 1. Purpose
+## 1. Purpose
 
-This document defines every state machine owned by the Configuration Infrastructure module.
+This document defines the lifecycle states and valid transitions owned by the Secret Management infrastructure module.
 
-It specifies:
+It covers:
 
-- lifecycle states
-- state transitions
-- transition ownership
-- terminal states
-- transient states
-- state invariants
-- recovery behavior
+- secret descriptor lifecycle;
+- secret revision lifecycle;
+- secret availability;
+- secret lease lifecycle;
+- secure backend lifecycle;
+- backend lock and unlock behavior;
+- secret registration and replacement candidates;
+- secret rotation lifecycle;
+- secret migration lifecycle;
+- secret validation lifecycle;
+- secret removal and tombstone behavior;
+- operation uncertainty and reconciliation;
+- active lease behavior during rotation, revocation, removal, migration, shutdown, and backend failure;
+- state ownership;
+- command-to-state mapping;
+- concurrency and persistence rules;
+- invalid transitions;
+- cross-module boundaries.
 
-This document intentionally excludes:
+This document does not define:
 
-- commands
-- queries
-- events
-- errors
-
-Those are defined in:
-
-```
-CONTRACT.md
-
-EVENTS.md
-
-ERRORS.md
-```
-
----
-
-# 2. State Philosophy
-
-Configuration is entirely state driven.
-
-Every important object owns an explicit lifecycle.
-
-Configuration never relies on hidden boolean flags.
-
-Avoid:
-
-```
-loaded = true
-
-validated = true
-
-published = true
-```
-
-Prefer
-
-```
-LOADING
-
-↓
-
-VALIDATING
-
-↓
-
-PUBLISHED
-```
+- command payload schemas;
+- query payload schemas;
+- event payload schemas;
+- detailed error codes;
+- encryption algorithms;
+- operating-system keychain APIs;
+- provider-native authentication states;
+- Provider Management provider states;
+- Runtime work-item states;
+- UI states;
+- database schemas;
+- implementation classes.
 
 ---
 
-# 3. State Machine Inventory
+## 2. State Ownership
 
-Configuration owns the following state machines.
+Secret Management owns lifecycle state for:
 
-```
-Configuration Source
-
-Configuration Candidate
-
-Configuration Snapshot
-
-Configuration Revision
-
-Configuration Override
-
-Configuration Validation
-
-Configuration Compatibility
-
-Configuration Migration
-
-Consumer Acceptance
-
-Configuration Reload
+```text
+SecretDescriptor
+SecretRevision
+SecretAvailability
+SecretLease
+SecretBackend
+SecretCandidate
+SecretRotation
+SecretMigration
+SecretValidation
+SecretRemoval
+SecretOperation
+SecretReconciliation
 ```
 
-Each machine is independent.
+Secret Management does not own lifecycle state for:
+
+```text
+ConfigurationSnapshot
+ProviderDefinition
+ProviderModel
+ProviderLease
+ProviderClient
+RuntimeWorkItem
+RuntimeAttempt
+TranslationJob
+RecognitionJob
+ReadingSession
+Presentation
+UserInterfacePrompt
+ExternalProviderAccount
+OperatingSystemUserSession
+```
+
+External state may trigger or constrain a Secret Management transition, but ownership remains with the originating module.
+
+Examples:
+
+- an operating-system keychain lock affects `SecretBackendState`;
+- a provider authentication rejection affects `SecretAvailabilityState` and validation metadata;
+- Provider Management may react to a secret revocation;
+- Runtime cancellation may trigger lease release;
+- Presentation may complete user presence interaction;
+- none of these consumers may mutate Secret Management state directly.
 
 ---
 
-# 4. General State Rules
+## 3. State Ownership Matrix
 
-Every state machine must satisfy:
-
-✓ explicit state
-
-✓ explicit transition
-
-✓ deterministic transition
-
-✓ no hidden state
-
-✓ observable transition
-
-✓ immutable history
-
-✓ replay safety
+| State machine | Owner | Notes |
+|---|---|---|
+| `SecretDescriptorState` | Secret Management | Logical secret identity lifecycle |
+| `SecretRevisionState` | Secret Management | Immutable material revision lifecycle |
+| `SecretAvailabilityState` | Secret Management | Normalized resolvability and usability summary |
+| `SecretLeaseState` | Secret Management | Temporary access authority |
+| `SecretBackendState` | Secret Management boundary | Normalized secure-store operational state |
+| `SecretCandidateState` | Secret Management | Pre-activation material candidate |
+| `SecretRotationState` | Secret Management | Rotation orchestration lifecycle |
+| `SecretMigrationState` | Secret Management | Backend migration lifecycle |
+| `SecretValidationState` | Secret Management | Validation execution lifecycle |
+| `SecretRemovalState` | Secret Management | Logical removal and material deletion lifecycle |
+| `SecretOperationState` | Secret Management | Administrative operation lifecycle |
+| `SecretReconciliationState` | Secret Management | Resolution of uncertain external outcomes |
+| `ProviderLeaseState` | Provider Management | Provider access lifecycle |
+| `RuntimeWorkState` | Runtime | Scheduling and execution |
+| `ConfigurationSnapshotState` | Configuration | Configuration publication lifecycle |
+| `UserPresenceState` | Presentation / Platform | User interaction and platform prompt |
 
 ---
 
-# 5. State Categories
+## 4. State Machine Separation
 
-Configuration distinguishes:
+Secret Management must not use one global state enumeration.
 
+Each entity has an independent lifecycle:
+
+```text
+SecretDescriptorState
+SecretRevisionState
+SecretAvailabilityState
+SecretLeaseState
+SecretBackendState
+SecretCandidateState
+SecretRotationState
+SecretMigrationState
+SecretValidationState
+SecretRemovalState
+SecretOperationState
+SecretReconciliationState
 ```
-Stable States
 
-Transient States
+This separation is required because:
 
-Terminal States
+- a descriptor may remain `ACTIVE` while its backend is `LOCKED`;
+- a secret may be `AVAILABLE` while an old revision is `SUPERSEDED`;
+- a descriptor may be `REVOKED` while historical metadata remains queryable;
+- a rotation may be `VALIDATING` while the current revision remains active;
+- a migration may fail while the source revision remains active;
+- a lease may remain `ACTIVE` while the descriptor enters `ROTATING`;
+- a backend may be `DEGRADED` without making every secret unavailable;
+- a secret may be logically removed while physical deletion is still pending;
+- a provider may reject one credential use without proving the secret is globally invalid;
+- an operation may be uncertain while the underlying secret remains protected.
 
-Failure States
+---
+
+## 5. State Principles
+
+### 5.1 State represents current lifecycle truth
+
+```text
+State
+    = current accepted lifecycle condition
+
+Event
+    = immutable fact that a transition occurred
 ```
 
-Stable states may exist indefinitely.
+State and event meaning must not be conflated.
 
-Transient states are expected to transition.
+### 5.2 Transitions are explicit
 
-Terminal states never transition again.
+Entities must not jump between unrelated states without a defined transition.
 
-Failure states require recovery or replacement.
+### 5.3 Secret identity is stable
 
----
+`SecretId` remains stable across:
 
-# 6. Transition Rules
-
-Every transition:
-
-- has exactly one origin state;
-- has exactly one destination state;
-- has one owner;
-- may publish events;
-- may fail.
-
-Transitions never occur implicitly.
-
----
-
-# 7. Transition Ownership
-
-Configuration owns state transitions for:
-
-- configuration sources;
-- candidates;
-- snapshots;
-- overrides;
+- material replacement;
+- rotation;
 - validation;
-- compatibility;
-- migrations.
+- backend migration;
+- temporary unavailability;
+- backend locking;
+- expiration;
+- revocation;
+- logical removal;
+- tombstone retention.
 
-Consumer modules own only:
+A new logical secret requires a new `SecretId`.
 
-```
-Consumer Acceptance
-```
+### 5.4 Revisions are immutable
+
+Once a revision is committed, its material meaning never changes.
+
+Replacement or rotation creates a new revision.
+
+### 5.5 Availability is derived
+
+`SecretAvailabilityState` summarizes whether an approved resolution may currently succeed.
+
+It is derived from:
+
+- descriptor state;
+- active revision state;
+- backend state;
+- expiration;
+- revocation;
+- access policy;
+- validation evidence;
+- user presence;
+- external provider feedback.
+
+It is not the sole source of truth.
+
+### 5.6 Lease state controls access authority
+
+A lease grants bounded authority to use one revision for one consumer and purpose.
+
+Descriptor availability alone does not grant access.
+
+### 5.7 Logical state and physical execution may diverge
+
+A lease may be logically revoked before:
+
+- a remote request finishes;
+- a child process releases copied material;
+- a provider client is disposed;
+- a backend handle is physically closed.
+
+The logical state controls future authority.
+
+### 5.8 Terminal does not mean erased
+
+Terminal state preserves identity and safe metadata unless retention policy explicitly removes it.
+
+### 5.9 Backend lock does not delete secrets
+
+A locked backend makes resolution unavailable.
+
+It does not remove descriptors or revisions.
+
+### 5.10 Security transitions take precedence
+
+Revocation, access denial, backend compromise, or policy violation may invalidate access immediately even when normal policy would allow graceful drain.
 
 ---
 
-# 8. State Persistence
+# Part I — Secret Descriptor State Machine
 
-Published states are persisted according to retention policy.
+## 6. SecretDescriptorState
 
-Transient execution states may remain in memory only.
+Canonical states:
 
-Persistence policy does not alter lifecycle semantics.
-
----
-
-# 9. Revision Awareness
-
-Every state transition belongs to exactly one configuration revision.
-
-Transitions never mutate historical revisions.
-
----
-
-# Part I — Configuration Source State Machine
-
-# 10. Source Lifecycle
-
-A configuration source follows:
-
-```
-REGISTERED
-
-↓
-
-ENABLED
-
-↓
-
-LOADING
-
-↓
-
-READY
-
-↓
-
-ENABLED
-
-↓
-
-...
-
-↓
-
-DISABLED
-
-↓
-
+```text
+REGISTERING
+ACTIVE
+ROTATING
+MIGRATING
+SUSPENDED
+REVOKED
+REMOVING
 REMOVED
+TOMBSTONED
 ```
 
-Failure transitions may occur during loading.
+Primary flow:
 
----
-
-# 11. REGISTERED
-
-Meaning
-
-The source exists.
-
-Properties
-
-- identity assigned;
-- metadata available;
-- not yet active.
-
-Allowed transitions
-
-```
-REGISTERED
-
-↓
-
-ENABLED
-
-REGISTERED
-
-↓
-
+```text
+REGISTERING
+    ↓
+ACTIVE
+    ↓
+ROTATING / MIGRATING / SUSPENDED
+    ↓
+ACTIVE
+    ↓
+REVOKED
+    ↓
+REMOVING
+    ↓
 REMOVED
+    ↓
+TOMBSTONED
+```
+
+Alternative registration path:
+
+```text
+REGISTERING → REMOVED
+```
+
+when registration fails before activation and no active identity should remain.
+
+---
+
+## 7. REGISTERING
+
+The logical secret identity is being created.
+
+At this point:
+
+- a `SecretId` may already be reserved;
+- a desired reference is validated;
+- access policy is validated;
+- backend selection is in progress or complete;
+- candidate material may exist;
+- no active revision exists yet;
+- normal resolution is prohibited;
+- safe administrative inspection may show registration in progress.
+
+Valid outgoing transitions:
+
+```text
+REGISTERING → ACTIVE
+REGISTERING → REMOVING
+REGISTERING → REMOVED
+```
+
+`REGISTERING → ACTIVE` requires:
+
+- a valid descriptor;
+- a valid access policy;
+- an activated revision;
+- a committed backend entry or approved non-persistent source;
+- no identity conflict;
+- no unresolved atomicity failure.
+
+---
+
+## 8. ACTIVE
+
+The descriptor is valid for normal use subject to:
+
+- availability;
+- access policy;
+- revision state;
+- backend state;
+- expiration;
+- consumer authorization;
+- purpose authorization.
+
+`ACTIVE` does not guarantee every resolution succeeds.
+
+Valid outgoing transitions:
+
+```text
+ACTIVE → ROTATING
+ACTIVE → MIGRATING
+ACTIVE → SUSPENDED
+ACTIVE → REVOKED
+ACTIVE → REMOVING
 ```
 
 ---
 
-# 12. ENABLED
+## 9. ROTATING
 
-Meaning
+A replacement revision is being prepared.
 
-The source participates in future configuration reloads.
+Properties:
 
-The source has not necessarily been loaded yet.
+- the current active revision remains authoritative unless policy says otherwise;
+- a candidate revision may exist;
+- new leases may continue using the current revision;
+- new leases may be temporarily frozen;
+- current leases may drain;
+- security rotation may revoke current leases;
+- descriptor identity remains stable.
 
-Allowed transitions
+Valid outgoing transitions:
 
+```text
+ROTATING → ACTIVE
+ROTATING → SUSPENDED
+ROTATING → REVOKED
+ROTATING → REMOVING
 ```
-ENABLED
 
-↓
+The descriptor returns to `ACTIVE` when:
 
-LOADING
+- the new revision activates successfully; or
+- rotation fails safely and the previous revision remains valid.
 
-ENABLED
+Rotation failure alone must not revoke a valid current revision unless evidence proves it unsafe.
 
-↓
+---
 
-DISABLED
+## 10. MIGRATING
+
+The active secret is being moved between backends or storage representations.
+
+Properties:
+
+- the source remains authoritative until destination validation and activation succeed;
+- normal access may continue through the source;
+- new lease admission may be frozen under strict policy;
+- material must not be exposed to the migration caller;
+- destination candidate is not active until commit.
+
+Valid outgoing transitions:
+
+```text
+MIGRATING → ACTIVE
+MIGRATING → SUSPENDED
+MIGRATING → REVOKED
+MIGRATING → REMOVING
 ```
 
----
-
-# 13. LOADING
-
-Meaning
-
-The source is currently being read.
-
-Possible activities:
-
-- file loading;
-- remote retrieval;
-- environment scan;
-- parsing.
-
-LOADING is transient.
+A failed migration should return the descriptor to `ACTIVE` when the source remains valid.
 
 ---
 
-# 14. READY
+## 11. SUSPENDED
 
-Meaning
-
-The source has been successfully loaded.
-
-Properties
-
-✓ parsed
-
-✓ normalized
-
-✓ available for merge
-
-READY is stable.
-
----
-
-# 15. FAILED
-
-Meaning
-
-Loading failed.
+The descriptor remains registered but normal resolution is temporarily prohibited.
 
 Possible causes:
 
-- missing file;
-- parse failure;
-- permission denied;
-- network failure.
+- administrative suspension;
+- unresolved policy conflict;
+- backend unavailable for an extended period;
+- user presence required but unavailable;
+- validation pending under strict policy;
+- suspected compromise;
+- migration or rotation reconciliation;
+- application safe mode;
+- compliance restriction.
 
-FAILED does not remove the source.
+Existing leases follow explicit policy:
 
-Recovery is possible.
-
----
-
-# 16. DISABLED
-
-Meaning
-
-The source remains registered.
-
-It no longer participates in merge.
-
-Historical revisions remain valid.
-
----
-
-# 17. REMOVED
-
-Meaning
-
-The source no longer exists.
-
-Properties
-
-✓ terminal
-
-No outgoing transitions.
-
----
-
-# 18. Source State Diagram
-
+```text
+ALLOW_DRAIN
+REVOKE_IMMEDIATELY
+REVOKE_AFTER_GRACE
 ```
-REGISTERED
 
-↓
+Valid outgoing transitions:
 
-ENABLED
-
-↓
-
-LOADING
-
-↙      ↘
-
-READY   FAILED
-
-↓         ↓
-
-ENABLED   ENABLED
-
-↓
-
-DISABLED
-
-↓
-
-REMOVED
+```text
+SUSPENDED → ACTIVE
+SUSPENDED → ROTATING
+SUSPENDED → MIGRATING
+SUSPENDED → REVOKED
+SUSPENDED → REMOVING
 ```
 
 ---
 
-# 19. Source Invariants
+## 12. REVOKED
 
-A source:
+The logical secret must not be used for new access.
 
-- has one identity;
-- one current state;
-- deterministic transitions;
-- immutable history.
+Properties:
+
+- no new lease may be granted;
+- active leases are revoked or drained only when policy explicitly permits;
+- safe descriptor metadata remains queryable;
+- historical revisions remain identifiable;
+- provider-side revocation may be complete, pending, unsupported, or unknown;
+- revocation is not deletion.
+
+Valid outgoing transitions:
+
+```text
+REVOKED → ROTATING
+REVOKED → REMOVING
+REVOKED → ACTIVE
+```
+
+`REVOKED → ACTIVE` is permitted only through explicit administrative recovery with:
+
+- a new valid revision or verified reinstatement;
+- policy approval;
+- concurrency protection;
+- audit trace.
+
+Silent un-revocation is prohibited.
 
 ---
 
-# Part II — Configuration Candidate State Machine
+## 13. REMOVING
 
-# 20. Candidate Lifecycle
+Logical removal or material deletion is in progress.
 
-A candidate represents unpublished configuration.
+Properties:
 
-Lifecycle
+- no new leases;
+- active leases follow removal policy;
+- backend deletion may be pending;
+- provider-side revocation may be pending;
+- descriptor remains queryable for operation tracking;
+- physical erasure assurance may be unknown until completion.
 
+Valid outgoing transitions:
+
+```text
+REMOVING → REMOVED
+REMOVING → REVOKED
+REMOVING → SUSPENDED
 ```
-CREATED
 
-↓
+Returning to `ACTIVE` is normally prohibited after material deletion begins.
 
-LOADING
+Recovery should create a new revision or new descriptor rather than pretending removal never began.
 
-↓
+---
 
-NORMALIZING
+## 14. REMOVED
 
-↓
+The descriptor is no longer available for normal use.
 
-MERGING
+Properties:
 
-↓
+- no active revision;
+- no new lease;
+- safe historical metadata may remain;
+- material deletion outcome is recorded;
+- references resolve as removed or missing according to visibility policy;
+- retention policy may later create a tombstone.
 
-BINDING
+Valid outgoing transitions:
 
-↓
+```text
+REMOVED → TOMBSTONED
+```
 
+Reactivation should normally create a new descriptor or require a controlled restore operation that creates a new revision and audit trail.
+
+---
+
+## 15. TOMBSTONED
+
+A minimal record remains to prevent identity reuse, support audit, or explain historical references.
+
+A tombstone may retain:
+
+```text
+secretId
+safe reference hash
+removal time
+last revision number
+backend identifier
+removal assurance
+reason code
+retention expiry
+```
+
+A tombstone must not retain secret material.
+
+`TOMBSTONED` is terminal.
+
+Hard deletion of the tombstone is a retention operation, not a normal lifecycle transition.
+
+---
+
+## 16. Descriptor Transition Table
+
+| Current | Command or condition | Next | Notes |
+|---|---|---|---|
+| `REGISTERING` | registration committed | `ACTIVE` | Initial revision active |
+| `REGISTERING` | registration aborted | `REMOVED` | No usable secret created |
+| `ACTIVE` | rotate accepted | `ROTATING` | Current revision may remain active |
+| `ACTIVE` | migrate accepted | `MIGRATING` | Source remains authoritative |
+| `ACTIVE` | suspend | `SUSPENDED` | New lease denied |
+| `ACTIVE` | revoke | `REVOKED` | Security authority removed |
+| `ACTIVE` | remove | `REMOVING` | Deletion workflow begins |
+| `ROTATING` | new revision activated | `ACTIVE` | Revision changes |
+| `ROTATING` | failed safely | `ACTIVE` | Old revision retained |
+| `ROTATING` | uncertain or unsafe | `SUSPENDED` | Reconciliation needed |
+| `MIGRATING` | destination activated | `ACTIVE` | Backend binding changes |
+| `MIGRATING` | failed safely | `ACTIVE` | Source retained |
+| `MIGRATING` | source uncertain | `SUSPENDED` | Reconciliation needed |
+| `SUSPENDED` | condition resolved | `ACTIVE` | Explicit transition |
+| `SUSPENDED` | security revoke | `REVOKED` | No drain by default |
+| `REVOKED` | replacement recovery | `ROTATING` | New revision path |
+| `REVOKED` | remove | `REMOVING` | Cleanup path |
+| `REMOVING` | deletion completed | `REMOVED` | Assurance recorded |
+| `REMOVED` | retention compaction | `TOMBSTONED` | Minimal metadata only |
+
+---
+
+# Part II — Secret Revision State Machine
+
+## 17. SecretRevisionState
+
+Canonical states:
+
+```text
+CANDIDATE
 VALIDATING
-
-↓
-
-COMPATIBILITY_CHECK
-
-↓
-
 READY
-
-↓
-
-PUBLISHED
-```
-
-Failure may occur from any transient state.
-
----
-
-# 21. CREATED
-
-The candidate exists.
-
-No processing has begun.
-
-Allowed transition
-
-```
-CREATED
-
-↓
-
-LOADING
-```
-
----
-
-# 22. LOADING
-
-Sources are collected.
-
-Input documents are read.
-
-Transient state.
-
----
-
-# 23. NORMALIZING
-
-All source formats become canonical internal representation.
-
-Examples
-
-```
-JSON
-
-↓
-
-Canonical Object
-
-YAML
-
-↓
-
-Canonical Object
-```
-
----
-
-# 24. MERGING
-
-Source precedence is applied.
-
-Winning values are selected.
-
-Origins recorded.
-
-No validation yet.
-
----
-
-# 25. BINDING
-
-Canonical values become typed configuration sections.
-
-Examples
-
-```
-RuntimeConfiguration
-
-TranslationConfiguration
-
-LoggingConfiguration
-```
-
-Binding failures terminate processing.
-
----
-
-# 26. VALIDATING
-
-Structural validation executes.
-
-Includes:
-
-- schema;
-- type;
-- required field;
-- cross-field.
-
-Validation success allows compatibility checking.
-
----
-
-# 27. COMPATIBILITY_CHECK
-
-Compatibility evaluation begins.
-
-Checks:
-
-- schema versions;
-- deprecated fields;
-- application compatibility.
-
-No consumer semantics.
-
----
-
-# 28. READY
-
-Candidate is fully validated.
-
-Eligible for publication.
-
-READY does not imply publication.
-
----
-
-# 29. PUBLISHED
-
-The candidate becomes:
-
-```
-Active Snapshot
-```
-
-PUBLISHED is terminal.
-
-Further modifications require a new candidate.
-
----
-
-# 30. REJECTED
-
-Meaning
-
-Candidate cannot become authoritative.
-
-Reasons
-
-- validation failure;
-- compatibility failure;
-- administrative rejection.
-
-REJECTED is terminal.
-
-# 31. Candidate Failure States
-
-During candidate construction, failures may occur.
-
-Possible failure states:
-
-```
-LOAD_FAILED
-
-NORMALIZATION_FAILED
-
-MERGE_FAILED
-
-BINDING_FAILED
-
-VALIDATION_FAILED
-
-COMPATIBILITY_FAILED
-```
-
-Each failure state is terminal.
-
-Recovery requires creation of a new candidate.
-
----
-
-# 32. LOAD_FAILED
-
-Meaning
-
-At least one required configuration source could not be loaded.
-
-Examples
-
-- required file missing;
-- unreadable source;
-- remote source unavailable;
-- corrupted content.
-
-Possible transitions
-
-```
-LOAD_FAILED
-
-↓
-
-DISCARDED
-```
-
-or
-
-```
-LOAD_FAILED
-
-↓
-
-CREATED
-```
-
-through a completely new reload.
-
----
-
-# 33. NORMALIZATION_FAILED
-
-Meaning
-
-Configuration values cannot be converted into the canonical internal representation.
-
-Examples
-
-```
-Invalid Duration
-
-Unknown Primitive
-
-Unsupported Encoding
-```
-
-Normalization failures prevent merge.
-
----
-
-# 34. MERGE_FAILED
-
-Meaning
-
-Configuration merge could not complete.
-
-Typical causes
-
-- conflicting merge strategy;
-- invalid inheritance;
-- cyclic references;
-- unsupported merge policy.
-
-Merge failures terminate the candidate.
-
----
-
-# 35. BINDING_FAILED
-
-Meaning
-
-Typed configuration objects cannot be created.
-
-Examples
-
-```
-RuntimeConfiguration
-
-↓
-
-Binding Failure
-```
-
-Binding failures usually indicate schema mismatch.
-
----
-
-# 36. VALIDATION_FAILED
-
-Meaning
-
-Structural validation failed.
-
-Examples
-
-- required field missing;
-- invalid enum;
-- duplicate keys;
-- incompatible object shape.
-
-Publication is impossible.
-
----
-
-# 37. COMPATIBILITY_FAILED
-
-Meaning
-
-The configuration is structurally valid but cannot be used.
-
-Examples
-
-- unsupported schema version;
-- incompatible application version;
-- unsupported module version.
-
-Candidate becomes terminal.
-
----
-
-# 38. DISCARDED
-
-Meaning
-
-The candidate has been permanently abandoned.
-
-Properties
-
-✓ terminal
-
-No further transitions.
-
-Historical diagnostics remain available.
-
----
-
-# 39. Candidate State Diagram
-
-```
-CREATED
-
-↓
-
-LOADING
-
-↓
-
-NORMALIZING
-
-↓
-
-MERGING
-
-↓
-
-BINDING
-
-↓
-
-VALIDATING
-
-↓
-
-COMPATIBILITY_CHECK
-
-↓
-
-READY
-
-↓
-
-PUBLISHED
-
-
-Failures
-
-↓
-
-LOAD_FAILED
-
-NORMALIZATION_FAILED
-
-MERGE_FAILED
-
-BINDING_FAILED
-
-VALIDATION_FAILED
-
-COMPATIBILITY_FAILED
-
-↓
-
-DISCARDED
-```
-
----
-
-# 40. Candidate Invariants
-
-A candidate guarantees:
-
-✓ exactly one lifecycle
-
-✓ exactly one terminal state
-
-✓ immutable processing history
-
-✓ publication at most once
-
----
-
-# Part III — Configuration Snapshot State Machine
-
-# 41. Snapshot Lifecycle
-
-Snapshots are immutable.
-
-Lifecycle
-
-```
-CREATED
-
-↓
-
-PUBLISHED
-
-↓
-
 ACTIVE
-
-↓
-
-RETAINED
-
-↓
-
+SUPERSEDED
 EXPIRED
-```
-
-Snapshots never return to ACTIVE once replaced.
-
----
-
-# 42. CREATED
-
-Meaning
-
-The snapshot object has been constructed.
-
-The snapshot is not yet authoritative.
-
-Allowed transition
-
-```
-CREATED
-
-↓
-
-PUBLISHED
-```
-
----
-
-# 43. PUBLISHED
-
-Meaning
-
-The snapshot has become authoritative.
-
-Publication creates:
-
-```
-Configuration Revision
-```
-
-PUBLISHED is transient.
-
-Immediately afterwards:
-
-```
-ACTIVE
-```
-
----
-
-# 44. ACTIVE
-
-Meaning
-
-This is the configuration currently used by the application.
-
-Properties
-
-✓ authoritative
-
-✓ immutable
-
-✓ queryable
-
-Only one snapshot may be ACTIVE.
-
----
-
-# 45. RETAINED
-
-Meaning
-
-The snapshot is historical.
-
-Properties
-
-✓ immutable
-
-✓ queryable
-
-✓ non-authoritative
-
-Historical revisions remain available according to retention policy.
-
----
-
-# 46. EXPIRED
-
-Meaning
-
-Historical retention has ended.
-
-The snapshot is no longer queryable.
-
-Properties
-
-✓ terminal
-
-Metadata may still exist.
-
----
-
-# 47. Snapshot Transition Rules
-
-```
-CREATED
-
-↓
-
-PUBLISHED
-
-↓
-
-ACTIVE
-
-↓
-
-RETAINED
-
-↓
-
-EXPIRED
-```
-
-Backward transitions are forbidden.
-
----
-
-# 48. Snapshot Replacement
-
-When a new snapshot is published:
-
-```
-Snapshot R18
-
-↓
-
-ACTIVE
-
-↓
-
-Publish R19
-
-↓
-
-Snapshot R18
-
-↓
-
-RETAINED
-
-Snapshot R19
-
-↓
-
-ACTIVE
-```
-
-There is never more than one ACTIVE snapshot.
-
----
-
-# 49. Snapshot Recovery
-
-Snapshots never recover from EXPIRED.
-
-A retained snapshot may be used as rollback input.
-
-The rollback creates:
-
-```
-New Snapshot
-```
-
-not reactivation.
-
----
-
-# 50. Snapshot Invariants
-
-Snapshots guarantee:
-
-✓ immutable contents
-
-✓ immutable revision
-
-✓ single ACTIVE snapshot
-
-✓ append-only history
-
----
-
-# Part IV — Configuration Revision State Machine
-
-# 51. Revision Lifecycle
-
-Configuration revisions follow:
-
-```
-ALLOCATED
-
-↓
-
-ACTIVE
-
-↓
-
-HISTORICAL
-
-↓
-
-EXPIRED
-```
-
----
-
-# 52. ALLOCATED
-
-Meaning
-
-The revision number has been reserved.
-
-The snapshot has not yet become authoritative.
-
-ALLOCATED is transient.
-
----
-
-# 53. ACTIVE
-
-Meaning
-
-The revision is currently authoritative.
-
-Exactly one revision is ACTIVE.
-
----
-
-# 54. HISTORICAL
-
-Meaning
-
-A newer revision has replaced it.
-
-Properties
-
-✓ immutable
-
-✓ queryable
-
-✓ rollback source
-
----
-
-# 55. EXPIRED
-
-Meaning
-
-Historical retention ended.
-
-The revision is no longer available through normal history queries.
-
----
-
-# 56. Revision Diagram
-
-```
-ALLOCATED
-
-↓
-
-ACTIVE
-
-↓
-
-HISTORICAL
-
-↓
-
-EXPIRED
-```
-
----
-
-# 57. Revision Invariants
-
-A revision:
-
-- is allocated once;
-- becomes active at most once;
-- never returns to ACTIVE;
-- never changes identity.
-
----
-
-# Part V — Configuration Override State Machine
-
-# 58. Override Lifecycle
-
-Overrides follow:
-
-```
-CREATED
-
-↓
-
-VALIDATED
-
-↓
-
-ACTIVE
-
-↓
-
-EXPIRED
-
-or
-
-REMOVED
-```
-
----
-
-# 59. CREATED
-
-The override exists.
-
-Validation has not completed.
-
----
-
-# 60. VALIDATED
-
-Meaning
-
-The override passed:
-
-- schema validation;
-- compatibility evaluation;
-- policy checks.
-
-Only validated overrides may become ACTIVE.
-
----
-
-# 61. ACTIVE
-
-Meaning
-
-The override participates in effective configuration resolution.
-
-Properties
-
-✓ highest precedence
-
-✓ visible in diagnostics
-
-✓ revision aware
-
-✓ auditable
-
-ACTIVE is stable.
-
----
-
-# 62. EXPIRED
-
-Meaning
-
-The override lifetime has elapsed.
-
-Properties
-
-- no longer participates in merge;
-- remains available for audit;
-- cannot become ACTIVE again.
-
-EXPIRED is terminal.
-
----
-
-# 63. REMOVED
-
-Meaning
-
-The override was explicitly removed.
-
-Examples
-
-- administrator removed it;
-- module cleanup;
-- policy enforcement.
-
-REMOVED is terminal.
-
----
-
-# 64. Override State Diagram
-
-```
-CREATED
-
-↓
-
-VALIDATED
-
-↓
-
-ACTIVE
-
-↙        ↘
-
-EXPIRED   REMOVED
-```
-
----
-
-# 65. Override State Rules
-
-An override:
-
-- becomes ACTIVE at most once;
-- never leaves ACTIVE except through expiration or removal;
-- never returns to ACTIVE.
-
----
-
-# 66. Override Invariants
-
-Every override guarantees:
-
-✓ explicit owner
-
-✓ explicit lifetime
-
-✓ deterministic activation
-
-✓ immutable history
-
----
-
-# Part VI — Configuration Validation State Machine
-
-# 67. Validation Lifecycle
-
-Validation follows:
-
-```
-CREATED
-
-↓
-
-RUNNING
-
-↓
-
-VALID
-
-or
-
-WARNING
-
-or
-
+REVOKED
 INVALID
+DELETION_PENDING
+DELETED
 ```
 
----
-
-# 68. CREATED
-
-Meaning
-
-Validation request exists.
-
-Execution has not started.
-
-Allowed transition
-
-```
-CREATED
-
-↓
-
-RUNNING
-```
-
----
-
-# 69. RUNNING
-
-Meaning
-
-Validation engine is executing.
-
-Possible activities:
-
-- schema validation;
-- type validation;
-- cross-field validation;
-- cross-section validation.
-
-RUNNING is transient.
-
----
-
-# 70. VALID
-
-Meaning
-
-Validation completed successfully.
-
-No blocking violations exist.
-
-Publication is allowed.
-
----
-
-# 71. WARNING
-
-Meaning
-
-Validation completed.
-
-Warnings exist.
-
-Publication remains allowed.
-
-Warnings should remain observable.
-
----
-
-# 72. INVALID
-
-Meaning
-
-Blocking validation failures exist.
-
-Publication is forbidden.
-
-INVALID is terminal.
-
----
-
-# 73. Validation Diagram
-
-```
-CREATED
-
-↓
-
-RUNNING
-
-↙     ↓      ↘
-
-VALID WARNING INVALID
-```
-
----
-
-# 74. Validation Recovery
-
-Recovery never mutates the failed validation.
-
-A new validation execution must be started.
-
----
-
-# 75. Validation Invariants
-
-Validation guarantees:
-
-✓ immutable result
-
-✓ deterministic outcome
-
-✓ one terminal state
-
-✓ replay safety
-
----
-
-# Part VII — Compatibility State Machine
-
-# 76. Compatibility Lifecycle
-
-```
-CREATED
-
-↓
-
-RUNNING
-
-↓
-
-COMPATIBLE
-
-COMPATIBLE_WITH_WARNINGS
-
-MIGRATION_REQUIRED
-
-INCOMPATIBLE
-```
-
----
-
-# 77. CREATED
-
-Compatibility evaluation exists.
-
-Execution has not started.
-
----
-
-# 78. RUNNING
-
-Compatibility engine evaluates:
-
-- schema versions;
-- supported application version;
-- deprecated fields;
-- compatibility policy.
-
-Transient.
-
----
-
-# 79. COMPATIBLE
-
-Configuration may proceed.
-
-No compatibility concerns exist.
-
----
-
-# 80. COMPATIBLE_WITH_WARNINGS
-
-Configuration is usable.
-
-Warnings should be reported.
-
-Publication remains allowed.
-
----
-
-# 81. MIGRATION_REQUIRED
-
-Configuration cannot be published directly.
-
-Migration must occur first.
-
----
-
-# 82. INCOMPATIBLE
-
-Configuration cannot be used.
-
-Publication is rejected.
-
-Terminal state.
-
----
-
-# 83. Compatibility Diagram
-
-```
-CREATED
-
-↓
-
-RUNNING
-
-↙       ↓          ↓             ↘
-
-COMPATIBLE
-
-COMPATIBLE_WITH_WARNINGS
-
-MIGRATION_REQUIRED
-
-INCOMPATIBLE
-```
-
----
-
-# 84. Compatibility Recovery
-
-Recovery paths include:
-
-```
-Migration
-
-↓
-
-Revalidation
-
-↓
-
-Compatibility
-```
-
-Recovery never mutates the original evaluation.
-
----
-
-# 85. Compatibility Invariants
-
-Compatibility guarantees:
-
-✓ explicit outcome
-
-✓ immutable result
-
-✓ deterministic evaluation
-
----
-
-# Part VIII — Configuration Migration State Machine
-
-# 86. Migration Lifecycle
-
-```
-CREATED
-
-↓
-
-READY
-
-↓
-
-RUNNING
-
-↓
-
-COMPLETED
-
-or
-
-FAILED
-
-or
-
-CANCELLED
-```
-
----
-
-# 87. CREATED
-
-Migration request exists.
-
-Resources not yet allocated.
-
----
-
-# 88. READY
-
-Migration prerequisites satisfied.
-
-Execution may begin.
-
----
-
-# 89. RUNNING
-
-Migration engine transforms configuration.
-
-Activities may include:
-
-- field rename;
-- schema conversion;
-- default insertion;
-- deprecated field handling.
-
----
-
-# 90. COMPLETED
-
-Migration successfully produced a candidate configuration.
-
-Publication has not yet occurred.
-
----
-
-# 91. FAILED
-
-Migration terminated unsuccessfully.
-
-Candidate configuration is discarded.
-
-FAILED is terminal.
-
----
-
-# 92. CANCELLED
-
-Migration intentionally stopped.
-
-Possible causes:
-
-- administrative cancellation;
-- shutdown;
-- newer migration request.
-
-Terminal state.
-
----
-
-# 93. Migration Diagram
-
-```
-CREATED
-
-↓
-
-READY
-
-↓
-
-RUNNING
-
-↙        ↓         ↘
-
-FAILED COMPLETED CANCELLED
-```
-
----
-
-# 94. Migration Recovery
-
-Recovery always starts a new migration.
-
-Previously failed migrations remain immutable.
-
----
-
-# 95. Migration Invariants
-
-Migration guarantees:
-
-✓ immutable source
-
-✓ deterministic execution
-
-✓ explicit terminal state
-
-✓ replay safety
-
----
-
-# Part IX — Consumer Acceptance State Machine
-
-# 96. Consumer Acceptance Lifecycle
-
-```
-PENDING
-
-↓
-
-ACCEPTED
-
-↓
-
-SUPERSEDED
-```
-
-Alternative paths:
-
-```
-PENDING
-
-↓
-
-DEFERRED
-
-↓
-
-ACCEPTED
-```
-
-or
-
-```
-PENDING
-
-↓
-
-REQUIRES_COMPONENT_RESTART
-```
-
-or
-
-```
-PENDING
-
-↓
-
-REQUIRES_APPLICATION_RESTART
-```
-
-or
-
-```
-PENDING
-
-↓
-
-REJECTED
-```
-
----
-
-# 97. PENDING
-
-Meaning
-
-The consumer has not yet evaluated the published revision.
-
-Initial state.
-
----
-
-# 98. ACCEPTED
-
-Meaning
-
-The consumer is operating on the published revision.
-
-Stable state.
-
----
-
-# 99. DEFERRED
-
-Meaning
-
-Consumer intentionally postponed adoption.
-
-The previous revision may remain active inside the consumer.
-
----
-
-# 100. REQUIRES_COMPONENT_RESTART
-
-Meaning
-
-Consumer cannot adopt without restarting its own component.
-
-Restart may later transition to:
-
-```
-ACCEPTED
-```
-
----
-
-# 101. REQUIRES_APPLICATION_RESTART
-
-Meaning
-
-The consumer cannot safely adopt the published configuration without restarting the entire application.
-
-Properties
-
-- configuration remains valid;
-- publication remains valid;
-- application restart is required before the consumer may transition to:
-
-```
-ACCEPTED
-```
-
----
-
-# 102. REJECTED
-
-Meaning
-
-The consumer refuses to adopt the published configuration.
-
-Possible reasons include:
-
-- unsupported runtime state;
-- unsupported feature;
-- invalid consumer semantics;
-- unrecoverable initialization failure.
-
-A rejected consumer does not invalidate the published configuration.
-
----
-
-# 103. SUPERSEDED
-
-Meaning
-
-A newer configuration revision has replaced the revision currently referenced by this acceptance record.
-
-Example
-
-```
-Revision 20
-
-↓
-
-Accepted
-
-↓
-
-Revision 21 Published
-
-↓
-
-Revision 20 Acceptance
-
-↓
-
-SUPERSEDED
-```
-
-SUPERSEDED is terminal.
-
----
-
-# 104. Consumer Acceptance Diagram
-
-```
-                 PENDING
-                     │
-      ┌──────────────┼──────────────┐
-      ▼              ▼              ▼
- ACCEPTED        DEFERRED      REJECTED
-      │              │
-      │              ▼
-      │         ACCEPTED
-      │
-      ├──────────────┐
-      ▼              ▼
-REQUIRES_      REQUIRES_
-COMPONENT      APPLICATION
-RESTART         RESTART
-      │              │
-      └──────┬───────┘
-             ▼
-         ACCEPTED
-             │
-             ▼
-        SUPERSEDED
-```
-
----
-
-# 105. Consumer Acceptance Recovery
-
-Recovery depends on the consumer.
-
-Possible recovery paths include:
-
-```
-Restart
-
-↓
-
-Accept
-```
-
-or
-
-```
-Manual Reconfiguration
-
-↓
-
-Accept
-```
-
-Configuration Infrastructure does not define recovery logic.
-
----
-
-# 106. Consumer Acceptance Invariants
-
-Consumer Acceptance guarantees:
-
-✓ one consumer
-
-✓ one revision
-
-✓ one current state
-
-✓ immutable history
-
-✓ deterministic transitions
-
----
-
-# Part X — Configuration Reload State Machine
-
-# 107. Reload Philosophy
-
-Reload is an infrastructure workflow.
-
-Reload does not directly mutate the active configuration.
-
-Instead it creates a new candidate.
-
-Only after successful validation may publication occur.
-
----
-
-# 108. Reload Lifecycle
-
-```
-IDLE
-
-↓
-
-REQUESTED
-
-↓
-
-DISCOVERING
-
-↓
-
-LOADING
-
-↓
-
-NORMALIZING
-
-↓
-
-MERGING
-
-↓
-
-BINDING
-
-↓
-
+Primary lifecycle:
+
+```text
+CANDIDATE
+    ↓
 VALIDATING
-
-↓
-
-COMPATIBILITY_CHECK
-
-↓
-
-READY_TO_PUBLISH
-
-↓
-
-PUBLISHING
-
-↓
-
-COMPLETED
+    ↓
+READY
+    ↓
+ACTIVE
+    ↓
+SUPERSEDED
+    ↓
+DELETION_PENDING
+    ↓
+DELETED
 ```
 
-Failure transitions may occur from every processing stage.
+Alternative terminal paths:
 
----
-
-# 109. IDLE
-
-Meaning
-
-No reload is currently executing.
-
-Stable state.
-
-Allowed transition
-
-```
-IDLE
-
-↓
-
-REQUESTED
+```text
+CANDIDATE → INVALID
+VALIDATING → INVALID
+READY → INVALID
+ACTIVE → EXPIRED
+ACTIVE → REVOKED
+SUPERSEDED → REVOKED
+EXPIRED → DELETION_PENDING
+REVOKED → DELETION_PENDING
+INVALID → DELETION_PENDING
 ```
 
 ---
 
-# 110. REQUESTED
+## 18. CANDIDATE
 
-Meaning
+Material exists in a pre-activation context.
 
-A reload request has been accepted.
+It may be:
 
-Examples
+- held in memory;
+- stored in a non-active backend slot;
+- represented by a provider-generated pending credential;
+- awaiting structural validation;
+- awaiting user confirmation;
+- awaiting policy approval.
 
-- administrator request;
-- explicit API call;
-- startup;
-- scheduled reload.
+A candidate:
 
-The reload has not yet started.
+- is not resolvable for normal consumers;
+- is not the active revision;
+- must have bounded lifetime;
+- must be cleaned up on failure;
+- must not appear in ordinary configuration or events.
 
----
+Valid outgoing transitions:
 
-# 111. DISCOVERING
-
-Meaning
-
-Configuration sources are being discovered.
-
-Examples
-
-- configuration directory;
-- registered providers;
-- environment variables;
-- runtime overrides.
-
-Transient state.
-
----
-
-# 112. LOADING
-
-Meaning
-
-All enabled sources are loaded.
-
-Examples
-
-```
-Application File
-
-↓
-
-Load
-
-User File
-
-↓
-
-Load
-
-Environment
-
-↓
-
-Read
+```text
+CANDIDATE → VALIDATING
+CANDIDATE → READY
+CANDIDATE → INVALID
+CANDIDATE → DELETION_PENDING
 ```
 
----
-
-# 113. NORMALIZING
-
-Meaning
-
-Source-specific formats become canonical internal objects.
-
-No merge occurs yet.
+Direct `CANDIDATE → READY` is allowed only when validation policy permits no additional check.
 
 ---
 
-# 114. MERGING
+## 19. VALIDATING
 
-Meaning
+The candidate is undergoing one or more checks:
 
-Source precedence is evaluated.
+- structural validation;
+- backend access validation;
+- cryptographic validation;
+- expiration parsing;
+- provider authentication;
+- provider capability validation;
+- compound-part completeness;
+- policy compatibility.
 
-Winning values are selected.
+Normal resolution remains prohibited.
 
-Origin metadata is produced.
+Valid outgoing transitions:
 
----
-
-# 115. BINDING
-
-Meaning
-
-Typed configuration sections are created.
-
-Examples
-
-```
-RuntimeConfiguration
-
-TranslationConfiguration
-
-ProviderManagementConfiguration
+```text
+VALIDATING → READY
+VALIDATING → INVALID
+VALIDATING → CANDIDATE
+VALIDATING → DELETION_PENDING
 ```
 
-Binding failures terminate the reload.
+`VALIDATING → CANDIDATE` may occur when validation is deferred or requires user action.
 
 ---
 
-# 116. VALIDATING
+## 20. READY
 
-Meaning
+The revision has passed required checks and may be activated atomically.
 
-Structural validation executes.
+Properties:
 
-Checks include:
+- material is stored or otherwise resolvable;
+- descriptor binding is validated;
+- access policy is compatible;
+- it is still not authoritative;
+- no normal lease may bind to it until activation.
 
-- schema;
-- types;
-- required fields;
-- cross-field rules;
-- cross-section rules.
+Valid outgoing transitions:
 
----
-
-# 117. COMPATIBILITY_CHECK
-
-Meaning
-
-Compatibility evaluation executes.
-
-Checks include:
-
-- supported schema versions;
-- migration requirements;
-- application compatibility.
-
----
-
-# 118. READY_TO_PUBLISH
-
-Meaning
-
-Candidate configuration satisfies every prerequisite.
-
-Publication has not yet started.
-
-Administrative policy may still prevent publication.
-
----
-
-# 119. PUBLISHING
-
-Meaning
-
-The new snapshot becomes authoritative.
-
-Publication includes:
-
-- snapshot creation;
-- revision allocation;
-- event publication;
-- consumer notification.
-
-PUBLISHING is transient.
-
----
-
-# 120. COMPLETED
-
-Meaning
-
-Reload completed successfully.
-
-Properties
-
-✓ new revision active
-
-✓ candidate consumed
-
-✓ consumers notified
-
-The reload returns to:
-
-```
-IDLE
-```
-
-after completion.
-
----
-
-# 121. Reload Failure States
-
-Possible failures.
-
-```
-DISCOVERY_FAILED
-
-LOAD_FAILED
-
-NORMALIZATION_FAILED
-
-MERGE_FAILED
-
-BINDING_FAILED
-
-VALIDATION_FAILED
-
-COMPATIBILITY_FAILED
-
-PUBLICATION_FAILED
-
-CANCELLED
-```
-
-Every failure state is terminal for that reload execution.
-
----
-
-# 122. DISCOVERY_FAILED
-
-Meaning
-
-Configuration sources could not be discovered.
-
-Examples
-
-- invalid configuration directory;
-- inaccessible registry;
-- unsupported source provider.
-
-Recovery requires a new reload request.
-
----
-
-# 123. LOAD_FAILED
-
-Meaning
-
-At least one required source could not be loaded.
-
-Examples
-
-- missing file;
-- permission denied;
-- malformed source.
-
-The active snapshot remains unchanged.
-
----
-
-# 124. NORMALIZATION_FAILED
-
-Meaning
-
-Canonical representation could not be produced.
-
-No merge occurs.
-
----
-
-# 125. MERGE_FAILED
-
-Meaning
-
-Source precedence or merge strategy failed.
-
-No candidate is published.
-
----
-
-# 126. BINDING_FAILED
-
-Meaning
-
-Typed configuration objects could not be constructed.
-
-Examples
-
-```
-RuntimeConfiguration
-
-↓
-
-Binding Failure
+```text
+READY → ACTIVE
+READY → INVALID
+READY → DELETION_PENDING
 ```
 
 ---
 
-# 127. VALIDATION_FAILED
+## 21. ACTIVE
 
-Meaning
+The revision is the descriptor's authoritative revision for new leases.
 
-Structural validation failed.
+Invariants:
 
-Publication is forbidden.
+- only one revision is normally `ACTIVE` per descriptor;
+- active revision identity is immutable;
+- new leases record the revision;
+- old leases do not silently change revision;
+- the backend binding is committed;
+- availability may still be non-available because of backend or policy state.
+
+Valid outgoing transitions:
+
+```text
+ACTIVE → SUPERSEDED
+ACTIVE → EXPIRED
+ACTIVE → REVOKED
+ACTIVE → INVALID
+ACTIVE → DELETION_PENDING
+```
+
+`ACTIVE → INVALID` requires strong evidence such as corrupted material or failed integrity validation.
 
 ---
 
-# 128. COMPATIBILITY_FAILED
+## 22. SUPERSEDED
 
-Meaning
+A newer revision is active.
 
-The configuration is valid but not compatible with the running application.
+Properties:
 
-Migration may be required.
+- no new lease should normally use it;
+- existing leases may continue under rotation policy;
+- historical identity remains;
+- backend material may be retained temporarily for drain or rollback;
+- it is not automatically deleted.
+
+Valid outgoing transitions:
+
+```text
+SUPERSEDED → EXPIRED
+SUPERSEDED → REVOKED
+SUPERSEDED → DELETION_PENDING
+```
+
+Returning to `ACTIVE` should occur only through an explicit rollback operation that creates a new revision whose content is based on the historical revision.
+
+Revision numbers never move backward.
 
 ---
 
-# 129. PUBLICATION_FAILED
+## 23. EXPIRED
 
-Meaning
+The material is no longer valid because its validity period ended.
 
-Publication could not complete.
+Properties:
+
+- no new lease;
+- active leases are revoked or fail on next use;
+- renewable credentials may trigger refresh;
+- expiration is not deletion;
+- safe expiration metadata remains queryable.
+
+Valid outgoing transitions:
+
+```text
+EXPIRED → DELETION_PENDING
+```
+
+A refresh creates a new revision.
+
+It does not reactivate the expired revision.
+
+---
+
+## 24. REVOKED
+
+Use of the revision is prohibited.
 
 Possible causes:
 
-- revision allocation failure;
-- persistence failure;
-- snapshot storage failure.
+- user revocation;
+- provider revocation;
+- suspected compromise;
+- policy change;
+- backend compromise;
+- account disconnect;
+- administrative action.
 
-The previous active snapshot remains authoritative.
+Properties:
 
----
+- no new lease;
+- active revision leases are revoked;
+- historical metadata remains;
+- provider-side status may be confirmed or uncertain.
 
-# 130. CANCELLED
-
-Meaning
-
-Reload execution stopped intentionally.
-
-Examples
-
-- administrator cancellation;
-- application shutdown;
-- higher-priority reload request.
-
-CANCELLED is terminal.
-
----
-
-# 131. Reload State Diagram
-
-The complete reload lifecycle.
+Valid outgoing transitions:
 
 ```text
-                        IDLE
-                          │
-                          ▼
-                     REQUESTED
-                          │
-                          ▼
-                    DISCOVERING
-                          │
-                          ▼
-                      LOADING
-                          │
-                          ▼
-                   NORMALIZING
-                          │
-                          ▼
-                      MERGING
-                          │
-                          ▼
-                      BINDING
-                          │
-                          ▼
-                    VALIDATING
-                          │
-                          ▼
-               COMPATIBILITY_CHECK
-                          │
-                          ▼
-                  READY_TO_PUBLISH
-                          │
-                          ▼
-                     PUBLISHING
-                          │
-                          ▼
-                     COMPLETED
-                          │
-                          ▼
-                         IDLE
-```
-
-Failure transitions:
-
-```text
-DISCOVERY_FAILED
-
-LOAD_FAILED
-
-NORMALIZATION_FAILED
-
-MERGE_FAILED
-
-BINDING_FAILED
-
-VALIDATION_FAILED
-
-COMPATIBILITY_FAILED
-
-PUBLICATION_FAILED
-
-CANCELLED
+REVOKED → DELETION_PENDING
 ```
 
 ---
 
-# 132. Reload Recovery
+## 25. INVALID
 
-Reload recovery always begins with a new reload request.
+The revision cannot be safely used.
 
-Example
+Possible causes:
+
+- malformed material;
+- missing compound part;
+- cryptographic failure;
+- backend corruption;
+- provider authentication failure under strict validation;
+- unsupported encoding;
+- identity mismatch;
+- integrity failure.
+
+An invalid revision is never activated.
+
+If invalidity is discovered after activation:
+
+- the descriptor becomes `SUSPENDED` or `REVOKED`;
+- leases are revoked according to severity;
+- replacement or rotation is required.
+
+Valid outgoing transitions:
 
 ```text
-VALIDATION_FAILED
+INVALID → DELETION_PENDING
+```
 
-↓
+---
 
-Administrator fixes configuration
+## 26. DELETION_PENDING
 
-↓
+Material deletion has been requested but is not yet confirmed.
 
+Possible reasons:
+
+- backend operation pending;
+- active lease drain;
+- external provider revocation pending;
+- backend offline;
+- operating-system prompt required;
+- secure-delete workflow deferred.
+
+No lease may be granted.
+
+Valid outgoing transitions:
+
+```text
+DELETION_PENDING → DELETED
+DELETION_PENDING → REVOKED
+```
+
+`DELETION_PENDING → REVOKED` represents deletion failure while use remains prohibited.
+
+---
+
+## 27. DELETED
+
+Secret material is no longer available through the managed backend.
+
+The deletion record must include an assurance level such as:
+
+```text
+LOGICAL_ONLY
+BACKEND_CONFIRMED
+CRYPTOGRAPHIC_ERASURE
+PHYSICAL_ERASURE_NOT_GUARANTEED
+EXTERNAL_SOURCE_REMOVED
+UNKNOWN
+```
+
+`DELETED` is terminal.
+
+The state does not claim stronger erasure than the backend can prove.
+
+---
+
+## 28. Revision Activation Invariant
+
+```text
+At most one ACTIVE revision per SecretId.
+```
+
+Activation flow:
+
+```text
+Current revision R4 = ACTIVE
+Candidate R5 = READY
+        ↓ atomic commit
+R5 = ACTIVE
+R4 = SUPERSEDED
+```
+
+No observable state may expose both revisions as active for new leases.
+
+Existing R4 leases may continue only under explicit policy.
+
+---
+
+# Part III — Secret Availability State
+
+## 29. SecretAvailabilityState
+
+Canonical states:
+
+```text
+UNKNOWN
+AVAILABLE
+UNAVAILABLE
+MISSING
+LOCKED
+EXPIRED
+REVOKED
+INVALID
+BACKEND_UNAVAILABLE
+ACCESS_RESTRICTED
+ROTATION_REQUIRED
+USER_ACTION_REQUIRED
+```
+
+Availability is derived and may change without changing descriptor state.
+
+---
+
+## 30. UNKNOWN
+
+The system lacks enough current evidence.
+
+Possible causes:
+
+- descriptor just loaded;
+- backend not checked;
+- validation never performed;
+- external source status unknown;
+- stale availability cache;
+- application recovery in progress.
+
+Policy should treat `UNKNOWN` conservatively.
+
+---
+
+## 31. AVAILABLE
+
+The secret can be considered for an authorized resolution attempt.
+
+Requirements normally include:
+
+- descriptor `ACTIVE`;
+- active revision exists;
+- active revision not expired, revoked, invalid, or deleted;
+- backend accessible;
+- policy permits the consumer and purpose;
+- no mandatory user action;
+- no strict validation failure.
+
+`AVAILABLE` does not guarantee provider authentication success.
+
+---
+
+## 32. UNAVAILABLE
+
+The secret exists but cannot currently be resolved or safely used.
+
+This is a generic normalized state when no more specific public state should be exposed.
+
+Possible causes:
+
+- temporary resolution failure;
+- internal adapter failure;
+- temporary policy evaluation issue;
+- unresolved recovery.
+
+---
+
+## 33. MISSING
+
+The reference does not map to an active descriptor or external source.
+
+Visibility policy may return `UNKNOWN` or hidden existence instead of `MISSING` to unauthorized callers.
+
+---
+
+## 34. LOCKED
+
+The relevant backend requires unlock or user presence.
+
+Properties:
+
+- descriptor and revision remain valid;
+- no material is returned;
+- retry may succeed after unlock;
+- the backend state is normally `LOCKED`;
+- this state is not a credential failure.
+
+---
+
+## 35. EXPIRED
+
+The active revision expired.
+
+A renewable credential may transition through refresh and create a new active revision.
+
+---
+
+## 36. REVOKED
+
+The descriptor or active revision is revoked.
+
+No new lease may be granted.
+
+---
+
+## 37. INVALID
+
+The active revision failed validation or integrity requirements.
+
+It may require replacement, rotation, or user re-entry.
+
+---
+
+## 38. BACKEND_UNAVAILABLE
+
+The secure backend cannot currently serve requests.
+
+Possible causes:
+
+- operating-system service unavailable;
+- external manager unreachable;
+- encrypted store damaged;
+- device profile unavailable;
+- permission loss;
+- adapter failure.
+
+Descriptor state does not automatically change.
+
+---
+
+## 39. ACCESS_RESTRICTED
+
+The secret exists and may be valid, but the requesting caller is not authorized.
+
+This state may be returned only when policy allows revealing that the secret exists.
+
+Otherwise the result should be hidden.
+
+---
+
+## 40. ROTATION_REQUIRED
+
+Policy requires replacement before normal use.
+
+Possible causes:
+
+- age threshold;
+- provider warning;
+- suspected exposure;
+- algorithm or certificate policy;
+- administrative requirement;
+- account lifecycle change.
+
+Policy determines whether limited existing access may drain.
+
+---
+
+## 41. USER_ACTION_REQUIRED
+
+Resolution requires user action such as:
+
+- device unlock;
+- biometric confirmation;
+- system prompt;
+- password re-entry;
+- external login;
+- credential re-entry.
+
+Presentation owns the interaction.
+
+Secret Management owns the resulting availability transition.
+
+---
+
+## 42. Availability Derivation
+
+Conceptual priority:
+
+```text
+Descriptor removed or missing
+    → MISSING
+
+Descriptor or revision revoked
+    → REVOKED
+
+Revision expired
+    → EXPIRED
+
+Revision invalid
+    → INVALID
+
+Backend locked
+    → LOCKED
+
+Backend unavailable
+    → BACKEND_UNAVAILABLE
+
+User action required
+    → USER_ACTION_REQUIRED
+
+Rotation mandatory
+    → ROTATION_REQUIRED
+
+Caller denied
+    → ACCESS_RESTRICTED or hidden
+
+All mandatory conditions satisfied
+    → AVAILABLE
+
+Insufficient evidence
+    → UNKNOWN
+
+Other temporary failure
+    → UNAVAILABLE
+```
+
+Security-specific states take precedence over generic `UNAVAILABLE`.
+
+---
+
+# Part IV — Secret Lease State Machine
+
+## 43. SecretLeaseState
+
+Canonical states:
+
+```text
 REQUESTED
-
-↓
-
-New Reload
+EVALUATING
+GRANTED
+ACTIVE
+RELEASING
+RELEASED
+EXPIRED
+REVOKED
+REJECTED
+ABANDONED
 ```
 
-Historical reload executions remain immutable.
-
----
-
-# 133. Reload Invariants
-
-Reload guarantees:
-
-✓ only one active reload
-
-✓ deterministic execution order
-
-✓ immutable history
-
-✓ publication only after successful completion
-
----
-
-# Part XI — Global State Relationships
-
-# 134. Overall Lifecycle
-
-The high-level lifecycle of Configuration Infrastructure is:
+Primary flow:
 
 ```text
-Configuration Sources
-
-↓
-
-Reload
-
-↓
-
-Candidate
-
-↓
-
-Validation
-
-↓
-
-Compatibility
-
-↓
-
-Snapshot
-
-↓
-
-Revision
-
-↓
-
-Consumers
+REQUESTED
+    ↓
+EVALUATING
+    ↓
+GRANTED
+    ↓
+ACTIVE
+    ↓
+RELEASING
+    ↓
+RELEASED
 ```
 
-Each stage owns its own state machine.
+Alternative terminal paths:
+
+```text
+REQUESTED → REJECTED
+EVALUATING → REJECTED
+GRANTED → EXPIRED
+GRANTED → REVOKED
+ACTIVE → EXPIRED
+ACTIVE → REVOKED
+ACTIVE → ABANDONED
+RELEASING → ABANDONED
+```
 
 ---
 
-# 135. Source → Candidate Relationship
+## 44. REQUESTED
 
-A candidate always depends on source state.
+A consumer requested bounded secret access.
 
-Required source states:
+At this point:
+
+- request identity exists;
+- no authority has been granted;
+- no handle is usable;
+- consumer, purpose, policy, backend, and revision checks are pending.
+
+Valid outgoing transitions:
 
 ```text
+REQUESTED → EVALUATING
+REQUESTED → REJECTED
+```
+
+---
+
+## 45. EVALUATING
+
+Secret Management is evaluating:
+
+- reference;
+- descriptor;
+- revision;
+- consumer identity;
+- access purpose;
+- access policy;
+- backend availability;
+- lease capacity;
+- requested duration;
+- user presence requirements.
+
+Valid outgoing transitions:
+
+```text
+EVALUATING → GRANTED
+EVALUATING → REJECTED
+```
+
+Material resolution may happen only after policy allows it.
+
+---
+
+## 46. GRANTED
+
+Authority was granted and a handle exists, but the consumer has not yet begun an approved operation.
+
+Properties:
+
+- lease lifetime has started;
+- revision is fixed;
+- consumer and purpose are fixed;
+- the handle is non-transferable;
+- normal use may transition to `ACTIVE`;
+- cancellation before use should release promptly.
+
+Valid outgoing transitions:
+
+```text
+GRANTED → ACTIVE
+GRANTED → RELEASING
+GRANTED → EXPIRED
+GRANTED → REVOKED
+```
+
+---
+
+## 47. ACTIVE
+
+The lease is currently being used by an approved consumer operation.
+
+Properties:
+
+- the handle may perform only granted operations;
+- every use validates lease authority;
+- no revision rebinding;
+- no consumer transfer;
+- lease expiration and revocation remain enforceable;
+- remote protocols may already have received derived authentication data.
+
+Valid outgoing transitions:
+
+```text
+ACTIVE → RELEASING
+ACTIVE → EXPIRED
+ACTIVE → REVOKED
+ACTIVE → ABANDONED
+```
+
+---
+
+## 48. RELEASING
+
+Logical release was requested and physical cleanup is in progress.
+
+Cleanup may include:
+
+- closing backend handle;
+- clearing temporary buffers;
+- detaching provider client;
+- invalidating child-process transfer;
+- decrementing lease counters;
+- removing internal cache entry.
+
+Valid outgoing transitions:
+
+```text
+RELEASING → RELEASED
+RELEASING → ABANDONED
+```
+
+No new use is permitted.
+
+---
+
+## 49. RELEASED
+
+The consumer completed normal release.
+
+Properties:
+
+- handle is unusable;
+- temporary material is cleared where practical;
+- lease is terminal;
+- repeated release is idempotent.
+
+`RELEASED` is terminal.
+
+---
+
+## 50. EXPIRED
+
+The lease lifetime ended.
+
+Properties:
+
+- new handle operations are rejected;
+- physical cleanup begins;
+- an already accepted external request may continue;
+- renewal must occur before terminal expiration when policy supports it.
+
+`EXPIRED` is terminal for the same lease.
+
+A new lease is required.
+
+---
+
+## 51. REVOKED
+
+Authority was explicitly removed before normal release.
+
+Possible causes:
+
+- descriptor or revision revocation;
+- security policy change;
+- consumer mismatch;
+- purpose violation;
+- backend compromise;
+- application shutdown;
+- provider credential rotation with immediate revocation;
+- administrative action.
+
+No future handle operation is valid.
+
+`REVOKED` is terminal.
+
+---
+
+## 52. REJECTED
+
+The request never received authority.
+
+Possible causes:
+
+- secret unavailable;
+- access denied;
+- invalid consumer;
+- invalid purpose;
+- revision mismatch;
+- lease capacity exceeded;
+- backend locked;
+- user action unavailable;
+- descriptor revoked or removed.
+
+No material may have crossed the approved boundary.
+
+`REJECTED` is terminal.
+
+---
+
+## 53. ABANDONED
+
+Secret Management stopped waiting for complete physical cleanup or acknowledgement.
+
+Examples:
+
+- child process disappeared;
+- provider SDK did not close;
+- backend handle close timed out;
+- external process transfer acknowledgement was lost;
+- application shutdown exceeded deadline.
+
+Logical authority is already removed.
+
+`ABANDONED` must not permit reuse.
+
+Late cleanup may still occur.
+
+---
+
+## 54. Lease Terminal States
+
+```text
+RELEASED
+EXPIRED
+REVOKED
+REJECTED
+ABANDONED
+```
+
+A terminal lease:
+
+- cannot become active again;
+- cannot change revision;
+- cannot change consumer;
+- cannot change purpose;
+- cannot be renewed;
+- may remain queryable as safe metadata.
+
+---
+
+## 55. Rotation and Active Leases
+
+Possible policies:
+
+```text
+ALLOW_TO_EXPIRE
+REVOKE_IMMEDIATELY
+REVOKE_AFTER_GRACE
+BACKEND_DEFINED
+```
+
+### ALLOW_TO_EXPIRE
+
+```text
+R4 lease ACTIVE
+R5 becomes ACTIVE revision
+R4 becomes SUPERSEDED
+R4 lease continues
+R4 lease later RELEASED or EXPIRED
+```
+
+### REVOKE_IMMEDIATELY
+
+```text
+R5 activation
+    ↓
+All R4 leases → REVOKED
+```
+
+Use for:
+
+- compromise;
+- explicit revocation;
+- critical policy change;
+- invalid old material.
+
+### REVOKE_AFTER_GRACE
+
+```text
+R5 activation
+    ↓
+R4 leases remain temporarily ACTIVE
+    ↓ grace deadline
+Remaining R4 leases → REVOKED
+```
+
+No new R4 lease may be granted after R5 activation.
+
+---
+
+## 56. Removal and Active Leases
+
+Removal policy must be explicit.
+
+Default secure flow:
+
+```text
+Descriptor → REMOVING
+    ↓
+No new leases
+    ↓
+Revoke or drain active leases
+    ↓
+Delete material
+    ↓
+Descriptor → REMOVED
+```
+
+Material must not be deleted while a backend requires it for an authorized draining lease unless policy explicitly prioritizes immediate security revocation.
+
+---
+
+# Part V — Secret Backend State Machine
+
+## 57. SecretBackendState
+
+Canonical states:
+
+```text
+UNREGISTERED
+REGISTERED
+INITIALIZING
+AVAILABLE
+LOCKED
+DEGRADED
+UNAVAILABLE
+MIGRATING
+COMPROMISED
+SHUTTING_DOWN
+TERMINATED
+```
+
+Primary flow:
+
+```text
+UNREGISTERED
+    ↓
+REGISTERED
+    ↓
+INITIALIZING
+    ↓
+AVAILABLE
+    ↓
+SHUTTING_DOWN
+    ↓
+TERMINATED
+```
+
+Operational alternatives:
+
+```text
+AVAILABLE ↔ LOCKED
+AVAILABLE ↔ DEGRADED
+AVAILABLE ↔ UNAVAILABLE
+AVAILABLE → MIGRATING → AVAILABLE
+ANY ACTIVE STATE → COMPROMISED
+```
+
+---
+
+## 58. UNREGISTERED
+
+The backend is unknown to the application.
+
+No operation is permitted.
+
+---
+
+## 59. REGISTERED
+
+The backend adapter and capability metadata are registered.
+
+Initialization has not completed.
+
+Valid outgoing transitions:
+
+```text
+REGISTERED → INITIALIZING
+REGISTERED → TERMINATED
+```
+
+---
+
+## 60. INITIALIZING
+
+The backend is checking:
+
+- platform availability;
+- permissions;
+- account context;
+- store existence;
+- schema or metadata compatibility;
+- encryption prerequisites;
+- lock state;
+- migration requirements.
+
+Valid outgoing transitions:
+
+```text
+INITIALIZING → AVAILABLE
+INITIALIZING → LOCKED
+INITIALIZING → DEGRADED
+INITIALIZING → UNAVAILABLE
+INITIALIZING → COMPROMISED
+```
+
+---
+
+## 61. AVAILABLE
+
+The backend may accept supported operations.
+
+Availability remains subject to:
+
+- per-secret access policy;
+- user presence;
+- backend capabilities;
+- value size;
+- secret kind;
+- scope;
+- current permissions.
+
+Valid outgoing transitions:
+
+```text
+AVAILABLE → LOCKED
+AVAILABLE → DEGRADED
+AVAILABLE → UNAVAILABLE
+AVAILABLE → MIGRATING
+AVAILABLE → COMPROMISED
+AVAILABLE → SHUTTING_DOWN
+```
+
+---
+
+## 62. LOCKED
+
+The backend exists but requires unlock or user presence.
+
+Properties:
+
+- descriptors may remain queryable from safe metadata cache;
+- material resolution is prohibited;
+- store or delete may also be prohibited;
+- unlock attempts must be bounded;
+- failed unlock must not reveal secret existence beyond policy.
+
+Valid outgoing transitions:
+
+```text
+LOCKED → AVAILABLE
+LOCKED → UNAVAILABLE
+LOCKED → COMPROMISED
+LOCKED → SHUTTING_DOWN
+```
+
+---
+
+## 63. DEGRADED
+
+The backend remains partially usable.
+
+Possible causes:
+
+- slow response;
+- partial capability loss;
+- enumeration unavailable;
+- secure delete unavailable;
+- metadata stale;
+- external service intermittent;
+- backup unavailable;
+- lock-state polling failure.
+
+Policy determines which operations remain allowed.
+
+Valid outgoing transitions:
+
+```text
+DEGRADED → AVAILABLE
+DEGRADED → UNAVAILABLE
+DEGRADED → LOCKED
+DEGRADED → COMPROMISED
+DEGRADED → SHUTTING_DOWN
+```
+
+---
+
+## 64. UNAVAILABLE
+
+The backend cannot currently perform required operations.
+
+Possible causes:
+
+- service not running;
+- network unreachable;
+- permission denied;
+- platform unsupported;
+- device profile missing;
+- adapter initialization failure;
+- external manager outage.
+
+Descriptors remain logically registered.
+
+Valid outgoing transitions:
+
+```text
+UNAVAILABLE → INITIALIZING
+UNAVAILABLE → AVAILABLE
+UNAVAILABLE → LOCKED
+UNAVAILABLE → COMPROMISED
+UNAVAILABLE → SHUTTING_DOWN
+```
+
+---
+
+## 65. MIGRATING
+
+Backend-level metadata or storage format is being migrated.
+
+Properties:
+
+- normal writes may be frozen;
+- reads may continue under policy;
+- per-secret migration states remain independent;
+- migration must preserve at least one valid copy;
+- failures may return backend to `DEGRADED` or `UNAVAILABLE`.
+
+Valid outgoing transitions:
+
+```text
+MIGRATING → AVAILABLE
+MIGRATING → DEGRADED
+MIGRATING → UNAVAILABLE
+MIGRATING → COMPROMISED
+```
+
+---
+
+## 66. COMPROMISED
+
+The backend is suspected or confirmed unsafe.
+
+Immediate effects:
+
+- no new resolution;
+- active leases are revoked under security policy;
+- affected descriptors become `SUSPENDED` or `REVOKED`;
+- migration or rotation may be required;
+- diagnostics are restricted;
+- raw failure details remain protected.
+
+Valid outgoing transitions:
+
+```text
+COMPROMISED → SHUTTING_DOWN
+COMPROMISED → TERMINATED
+COMPROMISED → INITIALIZING
+```
+
+Recovery through `INITIALIZING` requires explicit remediation and policy approval.
+
+---
+
+## 67. SHUTTING_DOWN
+
+The backend is draining and closing.
+
+Properties:
+
+- no new operations;
+- active leases are released or revoked;
+- internal caches are cleared;
+- pending writes are finalized or failed safely;
+- handles close within bounded time.
+
+Valid outgoing transitions:
+
+```text
+SHUTTING_DOWN → TERMINATED
+```
+
+---
+
+## 68. TERMINATED
+
+The backend adapter is no longer operational in the application instance.
+
+`TERMINATED` is terminal for that backend instance.
+
+A new application instance may register a new backend instance with the same logical backend identity.
+
+---
+
+# Part VI — Secret Candidate State Machine
+
+## 69. SecretCandidateState
+
+Canonical states:
+
+```text
+CREATED
+MATERIAL_RECEIVED
+STORED
+VALIDATING
 READY
+ACTIVATING
+ACTIVATED
+REJECTED
+CLEANUP_PENDING
+CLEANED
 ```
-
-Invalid source states:
-
-```text
-FAILED
-
-REMOVED
-```
-
-unless explicitly ignored by policy.
-
----
-
-# 136. Candidate → Snapshot Relationship
-
-A candidate becomes a snapshot only through:
-
-```text
-READY
-
-↓
-
-PUBLISHED
-```
-
-No other transition is allowed.
-
----
-
-# 137. Snapshot → Revision Relationship
-
-Publishing creates:
-
-```text
-Snapshot
-
-↓
-
-Revision
-```
-
-The relationship is one-to-one.
-
-A snapshot never belongs to multiple revisions.
-
----
-
-# 138. Revision → Consumer Relationship
-
-Consumers never observe unpublished revisions.
 
 Flow:
 
 ```text
-Revision Published
-
-↓
-
-Consumers Notified
-
-↓
-
-Consumers Evaluate
-
-↓
-
-Acceptance Recorded
-```
-
----
-
-# 139. Override Relationship
-
-Overrides influence:
-
-```text
-Effective Configuration
-```
-
-They never modify:
-
-```text
-Configuration Source
-
-Snapshot
-
-Historical Revision
-```
-
-Overrides only affect future effective revisions.
-
----
-
-# 140. Migration Relationship
-
-Migration always precedes publication.
-
-```text
-Old Configuration
-
-↓
-
-Migration
-
-↓
-
-Candidate
-
-↓
-
-Validation
-
-↓
-
-Publication
-```
-
-Migration never modifies published snapshots.
-
----
-
-# 141. Validation Relationship
-
-Validation operates only on:
-
-```text
-Candidate
-```
-
-Never on:
-
-```text
-Published Snapshot
-```
-
-Published snapshots remain immutable.
-
----
-
-# 142. Compatibility Relationship
-
-Compatibility always follows:
-
-```text
-Validation
-
-↓
-
-Compatibility
-```
-
-Compatibility never executes before successful validation.
-
----
-
-# 143. Reload Relationship
-
-Reload owns the orchestration.
-
-Reload does not own:
-
-- schema;
-- validation rules;
-- compatibility rules.
-
-It coordinates them.
-
----
-
-# Part XII — State Ownership Matrix
-
-# 144. Ownership Philosophy
-
-Every state machine has exactly one owner.
-
-Ownership defines:
-
-- transitions;
-- invariants;
-- recovery policy.
-
-Ownership never overlaps.
-
----
-
-# 145. Ownership Matrix
-
-| State Machine | Owner |
-|--------------|-------|
-| Configuration Source | Configuration |
-| Configuration Candidate | Configuration |
-| Configuration Snapshot | Configuration |
-| Configuration Revision | Configuration |
-| Configuration Override | Configuration |
-| Validation | Configuration |
-| Compatibility | Configuration |
-| Migration | Configuration |
-| Reload | Configuration |
-| Consumer Acceptance | Consumer Module |
-
----
-
-# 146. Consumer Ownership
-
-Examples
-
-```text
-Translation
-
-↓
-
-Owns Translation Acceptance
-
-Runtime
-
-↓
-
-Owns Runtime Acceptance
-
-Presentation
-
-↓
-
-Owns Presentation Acceptance
-```
-
-Configuration records acceptance.
-
-Consumers decide acceptance.
-
----
-
-# 147. Runtime Ownership Boundary
-
-Runtime owns:
-
-```text
-Workers
-
-Queues
-
-Scheduling
-
-Cancellation
-
-Execution
-```
-
-Runtime never owns:
-
-```text
-Configuration Snapshot State
-
-Revision State
-
-Validation State
-```
-
----
-
-# 148. Secret Management Boundary
-
-Secret Management owns:
-
-```text
-Secret Lifecycle
-```
-
-Configuration owns:
-
-```text
-Secret References
-```
-
-Configuration never tracks secret states.
-
----
-
-# 149. Provider Management Boundary
-
-Provider Management owns:
-
-```text
-Provider Health
-
-Lease
-
-Selection
-
-Availability
-```
-
-Configuration only publishes configuration consumed by Provider Management.
-
----
-
-# 150. Ownership Invariants
-
-Every state transition is initiated by exactly one owner.
-
-Shared ownership is forbidden.
-
----
-
-# Part XIII — Global Transition Rules
-
-# 151. Transition Philosophy
-
-Transitions must be:
-
-- deterministic;
-- observable;
-- replay safe;
-- idempotent where applicable.
-
-Transitions must never skip mandatory intermediate states.
-
----
-
-# 152. Forward-only Rule
-
-Normal execution proceeds only forward.
-
-Example
-
-```text
-LOADING
-
-↓
-
+CREATED
+    ↓
+MATERIAL_RECEIVED
+    ↓
+STORED
+    ↓
 VALIDATING
+    ↓
+READY
+    ↓
+ACTIVATING
+    ↓
+ACTIVATED
 ```
 
-Allowed.
-
-Example
+Failure path:
 
 ```text
-VALIDATING
-
-↓
-
-LOADING
-```
-
-Forbidden.
-
-Recovery requires a new lifecycle.
-
----
-
-# 153. Terminal State Rule
-
-Terminal states have no outgoing transitions.
-
-Examples
-
-```text
-REMOVED
-
-EXPIRED
-
+ANY NON-TERMINAL
+    ↓
 REJECTED
-
-DISCARDED
+    ↓
+CLEANUP_PENDING
+    ↓
+CLEANED
 ```
 
-Terminal objects remain queryable according to retention policy.
+---
+
+## 70. Candidate Atomicity
+
+A candidate must never become visible as active before:
+
+- material is durably available where required;
+- descriptor binding is valid;
+- access policy is committed;
+- required validation succeeds;
+- revision number is reserved safely;
+- activation transaction succeeds.
+
+A failed candidate must not replace the last known good revision.
 
 ---
 
-# 154. Immutable History Rule
+# Part VII — Secret Rotation State Machine
 
-State history is append-only.
+## 71. SecretRotationState
 
-Past states are never modified.
-
-Corrections create new lifecycle instances.
-
----
-
-# 155. Explicit Transition Rule
-
-Every transition has:
-
-- source state;
-- destination state;
-- transition reason.
-
-Implicit transitions are forbidden.
-
----
-
-# 156. Replay Rule
-
-Replaying historical events must reconstruct identical state progression.
-
-Hidden transitions are forbidden.
-
----
-
-# 157. Recovery Rule
-
-Recovery always creates a new execution.
-
-Recovery never mutates failed execution history.
-
----
-
-# 158. Cancellation Rule
-
-Cancellation transitions directly to:
+Canonical states:
 
 ```text
-CANCELLED
+REQUESTED
+PREPARING
+GENERATING
+STORING_CANDIDATE
+VALIDATING
+READY_TO_ACTIVATE
+ACTIVATING
+APPLYING_LEASE_POLICY
+COMPLETED
+FAILED
+CANCELED
+UNCERTAIN
+RECONCILING
 ```
 
-No intermediate rollback state exists.
-
-Cleanup occurs outside the state machine.
-
----
-
-# 159. Publication Rule
-
-Publication may occur only from:
+Primary flow:
 
 ```text
-READY_TO_PUBLISH
+REQUESTED
+    ↓
+PREPARING
+    ↓
+GENERATING
+    ↓
+STORING_CANDIDATE
+    ↓
+VALIDATING
+    ↓
+READY_TO_ACTIVATE
+    ↓
+ACTIVATING
+    ↓
+APPLYING_LEASE_POLICY
+    ↓
+COMPLETED
 ```
 
-Publication from any other state is forbidden.
+---
+
+## 72. REQUESTED
+
+Rotation command accepted for evaluation.
+
+No candidate exists yet.
+
+Valid outgoing transitions:
+
+```text
+REQUESTED → PREPARING
+REQUESTED → FAILED
+REQUESTED → CANCELED
+```
 
 ---
 
-# 160. Replacement Rule
+## 73. PREPARING
 
-Replacing active configuration always follows:
+Secret Management validates:
+
+- descriptor state;
+- expected revision;
+- rotation policy;
+- backend capabilities;
+- provider coordination requirements;
+- user presence;
+- existing lease policy;
+- idempotency;
+- concurrency.
+
+Valid outgoing transitions:
 
 ```text
-Old Snapshot
+PREPARING → GENERATING
+PREPARING → STORING_CANDIDATE
+PREPARING → FAILED
+PREPARING → CANCELED
+```
 
-↓
+`STORING_CANDIDATE` is used when material was supplied by the user.
 
-RETAINED
+---
 
-New Snapshot
+## 74. GENERATING
 
-↓
+New material is generated through:
 
+- backend generation;
+- provider API;
+- refresh-token flow;
+- certificate reissue;
+- key pair generation;
+- external identity flow.
+
+Valid outgoing transitions:
+
+```text
+GENERATING → STORING_CANDIDATE
+GENERATING → FAILED
+GENERATING → UNCERTAIN
+GENERATING → CANCELED
+```
+
+A lost provider acknowledgement may create `UNCERTAIN`.
+
+---
+
+## 75. STORING_CANDIDATE
+
+The candidate revision is stored without replacing the active revision.
+
+Valid outgoing transitions:
+
+```text
+STORING_CANDIDATE → VALIDATING
+STORING_CANDIDATE → FAILED
+STORING_CANDIDATE → UNCERTAIN
+```
+
+---
+
+## 76. VALIDATING
+
+Required candidate validation runs.
+
+Valid outgoing transitions:
+
+```text
+VALIDATING → READY_TO_ACTIVATE
+VALIDATING → FAILED
+VALIDATING → CANCELED
+VALIDATING → UNCERTAIN
+```
+
+---
+
+## 77. READY_TO_ACTIVATE
+
+The candidate passed validation.
+
+The active revision remains unchanged.
+
+Valid outgoing transitions:
+
+```text
+READY_TO_ACTIVATE → ACTIVATING
+READY_TO_ACTIVATE → CANCELED
+READY_TO_ACTIVATE → FAILED
+```
+
+---
+
+## 78. ACTIVATING
+
+Secret Management atomically:
+
+- marks the candidate revision active;
+- marks the old revision superseded;
+- updates descriptor binding;
+- updates backend reference if required;
+- commits safe metadata.
+
+Valid outgoing transitions:
+
+```text
+ACTIVATING → APPLYING_LEASE_POLICY
+ACTIVATING → FAILED
+ACTIVATING → UNCERTAIN
+```
+
+If activation outcome is uncertain, no blind retry is permitted until reconciliation.
+
+---
+
+## 79. APPLYING_LEASE_POLICY
+
+The selected policy is applied to old-revision leases.
+
+Possible actions:
+
+- allow drain;
+- schedule grace revocation;
+- revoke immediately;
+- rebuild provider clients;
+- invalidate internal caches.
+
+Valid outgoing transitions:
+
+```text
+APPLYING_LEASE_POLICY → COMPLETED
+APPLYING_LEASE_POLICY → FAILED
+APPLYING_LEASE_POLICY → UNCERTAIN
+```
+
+The new revision may already be active even if cleanup partially fails.
+
+The result may be `PARTIALLY_COMPLETED` at the operation level.
+
+---
+
+## 80. COMPLETED
+
+Rotation completed with a known active revision and known lease-policy result.
+
+`COMPLETED` is terminal.
+
+---
+
+## 81. FAILED
+
+Rotation did not activate a new revision.
+
+The previous active revision remains authoritative unless independently unsafe.
+
+Candidate cleanup must occur.
+
+`FAILED` is terminal.
+
+---
+
+## 82. CANCELED
+
+Rotation stopped before an irreversible external or activation step completed.
+
+Cancellation is terminal only when the final outcome is known.
+
+If provider-side generation may have completed, use `UNCERTAIN`, not `CANCELED`.
+
+---
+
+## 83. UNCERTAIN
+
+The system cannot determine whether an external or backend action completed.
+
+Examples:
+
+- provider rotated key but response was lost;
+- destination backend write timed out after commit;
+- activation transaction acknowledgement was lost;
+- child authentication broker disappeared.
+
+Valid outgoing transitions:
+
+```text
+UNCERTAIN → RECONCILING
+```
+
+No automatic non-idempotent retry is allowed.
+
+---
+
+## 84. RECONCILING
+
+Secret Management compares:
+
+- provider credential status;
+- backend revision;
+- active descriptor revision;
+- candidate existence;
+- validation evidence;
+- active lease bindings;
+- idempotency records.
+
+Valid outgoing transitions:
+
+```text
+RECONCILING → COMPLETED
+RECONCILING → FAILED
+RECONCILING → UNCERTAIN
+```
+
+Repeated unresolved reconciliation may suspend the descriptor.
+
+---
+
+# Part VIII — Secret Migration State Machine
+
+## 85. SecretMigrationState
+
+Canonical states:
+
+```text
+REQUESTED
+VALIDATING_SOURCE
+PREPARING_DESTINATION
+COPYING
+VALIDATING_DESTINATION
+READY_TO_SWITCH
+SWITCHING
+DRAINING_SOURCE
+CLEANING_SOURCE
+COMPLETED
+FAILED
+CANCELED
+UNCERTAIN
+RECONCILING
+```
+
+Primary flow:
+
+```text
+REQUESTED
+    ↓
+VALIDATING_SOURCE
+    ↓
+PREPARING_DESTINATION
+    ↓
+COPYING
+    ↓
+VALIDATING_DESTINATION
+    ↓
+READY_TO_SWITCH
+    ↓
+SWITCHING
+    ↓
+DRAINING_SOURCE
+    ↓
+CLEANING_SOURCE
+    ↓
+COMPLETED
+```
+
+---
+
+## 86. Migration Safety Invariant
+
+```text
+At least one valid resolvable copy remains
+until destination activation is confirmed.
+```
+
+The source must not be deleted before:
+
+- destination material is stored;
+- destination validation succeeds;
+- descriptor binding switches atomically;
+- new resolution uses the destination;
+- existing source-bound leases are handled.
+
+---
+
+## 87. VALIDATING_SOURCE
+
+Checks:
+
+- source descriptor and revision;
+- source backend access;
+- expected revision;
+- export or internal transfer capability;
+- migration policy;
+- active lease state.
+
+Failure leaves the source active.
+
+---
+
+## 88. PREPARING_DESTINATION
+
+Checks:
+
+- destination backend available;
+- capability compatibility;
+- scope support;
+- secret kind support;
+- size limits;
+- user presence;
+- atomic replace capability;
+- policy compatibility.
+
+---
+
+## 89. COPYING
+
+Material transfers internally between approved backends.
+
+The caller never receives material.
+
+Failure must preserve the source.
+
+---
+
+## 90. VALIDATING_DESTINATION
+
+The destination candidate is checked before activation.
+
+A failed destination is cleaned up.
+
+The source remains active.
+
+---
+
+## 91. READY_TO_SWITCH
+
+Destination is valid but not yet authoritative.
+
+Valid outgoing transitions:
+
+```text
+READY_TO_SWITCH → SWITCHING
+READY_TO_SWITCH → CANCELED
+READY_TO_SWITCH → FAILED
+```
+
+---
+
+## 92. SWITCHING
+
+Descriptor and active revision backend binding switch atomically.
+
+Possible result:
+
+- new leases use destination;
+- old source-bound leases drain;
+- source remains until cleanup policy permits deletion.
+
+---
+
+## 93. DRAINING_SOURCE
+
+No new source-bound leases are granted.
+
+Existing leases:
+
+- drain;
+- revoke immediately; or
+- revoke after grace.
+
+---
+
+## 94. CLEANING_SOURCE
+
+The source copy is deleted according to requested assurance.
+
+Failure may yield a partially completed migration:
+
+```text
+Destination active
+Source cleanup failed
+```
+
+This must not roll the descriptor back automatically.
+
+---
+
+## 95. Migration Terminal and Uncertain States
+
+`COMPLETED`, `FAILED`, and `CANCELED` follow the same certainty rules as rotation.
+
+`UNCERTAIN` requires `RECONCILING`.
+
+Reconciliation determines:
+
+- active backend;
+- destination content;
+- source content;
+- descriptor binding;
+- lease bindings;
+- cleanup status.
+
+---
+
+# Part IX — Secret Validation State Machine
+
+## 96. SecretValidationState
+
+Canonical states:
+
+```text
+REQUESTED
+CHECKING_REFERENCE
+CHECKING_BACKEND
+CHECKING_STRUCTURE
+CHECKING_PROVIDER
+VALID
+INVALID
+UNKNOWN
+DEFERRED
+CANCELED
+FAILED
+```
+
+The exact steps depend on validation mode.
+
+---
+
+## 97. Validation Semantics
+
+Validation state describes one validation operation.
+
+It does not replace descriptor, revision, or availability state.
+
+Examples:
+
+- a provider check may fail because of network outage and result in `UNKNOWN`;
+- a structural check may result in `INVALID`;
+- a canceled check must not mark the revision invalid;
+- a previous `VALID` result may become stale.
+
+---
+
+## 98. VALID
+
+Required checks succeeded at `checkedAt`.
+
+`VALID` is evidence, not a permanent guarantee.
+
+The summary records:
+
+- revision;
+- validation mode;
+- provider;
+- expiration metadata;
+- safe evidence;
+- validation timestamp.
+
+---
+
+## 99. INVALID
+
+Evidence proves the revision is unusable for the checked requirement.
+
+Effects depend on severity:
+
+```text
+Candidate invalid
+    → candidate rejected
+
+Active revision invalid
+    → descriptor SUSPENDED or REVOKED
+    → active leases revoked when necessary
+```
+
+---
+
+## 100. UNKNOWN
+
+The system cannot determine validity.
+
+Possible causes:
+
+- network unavailable;
+- provider unavailable;
+- backend unavailable;
+- unsupported validation;
+- inconclusive response;
+- stale evidence.
+
+`UNKNOWN` is not equivalent to `INVALID`.
+
+---
+
+## 101. DEFERRED
+
+Validation requires:
+
+- user action;
+- scheduled provider call;
+- network permission;
+- cost approval;
+- rate-limit recovery;
+- external process.
+
+The secret may remain available only when policy permits.
+
+---
+
+## 102. CANCELED and FAILED
+
+`CANCELED` means the operation was stopped intentionally.
+
+`FAILED` means the validation infrastructure failed unexpectedly.
+
+Neither state alone proves secret invalidity.
+
+---
+
+# Part X — Secret Removal State Machine
+
+## 103. SecretRemovalState
+
+Canonical states:
+
+```text
+REQUESTED
+BLOCKING_NEW_ACCESS
+DRAINING_LEASES
+REVOKING_EXTERNAL
+DELETING_MATERIAL
+VERIFYING_DELETION
+RETAINING_TOMBSTONE
+COMPLETED
+PARTIALLY_COMPLETED
+FAILED
+UNCERTAIN
+RECONCILING
+```
+
+---
+
+## 104. Removal Flow
+
+```text
+REQUESTED
+    ↓
+BLOCKING_NEW_ACCESS
+    ↓
+DRAINING_LEASES
+    ↓
+REVOKING_EXTERNAL
+    ↓
+DELETING_MATERIAL
+    ↓
+VERIFYING_DELETION
+    ↓
+RETAINING_TOMBSTONE
+    ↓
+COMPLETED
+```
+
+Optional steps may be skipped when unsupported or unnecessary.
+
+---
+
+## 105. BLOCKING_NEW_ACCESS
+
+Descriptor enters `REMOVING`.
+
+No new lease may be granted.
+
+This transition must occur before material deletion.
+
+---
+
+## 106. DRAINING_LEASES
+
+Lease policy is applied.
+
+Security removal should normally revoke immediately.
+
+Routine cleanup may allow bounded drain.
+
+---
+
+## 107. REVOKING_EXTERNAL
+
+When requested and supported, Secret Management coordinates provider-side revocation.
+
+Outcomes:
+
+```text
+CONFIRMED
+NOT_SUPPORTED
+FAILED
+UNCERTAIN
+NOT_REQUESTED
+```
+
+External revocation is separate from local deletion.
+
+---
+
+## 108. DELETING_MATERIAL
+
+The backend deletion operation executes.
+
+No public result may claim physical erasure beyond backend guarantees.
+
+---
+
+## 109. VERIFYING_DELETION
+
+Verification may include:
+
+- backend entry absent;
+- active reference no longer resolves;
+- encrypted blob key destroyed;
+- external source missing;
+- safe metadata updated.
+
+Verification must not re-expose material.
+
+---
+
+## 110. PARTIALLY_COMPLETED
+
+Examples:
+
+- local deletion succeeded but provider revocation failed;
+- destination active but source cleanup failed;
+- material removed but tombstone persistence failed;
+- one compound part removed while another external part is uncertain.
+
+The operation requires explicit recovery guidance.
+
+The descriptor remains `REMOVED`, `REVOKED`, or `SUSPENDED` according to the safe outcome.
+
+---
+
+# Part XI — Secret Operation and Reconciliation
+
+## 111. SecretOperationState
+
+Canonical states:
+
+```text
+ACCEPTED
+RUNNING
+WAITING_FOR_USER
+WAITING_FOR_EXTERNAL
+DEFERRED
+COMPLETED
+PARTIALLY_COMPLETED
+REJECTED
+FAILED
+CANCELED
+UNCERTAIN
+```
+
+This is a general administrative operation state.
+
+It does not replace entity-specific state machines.
+
+---
+
+## 112. WAITING_FOR_USER
+
+The operation needs:
+
+- device unlock;
+- biometric confirmation;
+- system credential prompt;
+- credential re-entry;
+- application confirmation;
+- external authentication.
+
+Presentation displays the prompt.
+
+Secret Management resumes only from a trusted result.
+
+---
+
+## 113. WAITING_FOR_EXTERNAL
+
+The operation is waiting for:
+
+- provider API;
+- operating-system service;
+- external secret manager;
+- child process;
+- identity provider;
+- remote validation.
+
+Timeout may lead to `FAILED` or `UNCERTAIN` depending on whether the external action may have committed.
+
+---
+
+## 114. SecretReconciliationState
+
+Canonical states:
+
+```text
+NOT_REQUIRED
+REQUIRED
+INSPECTING
+RESOLVED_SUCCESS
+RESOLVED_FAILURE
+UNRESOLVED
+MANUAL_ACTION_REQUIRED
+```
+
+Reconciliation is required when repeating an operation could:
+
+- create another provider credential;
+- revoke the wrong credential;
+- overwrite a newer revision;
+- lose the only valid copy;
+- delete the wrong backend entry;
+- expose inconsistent lease authority.
+
+---
+
+## 115. Reconciliation Invariant
+
+```text
+Do not retry a potentially committed non-idempotent operation
+until its actual outcome is known or safely isolated.
+```
+
+---
+
+# Part XII — Cross-State Rules
+
+## 116. Descriptor and Revision Relationship
+
+| Descriptor | Allowed active revision condition |
+|---|---|
+| `REGISTERING` | No active revision |
+| `ACTIVE` | Exactly one active revision |
+| `ROTATING` | One current active revision plus optional candidate |
+| `MIGRATING` | One active revision, source authoritative until switch |
+| `SUSPENDED` | Active revision may exist but no new lease |
+| `REVOKED` | No usable active revision |
+| `REMOVING` | No new use; revisions deletion-pending or revoked |
+| `REMOVED` | No active revision |
+| `TOMBSTONED` | No material revision retained |
+
+---
+
+## 117. Descriptor and Availability Relationship
+
+Examples:
+
+```text
+Descriptor ACTIVE + Backend AVAILABLE + Revision ACTIVE
+    → Availability may be AVAILABLE
+
+Descriptor ACTIVE + Backend LOCKED
+    → Availability LOCKED
+
+Descriptor ACTIVE + Revision EXPIRED
+    → Availability EXPIRED
+
+Descriptor SUSPENDED
+    → Availability UNAVAILABLE or USER_ACTION_REQUIRED
+
+Descriptor REVOKED
+    → Availability REVOKED
+
+Descriptor REMOVED
+    → Availability MISSING
+```
+
+---
+
+## 118. Backend and Lease Relationship
+
+When backend becomes:
+
+### LOCKED
+
+- existing operation-oriented handles may continue only if they do not require another backend read;
+- new resolution is denied;
+- policy may revoke handles that depend on backend presence.
+
+### UNAVAILABLE
+
+- new resolution denied;
+- active leases may continue if material is already safely bound;
+- failures must not expose backend internals.
+
+### COMPROMISED
+
+- new resolution denied;
+- active leases revoked;
+- affected descriptors suspended or revoked;
+- rotation or migration required.
+
+### SHUTTING_DOWN
+
+- no new lease;
+- active leases drain or revoke;
+- cleanup bounded.
+
+---
+
+## 119. Provider Management Interaction
+
+Secret Management exposes normalized availability.
+
+Provider Management may derive:
+
+```text
+CredentialAvailabilityState
+```
+
+from Secret Management state.
+
+Mapping example:
+
+| Secret availability | Provider credential state |
+|---|---|
+| `AVAILABLE` | `AVAILABLE` |
+| `LOCKED` | `CREDENTIAL_UNAVAILABLE` or user action required |
+| `EXPIRED` | `CREDENTIAL_UNAVAILABLE` |
+| `REVOKED` | `CREDENTIAL_UNAVAILABLE` |
+| `INVALID` | `CREDENTIAL_UNAVAILABLE` |
+| `BACKEND_UNAVAILABLE` | `CREDENTIAL_UNAVAILABLE` |
+| `UNKNOWN` | `UNKNOWN` |
+
+Provider Management must not mutate secret state.
+
+Authentication feedback is submitted through a command.
+
+---
+
+## 120. Runtime Cancellation Interaction
+
+Runtime cancellation may request lease release.
+
+```text
+Runtime Attempt canceled
+    ↓
+Provider operation canceled where supported
+    ↓
+Secret lease → RELEASING
+    ↓
+Secret lease → RELEASED
+```
+
+If physical cleanup cannot be confirmed:
+
+```text
+Secret lease → ABANDONED
+```
+
+Cancellation does not revoke the descriptor or revision.
+
+---
+
+## 121. Application Shutdown Interaction
+
+Recommended order:
+
+```text
+Stop new work
+    ↓
+Stop new secret leases
+    ↓
+Release or revoke active leases
+    ↓
+Cancel candidate operations
+    ↓
+Finish or mark uncertain rotations/migrations
+    ↓
+Clear sensitive memory caches
+    ↓
+Shutdown backends
+    ↓
+Backend TERMINATED
+```
+
+Shutdown must not silently mark uncertain external rotation as failed.
+
+---
+
+# Part XIII — Invalid Transitions
+
+## 122. Invalid Descriptor Transitions
+
+Examples:
+
+```text
+REMOVED → ACTIVE
+TOMBSTONED → ACTIVE
+REVOKED → ACTIVE without explicit recovery
+REGISTERING → ROTATING
+REMOVING → ROTATING
+```
+
+These require a new controlled operation or new identity.
+
+---
+
+## 123. Invalid Revision Transitions
+
+Examples:
+
+```text
+SUPERSEDED → ACTIVE directly
+EXPIRED → ACTIVE
+REVOKED → ACTIVE
+DELETED → ACTIVE
+INVALID → ACTIVE
+ACTIVE R4 material mutated in place
+```
+
+Rollback creates a new revision.
+
+---
+
+## 124. Invalid Lease Transitions
+
+Examples:
+
+```text
+RELEASED → ACTIVE
+EXPIRED → ACTIVE
+REVOKED → ACTIVE
+REJECTED → GRANTED
+ABANDONED → ACTIVE
+GRANTED revision changed
+ACTIVE consumer changed
+ACTIVE purpose changed
+```
+
+A new lease is required.
+
+---
+
+## 125. Invalid Backend Transitions
+
+Examples:
+
+```text
+TERMINATED → AVAILABLE
+COMPROMISED → AVAILABLE without remediation
+UNREGISTERED → AVAILABLE
+LOCKED → MIGRATING without unlock when material access is required
+```
+
+---
+
+## 126. Invalid Rotation and Migration Transitions
+
+Examples:
+
+```text
+FAILED → ACTIVATING
+CANCELED → COMPLETED
+UNCERTAIN → automatic retry
+COPYING → source deletion
+VALIDATING_DESTINATION → source cleanup
+READY_TO_SWITCH → source deleted before switch
+```
+
+---
+
+# Part XIV — Concurrency and Persistence
+
+## 127. Single Logical Writer
+
+Secret Management is the single logical writer for:
+
+- descriptor state;
+- revision state;
+- lease state;
+- rotation state;
+- migration state;
+- removal state;
+- normalized availability;
+- backend state snapshots.
+
+Backend adapters report facts.
+
+Consumers do not write lifecycle state directly.
+
+---
+
+## 128. Optimistic Concurrency
+
+Mutating operations should validate:
+
+```text
+expectedDescriptorVersion
+expectedCurrentRevision
+expectedBackendBindingRevision
+expectedLeaseVersion
+```
+
+A stale operation must not overwrite newer state.
+
+---
+
+## 129. State Transition Record
+
+Every accepted transition should record safe metadata:
+
+```text
+entityType
+entityId
+fromState
+toState
+reasonCode
+operationId
+actorId
+correlationId
+causationId?
+occurredAt
+stateVersion
+```
+
+No record may contain secret material.
+
+---
+
+## 130. Persistence Ordering
+
+For durable state:
+
+```text
+Validate transition
+    ↓
+Persist material candidate if needed
+    ↓
+Persist new lifecycle state atomically
+    ↓
+Commit
+    ↓
+Publish safe event
+```
+
+Events must not be published before the authoritative state commit.
+
+If event publication fails, state remains authoritative and publication may be retried according to Event Bus policy.
+
+---
+
+## 131. Crash Recovery
+
+On startup, Secret Management must detect incomplete states such as:
+
+```text
+REGISTERING
+ROTATING
+MIGRATING
+REMOVING
+ACTIVATING
+SWITCHING
+DELETION_PENDING
+UNCERTAIN
+RELEASING
+```
+
+Recovery rules:
+
+- never assume an external operation failed merely because the process crashed;
+- never activate an unvalidated candidate;
+- preserve the last known good revision;
+- reconcile uncertain provider or backend outcomes;
+- expire orphaned leases;
+- clear memory-only material;
+- mark unavailable references appropriately;
+- complete safe idempotent cleanup.
+
+---
+
+## 132. Orphaned Lease Recovery
+
+After restart:
+
+```text
+Persistent lease metadata found
+    ↓
+No live consumer identity
+    ↓
+Lease → EXPIRED or ABANDONED
+    ↓
+Cleanup attempted
+```
+
+Secret material handles themselves must not be restored from ordinary persistence.
+
+A new resolution is required.
+
+---
+
+## 133. Memory Backend Recovery
+
+Memory-backed secrets do not survive process termination.
+
+After restart:
+
+- descriptor may become `SUSPENDED`, `REMOVED`, or remain configuration-only depending on policy;
+- availability becomes `MISSING` or `UNAVAILABLE`;
+- active memory revision cannot be reconstructed;
+- the user or provider flow must supply a new revision.
+
+---
+
+# Part XV — Command-to-State Mapping
+
+## 134. RegisterSecret
+
+```text
+Descriptor: none → REGISTERING → ACTIVE
+Candidate: CREATED → ... → ACTIVATED
+Revision: CANDIDATE → READY → ACTIVE
+Operation: ACCEPTED → RUNNING → COMPLETED
+```
+
+Failure:
+
+```text
+Candidate → REJECTED → CLEANED
+Descriptor → REMOVED or no persistent record
+Operation → FAILED / REJECTED
+```
+
+---
+
+## 135. ReplaceSecret
+
+```text
+Descriptor ACTIVE → ROTATING
+Rotation REQUESTED → ... → COMPLETED
+New revision CANDIDATE → ACTIVE
+Old revision ACTIVE → SUPERSEDED
+Descriptor ROTATING → ACTIVE
+```
+
+---
+
+## 136. RotateSecret
+
+Same state shape as replacement, with optional provider generation and reconciliation.
+
+---
+
+## 137. RevokeSecret
+
+```text
+Descriptor ACTIVE / SUSPENDED → REVOKED
+Active revision ACTIVE → REVOKED
+Active leases → REVOKED
+Availability → REVOKED
+```
+
+---
+
+## 138. RemoveSecret
+
+```text
+Descriptor → REMOVING
+Removal → REQUESTED ... COMPLETED
+Revisions → DELETION_PENDING → DELETED
+Descriptor → REMOVED → TOMBSTONED
+Availability → MISSING
+```
+
+---
+
+## 139. ResolveSecret / AcquireLease
+
+```text
+Lease REQUESTED
+    ↓ EVALUATING
+    ↓ GRANTED
+    ↓ ACTIVE
+    ↓ RELEASING
+    ↓ RELEASED
+```
+
+No descriptor state change is required for normal resolution.
+
+Safe usage metadata may update.
+
+---
+
+## 140. ValidateSecret
+
+```text
+Validation REQUESTED
+    ↓ checking stages
+    ↓ VALID / INVALID / UNKNOWN / DEFERRED
+```
+
+Only authoritative evidence may affect revision or availability state.
+
+---
+
+## 141. MigrateSecret
+
+```text
+Descriptor ACTIVE → MIGRATING
+Migration REQUESTED → ... → COMPLETED
+Revision backend binding switches
+Descriptor MIGRATING → ACTIVE
+```
+
+Failure before switch returns to `ACTIVE`.
+
+Uncertain switch leads to `SUSPENDED` plus reconciliation.
+
+---
+
+# Part XVI — Event-to-State Mapping
+
+## 142. Event Principle
+
+Events report accepted facts after state transition.
+
+Examples:
+
+```text
+SecretRegistered
+SecretDescriptorActivated
+SecretRevisionActivated
+SecretRotationStarted
+SecretRotationCompleted
+SecretRevoked
+SecretRemovalStarted
+SecretRemoved
+SecretAvailabilityChanged
+SecretLeaseGranted
+SecretLeaseActivated
+SecretLeaseReleased
+SecretLeaseExpired
+SecretLeaseRevoked
+SecretBackendLocked
+SecretBackendAvailable
+SecretBackendCompromised
+SecretMigrationCompleted
+SecretValidationCompleted
+SecretOperationBecameUncertain
+SecretReconciliationRequired
+```
+
+Detailed event contracts belong in `EVENTS.md`.
+
+---
+
+## 143. State Transition Before Event
+
+Correct:
+
+```text
+Validate
+    ↓
+Persist state transition
+    ↓
+Commit
+    ↓
+Publish event
+```
+
+Incorrect:
+
+```text
+Publish event
+    ↓
+Attempt state transition
+```
+
+---
+
+# Part XVII — Security Invariants
+
+## 144. No Material in State Records
+
+Lifecycle state records may contain:
+
+- IDs;
+- revisions;
+- safe references;
+- timestamps;
+- reason codes;
+- backend IDs;
+- policy IDs;
+- operation IDs;
+- safe status metadata.
+
+They must never contain:
+
+- raw secret;
+- authorization header;
+- password;
+- access token;
+- refresh token;
+- private key;
+- decrypted compound credential;
+- backend encryption key;
+- secret handle;
+- temporary plaintext buffer.
+
+---
+
+## 145. Lease Authority Invariant
+
+A handle is usable only when:
+
+```text
+Lease state = GRANTED or ACTIVE
+AND
+consumer identity matches
+AND
+purpose matches
+AND
+revision remains permitted
+AND
+lease not expired
+AND
+lease not revoked
+```
+
+---
+
+## 146. Rotation Authority Invariant
+
+After a new revision activates:
+
+```text
+No new lease may bind to the superseded revision.
+```
+
+---
+
+## 147. Revocation Invariant
+
+After descriptor or revision revocation:
+
+```text
+No new material access may be granted.
+```
+
+Late physical execution does not restore authority.
+
+---
+
+## 148. Removal Invariant
+
+Material deletion must not occur before new access is blocked.
+
+---
+
+## 149. Backend Compromise Invariant
+
+A compromised backend cannot return to normal availability without explicit remediation and reinitialization.
+
+---
+
+# Part XVIII — MVP State Boundary
+
+## 150. Required MVP State Machines
+
+The desktop MVP must implement:
+
+```text
+SecretDescriptorState
+SecretRevisionState
+SecretAvailabilityState
+SecretLeaseState
+SecretBackendState
+SecretCandidateState
+SecretValidationState
+SecretOperationState
+```
+
+The MVP should implement basic:
+
+```text
+SecretRotationState
+SecretRemovalState
+```
+
+The MVP may implement simplified:
+
+```text
+SecretMigrationState
+SecretReconciliationState
+```
+
+Simplification must not remove:
+
+- immutable revision identity;
+- lease terminal states;
+- backend lock state;
+- uncertainty handling;
+- safe candidate activation;
+- revocation;
+- deletion assurance distinction.
+
+---
+
+## 151. MVP Backend States
+
+Required:
+
+```text
+OS secure-store backend:
+    INITIALIZING
+    AVAILABLE
+    LOCKED
+    UNAVAILABLE
+    SHUTTING_DOWN
+    TERMINATED
+
+Memory backend:
+    INITIALIZING
+    AVAILABLE
+    SHUTTING_DOWN
+    TERMINATED
+
+Environment backend:
+    INITIALIZING
+    AVAILABLE
+    UNAVAILABLE
+    TERMINATED
+```
+
+---
+
+# Part XIX — State Decisions
+
+## 152. Decisions
+
+### Decision 1 — Independent state machines
+
+Descriptor, revision, availability, lease, backend, rotation, migration, validation, removal, and operation states remain separate.
+
+### Decision 2 — One active revision
+
+A descriptor normally has exactly one active revision.
+
+### Decision 3 — Rotation never mutates a revision
+
+Rotation creates a new revision and supersedes the old revision.
+
+### Decision 4 — Availability is derived
+
+Availability summarizes resolvability but does not replace source state.
+
+### Decision 5 — Leases are terminal once closed
+
+Released, expired, revoked, rejected, and abandoned leases never reactivate.
+
+### Decision 6 — Backend lock preserves identity
+
+Locking changes availability, not descriptor identity.
+
+### Decision 7 — Revocation differs from removal
+
+Revocation blocks use; removal deletes or detaches material.
+
+### Decision 8 — Removal differs from erasure guarantee
+
+Deletion state records the actual assurance supported by the backend.
+
+### Decision 9 — Uncertain is explicit
+
+Potentially committed external operations enter `UNCERTAIN` and require reconciliation.
+
+### Decision 10 — Last known good remains authoritative
+
+A failed rotation or migration does not replace a valid current revision.
+
+### Decision 11 — Security may bypass graceful drain
+
+Compromise or explicit revocation may revoke active leases immediately.
+
+### Decision 12 — State persistence contains no secret material
+
+Only safe metadata is persisted in lifecycle state.
+
+---
+
+# Part XX — Open Decisions
+
+## 153. Policy Decisions
+
+Still to finalize:
+
+- default lease duration;
+- maximum lease duration;
+- default lease policy during routine rotation;
+- default lease policy during security rotation;
+- descriptor suspension thresholds;
+- availability cache TTL;
+- validation evidence TTL;
+- automatic refresh timing;
+- grace period duration;
+- backend recovery retry cadence;
+- tombstone retention;
+- superseded revision retention;
+- source cleanup behavior after migration;
+- orphaned lease terminal mapping;
+- environment secret behavior after restart.
+
+---
+
+## 154. Platform Decisions
+
+Still to finalize:
+
+- exact Windows lock-state mapping;
+- exact macOS Keychain prompt behavior;
+- exact Linux Secret Service lock mapping;
+- safe fallback when no platform store exists;
+- whether OS prompt cancellation maps to `LOCKED`, `USER_ACTION_REQUIRED`, or operation `CANCELED`;
+- process identity binding;
+- child-process lease transfer;
+- platform-specific secure delete assurance.
+
+---
+
+## 155. Event Decisions
+
+To define in `EVENTS.md`:
+
+- public versus restricted events;
+- lease event visibility;
+- backend lock event visibility;
+- rotation progress granularity;
+- migration progress granularity;
+- validation event throttling;
+- tombstone events;
+- reconciliation events;
+- audit sink separation;
+- provider-facing credential availability events.
+
+---
+
+## 156. Error Decisions
+
+To define in `ERRORS.md`:
+
+- invalid transition codes;
+- revision conflict codes;
+- backend lock errors;
+- uncertain operation errors;
+- reconciliation errors;
+- deletion assurance warnings;
+- active lease cleanup failures;
+- candidate cleanup errors;
+- provider rotation mismatch;
+- migration source/destination errors;
+- security violation severity.
+
+---
+
+# Part XXI — Related Documents
+
+## 157. Related Documents
+
+```text
+.meta/MODULES.md
+.meta/MODULES_RULE.md
+
+docs/architecture/CAPABILITY_MAP.md
+docs/architecture/STATE_MACHINE.md
+docs/architecture/EVENT_BUS.md
+docs/architecture/MODULE_DEPENDENCY.md
+docs/architecture/DATA_FLOW.md
+
+docs/architecture/runtime/CANCELLATION.md
+docs/architecture/runtime/RESOURCE_LIFECYCLE.md
+docs/architecture/runtime/ERROR_MODEL.md
+docs/architecture/runtime/RUNTIME_OBSERVABILITY.md
+
+03-infrastructure/configuration/MODULE.md
+03-infrastructure/configuration/CONTRACT.md
+
+03-infrastructure/secret-management/MODULE.md
+03-infrastructure/secret-management/CONTRACT.md
+
+02-modules/provider-management/MODULE.md
+02-modules/provider-management/CONTRACT.md
+02-modules/provider-management/STATES.md
+```
+
+Future Secret Management documents:
+
+```text
+03-infrastructure/secret-management/EVENTS.md
+03-infrastructure/secret-management/ERRORS.md
+03-infrastructure/secret-management/README.md
+```
+
+---
+
+## 158. Summary
+
+Secret Management uses independent state machines for logical identity, immutable material revisions, availability, temporary access authority, backend operations, candidate activation, rotation, migration, validation, removal, and reconciliation.
+
+The core descriptor lifecycle is:
+
+```text
+REGISTERING
+    ↓
 ACTIVE
+    ↓
+ROTATING / MIGRATING / SUSPENDED
+    ↓
+ACTIVE
+    ↓
+REVOKED
+    ↓
+REMOVING
+    ↓
+REMOVED
+    ↓
+TOMBSTONED
 ```
 
-Both transitions are atomic from the perspective of consumers.
-
----
-
-# Part XIV — State Invariants
-
-# 161. Source Invariants
-
-Configuration Sources guarantee:
-
-✓ stable identity
-
-✓ one lifecycle
-
-✓ deterministic transitions
-
-✓ immutable history
-
----
-
-# 162. Candidate Invariants
-
-Candidates guarantee:
-
-✓ unpublished until READY
-
-✓ published at most once
-
-✓ immutable processing history
-
----
-
-# 163. Snapshot Invariants
-
-Snapshots guarantee:
-
-✓ immutable contents
-
-✓ immutable revision
-
-✓ one active snapshot
-
----
-
-# 164. Revision Invariants
-
-Revisions guarantee:
-
-✓ total ordering
-
-✓ append-only history
-
-✓ immutable identity
-
----
-
-# 165. Override Invariants
-
-Overrides guarantee:
-
-✓ explicit scope
-
-✓ explicit lifetime
-
-✓ deterministic precedence
-
----
-
-# 166. Validation Invariants
-
-Validation guarantees:
-
-✓ immutable result
-
-✓ deterministic execution
-
-✓ replay safety
-
----
-
-# 167. Compatibility Invariants
-
-Compatibility guarantees:
-
-✓ explicit outcome
-
-✓ immutable evaluation
-
-✓ deterministic rules
-
----
-
-# 168. Migration Invariants
-
-Migration guarantees:
-
-✓ immutable source
-
-✓ deterministic transformation
-
-✓ one terminal state
-
----
-
-# 169. Reload Invariants
-
-Reload guarantees:
-
-✓ single active execution
-
-✓ deterministic orchestration
-
-✓ explicit failures
-
----
-
-# 170. Consumer Acceptance Invariants
-
-Consumer Acceptance guarantees:
-
-✓ one acceptance per consumer per revision
-
-✓ immutable history
-
-✓ explicit adoption state
-
----
-
-# Part XV — State Specification Summary
-
-# 171. State Machines Covered
-
-This document specifies:
+The core revision lifecycle is:
 
 ```text
-✓ Configuration Source
-
-✓ Configuration Candidate
-
-✓ Configuration Snapshot
-
-✓ Configuration Revision
-
-✓ Configuration Override
-
-✓ Validation
-
-✓ Compatibility
-
-✓ Migration
-
-✓ Consumer Acceptance
-
-✓ Reload
+CANDIDATE
+    ↓
+VALIDATING
+    ↓
+READY
+    ↓
+ACTIVE
+    ↓
+SUPERSEDED / EXPIRED / REVOKED
+    ↓
+DELETION_PENDING
+    ↓
+DELETED
 ```
 
----
-
-# 172. Core Architectural Guarantees
-
-Configuration Infrastructure guarantees:
-
-✓ explicit lifecycle
-
-✓ deterministic transitions
-
-✓ immutable history
-
-✓ append-only revisions
-
-✓ immutable snapshots
-
-✓ replay-safe state evolution
-
-✓ ownership isolation
-
-✓ observable state changes
-
-✓ recovery through new lifecycle
-
-✓ transport-independent state model
-
----
-
-# 173. Relationship to Other Documents
-
-The complete Configuration specification is composed of:
+The core lease lifecycle is:
 
 ```text
-MODULE.md
-    │
-    ├── Responsibility
-    ├── Boundaries
-    └── Architecture
-
-CONTRACT.md
-    │
-    ├── Commands
-    ├── Queries
-    ├── DTOs
-    └── Public API
-
-STATES.md
-    │
-    ├── Lifecycles
-    ├── State Machines
-    ├── Transition Rules
-    └── Invariants
-
-EVENTS.md
-    │
-    ├── Domain Events
-    ├── Event Ordering
-    └── Event Contracts
-
-ERRORS.md
-    │
-    ├── Error Taxonomy
-    ├── Recovery
-    └── Retry Policy
-
-README.md
-    │
-    ├── Navigation
-    ├── Concepts
-    └── Module Overview
+REQUESTED
+    ↓
+EVALUATING
+    ↓
+GRANTED
+    ↓
+ACTIVE
+    ↓
+RELEASING
+    ↓
+RELEASED
 ```
 
----
+The architecture preserves these invariants:
 
-# 174. End of State Specification
+- one logical writer;
+- one active revision per descriptor;
+- immutable revisions;
+- deny-by-default access;
+- consumer- and purpose-bound leases;
+- no lease reactivation;
+- no secret material in state records;
+- failed candidates do not replace last known good material;
+- revocation blocks new access immediately;
+- backend lock does not delete identity;
+- uncertain external outcomes require reconciliation;
+- removal does not overstate physical erasure guarantees.
 
-This document defines the complete lifecycle specification for the Configuration Infrastructure module.
-
-All future implementations of the Configuration module must preserve:
-
-- lifecycle semantics;
-- ownership boundaries;
-- state invariants;
-- transition rules;
-- replay guarantees;
-
-regardless of implementation language, storage technology, transport protocol, or deployment model.
+This document is the state-machine source of truth for subsequent Secret Management events, errors, and implementation documentation.

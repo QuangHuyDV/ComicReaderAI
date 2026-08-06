@@ -130,6 +130,15 @@ Presentation Commit
 
 | Module | Status | Notes |
 |---|---|---|
+| Secret Management Infrastructure | ✅ Complete | Standard document set (README, MODULE, CONTRACT, STATES, EVENTS, ERRORS) completed. |
+| Event Bus Infrastructure | ✅ Complete | Standard document set completed and aligned with Runtime execution model. |
+| Logging Infrastructure | ✅ Complete | Structured logging architecture completed. |
+| Telemetry Infrastructure | ✅ Complete | Metrics, tracing and observability contracts completed. |
+| Scheduler Infrastructure | ✅ Complete | Scheduling lifecycle, retry, timeout, cancellation and orchestration documented. |
+
+
+| Module | Status | Notes |
+|---|---|---|
 | Capture | ✅ Documented | Module overview, contract, events, states and errors exist; later Runtime v2 terminology review may still be needed. |
 | Recognition | ✅ Runtime v2 synchronized | `README.md`, `MODULE.md`, `CONTRACT.md`, `STATES.md`, `EVENTS.md` and `ERRORS.md` now share the Candidate Artifact and Runtime authority model. |
 | Text Processing | ✅ Documented | Produces normalized and structured source data for Translation; cross-check against the new Recognition Artifact boundary remains a later synchronization task. |
@@ -177,36 +186,16 @@ Recognition does not own WorkItem/Attempt lifecycle, retry, cancellation authori
 
 ## 1.5 Current Focus
 
-The immediate focus is synchronization of detailed architecture with the newly consolidated Runtime v2 and Recognition contracts.
+The immediate focus is completion of the Infrastructure Architecture before technology selection.
 
 Current priorities are:
 
-1. review `doc/01-architecture/ocr/PIPELINE.md`
-2. reconcile detailed OCR/Recognition documents with `doc/02-modules/recognition/`
-3. remove remaining Stage-centric or request-centric terminology where it conflicts with Runtime v2
-4. verify that detailed OCR documents do not duplicate module ownership or Runtime orchestration
-5. continue cross-module synchronization, especially the Recognition Artifact → Text Processing boundary
-6. update this project-status document whenever a document group is completed
+1. complete `03-infrastructure/resource-manager/`
+2. continue the remaining Infrastructure modules
+3. synchronize architecture terminology across modules
+4. revisit OCR architecture after Infrastructure stabilization
+5. update PROJECT_STATUS after each completed document group
 
-The next detailed folder is:
-
-```text
-doc/01-architecture/ocr/
-├── PIPELINE.md
-├── PREPROCESS.md
-├── DETECTION.md
-├── RECOGNITION.md
-├── POSTPROCESS.md
-├── LAYOUT.md
-├── READING_ORDER.md
-├── TEXT_DIRECTION.md
-├── QUALITY.md
-└── PROVIDERS.md
-```
-
-No technology stack, provider or implementation decision should be inferred from the current architecture documents unless explicitly recorded.
-
----
 
 ## 1.6 Architecture Snapshot
 
@@ -309,7 +298,10 @@ Pipeline stages and module events never independently decide the next business s
 
 ---
 
-## 1.7 How to Resume the Project
+## 1.7 How to Resume
+
+For Infrastructure work, continue from the current unfinished module under `03-infrastructure/`.
+ the Project
 
 For a new AI session or a new contributor, use this reading order:
 
