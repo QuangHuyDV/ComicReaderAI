@@ -1,487 +1,1274 @@
 # OCR Postprocessing
 
-> Status: Draft
-> Version: 1.0
-> Layer: OCR Pipeline
-> Depends On: Detection, Recognition, Layout Analysis, Text Direction
-> Next Layer: Reading Order, Translation
+> **Status:** Draft
+> **Version:** 1.1
+> **Layer:** OCR Architecture
+> **Depends On:** Detection, Recognition, Text Direction, Layout Analysis
+> **Next Layer:** Quality Assessment, Reading Order
 
 ---
 
 # 1. Purpose
 
-## Overview
-
-OCR Postprocessing là giai đoạn chuẩn hóa và hợp nhất kết quả sau khi các bước OCR hoàn thành.
-
-Đây là tầng cuối của OCR Pipeline trước khi dữ liệu được chuyển sang Reading Order và Translation.
-
-Postprocessing không thực hiện OCR mới mà làm sạch, chuẩn hóa và thống nhất toàn bộ dữ liệu OCR thành một mô hình duy nhất.
+OCR Postprocessing là giai đoạn chuẩn hóa và hợp nhất các kết quả OCR thành một representation thống nhất.
 
 Nếu:
 
-* Detection trả lời:
+```text id="p1"
+Detection
+    → "Text nằm ở đâu?"
 
-> "Text nằm ở đâu?"
+Recognition
+    → "Text là gì?"
 
-* Recognition trả lời:
+Text Direction
+    → "Text được viết theo hướng nào?"
 
-> "Text là gì?"
-
-* Layout Analysis trả lời:
-
-> "Các Region được tổ chức như thế nào?"
+Layout
+    → "Các visual entity được tổ chức như thế nào?"
+```
 
 thì Postprocessing trả lời:
 
-> "Làm thế nào để toàn bộ kết quả OCR trở nên nhất quán và sẵn sàng cho các bước xử lý tiếp theo?"
+```text id="p2"
+"Làm thế nào để các kết quả OCR trở thành
+một OCR Document nhất quán?"
+```
 
----
+Postprocessing không thực hiện OCR mới.
 
-## Objectives
+Nó chỉ:
 
-Postprocessing phải:
-
-* hợp nhất kết quả OCR
-* chuẩn hóa dữ liệu
-* loại bỏ dữ liệu không hợp lệ
-* bổ sung Metadata
-* đảm bảo tính nhất quán
-* sinh OCR Document chuẩn
-
----
-
-## Responsibilities
-
-Postprocessing chịu trách nhiệm:
-
-* Validation
-* Data Normalization
-* Result Merging
-* Metadata Completion
-* Consistency Checking
-* OCR Document Generation
-
-Không chịu trách nhiệm:
-
-* OCR
-* Machine Translation
-* Grammar Correction
-* Reading Order
-* Rendering
+* validate
+* normalize
+* merge
+* complete metadata
+* assemble canonical OCR Document
 
 ---
 
 # 2. Scope
 
-Postprocessing chỉ thao tác trên dữ liệu OCR đã được sinh ra.
+Postprocessing chịu trách nhiệm:
 
-Không xử lý trực tiếp:
+* Result Validation
+* Data Normalization
+* Result Merging
+* Reference Validation
+* Consistency Checking
+* Metadata Completion
+* OCR Document Assembly
+* postprocessing diagnostics
+* postprocessing statistics
 
-* ảnh gốc
-* OCR Provider
-* UI
-* Presentation
+Postprocessing không chịu trách nhiệm:
+
+* Text Detection
+* Character Recognition
+* Translation
+* semantic rewriting
+* Grammar Correction
+* Reading Order
+* Layout Analysis
+* Text Direction Analysis
+* Rendering
+* Runtime scheduling
+* Runtime retry
+* cancellation authority
+* Event Bus behavior
+* global cache lifecycle
 
 ---
 
-# 3. Terminology
+# 3. Goals
+
+Postprocessing hướng tới:
+
+* canonical data representation
+* provider independence
+* structural consistency
+* explicit references
+* serializable output
+* immutable published result
+* deterministic assembly
+* downstream usability
+* traceability
+
+---
+
+# 4. Non-Goals
+
+Postprocessing không:
+
+* sửa text Recognition dựa trên ngữ nghĩa
+* đoán lại Region
+* thay đổi Geometry
+* thay đổi Layout Tree
+* thay đổi Text Direction
+* tự quyết định Retry
+* tự quyết định Provider fallback
+* tự xác định Reading Order
+* dịch source text
+
+---
+
+# 5. Architecture Position
+
+```text id="p3"
+Detection Result
+       +
+Recognition Result
+       +
+Direction Result
+       +
+Layout Result
+       │
+       ▼
+OCR Postprocessing
+       │
+       ▼
+OCR Document
+       │
+       ├──► Quality Assessment
+       │
+       └──► Reading Order
+```
+
+Postprocessing là bước hợp nhất các output riêng lẻ của OCR Architecture.
+
+---
+
+# 6. Terminology
 
 ## OCR Document
 
-Mô hình dữ liệu chuẩn của toàn bộ kết quả OCR.
+Canonical provider-neutral representation của kết quả OCR.
 
 ---
 
 ## Normalization
 
-Quá trình chuẩn hóa dữ liệu về cùng một định dạng.
+Đưa dữ liệu từ nhiều source/provider/stage về cùng contract.
 
 ---
 
 ## Validation
 
-Kiểm tra tính hợp lệ của dữ liệu.
+Kiểm tra dữ liệu có hợp lệ theo contract hay không.
 
 ---
 
 ## Merge
 
-Hợp nhất nhiều kết quả thành một mô hình thống nhất.
+Liên kết nhiều result khác nhau vào cùng một OCR Document.
 
 ---
 
 ## Consistency
 
-Đảm bảo mọi thành phần trong OCR Document không mâu thuẫn với nhau.
+Đảm bảo các entity và reference không mâu thuẫn.
 
 ---
 
-## Metadata
+## Metadata Completion
 
-Thông tin bổ sung phục vụ Runtime, Debugging và Benchmark.
-
----
-
-# 4. Goals
-
-Postprocessing hướng tới:
-
-* dữ liệu ổn định
-* dễ mở rộng
-* độc lập Provider
-* dễ Debug
-* dễ Serialize
-* dễ Cache
-* dễ truyền giữa các Module
+Bổ sung metadata còn thiếu ở mức aggregate mà không thay đổi semantic output của upstream stage.
 
 ---
 
-# 5. Non-Goals
+## Validation Report
 
-Không thực hiện:
-
-* OCR
-* AI Translation
-* NLP
-* Reading Order
-* Semantic Analysis
-* Layout Detection
+Báo cáo các lỗi hoặc warning được phát hiện trong Postprocessing.
 
 ---
 
-# 6. Architecture Position
+# 7. Core Inputs
 
-```text
-Image
+Postprocessing nhận:
 
-↓
-
-Preprocessing
-
-↓
-
-Detection
-
-↓
-
-Recognition
-
-↓
-
-Text Direction
-
-↓
-
-Layout Analysis
-
-↓
-
-OCR Postprocessing
-
-↓
-
-Reading Order
-
-↓
-
-Translation
-```
-
----
-
-# 7. High-Level Pipeline
-
-```text
+```text id="p4"
 Detection Result
-
 +
-
 Recognition Result
-
 +
-
-Layout Result
-
-+
-
 Direction Result
++
+Layout Result
++
+Effective OCR Profile
+```
 
-↓
+Các result phải tham chiếu cùng semantic source:
 
-Validation
+* Image identity
+* Image version
+* Session/Revision khi contract yêu cầu
+* compatible OCR execution context
 
-↓
+---
 
-Normalization
+# 8. Core Output
 
-↓
+Output chính:
 
-Merge
-
-↓
-
-Consistency Check
-
-↓
-
-Metadata Completion
-
-↓
-
+```text id="p5"
 OCR Document
+```
 
-↓
+Có thể kèm:
 
-Pipeline Output
+```text id="p6"
+Validation Report
+Processing Statistics
+Diagnostics
+```
+
+`OCR Document` là output canonical cho downstream OCR consumers.
+
+---
+
+# 9. High-Level Postprocessing Flow
+
+```text id="p7"
+Upstream OCR Results
+        │
+        ▼
+1. Input Validation
+        │
+        ▼
+2. Identity / Reference Validation
+        │
+        ▼
+3. Data Normalization
+        │
+        ▼
+4. Result Merge
+        │
+        ▼
+5. Consistency Check
+        │
+        ▼
+6. Metadata Completion
+        │
+        ▼
+7. OCR Document Assembly
+        │
+        ▼
+8. Output Validation
 ```
 
 ---
 
-# 8. Processing Lifecycle
+# 10. Stage 1 — Input Validation
 
-## Stage 1
+Postprocessing kiểm tra:
 
-Thu thập toàn bộ OCR Result.
+* required result tồn tại
+* contract version được hỗ trợ
+* result structure hợp lệ
+* source identity nhất quán
+* referenced entity tồn tại
+* required metadata có mặt
 
----
-
-## Stage 2
-
-Kiểm tra tính hợp lệ.
-
----
-
-## Stage 3
-
-Chuẩn hóa dữ liệu.
+Postprocessing không tự chạy lại upstream stage để sửa lỗi.
 
 ---
 
-## Stage 4
+# 11. Stage 2 — Identity and Reference Validation
 
-Hợp nhất dữ liệu.
+Postprocessing phải kiểm tra lineage giữa các stage.
 
----
+Ví dụ:
 
-## Stage 5
-
-Hoàn thiện Metadata.
-
----
-
-## Stage 6
-
-Sinh OCR Document.
-
----
-
-# 9. Inputs
-
-Nhận:
-
-* Detection Result
-* Recognition Result
-* Layout Result
-* Direction Result
-* OCR Profile
-
----
-
-# 10. Outputs
-
-Trả về:
-
-* OCR Document
-* OCR Metadata
-* Processing Statistics
-* Validation Report
-
----
-
-# 11. OCR Document Model
-
-```text
-OCR Document
-
-├── Metadata
-
-├── Page
-
-│     ├── Panels
-
-│     ├── Containers
-
-│     ├── Blocks
-
-│     └── Regions
-
-├── Recognition
-
-├── Layout
-
-├── Direction
-
-├── Statistics
-
-└── Diagnostics
+```text id="p8"
+Recognition Region Reference
+        ↓
+must reference
+        ↓
+Detection Region
 ```
 
-OCR Document là Contract chuẩn giữa OCR Pipeline và các module phía sau.
+Tương tự:
+
+```text id="p9"
+Direction Line Reference
+        ↓
+Recognition Line
+
+Layout Region Reference
+        ↓
+Detection Region
+```
+
+Không được tạo reference mồ côi.
 
 ---
 
-# 12. Result Validation
+# 12. Identity Invariants
 
-Trước khi hợp nhất dữ liệu, hệ thống cần kiểm tra:
+Entity identity phải giữ xuyên suốt pipeline.
 
-* Region hợp lệ
-* Geometry hợp lệ
-* Character hợp lệ
-* Layout hợp lệ
-* Direction hợp lệ
-* Metadata đầy đủ
+Ví dụ:
 
-Các lỗi cần được ghi nhận trong Validation Report thay vì làm hỏng toàn bộ Pipeline khi có thể phục hồi.
+```text id="p10"
+Detection Region ID
+        ↓
+Recognition Region Reference
+        ↓
+Layout Region Reference
+        ↓
+OCR Document Region Reference
+```
+
+Postprocessing không tự đổi ID chỉ để thuận tiện cho serialization.
 
 ---
 
-# 13. Data Normalization
+# 13. Stage 3 — Data Normalization
 
-Mục tiêu là đưa toàn bộ dữ liệu từ các OCR Provider về cùng một mô hình thống nhất.
+Normalization có thể áp dụng cho:
 
-Các nội dung cần chuẩn hóa bao gồm:
-
-* ID
-* Geometry
-* Confidence
+* ID representation
+* Geometry representation
+* Confidence representation
 * Language Code
 * Script Code
-* Direction
+* Direction enum
 * Writing Mode
-* Metadata
+* Timestamp format
+* Metadata structure
+* Provider metadata envelope
 
-Sau bước này, các module phía sau không cần biết dữ liệu đến từ Provider nào.
+Normalization không thay đổi meaning.
 
 ---
 
-# 14. Result Merging
+# 14. Provider Normalization Boundary
+
+Provider-native data phải được normalize trước hoặc trong Postprocessing boundary.
+
+Downstream không được nhìn thấy:
+
+* provider SDK object
+* provider-specific enum
+* provider-specific coordinate type
+* provider-specific confidence schema
+
+Public OCR Document phải dùng CRAI contract.
+
+---
+
+# 15. Stage 4 — Result Merge
 
 Postprocessing hợp nhất:
 
-* Detection Result
-* Recognition Result
-* Layout Result
-* Direction Result
+```text id="p11"
+Detection
+    → Region / Geometry
 
-thành một OCR Document duy nhất.
+Recognition
+    → Text Structure
 
-Quá trình Merge không được làm mất liên kết giữa các thành phần.
+Text Direction
+    → Writing Direction
 
-Ví dụ:
+Layout
+    → Spatial Structure
+```
 
-* Region phải giữ liên kết với Paragraph.
-* Paragraph phải giữ liên kết với Line.
-* Line phải giữ liên kết với Word.
-* Word phải giữ liên kết với Character.
+thành một OCR Document thống nhất.
 
----
+Merge chỉ liên kết và tổ chức dữ liệu.
 
-# 15. Consistency Checking
-
-Sau khi Merge, hệ thống cần kiểm tra:
-
-* Region tồn tại trong Layout.
-* Character thuộc đúng Word.
-* Word thuộc đúng Line.
-* Line thuộc đúng Paragraph.
-* Geometry không mâu thuẫn.
-* Direction phù hợp với Recognition.
-* Parent-Child Relationship hợp lệ.
-
-Nếu phát hiện bất nhất, hệ thống nên đánh dấu thay vì tự động sửa khi chưa có đủ căn cứ.
+Không reinterpret upstream semantics.
 
 ---
 
-# 16. Metadata Completion
+# 16. Merge Relationships
 
-Bổ sung Metadata phục vụ các bước sau.
+Ví dụ mapping:
+
+```text id="p12"
+Region
+  └── Recognition
+       ├── Paragraph
+       ├── Line
+       ├── Word
+       └── Character
+```
+
+và:
+
+```text id="p13"
+Page
+  └── Layout
+       ├── Panel
+       ├── Container
+       ├── Block
+       └── Region Reference
+```
+
+Direction metadata liên kết vào Region/Paragraph/Line tương ứng.
+
+---
+
+# 17. Merge Rules
+
+Merge phải đảm bảo:
+
+* không mất entity
+* không duplicate identity
+* không overwrite upstream semantic fields
+* reference luôn map về entity hợp lệ
+* optional data có thể thiếu mà không phá toàn document nếu contract cho phép
+
+---
+
+# 18. Stage 5 — Consistency Check
+
+Sau merge, hệ thống kiểm tra consistency.
 
 Ví dụ:
 
-* OCR Version
-* Provider Version
+* Region trong Recognition tồn tại trong Detection
+* Layout reference trỏ đúng Region
+* Character thuộc Word hợp lệ
+* Word thuộc Line hợp lệ
+* Line thuộc Paragraph hợp lệ
+* Paragraph thuộc Region hợp lệ
+* Direction reference hợp lệ
+* Geometry không nằm ngoài declared coordinate space
+* parent-child graph không lỗi
+
+---
+
+# 19. Structural Consistency
+
+Textual hierarchy:
+
+```text id="p14"
+Region
+  └── Paragraph
+       └── Line
+            └── Word
+                 └── Character
+```
+
+Visual hierarchy:
+
+```text id="p15"
+Page
+  └── Panel
+       └── Container
+            └── Block
+                 └── Region
+```
+
+Hai hierarchy liên kết qua `Region`.
+
+Postprocessing không được gộp chúng thành một hierarchy duy nhất làm mất semantics.
+
+---
+
+# 20. Inconsistency Handling
+
+Nếu phát hiện bất nhất:
+
+* record issue
+* classify severity
+* preserve original result
+* reject only when contract không thể đảm bảo
+
+Không tự sửa khi không đủ evidence.
+
+Ví dụ:
+
+```text id="p16"
+Paragraph references missing Region
+```
+
+không được tự gán sang Region gần nhất chỉ dựa vào geometry.
+
+---
+
+# 21. Recoverable vs Invalid
+
+Một vấn đề có thể là:
+
+```text id="p17"
+Warning
+```
+
+nếu OCR Document vẫn usable.
+
+Hoặc:
+
+```text id="p18"
+Invalid
+```
+
+nếu canonical contract không thể tạo.
+
+Postprocessing chỉ phân loại semantic validity.
+
+Runtime sở hữu execution response.
+
+---
+
+# 22. Stage 6 — Metadata Completion
+
+Postprocessing có thể bổ sung metadata aggregate như:
+
+* OCR Contract Version
 * Pipeline Version
-* Processing Time
-* Language Summary
-* Script Summary
-* Confidence Summary
-* Creation Time
-* Processing Profile
+* Processing Profile Version
+* creation timestamp
+* source identity
+* language summary
+* script summary
+* confidence summary
+* provider summary
+* stage result references
 
-Metadata không làm thay đổi dữ liệu OCR.
+Metadata completion không thay đổi upstream semantic result.
 
 ---
 
-# 17. Statistics Generation
+# 23. Provider Metadata
 
-Sinh thống kê phục vụ Benchmark và Monitoring.
+Provider Metadata có thể được giữ cho:
+
+* diagnostics
+* reproducibility
+* compatibility
+* benchmark correlation
+
+Nhưng phải:
+
+* optional
+* encapsulated
+* không trở thành dependency bắt buộc của downstream
+
+---
+
+# 24. Stage 7 — OCR Document Assembly
+
+Postprocessing tạo đúng một canonical `OCR Document` cho một compatible result set.
+
+Conceptual structure:
+
+```text id="p19"
+OCR Document
+├── Metadata
+├── Source
+├── Page
+│   ├── Panels
+│   ├── Containers
+│   ├── Blocks
+│   └── Regions
+├── Recognition
+│   ├── Paragraphs
+│   ├── Lines
+│   ├── Words
+│   └── Characters
+├── Direction
+├── Layout
+├── Statistics
+└── Diagnostics
+```
+
+Exact serialization schema có thể được định nghĩa riêng khi implementation bắt đầu.
+
+---
+
+# 25. OCR Document Ownership
+
+`POSTPROCESS.md` là authoritative owner hiện tại của:
+
+```text id="p20"
+OCR Document
+```
+
+Các tài liệu:
+
+* Quality
+* Reading Order
+* Text Processing
+* Translation boundary
+* Presentation
+* Storage
+
+chỉ consume hoặc reference OCR Document.
+
+Không được định nghĩa lại một model khác có cùng ý nghĩa.
+
+---
+
+# 26. OCR Document Identity
+
+OCR Document phải có identity riêng.
+
+Có thể gồm:
+
+* Document ID
+* Revision
+* Source Image ID
+* Source Image Version
+* Pipeline Version
+* Profile Version
+
+Identity exact form sẽ phụ thuộc Runtime/Artifact contract.
+
+---
+
+# 27. OCR Document Immutability
+
+Published OCR Document phải immutable.
+
+Nếu một upstream stage chạy lại:
+
+```text id="p21"
+new Detection Result
+```
+
+hoặc:
+
+```text id="p22"
+new Recognition Result
+```
+
+thì Postprocessing phải tạo:
+
+```text id="p23"
+new OCR Document revision
+```
+
+không silent-mutate document cũ.
+
+---
+
+# 28. OCR Document Lineage
+
+OCR Document nên giữ references tới upstream result revisions.
 
 Ví dụ:
 
-* số Region
-* số Paragraph
-* số Line
-* số Word
-* số Character
-* thời gian xử lý
-* bộ nhớ sử dụng
-* Confidence trung bình
-* số lỗi Validation
+```text id="p24"
+OCR Document
+├── Detection Result Ref
+├── Recognition Result Ref
+├── Direction Result Ref
+└── Layout Result Ref
+```
 
-Statistics không được sử dụng để thay thế dữ liệu OCR.
+Lineage giúp:
+
+* debugging
+* compatibility
+* reproducibility
+* stale-result detection
 
 ---
 
-# 18. Diagnostics
+# 29. Stage 8 — Output Validation
 
-Diagnostics lưu thông tin phục vụ Debug.
+Trước khi publish, OCR Document phải được validate lần cuối.
+
+Checks tối thiểu:
+
+* required entities tồn tại
+* required references hợp lệ
+* source identity nhất quán
+* hierarchy hợp lệ
+* no duplicate identity
+* provider-native structure không leak
+* serialization-safe
+* contract version hợp lệ
+
+---
+
+# 30. Validation Report
+
+Validation Report có thể chứa:
+
+```text id="p25"
+Validation Report
+├── Issues[]
+│   ├── Code
+│   ├── Severity
+│   ├── Entity Reference
+│   └── Message
+├── Warning Count
+├── Error Count
+└── Valid
+```
+
+Validation Report không thay thế OCR Document.
+
+---
+
+# 31. Diagnostics
+
+Diagnostics có thể chứa:
+
+* normalization warning
+* missing optional metadata
+* merge conflict
+* orphan reference
+* provider normalization warning
+* structural inconsistency
+* fallback information từ upstream metadata
+
+Không nên chứa Runtime retry state.
+
+---
+
+# 32. Statistics
+
+Postprocessing có thể tạo statistics như:
+
+* Region count
+* Paragraph count
+* Line count
+* Word count
+* Character count
+* invalid reference count
+* normalization issue count
+* processing duration
+* confidence summary
+
+Statistics có thể được export sang Telemetry.
+
+Telemetry ownership thuộc Infrastructure.
+
+---
+
+# 33. Confidence Summary
+
+Postprocessing có thể tổng hợp confidence metadata để downstream dễ truy cập.
+
+Nhưng nó không redefine confidence semantics.
+
+Owners vẫn là:
+
+```text id="p26"
+Detection Confidence
+    → DETECTION.md
+
+Recognition Confidence
+    → RECOGNITION.md
+
+Direction Confidence
+    → TEXT_DIRECTION.md
+
+Layout Confidence
+    → LAYOUT.md
+```
+
+Quality mới đánh giá confidence ở mức toàn document.
+
+---
+
+# 34. Postprocessing vs Quality
+
+Boundary bắt buộc:
+
+```text id="p27"
+Postprocessing
+    → "Is the OCR data structurally consistent?"
+
+Quality
+    → "How good/trustworthy is this OCR Document?"
+```
+
+Postprocessing validate contract.
+
+Quality đánh giá usability/quality.
+
+---
+
+# 35. Postprocessing vs Reading Order
+
+Postprocessing không tạo precedence.
+
+Nó chỉ tạo structured OCR Document.
+
+```text id="p28"
+Postprocessing
+    ↓
+OCR Document
+    ↓
+Reading Order
+    ↓
+Reading Sequence
+```
+
+Reading Order mới sở hữu thứ tự đọc.
+
+---
+
+# 36. Postprocessing vs Text Processing
+
+Postprocessing chỉ normalize OCR-specific structure.
+
+Nó không thực hiện:
+
+* semantic source normalization
+* sentence reconstruction
+* translation segmentation
+* glossary preparation
+
+Những phần này thuộc Text Processing.
+
+---
+
+# 37. Text Preservation
+
+Recognized source text phải được giữ nguyên meaning.
+
+Postprocessing không tự:
+
+* sửa spelling
+* sửa grammar
+* đổi punctuation theo semantic preference
+* replace term
+* translate content
+
+OCR/provider artifact cleanup chỉ được thực hiện nếu semantics đã được owner document định nghĩa rõ.
+
+---
+
+# 38. Geometry Preservation
+
+Postprocessing không thay đổi canonical Detection Geometry.
+
+Nếu normalization cần đổi representation:
+
+```text id="p29"
+Provider Polygon
+    ↓
+CRAI Polygon
+```
+
+thì visual meaning phải giữ nguyên.
+
+---
+
+# 39. Layout Preservation
+
+Postprocessing không reorder hoặc restructure Layout Tree để phục vụ Reading Order.
+
+Layout Result được merge theo semantics đã được `LAYOUT.md` định nghĩa.
+
+---
+
+# 40. Direction Preservation
+
+Postprocessing không sửa:
+
+* Writing Mode
+* Line Direction
+* Paragraph Direction
+* Character Flow
+
+nếu không có explicit upstream revision.
+
+---
+
+# 41. Serialization
+
+OCR Document phải hỗ trợ:
+
+* serialization
+* deserialization
+* versioning
+* persistence
+* transport where allowed
+
+Serialization không được:
+
+* thay đổi ID
+* mất lineage
+* mất metadata bắt buộc
+* đổi semantic enum
+
+---
+
+# 42. Schema Versioning
+
+OCR Document phải có Contract Version.
+
+Breaking changes như:
+
+* đổi field meaning
+* đổi hierarchy semantics
+* đổi required reference
+* đổi identity semantics
+
+phải tăng version.
+
+---
+
+# 43. Compatibility
+
+OCR Document compatibility có thể phụ thuộc:
+
+* source identity
+* upstream result revisions
+* Pipeline Version
+* OCR Profile Version
+* contract version
+
+Postprocessing chỉ định nghĩa semantic compatibility.
+
+Runtime/Storage quyết định lifecycle cụ thể.
+
+---
+
+# 44. Provider Independence
+
+OCR Document phải provider-neutral.
+
+Downstream không cần biết:
+
+* PaddleOCR
+* Tesseract
+* Google Vision
+* Azure Vision
+* Custom Model
+
+đã tạo dữ liệu gốc như thế nào.
+
+---
+
+# 45. Multi-Provider Assembly
+
+Một OCR Document có thể được tạo từ nhiều Provider.
 
 Ví dụ:
 
-* Warning
-* Validation Error
-* Merge Conflict
-* Provider Message
-* Retry Information
+```text id="p30"
+Detection
+    → Provider A
 
-Diagnostics nên được tách khỏi dữ liệu OCR chính để giảm ảnh hưởng đến Runtime.
+Recognition
+    → Provider B
 
----
+Layout Hint
+    → Provider C
+```
 
-# 19. Serialization
+Sau normalize + merge, downstream vẫn chỉ thấy:
 
-OCR Document phải có khả năng:
-
-* Serialize
-* Deserialize
-* Cache
-* Compress
-* Truyền qua Network
-
-Việc tuần tự hóa không được làm mất Metadata hoặc thay đổi ID của các thực thể.
+```text id="p31"
+CRAI OCR Document
+```
 
 ---
 
-# 20. Architecture Invariants
+# 46. Runtime Integration
+
+Postprocessing không sở hữu:
+
+* queue state
+* WorkItem state
+* Attempt
+* retry decision
+* cancellation authority
+* stale-result authority
+* Scheduler behavior
+
+Runtime sở hữu execution.
+
+---
+
+# 47. Retry Integration
+
+Postprocessing có thể báo:
+
+* invalid upstream result
+* consistency failure
+* missing required data
+* structural corruption
+
+Quality/Runtime có thể dùng các signal này.
+
+Postprocessing không tự retry upstream stage.
+
+---
+
+# 48. Cache Integration
+
+Postprocessing có thể xác định semantic incompatibility khi:
+
+* upstream result revision thay đổi
+* OCR Profile thay đổi
+* Pipeline Version thay đổi
+* Postprocessing Strategy Version thay đổi
+
+Global cache:
+
+* storage
+* retention
+* eviction
+* cleanup
+
+thuộc Runtime.
+
+---
+
+# 49. Event Integration
+
+Postprocessing có thể tạo domain facts như:
+
+```text id="p32"
+OCRDocumentAssembled
+OCRDocumentInvalid
+PostprocessingCompleted
+PostprocessingFailed
+```
+
+Ý nghĩa semantic thuộc Postprocessing.
+
+Transport/envelope thuộc Event Bus.
+
+---
+
+# 50. Error Integration
+
+Postprocessing-specific semantic errors có thể gồm:
+
+```text id="p33"
+MissingDetectionResult
+MissingRecognitionResult
+InvalidRegionReference
+InvalidTextHierarchy
+InvalidLayoutReference
+InvalidDirectionReference
+MergeConflict
+OCRDocumentInvalid
+UnsupportedContractVersion
+```
+
+Các lỗi phải map về Runtime Error Model khi crossing execution boundary.
+
+---
+
+# 51. Observability Integration
+
+Useful measurements:
+
+* Postprocessing duration
+* merge issue count
+* invalid reference count
+* OCR Document entity counts
+* normalization warning count
+* output size
+* Contract Version
+
+Telemetry transport thuộc Runtime/Infrastructure.
+
+---
+
+# 52. Privacy
+
+OCR Document có thể chứa toàn bộ source text.
+
+Do đó:
+
+* không log full OCR Document mặc định
+* diagnostics chỉ lưu metadata cần thiết
+* provider metadata phải được sanitize
+* serialization/persistence phải tuân Privacy Profile
+* local-only content giữ local boundary
+
+---
+
+# 53. Determinism
+
+Cùng:
+
+```text id="p34"
+compatible upstream results
++
+Postprocessing Profile
++
+Postprocessing Strategy Version
+```
+
+phải tạo structurally equivalent OCR Document.
+
+Ordering bên trong unordered collection phải có stable serialization rule khi cần reproducibility.
+
+---
+
+# 54. Architecture Invariants
 
 OCR Postprocessing phải luôn đảm bảo:
 
-* không thay đổi nội dung văn bản đã Recognition
-* không thay đổi Geometry đã Detection
-* không thay đổi Layout đã phân tích
-* không thay đổi Direction đã xác định
-* chỉ chuẩn hóa và hợp nhất dữ liệu
-* tạo đúng một OCR Document cho mỗi phiên xử lý
-* OCR Document phải độc lập với OCR Provider
-* OCR Document phải đủ thông tin để Reading Order, Translation và Presentation hoạt động mà không cần truy cập lại các kết quả trung gian hoặc OCR Provider
+1. Không thực hiện Detection.
+
+2. Không thực hiện Recognition.
+
+3. Không thực hiện Text Direction Analysis.
+
+4. Không thực hiện Layout Analysis.
+
+5. Không thực hiện Reading Order.
+
+6. Không thực hiện Translation.
+
+7. Không sửa recognized source meaning.
+
+8. Không thay đổi canonical Detection Geometry.
+
+9. Không thay đổi Layout semantics.
+
+10. Không thay đổi Direction semantics.
+
+11. Chỉ validate, normalize, merge và assemble.
+
+12. OCR Document phải provider-neutral.
+
+13. OCR Document phải giữ source/upstream lineage.
+
+14. Entity reference phải hợp lệ.
+
+15. Textual hierarchy và visual hierarchy không được trộn mất semantics.
+
+16. Published OCR Document phải immutable.
+
+17. Upstream rerun tạo OCR Document revision mới.
+
+18. Provider-native model không crossing OCR Document boundary.
+
+19. Postprocessing không sở hữu Runtime scheduling.
+
+20. Postprocessing không sở hữu Runtime retry.
+
+21. Postprocessing không sở hữu cancellation authority.
+
+22. Postprocessing không sở hữu global cache lifecycle.
+
+23. Quality Assessment không được thay thế bằng Postprocessing validation.
+
+24. Reading Order không được tính trong Postprocessing.
+
+---
+
+# 55. Recommended MVP Postprocessing
+
+MVP nên tập trung vào:
+
+```text id="p35"
+Detection Result
+      +
+Recognition Result
+      +
+Direction Result
+      +
+Layout Result
+      ↓
+Reference Validation
+      ↓
+Normalization
+      ↓
+Merge
+      ↓
+Consistency Check
+      ↓
+OCR Document
+```
+
+MVP nên hỗ trợ:
+
+* Region mapping
+* Paragraph / Line / Word / Character mapping
+* Direction metadata
+* Layout Tree references
+* provider-neutral enums
+* Validation Report
+* immutable OCR Document
+* versioned contract
+* upstream lineage
+
+Không cần ngay:
+
+* complex conflict auto-repair
+* semantic correction
+* AI-based document reconstruction
+* automatic text rewriting
+* multi-document merge
+
+---
+
+# 56. Ownership References
+
+| Concern                | Owner               |
+| ---------------------- | ------------------- |
+| Region / Geometry      | `DETECTION.md`      |
+| Recognition Text Model | `RECOGNITION.md`    |
+| Writing Direction      | `TEXT_DIRECTION.md` |
+| Layout Tree            | `LAYOUT.md`         |
+| OCR Document           | `POSTPROCESS.md`    |
+| Quality Report         | `QUALITY.md`        |
+| Reading Order          | `READING_ORDER.md`  |
+| Provider Contract      | `PROVIDERS.md`      |
+| Retry                  | Runtime             |
+| Cancellation           | Runtime             |
+| Scheduling             | Runtime             |
+| Cache Lifecycle        | Runtime             |
+| Event Transport        | Event Bus           |
+| Telemetry Transport    | Infrastructure      |
+
+---
+
+# 57. Summary
+
+OCR Postprocessing chuyển:
+
+```text id="p36"
+Detection Result
++
+Recognition Result
++
+Direction Result
++
+Layout Result
+```
+
+thành:
+
+```text id="p37"
+OCR Document
+```
+
+thông qua:
+
+```text id="p38"
+Validate
+    ↓
+Normalize
+    ↓
+Merge
+    ↓
+Check Consistency
+    ↓
+Complete Metadata
+    ↓
+Assemble OCR Document
+```
+
+Boundary cốt lõi:
+
+```text id="p39"
+Upstream stages define meaning.
+
+Postprocessing preserves and combines meaning.
+
+Quality evaluates the document.
+
+Reading Order defines precedence.
+
+Runtime owns execution.
+```

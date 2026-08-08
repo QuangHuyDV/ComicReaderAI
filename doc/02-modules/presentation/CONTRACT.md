@@ -1,21 +1,23 @@
 # Presentation Contract
 
-> **Project:** CRAI  
-> **Module:** `presentation`  
-> **Path:** `doc/02-modules/presentation/CONTRACT.md`  
-> **Contract Version:** 1.0.0  
-> **Status:** Architecture Draft  
+> **Project:** CRAI
+> **Module:** `presentation`
+> **Path:** `doc/02-modules/presentation/CONTRACT.md`
+> **Contract Version:** 2.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2 aligned
 > **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-08
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-This document defines the public boundary of the Presentation module.
+This document defines the public contract boundary of the Presentation module.
 
-Presentation converts accepted reading content into stable, revisioned presentation data that can be applied by `ui-adapter`.
+Presentation transforms compatible accepted Runtime Artifacts and presentation context into a framework-neutral user-visible Presentation model.
 
-The module produces two primary public outputs:
+The primary semantic outputs are:
 
 ```text
 PresentationSnapshot
@@ -23,40 +25,95 @@ PresentationSnapshot
 RenderPlan
 ```
 
-Presentation does not render pixels, create native windows, manipulate browser DOM, receive raw operating-system input, perform OCR, or execute translation.
+The module operates through a candidate-and-commit model:
 
-The public contract exists to ensure that:
+```text
+Accepted Artifact References
+        +
+Presentation Context
+        +
+Presentation Profile
+        +
+Presentation Target
+        +
+Viewport Snapshot
+        ↓
+Presentation Operation
+        ↓
+Candidate Presentation State
+        ↓
+Authority Revalidation
+        ↓
+Presentation Commit
+        ↓
+Committed PresentationSnapshot
+        +
+Committed RenderPlan
+```
 
-- upstream modules can request presentation work without importing internal Presentation types;
-- `ui-adapter` can render Presentation output without depending on Presentation internals;
-- asynchronous and incremental updates can be rejected when stale;
-- commands, queries, events, and errors remain serializable and versionable;
-- Presentation remains independent from any UI framework or operating system.
+Presentation does not:
+
+* perform OCR;
+* perform Text Processing;
+* execute Translation;
+* own Runtime Revision authority;
+* own WorkItem or Attempt lifecycle;
+* publish upstream business Artifacts;
+* create native windows;
+* manipulate DOM nodes;
+* own UI framework objects;
+* process raw operating-system input.
+
+This contract exists so that:
+
+* Runtime/Application code can invoke Presentation without importing Presentation internals;
+* Presentation can consume immutable accepted Artifact references;
+* stale or superseded candidate work cannot replace newer committed Presentation state;
+* `ui-adapter` can consume Presentation output without knowing Presentation internals;
+* contracts remain serializable, versionable, provider-independent, platform-independent, and testable.
 
 ---
 
-## 2. Contract Scope
+# 2. Contract Scope
 
-This file owns the public definitions for:
+This file owns public definitions for:
 
-- commands accepted by Presentation;
-- queries exposed by Presentation;
-- public data contracts;
-- references shared across module boundaries;
-- required validation metadata;
-- revision and authority rules;
-- compatibility and versioning rules.
+```text
+Presentation identifiers
+Presentation context
+Presentation operation input
+Presentation candidate state
+Presentation commit contracts
+PresentationSnapshot
+PresentationItem
+PresentationMarker
+RenderPlan
+PresentationTarget
+ViewportSnapshot
+PresentationProfile
+Presentation commands
+Presentation queries
+Presentation command results
+UI apply feedback
+validation rules
+revision semantics
+compatibility/versioning
+```
 
 This file does not define:
 
-- internal algorithms;
-- concrete layout implementations;
-- module lifecycle state transitions;
-- canonical event envelope details;
-- complete event catalog;
-- complete error catalog;
-- persistence schemas;
-- UI framework bindings.
+* Presentation internal algorithms;
+* concrete layout engines;
+* internal source folders;
+* Runtime WorkItem/Attempt lifecycle;
+* Runtime authority implementation;
+* Artifact Store implementation;
+* Event Bus transport;
+* full Presentation state transitions;
+* full event catalog;
+* full error catalog;
+* persistence schemas;
+* concrete UI framework bindings.
 
 Those concerns belong to:
 
@@ -65,59 +122,149 @@ doc/02-modules/presentation/MODULE.md
 doc/02-modules/presentation/STATES.md
 doc/02-modules/presentation/EVENTS.md
 doc/02-modules/presentation/ERRORS.md
+
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+
 doc/02-modules/ui-adapter/CONTRACT.md
 ```
 
 ---
 
-## 3. Boundary Summary
+# 3. Architectural Boundary
 
-The intended dependency flow is:
+The intended flow is:
 
 ```text
-translation / reading-session / preferences
-                ↓
-       Presentation commands
-                ↓
-          presentation
-                ↓
- PresentationSnapshot + RenderPlan
-                ↓
-           ui-adapter
-                ↓
-      framework / platform UI
+Published Runtime Artifacts
+        ↓
+Runtime / Application
+        ↓
+Presentation public command
+        ↓
+presentation
+        ↓
+Candidate Presentation State
+        ↓
+authority revalidation
+        ↓
+Presentation commit
+        ↓
+PresentationSnapshot + RenderPlan
+        ↓
+ui-adapter
+        ↓
+framework / platform UI
 ```
 
 Presentation owns:
 
-- presentation identity;
-- presentation revision;
-- presentation item identity;
-- effective presentation mode;
-- presentation snapshot construction;
-- presentation-level geometry;
-- layout planning;
-- overflow and fallback decisions;
-- presentation diagnostics metadata;
-- stale-update rejection at its boundary.
+* `PresentationId`;
+* `PresentationContextId`;
+* `PresentationItemId`;
+* `MarkerId`;
+* `PresentationRevision`;
+* Presentation semantic grouping;
+* requested/effective Presentation mode semantics;
+* Candidate Presentation construction;
+* committed `PresentationSnapshot`;
+* committed `RenderPlan`;
+* framework-neutral layout planning;
+* Presentation fallback decisions;
+* Presentation-local focus and selection state;
+* Presentation candidate validation;
+* Presentation commit semantics.
 
 Presentation does not own:
 
-- reading-session lifecycle;
-- translation-result lifecycle;
-- persistent preferences;
-- platform surface lifecycle;
-- renderer or widget instances;
-- native coordinates obtained directly from platform APIs;
-- storage repositories.
+* Runtime `RevisionId`;
+* Runtime `WorkItemId`;
+* Runtime `AttemptId`;
+* Runtime authority;
+* scheduler state;
+* retry lifecycle;
+* global cancellation authority;
+* upstream Artifact publication;
+* Reading Session lifecycle;
+* Translation Artifact lifecycle;
+* native rendering resource lifecycle;
+* persistent preference storage;
+* durable reading history.
 
 ---
 
-## 4. Contract Conventions
+# 4. Contract Principles
 
-### 4.1 Naming
+## 4.1 Serializable Boundary
 
-Public contract type names use PascalCase.
+All public contract values MUST be serializable.
+
+Public payloads MUST NOT contain:
+
+* UI framework objects;
+* DOM nodes;
+* native handles;
+* database connections;
+* provider clients;
+* SDK-specific response objects;
+* mutable module-internal entities;
+* executable callbacks;
+* thread-affine UI objects.
+
+## 4.2 Immutability
+
+Published or committed public values are immutable.
+
+This includes:
+
+```text
+PresentationSnapshot
+RenderPlan
+PresentationProfile
+PresentationTarget
+ViewportSnapshot
+CandidatePresentationState
+```
+
+A new visible state creates a new `PresentationRevision`.
+
+Existing committed objects are never mutated in place.
+
+## 4.3 Stable References
+
+Cross-module contracts SHOULD use:
+
+```text
+ArtifactRef
+Identifier
+Immutable bounded value
+```
+
+rather than copying mutable aggregates across module boundaries.
+
+## 4.4 Explicit Ownership
+
+Every public field must have one semantic owner.
+
+A field appearing inside a Presentation contract does not imply Presentation owns its lifecycle.
+
+## 4.5 No Hidden Runtime
+
+Presentation contracts MUST NOT recreate:
+
+* WorkItem state;
+* Attempt state;
+* retry state;
+* scheduler state;
+* global Revision registry;
+* competing Runtime authority state.
+
+---
+
+# 5. Naming Convention
+
+Public type names use PascalCase.
 
 Public field names are shown in camelCase.
 
@@ -125,50 +272,101 @@ Examples:
 
 ```text
 BuildPresentation
-PresentationRequest
-presentationId
-contentRevision
+CandidatePresentationState
+presentationContextId
+presentationRevision
+runtimeRevisionId
 ```
 
-Concrete source code may adapt naming to the chosen language while preserving semantic meaning.
-
-### 4.2 Serialization
-
-All public contracts MUST be serializable.
-
-Public payloads MUST NOT contain:
-
-- UI framework objects;
-- database connections;
-- provider clients;
-- native window handles;
-- DOM nodes;
-- mutable module-internal entities;
-- executable callbacks.
-
-### 4.3 Immutability
-
-Public snapshots and plans are immutable values.
-
-An update produces a new revision rather than mutating a previously published object in place.
-
-### 4.4 Optional Fields
-
-Optional fields MUST have explicit fallback behavior.
-
-Absence of an optional field MUST NOT silently change semantic ownership.
-
-### 4.5 References
-
-Cross-module payloads should prefer stable references and bounded value objects over importing another module's internal aggregate.
+Concrete implementations may adapt naming to language conventions while preserving semantic meaning.
 
 ---
 
-## 5. Shared Identifier Contracts
+# 6. Shared Runtime Identity
 
-### 5.1 PresentationId
+Presentation work executed through Runtime may carry:
 
-Identifies one logical presentation across incremental updates for the same accepted content revision.
+```text
+RuntimeExecutionIdentity
+├── sessionId
+├── runtimeRevisionId
+├── workItemId?
+├── attemptId?
+├── correlationId?
+├── causationId?
+└── configurationSnapshotRef?
+```
+
+Rules:
+
+1. `runtimeRevisionId` identifies Runtime execution intent, not Presentation output revision.
+2. Presentation MUST NOT generate Runtime IDs.
+3. Presence of Runtime IDs does not grant Presentation authority ownership.
+4. Presentation MAY use them for:
+
+   * trace correlation;
+   * validation;
+   * diagnostics;
+   * commit revalidation requests.
+5. Runtime Control remains authoritative for current Runtime Revision relevance.
+
+---
+
+# 7. Cancellation Context
+
+Presentation may receive a Runtime-controlled cancellation reference.
+
+```text
+CancellationContextRef
+- cancellationContextId
+- runtimeRevisionId
+- workItemId?
+- attemptId?
+```
+
+The reference allows Presentation to cooperate with cancellation.
+
+Presentation MUST NOT:
+
+* mark Runtime work canceled;
+* create a new cancellation state;
+* determine terminal Attempt outcome.
+
+Cancellation observation is not cancellation authority.
+
+---
+
+# 8. PresentationContextId
+
+Identifies one logical presentation scope.
+
+```text
+PresentationContextId
+- value
+```
+
+Examples:
+
+```text
+main-reader
+comic-panel
+text-reader
+focused-overlay
+```
+
+Rules:
+
+* stable while the logical display context exists;
+* independent from native surface identity;
+* MAY survive multiple Presentation revisions;
+* MUST NOT be inferred from widget identity;
+* MUST NOT be reused simultaneously for unrelated active contexts.
+
+---
+
+# 9. PresentationId
+
+Identifies one logical Presentation lineage.
 
 ```text
 PresentationId
@@ -177,34 +375,60 @@ PresentationId
 
 Rules:
 
-- globally unique within one CRAI installation or runtime authority domain;
-- stable while the same logical presentation is incrementally updated;
-- replaced when a new logical presentation is created;
-- never inferred from list position.
+* stable across compatible incremental updates;
+* stable across layout-only revisions when semantic Presentation identity is unchanged;
+* replaced when a new logical Presentation is created;
+* not derived from array position;
+* not equal to Runtime Revision identity.
 
-### 5.2 PresentationRequestId
+---
 
-Correlates a public command with its result or rejection.
+# 10. PresentationOperationId
+
+Identifies one Presentation-owned semantic operation.
+
+```text
+PresentationOperationId
+- value
+```
+
+It may be used for:
+
+* diagnostics;
+* local operation tracking;
+* candidate correlation;
+* commit diagnostics.
+
+It is not:
+
+```text
+WorkItemId
+AttemptId
+Runtime operation authority
+```
+
+---
+
+# 11. PresentationRequestId
+
+Correlates a public command with its immediate response.
 
 ```text
 PresentationRequestId
 - value
 ```
 
-### 5.3 PresentationJobId
+Rules:
 
-Identifies asynchronous Presentation work.
+* SHOULD be unique within the active application instance;
+* MAY support duplicate command detection;
+* MUST NOT be used as Presentation identity.
 
-```text
-PresentationJobId
-- value
-```
+---
 
-It may be absent for purely synchronous implementations, but the contract reserves it for cancellation, tracing, and diagnostics.
+# 12. PresentationItemId
 
-### 5.4 PresentationItemId
-
-Identifies one semantic visible item inside a presentation.
+Identifies one semantic visible unit.
 
 ```text
 PresentationItemId
@@ -213,131 +437,210 @@ PresentationItemId
 
 Rules:
 
-- stable across layout recomputation;
-- stable across partial translation updates when semantic grouping is unchanged;
-- replaced only when the underlying semantic item is removed or regrouped;
-- never derived solely from the current array index.
+* stable across layout recomputation;
+* stable across PresentationProfile changes where semantic grouping remains unchanged;
+* stable across compatible partial translation updates;
+* replaced only when semantic grouping genuinely changes;
+* never derived solely from array index.
 
-### 5.5 MarkerId
+---
 
-Identifies one source association marker.
+# 13. MarkerId
+
+Identifies one Presentation marker.
 
 ```text
 MarkerId
 - value
 ```
 
-### 5.6 SurfaceId
-
-Identifies a rendering surface known through a platform-independent contract.
-
-```text
-SurfaceId
-- value
-```
-
-Presentation does not create or own the actual surface resource.
+A marker remains stable while its Presentation-item/source association remains semantically stable.
 
 ---
 
-## 6. Revision and Authority Contracts
+# 14. PresentationRevision
 
-### 6.1 ContentRevision
-
-Represents the accepted semantic source-content revision owned by `reading-session`.
-
-```text
-ContentRevision
-- value: non-negative integer or opaque monotonic token
-```
-
-Presentation MUST NOT invent a new `contentRevision`.
-
-### 6.2 PresentationRevision
-
-Represents the version of Presentation output.
+Represents the committed visible Presentation version.
 
 ```text
 PresentationRevision
-- value: non-negative monotonic integer
+- value: monotonic non-negative integer or equivalent monotonic token
 ```
 
 Rules:
 
-- increases whenever published Presentation output changes;
-- MUST NOT decrease;
-- older revisions MUST NOT overwrite newer revisions;
-- layout-only changes may increase `presentationRevision` without changing `contentRevision`;
-- focus or selection changes may increase `presentationRevision` when they are part of published snapshot state.
-
-### 6.3 AuthorityContext
-
-Carries the minimum information required to determine whether work is still authorized to become current.
-
-```text
-AuthorityContext
-- sessionId
-- contentId
-- contentRevision
-- expectedPresentationId?
-- expectedPresentationRevision?
-- sessionEpoch?
-- requestStartedAt?
-```
-
-Rules:
-
-- `sessionId`, `contentId`, and `contentRevision` are required for presentation work tied to active reading content;
-- expected revision fields provide optimistic concurrency protection;
-- `sessionEpoch` may be used when session identifiers can be reused;
-- Presentation MUST reject results that fail authority checks.
+1. scoped to one `PresentationContextId` or Presentation lineage;
+2. MUST increase when committed visible Presentation state changes;
+3. MUST NOT decrease;
+4. older revisions MUST NOT overwrite newer committed revisions;
+5. layout-only changes MAY create a new PresentationRevision;
+6. focus/selection changes MAY create a new PresentationRevision;
+7. PresentationRevision is distinct from Runtime Revision.
 
 ---
 
-## 7. Public Value Contracts
+# 15. Runtime Revision vs Presentation Revision
 
-## 7.1 PresentationMode
+These identifiers serve different purposes.
+
+```text
+Runtime RevisionId
+    → whether processing intent is still current
+
+PresentationRevision
+    → which user-visible Presentation state is current
+```
+
+Example:
+
+```text
+Runtime Revision 42
+    ↓
+Presentation Revision 1
+    ↓
+viewport changes
+    ↓
+Presentation Revision 2
+    ↓
+focus changes
+    ↓
+Presentation Revision 3
+```
+
+A new PresentationRevision MUST NOT be interpreted as a new Runtime Revision.
+
+---
+
+# 16. ArtifactRef
+
+Presentation consumes accepted immutable Runtime Artifact references.
+
+Conceptually:
+
+```text
+ArtifactRef
+├── artifactId
+├── artifactType
+├── contractVersion
+├── contentIdentity
+├── compatibilityMetadata?
+└── owner?
+```
+
+Typical accepted input types include:
+
+```text
+RECOGNITION_ARTIFACT
+SOURCE_DOCUMENT_ARTIFACT
+TRANSLATION_ARTIFACT
+```
+
+Presentation MUST NOT consume an upstream Candidate Artifact through this contract unless an explicitly separate candidate-only diagnostic contract exists.
+
+---
+
+# 17. PresentationInputArtifactSet
+
+```text
+PresentationInputArtifactSet
+├── recognitionArtifactRef?
+├── sourceDocumentArtifactRef?
+├── translationArtifactRef?
+└── auxiliaryArtifactRefs[]?
+```
+
+Rules:
+
+* required artifacts depend on requested Presentation capability;
+* all supplied references MUST be compatible with one logical content lineage;
+* Presentation MUST NOT mutate referenced Artifacts;
+* missing optional Artifact types MUST have explicit semantic behavior;
+* Artifact reuse is governed by compatibility semantics, not merely matching Runtime Revision IDs.
+
+---
+
+# 18. ContentIdentity
+
+Presentation should not depend solely on a mutable application content counter.
+
+Use a bounded semantic identity structure where possible.
+
+```text
+ContentIdentity
+├── contentId
+├── sourceId?
+├── sourceVersion?
+├── documentId?
+├── chapterId?
+├── pageId?
+├── semanticFingerprint?
+└── lineageMetadata?
+```
+
+The exact fields depend on upstream contracts.
+
+Presentation uses ContentIdentity to establish semantic compatibility.
+
+Runtime Revision remains separate.
+
+---
+
+# 19. PresentationMode
 
 ```text
 PresentationMode
 - SidePanel
-- Overlay
 - TextReader
+- Overlay
 - Hybrid
+- Unknown
 ```
 
 Rules:
 
-- the requested mode and effective mode are distinct values;
-- unsupported requested modes may resolve to a supported fallback;
-- fallback MUST be observable;
-- unknown enum values MUST be handled as unsupported, not silently interpreted.
+* requested and effective mode are separate;
+* unsupported mode MUST NOT be silently interpreted;
+* fallback MAY resolve requested mode to another mode;
+* fallback reason MUST be observable;
+* unknown future values must follow version compatibility policy.
 
-## 7.2 PresentationTarget
+---
 
-Describes the requested logical destination without exposing native UI objects.
+# 20. PresentationTarget
+
+Describes the logical destination surface.
 
 ```text
 PresentationTarget
-- surfaceId
-- surfaceKind
-- capabilities
-- coordinateSpace
-- sourceAssociation?
+├── targetId
+├── targetKind
+├── targetRevision
+├── capabilities[]
+├── bounds?
+├── coordinateSpace
+├── scale?
+├── safeInsets?
+└── sourceAssociation?
 ```
 
-Possible `surfaceKind` values:
+Possible `targetKind` values:
 
 ```text
-MainReader
+MainWindow
 CompanionPanel
-OverlaySurface
 FloatingSurface
+OverlaySurface
 BrowserSurface
 Unknown
 ```
 
-`capabilities` may include:
+A PresentationTarget is not a native surface resource.
+
+---
+
+# 21. Target Capabilities
+
+Possible capability values include:
 
 ```text
 SupportsScrolling
@@ -348,68 +651,96 @@ SupportsKeyboardFocus
 SupportsTextSelection
 SupportsDynamicResize
 SupportsBilingualLayout
+SupportsCaptureExclusion
+SupportsTransparency
+SupportsAlwaysOnTop
 ```
 
-Presentation consumes these capabilities when resolving mode and fallback behavior.
+Capabilities describe normalized logical ability.
 
-## 7.3 PresentationProfile
+Presentation must not query operating-system APIs directly to obtain them.
 
-An immutable, resolved preference snapshot used for one build or update.
+---
+
+# 22. ViewportSnapshot
+
+Describes one immutable normalized viewport observation.
+
+```text
+ViewportSnapshot
+├── viewportId
+├── viewportRevision
+├── targetId
+├── targetRevision
+├── width
+├── height
+├── scale
+├── zoom?
+├── scrollOffset?
+├── visibleBounds?
+├── coordinateSpace
+├── transforms[]
+├── safeInsets?
+└── capturedAt?
+```
+
+Rules:
+
+* numeric values MUST be finite;
+* width/height MUST be non-negative;
+* coordinate space is mandatory;
+* viewport revisions SHOULD be monotonic per target;
+* stale viewport work MUST NOT overwrite newer committed layout.
+
+---
+
+# 23. PresentationProfile
+
+An immutable resolved preference snapshot.
 
 ```text
 PresentationProfile
-- profileId?
-- profileRevision?
-- preferredMode
-- fontFamily?
-- fontSize
-- minimumReadableFontSize
-- lineHeight
-- paragraphSpacing
-- panelWidth?
-- panelPlacement?
-- showSourceText
-- showRegionMarkers
-- markerStyle?
-- overlayOpacity?
-- theme
-- autoFallbackEnabled
-- accessibilityHints?
+├── profileId?
+├── profileVersion?
+├── preferredMode
+├── typography
+├── panelConfiguration?
+├── readerConfiguration?
+├── sourceVisibility
+├── markerPolicy
+├── overlayPolicy
+├── fallbackPolicy
+├── themeSemantics
+└── accessibilityPreferences?
 ```
 
-Rules:
+Presentation consumes but does not persist the profile.
 
-- Presentation consumes but does not persist this profile;
-- unsupported values produce bounded fallback or validation issues;
-- profile changes do not alter `contentRevision`;
-- profile changes may produce a new `presentationRevision`.
+---
 
-## 7.4 PresentationViewport
-
-Describes the current logical rendering area.
+# 24. TypographyProfile
 
 ```text
-PresentationViewport
-- surfaceId
-- width
-- height
-- scale
-- zoom
-- scrollOffset
-- devicePixelRatio?
-- coordinateSpace
-- sourceTransform?
-- safeInsets?
+TypographyProfile
+├── fontFamily?
+├── fontSize
+├── minimumReadableFontSize
+├── lineHeight
+├── paragraphSpacing
+├── alignment?
+├── wrappingPolicy?
+└── emphasisPolicy?
 ```
 
 Rules:
 
-- width and height MUST be finite and non-negative;
-- coordinate space MUST be declared;
-- viewport changes do not create a new semantic content revision;
-- viewport changes may require a new RenderPlan.
+* font sizes MUST be finite and positive;
+* minimum readable size MUST NOT exceed configured maximum where a maximum exists;
+* platform-specific font objects MUST NOT appear here.
 
-## 7.5 CoordinateSpace
+---
+
+# 25. CoordinateSpace
 
 ```text
 CoordinateSpace
@@ -420,144 +751,202 @@ CoordinateSpace
 - BrowserViewport
 - Screen
 - OverlaySurface
+- Unknown
 ```
 
-A geometry value without coordinate-space metadata is invalid at a public module boundary.
+Geometry crossing a public boundary MUST declare its coordinate space.
 
-## 7.6 Point
+---
+
+# 26. Point
 
 ```text
 Point
-- x
-- y
-- coordinateSpace
+├── x
+├── y
+└── coordinateSpace
 ```
 
-## 7.7 Size
+Values MUST be finite.
+
+---
+
+# 27. Size
 
 ```text
 Size
-- width
-- height
+├── width
+└── height
 ```
 
-## 7.8 Rect
+Values MUST be finite and non-negative.
+
+---
+
+# 28. Rect
 
 ```text
 Rect
-- x
-- y
-- width
-- height
-- coordinateSpace
+├── x
+├── y
+├── width
+├── height
+└── coordinateSpace
 ```
 
-Validation:
+Values MUST be finite.
 
-- all numeric values MUST be finite;
-- width and height MUST be non-negative;
-- normalized coordinates MUST follow the declared normalized range policy;
-- conversion between spaces requires an explicit transform.
+Width and height MUST be non-negative.
 
-## 7.9 GeometryTransform
+---
+
+# 29. GeometryTransform
 
 ```text
 GeometryTransform
-- fromSpace
-- toSpace
-- matrix?
-- scaleX?
-- scaleY?
-- offsetX?
-- offsetY?
-- rotation?
-- sourceRevision?
+├── transformId?
+├── transformVersion?
+├── fromSpace
+├── toSpace
+├── matrix?
+├── scaleX?
+├── scaleY?
+├── offsetX?
+├── offsetY?
+├── rotation?
+└── sourceGeometryVersion?
 ```
 
-Presentation may consume normalized transforms supplied by adapters or upstream contracts.
+A conversion between coordinate spaces requires an explicit compatible transform.
 
-It MUST NOT call native platform geometry APIs directly.
+Presentation MUST NOT call native platform geometry APIs directly.
 
-## 7.10 SourceRegionRef
+---
 
-A bounded Presentation-facing reference to recognized source geometry.
+# 30. SourceRegionRef
+
+A Presentation-facing reference to accepted region semantics.
 
 ```text
 SourceRegionRef
-- regionId
-- sourceId
-- contentId
-- contentRevision
-- bounds
-- polygon?
-- rotation?
-- readingOrder
-- confidence?
+├── regionId
+├── recognitionArtifactRef?
+├── bounds
+├── polygon?
+├── rotation?
+├── semanticOrder?
+├── confidence?
+└── direction?
 ```
 
-## 7.11 SourceSegmentRef
+The exact underlying Recognition representation remains owned by Recognition Artifact contracts.
+
+Presentation MUST NOT redefine Recognition geometry semantics.
+
+---
+
+# 31. SourceBlockRef
+
+```text
+SourceBlockRef
+├── sourceBlockId
+├── sourceDocumentArtifactRef
+├── sourceSegmentIds[]
+├── regionIds[]
+├── semanticRole?
+└── sequence
+```
+
+---
+
+# 32. SourceSegmentRef
 
 ```text
 SourceSegmentRef
-- segmentId
-- regionIds[]
-- sequence
-- sourceText?
-- language?
-- status?
+├── sourceSegmentId
+├── sourceBlockId?
+├── sourceDocumentArtifactRef
+├── regionIds[]
+├── sequence
+├── sourceText?
+├── language?
+├── direction?
+└── semanticRole?
 ```
 
-## 7.12 TranslationSegmentRef
+This is a bounded Presentation view.
 
-A Presentation-facing view of accepted translation content.
+Presentation MUST prefer Artifact references plus bounded fields rather than embedding a complete SourceDocument.
+
+---
+
+# 33. TranslationSegmentRef
 
 ```text
 TranslationSegmentRef
-- translationSegmentId
-- sourceSegmentIds[]
-- sequence
-- translatedText
-- status
-- confidence?
-- correctionRevision?
-- translationRevision?
-- issues[]?
+├── translationSegmentId
+├── translationUnitId?
+├── translationArtifactRef
+├── sourceSegmentIds[]
+├── sequence
+├── translatedText?
+├── translationState
+├── translationRevision?
+├── correctionRevision?
+├── confidence?
+└── issues[]?
 ```
 
-Presentation MUST NOT receive provider-specific chunks as this contract.
+Presentation MUST NOT receive provider-specific chunks through this type.
 
-## 7.13 PresentationStatus
+---
+
+# 34. PresentationCompleteness
 
 ```text
-PresentationStatus
-- Preparing
-- Ready
-- Updating
-- Reflowing
+PresentationCompleteness
+- SourceOnly
+- WaitingForTranslation
+- Partial
+- Complete
+- Corrected
 - Degraded
-- Clearing
-- Cleared
-- Rejected
 ```
 
-The detailed lifecycle is defined by `STATES.md`.
+Completeness describes user-visible semantic availability.
 
-## 7.14 PresentationItemStatus
+It is not Runtime Attempt status.
+
+---
+
+# 35. PresentationItemState
 
 ```text
-PresentationItemStatus
-- Waiting
-- Recognized
-- Translating
+PresentationItemState
+- SourceAvailable
+- WaitingForTranslation
 - PartiallyTranslated
 - Translated
 - Corrected
-- Failed
+- TranslationFailed
 - Empty
 - Suppressed
 ```
 
-## 7.15 FocusState
+Avoid Runtime-style names such as:
+
+```text
+Running
+Completed
+Cancelled
+Retrying
+```
+
+for PresentationItem state.
+
+---
+
+# 36. FocusState
 
 ```text
 FocusState
@@ -567,309 +956,541 @@ FocusState
 - ActiveForCorrection
 ```
 
-## 7.16 PresentationIssue
+Focus state is Presentation-local semantic UI state.
 
-```text
-PresentationIssue
-- issueId
-- code
-- severity
-- presentationItemId?
-- regionId?
-- messageKey
-- recoverable
-- technicalDetails?
-```
-
-Technical details are diagnostic metadata and MUST NOT automatically be shown to end users.
+Raw input events remain outside Presentation.
 
 ---
 
-## 8. Core Output Contracts
+# 37. PresentationIssue
 
-## 8.1 PresentationSnapshot
+```text
+PresentationIssue
+├── issueId
+├── code
+├── severity
+├── presentationItemId?
+├── sourceRegionId?
+├── messageKey
+├── recoverability
+└── diagnosticRef?
+```
 
-Represents the immutable semantic presentation state for one revision.
+Full user content SHOULD NOT appear inside standard issue metadata.
+
+---
+
+# 38. PresentationSnapshot
+
+Represents one immutable committed Presentation revision.
 
 ```text
 PresentationSnapshot
-- presentationId
-- sessionId
-- sourceId?
-- contentId
-- contentRevision
-- presentationRevision
-- requestedMode
-- effectiveMode
-- status
-- items[]
-- markers[]
-- profileSummary?
-- target
-- issues[]
-- createdAt
-- updatedAt
+├── presentationId
+├── presentationContextId
+├── sessionId
+├── runtimeRevisionId?
+├── contentIdentity
+├── sourceArtifactRefs[]
+├── presentationRevision
+├── requestedMode
+├── effectiveMode
+├── completeness
+├── items[]
+├── markers[]
+├── profileSummary?
+├── targetSummary
+├── focusState?
+├── selectionState?
+├── issues[]
+└── createdAt
 ```
 
 Invariants:
 
-- one snapshot belongs to one session and one content revision;
-- a snapshot MUST NOT combine items from unrelated content revisions;
-- every item maintains explicit references to upstream source data;
-- snapshot identity remains stable across incremental updates of the same logical presentation;
-- published snapshots are immutable;
-- a newer revision replaces, but does not mutate, an older snapshot.
+1. belongs to exactly one Presentation Context;
+2. belongs to exactly one committed PresentationRevision;
+3. derives from compatible accepted Artifact references;
+4. MUST NOT combine unrelated content lineage;
+5. immutable after commit;
+6. unchanged semantic items preserve identity;
+7. snapshot and RenderPlan of one commit share the same PresentationRevision.
 
-## 8.2 PresentationItem
+---
+
+# 39. PresentationItem
 
 ```text
 PresentationItem
-- presentationItemId
-- regionIds[]
-- sourceSegmentIds[]
-- translationSegmentIds[]
-- sequence
-- sourceText?
-- translatedText?
-- status
-- confidence?
-- focusState
-- availableActions[]
-- issues[]
-- semanticHints?
+├── presentationItemId
+├── sourceBlockIds[]
+├── sourceSegmentIds[]
+├── translationUnitIds[]
+├── translationSegmentIds[]
+├── recognitionRegionIds[]
+├── sequence
+├── sourceText?
+├── translatedText?
+├── state
+├── completeness
+├── confidenceSummary?
+├── semanticRole?
+├── focusState
+├── availableActions[]
+├── layoutHints?
+└── issues[]
 ```
 
 Rules:
 
-- mapping MUST NOT rely only on list position;
-- `sequence` represents visible semantic order, not object identity;
-- unchanged items preserve `presentationItemId` across updates;
-- empty translation text requires an explicit status;
-- a corrected item MUST NOT be overwritten by an older automatic result.
+* array position is not canonical mapping;
+* `sequence` represents semantic visible order;
+* corrected content MUST NOT be overwritten by older automatic content;
+* absent translated text requires explicit state;
+* item identity survives non-semantic layout changes.
 
-## 8.3 SourceMarker
+---
 
-```text
-SourceMarker
-- markerId
-- presentationItemId
-- regionId
-- label
-- sourceBounds
-- state
-- visibility
-- emphasis?
-```
-
-Possible marker states:
+# 40. PresentationMarker
 
 ```text
-Normal
-Focused
-Selected
-Uncertain
-Failed
-Hidden
+PresentationMarker
+├── markerId
+├── presentationItemId
+├── sourceRegionRef
+├── label
+├── sourceGeometry
+├── projectedGeometry?
+├── visibility
+├── emphasis?
+└── state
 ```
 
-## 8.4 RenderPlan
+Marker semantics belong to Presentation.
 
-Represents a platform-independent instruction model that `ui-adapter` can apply.
+Native marker resources belong to UI Adapter.
+
+---
+
+# 41. RenderPlan
+
+Represents framework-neutral display arrangement.
 
 ```text
 RenderPlan
-- presentationId
-- presentationRevision
-- target
-- effectiveMode
-- viewport
-- panelPlan?
-- itemPlans[]
-- markerPlans[]
-- overlayPlans[]
-- readerPlan?
-- overflowItems[]
-- hiddenItems[]
-- fallback?
-- issues[]
-- strategyVersion
+├── renderPlanId
+├── presentationId
+├── presentationContextId
+├── presentationRevision
+├── effectiveMode
+├── targetId
+├── targetRevision
+├── viewportRevision?
+├── strategyVersion
+├── panelPlan?
+├── readerPlan?
+├── itemPlans[]
+├── markerPlans[]
+├── overlayPlans[]
+├── overflowItems[]
+├── hiddenItems[]
+├── focusPlan?
+├── fallback?
+└── issues[]
 ```
 
 Invariants:
 
-- RenderPlan is immutable;
-- RenderPlan belongs to exactly one `presentationRevision`;
-- RenderPlan contains no framework or native object;
-- for the same accepted inputs and strategy version, output SHOULD be deterministic;
-- `ui-adapter` may reject a RenderPlan whose surface is no longer valid;
-- applying a RenderPlan does not transfer surface ownership to Presentation.
+* immutable;
+* belongs to exactly one committed PresentationRevision;
+* contains no framework/native object;
+* references valid Presentation items and markers;
+* coordinate spaces are explicit;
+* semantically equivalent fixed inputs SHOULD produce deterministic equivalent plans.
 
-## 8.5 ItemRenderPlan
+---
+
+# 42. ItemRenderPlan
 
 ```text
 ItemRenderPlan
-- presentationItemId
-- bounds?
-- order
-- visibility
-- textStyle
-- containerStyle?
-- overflowBehavior
-- interactionHints[]
-```
-
-## 8.6 MarkerRenderPlan
-
-```text
-MarkerRenderPlan
-- markerId
-- presentationItemId
-- bounds
-- label
-- visibility
-- emphasis
-- connector?
-```
-
-## 8.7 PresentationFallback
-
-```text
-PresentationFallback
-- requestedMode
-- effectiveMode
-- reasonCode
-- affectedItemIds[]?
-- automatic
+├── presentationItemId
+├── bounds?
+├── order
+├── visibility
+├── typography
+├── containerHints?
+├── overflowBehavior
+└── interactionHints[]
 ```
 
 ---
 
-## 9. Public Command Contracts
+# 43. MarkerRenderPlan
 
-All commands MUST include:
+```text
+MarkerRenderPlan
+├── markerId
+├── presentationItemId
+├── bounds
+├── coordinateSpace
+├── label
+├── visibility
+├── emphasis
+└── connector?
+```
+
+---
+
+# 44. OverlayRenderPlan
+
+```text
+OverlayRenderPlan
+├── presentationItemId
+├── sourceRegionId
+├── bounds
+├── coordinateSpace
+├── textLayout
+├── visibility
+├── collisionState?
+└── readabilityState
+```
+
+Overlay plans remain framework-neutral.
+
+---
+
+# 45. PresentationFallback
+
+```text
+PresentationFallback
+├── requestedMode
+├── effectiveMode
+├── reasonCode
+├── affectedItemIds[]?
+├── automatic
+└── degradedCapability?
+```
+
+Fallback MUST be observable.
+
+---
+
+# 46. CandidatePresentationState
+
+Represents a prepared but not yet authoritative visible state.
+
+```text
+CandidatePresentationState
+├── candidateId
+├── operationId
+├── presentationId
+├── presentationContextId
+├── basedOnPresentationRevision?
+├── candidatePresentationRevision
+├── runtimeExecutionIdentity?
+├── sourceArtifactRefs[]
+├── snapshot
+├── renderPlan
+├── changeSet?
+├── completeness
+├── fallback?
+├── warnings[]
+└── diagnosticsSummary?
+```
+
+Rules:
+
+1. immutable after preparation;
+2. MUST NOT be exposed as current Presentation;
+3. MAY be discarded without affecting committed state;
+4. does not imply Runtime authority;
+5. does not imply UI application;
+6. candidate snapshot and RenderPlan share one candidate revision.
+
+---
+
+# 47. PresentationChangeSet
+
+```text
+PresentationChangeSet
+├── addedItemIds[]
+├── updatedItemIds[]
+├── removedItemIds[]
+├── layoutChanged
+├── modeChanged
+├── styleChanged
+├── visibilityChanged
+├── focusChanged
+└── completenessChanged
+```
+
+A change set describes differences between Presentation revisions.
+
+It does not contain mutable patch instructions for native UI objects.
+
+---
+
+# 48. PresentationCommitRequest
+
+A Presentation candidate must pass commit validation.
+
+```text
+PresentationCommitRequest
+├── candidateId
+├── presentationContextId
+├── expectedPresentationRevision?
+├── runtimeExecutionIdentity?
+├── authorityContextRef?
+├── targetId
+├── targetRevision
+└── viewportRevision?
+```
+
+This contract carries data needed to ask whether the candidate may become current.
+
+It does not make Presentation the owner of Runtime authority.
+
+---
+
+# 49. AuthorityRevalidationResult
+
+Authority evaluation is supplied by Runtime/Application authority services.
+
+```text
+AuthorityRevalidationResult
+├── status
+├── runtimeRevisionId?
+├── reasonCode?
+└── evaluatedAt
+```
+
+Possible values:
+
+```text
+Accepted
+RejectedStale
+RejectedCanceled
+RejectedSessionInactive
+RejectedRuntimeRevision
+RejectedTargetInvalidated
+RejectedOther
+```
+
+Presentation MUST treat Runtime authority rejection as final for that candidate.
+
+Presentation MUST NOT override it.
+
+---
+
+# 50. PresentationCommitResult
+
+```text
+PresentationCommitResult
+├── status
+├── presentationId
+├── presentationContextId
+├── previousPresentationRevision?
+├── presentationRevision?
+├── snapshot?
+├── renderPlan?
+├── fallback?
+├── rejectionReason?
+└── committedAt?
+```
+
+Possible status:
+
+```text
+Committed
+RejectedAuthority
+RejectedPresentationRevision
+RejectedTarget
+RejectedValidation
+DiscardedSuperseded
+Failed
+```
+
+Only `Committed` creates current Presentation state.
+
+---
+
+# 51. Atomic Commit Rule
+
+A commit MUST atomically advance:
+
+```text
+PresentationRevision
++
+PresentationSnapshot
++
+RenderPlan
+```
+
+The following states are invalid:
+
+```text
+new Snapshot + old RenderPlan
+old Snapshot + new RenderPlan
+new Revision + missing Snapshot
+new Revision + missing RenderPlan
+```
+
+where the active mode requires both outputs.
+
+---
+
+# 52. Preserve-Previous Rule
+
+During preparation:
+
+```text
+previous committed Presentation
+```
+
+remains authoritative until candidate commit succeeds.
+
+Recoverable failure MUST normally produce:
+
+```text
+discard Candidate
++
+retain previous committed Presentation
+```
+
+not:
+
+```text
+clear current Presentation automatically
+```
+
+unless policy explicitly requires invalidation.
+
+---
+
+# 53. Common Command Envelope
+
+Presentation commands SHOULD contain:
 
 ```text
 requestId
-issuedAt
 contractVersion
+issuedAt
+presentationContextId
+runtimeExecutionIdentity?
+cancellationContextRef?
 ```
 
-Commands tied to active content MUST also include `authority`.
+Commands MUST NOT require Runtime WorkItem metadata when invoked for purely Presentation-local UI state unless Runtime integration specifically requires it.
 
-## 9.1 BuildPresentation
+---
 
-Creates a new logical presentation from accepted content.
+# 54. BuildPresentation
+
+Creates a new logical Presentation from accepted Artifact references.
 
 ```text
 BuildPresentation
-- requestId
-- contractVersion
-- issuedAt
-- authority
-- sourceId?
-- contentKind
-- regions[]
-- sourceSegments[]
-- translationSegments[]
-- translationStatus
-- requestedMode
-- target
-- viewport
-- profile
-- correlationId?
+├── requestId
+├── contractVersion
+├── issuedAt
+├── presentationContextId
+├── runtimeExecutionIdentity?
+├── cancellationContextRef?
+├── inputArtifacts
+├── contentIdentity
+├── requestedMode
+├── target
+├── viewport?
+├── profile
+└── previousPresentationRef?
 ```
 
 Required validation:
 
-- authority identifiers are present;
-- `contentRevision` matches all supplied content references;
-- region geometry declares coordinate space;
-- segment mappings are internally consistent;
-- requested mode is known or safely rejectable;
-- target capabilities are declared sufficiently for mode resolution;
-- viewport is valid;
-- supplied translation data has been accepted upstream.
+* Presentation Context valid;
+* required Artifact references present;
+* Artifact types supported;
+* content lineage compatible;
+* target valid;
+* viewport valid when required;
+* requested mode known or safely rejectable;
+* profile valid;
+* required mappings obtainable from accepted Artifact data;
+* no Candidate upstream Artifact is passed as authoritative input.
 
-Success result:
-
-```text
-BuildPresentationResult
-- requestId
-- presentationId
-- presentationRevision
-- snapshot
-- renderPlan
-- fallback?
-- diagnosticsSummary?
-```
-
-Failure result:
+Preparation result:
 
 ```text
-PresentationCommandRejected
+BuildPresentationPreparedResult
+├── requestId
+├── operationId
+└── candidate
 ```
 
-## 9.2 UpdatePresentationContent
+This result does not imply commit.
 
-Applies accepted incremental content changes without replacing unaffected item identities.
+---
+
+# 55. UpdatePresentationContent
+
+Updates Presentation using newer accepted Artifact references.
 
 ```text
 UpdatePresentationContent
-- requestId
-- contractVersion
-- issuedAt
-- authority
-- presentationId
-- expectedPresentationRevision
-- changedTranslationSegments[]
-- removedTranslationSegmentIds[]
-- changedSourceSegments[]?
-- removedSourceSegmentIds[]?
-- translationStatus
-- updateCause
+├── requestId
+├── contractVersion
+├── issuedAt
+├── presentationContextId
+├── presentationId
+├── expectedPresentationRevision
+├── runtimeExecutionIdentity?
+├── cancellationContextRef?
+├── inputArtifacts
+├── updateCause
+└── contentIdentity
+```
+
+Possible causes:
+
+```text
+TranslationUpdated
+TranslationCorrected
+SourceDocumentUpdated
+ArtifactReplaced
+PartialResultAdvanced
+ManualRefresh
 ```
 
 Rules:
 
-- unchanged items MUST preserve identity;
-- a mismatched expected revision is rejected or superseded according to the update policy;
-- corrected content takes precedence over older automatic content;
-- removed segments MUST NOT remain visible as active content;
-- a full rebuild is allowed internally but MUST preserve public identity where semantics are unchanged.
+* unchanged semantic items preserve IDs;
+* older corrections cannot overwrite newer accepted correction semantics;
+* removed upstream semantic content must not remain current;
+* full internal rebuild is allowed if external identity invariants remain valid.
 
-Success result:
+---
 
-```text
-UpdatePresentationContentResult
-- requestId
-- presentationId
-- previousPresentationRevision
-- presentationRevision
-- changedItemIds[]
-- removedItemIds[]
-- snapshot
-- renderPlan
-```
+# 56. RecomputePresentationLayout
 
-## 9.3 RecomputePresentationLayout
-
-Recomputes RenderPlan without changing semantic content.
+Recomputes layout without changing semantic source/translation content.
 
 ```text
 RecomputePresentationLayout
-- requestId
-- contractVersion
-- issuedAt
-- authority
-- presentationId
-- expectedPresentationRevision
-- viewport
-- target?
-- profile?
-- reason
+├── requestId
+├── contractVersion
+├── issuedAt
+├── presentationContextId
+├── presentationId
+├── expectedPresentationRevision
+├── target
+├── viewport
+├── profile?
+├── cancellationContextRef?
+└── reason
 ```
 
-Possible reasons:
+Reasons may include:
 
 ```text
 WindowResized
@@ -877,8 +1498,8 @@ SourceMoved
 ZoomChanged
 ScrollChanged
 PanelResized
-ThemeChanged
 FontChanged
+ThemeChanged
 DisplayChanged
 TargetCapabilityChanged
 ManualRefresh
@@ -886,461 +1507,881 @@ ManualRefresh
 
 Rules:
 
-- semantic item identity MUST remain stable;
-- semantic reading order MUST remain unchanged;
-- obsolete layout jobs may be cancelled or coalesced;
-- source-transform invalidation may produce a degraded side-panel plan instead of unsafe overlay geometry.
+* semantic item identity remains stable;
+* semantic reading order remains stable;
+* obsolete reflow work MAY be coalesced;
+* invalid overlay geometry MAY produce Side Panel fallback;
+* stale viewport result MUST NOT commit.
 
-Success result:
+---
 
-```text
-RecomputePresentationLayoutResult
-- requestId
-- presentationId
-- previousPresentationRevision
-- presentationRevision
-- renderPlan
-- fallback?
-```
-
-## 9.4 ChangePresentationMode
-
-Requests a new presentation strategy.
+# 57. ChangePresentationMode
 
 ```text
 ChangePresentationMode
-- requestId
-- contractVersion
-- issuedAt
-- authority
-- presentationId
-- expectedPresentationRevision
-- requestedMode
-- target
-- viewport
-- profile?
+├── requestId
+├── contractVersion
+├── issuedAt
+├── presentationContextId
+├── presentationId
+├── expectedPresentationRevision
+├── requestedMode
+├── target
+├── viewport?
+├── profile?
+└── cancellationContextRef?
 ```
 
 Rules:
 
-- effective mode may differ from requested mode;
-- fallback reason MUST be returned when different;
-- mode change MUST NOT alter `contentRevision`;
-- Presentation item identity SHOULD remain stable when semantic grouping is unchanged.
+* requested and effective modes may differ;
+* fallback reason required when they differ;
+* semantic content lineage does not change;
+* item identity SHOULD remain stable where possible.
 
-Success result:
+---
 
-```text
-ChangePresentationModeResult
-- requestId
-- presentationId
-- previousMode
-- requestedMode
-- effectiveMode
-- presentationRevision
-- snapshot
-- renderPlan
-- fallback?
-```
-
-## 9.5 UpdatePresentationFocus
-
-Updates Presentation-owned focus, selection, or correction state after an application intent is resolved outside the module.
+# 58. UpdatePresentationFocus
 
 ```text
 UpdatePresentationFocus
-- requestId
-- contractVersion
-- issuedAt
-- authority
-- presentationId
-- expectedPresentationRevision
-- presentationItemId?
-- regionId?
-- focusState
-- cause
+├── requestId
+├── contractVersion
+├── issuedAt
+├── presentationContextId
+├── presentationId
+├── expectedPresentationRevision
+├── presentationItemId?
+├── sourceRegionId?
+├── focusState
+└── cause
 ```
 
 Rules:
 
-- raw mouse, keyboard, touch, or OS events MUST NOT enter this command;
-- the requested item or region MUST belong to the active presentation;
-- focus changes MUST NOT alter `contentRevision`;
-- focus changes may produce a new `presentationRevision`.
+* raw input events MUST NOT appear;
+* referenced item/region must belong to current Presentation;
+* focus does not change Runtime Revision;
+* focus MAY create new PresentationRevision.
 
-## 9.6 ApplyPresentationProfile
+---
 
-Applies a new resolved PresentationProfile.
+# 59. ApplyPresentationProfile
 
 ```text
 ApplyPresentationProfile
-- requestId
-- contractVersion
-- issuedAt
-- authority
-- presentationId
-- expectedPresentationRevision
-- profile
-- viewport?
+├── requestId
+├── contractVersion
+├── issuedAt
+├── presentationContextId
+├── presentationId
+├── expectedPresentationRevision
+├── profile
+├── target?
+└── viewport?
 ```
 
-Rules:
+Presentation does not persist the profile.
 
-- Presentation does not persist the profile;
-- profile application may trigger layout recomputation;
-- unsupported values produce bounded fallback or issues;
-- content semantics remain unchanged.
+Profile application may trigger:
 
-## 9.7 ClearPresentation
+* style update;
+* reflow;
+* mode fallback;
+* new PresentationRevision.
 
-Invalidates and removes active Presentation state.
+---
+
+# 60. ClearPresentation
+
+Logically invalidates committed Presentation state.
 
 ```text
 ClearPresentation
-- requestId
-- contractVersion
-- issuedAt
-- sessionId
-- presentationId?
-- expectedPresentationRevision?
-- reason
+├── requestId
+├── contractVersion
+├── issuedAt
+├── presentationContextId
+├── presentationId?
+├── expectedPresentationRevision?
+└── reason
 ```
 
-Possible reasons:
+Reasons:
 
 ```text
-SessionStopping
 SessionStopped
-SourceChanged
-ContentInvalidated
-TargetUnavailable
-PermissionLost
-ApplicationClosing
+SessionReplaced
+ContentReplaced
+TargetDestroyed
+PrivacyInvalidation
+ApplicationShutdown
 UserRequested
 ```
 
 Rules:
 
-- clearing is idempotent;
-- late work for the cleared authority MUST NOT become current;
-- clear does not imply persistent content deletion;
-- platform resource cleanup remains the responsibility of `ui-adapter`.
+* idempotent;
+* logically invalidates commit eligibility for older Presentation candidates in the context;
+* does not delete persistent source/translation content;
+* does not itself destroy native surface resources.
 
 ---
 
-## 10. Public Query Contracts
+# 61. Command Preparation Result
 
-Queries return immutable snapshots or summaries.
+Presentation commands that prepare a candidate return:
 
-Queries MUST NOT expose mutable internal entities.
+```text
+PresentationPreparationResult
+├── requestId
+├── operationId
+├── status
+├── candidate?
+├── rejection?
+└── diagnosticsSummary?
+```
 
-## 10.1 GetPresentationSnapshot
+Possible status:
+
+```text
+Prepared
+Rejected
+CanceledLocally
+SupersededLocally
+Failed
+```
+
+`Prepared` means candidate creation succeeded.
+
+It does not mean:
+
+```text
+Runtime accepted it
+Presentation committed it
+UI rendered it
+```
+
+---
+
+# 62. PresentationCommandRejection
+
+```text
+PresentationCommandRejection
+├── requestId
+├── commandName
+├── presentationContextId?
+├── presentationId?
+├── expectedPresentationRevision?
+├── currentPresentationRevision?
+├── reasonCode
+├── recoverability
+├── retryHint?
+└── issues[]
+```
+
+Typical Presentation-owned rejection reasons:
+
+```text
+PRESENTATION_INVALID_COMMAND
+PRESENTATION_CONTEXT_NOT_FOUND
+PRESENTATION_NOT_FOUND
+PRESENTATION_ITEM_NOT_FOUND
+PRESENTATION_REVISION_CONFLICT
+PRESENTATION_INCOMPATIBLE_ARTIFACT
+PRESENTATION_INVALID_MAPPING
+PRESENTATION_INVALID_GEOMETRY
+PRESENTATION_INVALID_VIEWPORT
+PRESENTATION_UNSUPPORTED_MODE
+PRESENTATION_TARGET_CAPABILITY_MISSING
+PRESENTATION_INVALID_PROFILE
+PRESENTATION_EMPTY_INPUT
+PRESENTATION_CANDIDATE_INVALID
+```
+
+Runtime authority rejection SHOULD remain distinguishable from Presentation semantic rejection.
+
+---
+
+# 63. Do Not Duplicate Runtime Error Semantics
+
+Presentation SHOULD NOT invent local equivalents of:
+
+```text
+SESSION_NOT_ACTIVE
+RUNTIME_REVISION_STALE
+ATTEMPT_CANCELLED
+WORKITEM_SUPERSEDED
+RETRY_EXHAUSTED
+```
+
+when those facts are owned by Runtime.
+
+Instead, Presentation may expose:
+
+```text
+CommitRejected
+reasonSource = RuntimeAuthority
+runtimeReasonCode = ...
+```
+
+or equivalent normalized cross-boundary representation.
+
+---
+
+# 64. Idempotency
+
+Commands SHOULD support deduplication where duplicate delivery is possible.
+
+`ClearPresentation` MUST be idempotent.
+
+Repeated preparation with the same `requestId` MUST NOT create conflicting committed revisions.
+
+Candidate IDs MAY differ if an implementation intentionally re-executes after prior candidate disposal, but observable commit semantics must remain deterministic.
+
+---
+
+# 65. Query — GetCurrentPresentation
+
+```text
+GetCurrentPresentation
+├── presentationContextId
+└── minimumRevision?
+```
+
+Result:
+
+```text
+GetCurrentPresentationResult
+├── found
+├── presentationId?
+├── presentationRevision?
+├── snapshot?
+└── renderPlan?
+```
+
+Snapshot and RenderPlan returned together MUST belong to the same revision.
+
+---
+
+# 66. Query — GetPresentationSnapshot
 
 ```text
 GetPresentationSnapshot
-- presentationId
-- minimumRevision?
+├── presentationId
+└── presentationRevision?
 ```
 
 Result:
 
 ```text
 GetPresentationSnapshotResult
-- found
-- snapshot?
+├── found
+└── snapshot?
 ```
 
-## 10.2 GetRenderPlan
+---
+
+# 67. Query — GetRenderPlan
 
 ```text
 GetRenderPlan
-- presentationId
-- presentationRevision?
+├── presentationId
+└── presentationRevision?
 ```
 
 Result:
 
 ```text
 GetRenderPlanResult
-- found
-- renderPlan?
+├── found
+└── renderPlan?
 ```
 
-## 10.3 GetPresentationItem
+---
+
+# 68. Query — GetPresentationItem
 
 ```text
 GetPresentationItem
-- presentationId
-- presentationItemId
+├── presentationId
+├── presentationRevision?
+└── presentationItemId
 ```
 
 Result:
 
 ```text
 GetPresentationItemResult
-- found
-- item?
+├── found
+└── item?
 ```
 
-## 10.4 GetPresentationSummary
+---
+
+# 69. Query — GetPresentationSummary
 
 ```text
 GetPresentationSummary
-- presentationId
+- presentationContextId
 ```
 
 Result:
 
 ```text
 PresentationSummary
-- presentationId
-- contentId
-- contentRevision
-- presentationRevision
-- effectiveMode
-- status
-- itemCount
-- markerCount
-- overflowCount
-- issueCount
+├── presentationId?
+├── presentationRevision?
+├── contentIdentity?
+├── effectiveMode?
+├── completeness?
+├── itemCount
+├── markerCount
+├── overflowCount
+├── issueCount
+└── targetId?
 ```
 
-## 10.5 GetPresentationDiagnostics
+---
+
+# 70. Query — GetPresentationDiagnostics
 
 ```text
 GetPresentationDiagnostics
-- presentationId
-- includeTechnicalDetails
+├── presentationContextId
+├── presentationId?
+└── includeTechnicalDetails
 ```
 
-Result MUST follow diagnostics and privacy rules.
+Diagnostic queries MUST follow privacy restrictions.
 
-Full source or translated content MUST NOT be returned by default as diagnostic data.
+Full source/translation text MUST NOT be returned by default.
 
 ---
 
-## 11. Command Result and Rejection Contract
+# 71. UI Apply Request
 
-## 11.1 PresentationCommandRejected
+Presentation logical commit and actual UI apply are distinct.
 
-```text
-PresentationCommandRejected
-- requestId
-- commandName
-- presentationId?
-- sessionId?
-- contentId?
-- contentRevision?
-- expectedPresentationRevision?
-- currentPresentationRevision?
-- reasonCode
-- recoverable
-- retryAdvice?
-- issues[]
-```
-
-Common reason codes:
+A compatible UI Adapter consumes:
 
 ```text
-PRESENTATION_INVALID_COMMAND
-PRESENTATION_UNKNOWN_SESSION
-PRESENTATION_SESSION_NOT_ACTIVE
-PRESENTATION_CONTENT_REVISION_STALE
-PRESENTATION_REVISION_CONFLICT
-PRESENTATION_NOT_FOUND
-PRESENTATION_ITEM_NOT_FOUND
-PRESENTATION_INVALID_MAPPING
-PRESENTATION_INVALID_GEOMETRY
-PRESENTATION_INVALID_VIEWPORT
-PRESENTATION_UNSUPPORTED_MODE
-PRESENTATION_TARGET_UNAVAILABLE
-PRESENTATION_TARGET_CAPABILITY_MISSING
-PRESENTATION_EMPTY_CONTENT
-PRESENTATION_CANCELLED
-PRESENTATION_INTERNAL_FAILURE
+PresentationApplyRequest
+├── presentationContextId
+├── presentationId
+├── presentationRevision
+├── snapshotRefOrValue
+├── renderPlanRefOrValue
+├── targetId
+└── targetRevision
 ```
 
-The complete catalog belongs to `ERRORS.md`.
-
-## 11.2 Idempotency
-
-Commands SHOULD support deduplication by `requestId` where duplicate delivery is possible.
-
-Repeated `ClearPresentation` requests MUST be safe.
-
-Repeated build or update requests with the same `requestId` MUST NOT create conflicting current revisions.
+The concrete delivery mechanism may vary, but semantics must remain equivalent.
 
 ---
 
-## 12. Consumed Event Boundary
-
-Presentation may react to normalized domain events including:
+# 72. UI Apply Result
 
 ```text
-ReadingContentAccepted
-TranslationPartiallyCompleted
-TranslationCompleted
-TranslationCorrected
-SourceGeometryChanged
-PresentationPreferenceChanged
-PresentationTargetChanged
-ReadingSessionStopping
-ReadingSessionStopped
+PresentationApplyResult
+├── presentationContextId
+├── presentationId
+├── presentationRevision
+├── targetId
+├── status
+├── appliedAt?
+├── reasonCode?
+└── diagnostics?
 ```
 
-Rules:
+Possible status:
 
-- consumed events MUST follow the canonical event envelope;
-- Presentation MUST NOT consume raw provider-specific OCR or translation events;
-- event handlers MUST translate event payloads into the same validation path used by public commands;
-- event delivery does not bypass revision or authority checks;
-- duplicate events MUST be safely handled.
+```text
+Applied
+RejectedStale
+RejectedTargetMismatch
+TargetUnavailable
+Failed
+```
 
-Exact names and payloads are defined in `EVENTS.md` and the architecture event convention.
+Presentation MUST NOT depend on framework-specific exception classes.
 
 ---
 
-## 13. Published Event Boundary
+# 73. Presentation Commit vs UI Apply
 
-Presentation may publish:
-
-```text
-PresentationPrepared
-PresentationUpdated
-PresentationLayoutChanged
-PresentationModeFallbackApplied
-PresentationFocusChanged
-PresentationIssueDetected
-PresentationRejected
-PresentationCleared
-```
-
-Published events SHOULD include, where applicable:
+These are separate:
 
 ```text
-presentationId
-sessionId
-contentId
-contentRevision
-presentationRevision
-requestId
-correlationId
-causationId
+Presentation Commit
+    ↓
+logical Presentation is current
+
+UI Apply
+    ↓
+actual native/framework surface reflects it
 ```
 
-Events SHOULD carry bounded metadata or references rather than duplicating entire source and translation documents.
+Therefore a valid state exists where:
 
-Exact event contracts belong to `EVENTS.md`.
+```text
+Presentation committed
+UI apply failed
+```
+
+This condition must be observable.
+
+It does not automatically invalidate Runtime Artifact publication.
 
 ---
 
-## 14. Validation Contract
+# 74. Input Validation
 
-Presentation MUST reject or degrade input when any of the following is true:
+Presentation MUST reject or degrade input when:
 
-- required authority identifiers are missing;
-- the reading session is stopped or no longer authoritative;
-- `contentRevision` is stale;
-- expected `presentationRevision` conflicts with current state;
-- cross-reference mappings are inconsistent;
-- geometry has no coordinate space;
-- numeric geometry values are non-finite;
-- viewport dimensions are invalid;
-- a requested mode is unsupported and no fallback is allowed;
-- target capabilities cannot support the resolved plan;
-- source or translation references belong to another content revision;
-- malformed text cannot be represented safely;
-- a command references an unknown presentation item.
-
-Incomplete translation MUST NOT automatically cause whole-request rejection.
-
-It may produce explicit waiting, partial, failed, or degraded item states.
+* required Presentation identifiers are absent;
+* Artifact type unsupported;
+* Artifact references incompatible;
+* ContentIdentity lineage conflicts;
+* expected PresentationRevision conflicts;
+* geometry missing coordinate-space metadata;
+* numeric geometry invalid;
+* transform chain invalid;
+* viewport invalid;
+* target capabilities insufficient;
+* requested mode unsupported and fallback disabled;
+* mapping refers to missing source structures;
+* RenderPlan cannot satisfy mandatory readability policy;
+* candidate violates Presentation invariants.
 
 ---
 
-## 15. Determinism Contract
+# 75. Runtime Authority Validation
 
-For the same:
+Presentation MUST NOT determine Runtime authority using private local state.
+
+At commit boundary:
 
 ```text
-accepted content
-presentation profile
-presentation target
-viewport
+candidate
+    ↓
+authority revalidation service / Runtime Control
+    ↓
+accepted or rejected
+```
+
+If Runtime rejects authority:
+
+* candidate is discarded;
+* committed Presentation remains unchanged unless separate invalidation applies;
+* Presentation MUST NOT override the Runtime decision.
+
+---
+
+# 76. Presentation Revision Validation
+
+Presentation itself owns optimistic concurrency for PresentationRevision.
+
+Candidate commit MUST fail or be superseded when:
+
+```text
+expectedPresentationRevision
+!=
+currentPresentationRevision
+```
+
+unless the command explicitly supports deterministic merge.
+
+For MVP:
+
+```text
+automatic concurrent merge is not required.
+```
+
+---
+
+# 77. Target Revision Validation
+
+When layout depends on target capabilities, candidate commit should verify:
+
+```text
+candidate.targetRevision
+==
+current target revision
+```
+
+or otherwise prove compatibility.
+
+A stale target revision MUST NOT result in unsafe overlay placement.
+
+---
+
+# 78. Viewport Revision Validation
+
+Layout-sensitive candidates should verify the current viewport revision.
+
+For high-frequency viewport changes:
+
+```text
+older candidates may be silently superseded
+```
+
+without being treated as errors.
+
+---
+
+# 79. Candidate Invariant Validation
+
+Before commit:
+
+* candidate ID exists;
+* Presentation ID valid;
+* Presentation Context valid;
+* PresentationRevision valid;
+* Snapshot valid;
+* RenderPlan valid;
+* Snapshot/RenderPlan revisions match;
+* source references resolve;
+* item IDs unique;
+* marker IDs unique;
+* item mappings valid;
+* marker mappings valid;
+* semantic sequence valid;
+* geometry valid;
+* target compatible;
+* no framework object present;
+* no native handle present;
+* no mutable upstream object present.
+
+---
+
+# 80. Compatibility Metadata
+
+Presentation may attach compatibility metadata to committed state.
+
+```text
+PresentationCompatibilityMetadata
+├── presentationContractVersion
+├── sourceArtifactContractVersions[]
+├── presentationProfileVersion?
+├── targetCapabilityVersion?
+├── geometryTransformVersion?
+├── strategyVersion
+├── locale?
+├── typographyPolicyVersion?
+└── privacyPartition?
+```
+
+This describes semantic dependencies.
+
+It does not determine Runtime current authority.
+
+---
+
+# 81. Determinism Contract
+
+For semantically equivalent fixed:
+
+```text
+accepted Artifact set
+ContentIdentity
+PresentationProfile
+PresentationTarget
+ViewportSnapshot
 strategy version
 ```
 
 Presentation SHOULD produce semantically equivalent:
 
 ```text
-PresentationSnapshot
-RenderPlan
+item mapping
+semantic ordering
+mode resolution
+fallback decision
+layout classification
+PresentationSnapshot content
+RenderPlan structure
 ```
 
-Determinism does not require equal timestamps or generated correlation identifiers.
-
-Layout algorithms MUST NOT reorder semantic items because of insignificant geometry drift when an accepted reading order is available.
+Generated IDs and timestamps may differ unless deterministic fixture policy requires fixed values.
 
 ---
 
-## 16. Performance Contract
+# 82. Partial Presentation
 
-Performance values are initially measurement targets, not permanent compatibility guarantees.
+Incomplete Translation does not automatically invalidate Presentation.
 
-The contract MUST support measurement of:
-
-- build duration;
-- incremental-update duration;
-- layout-recompute duration;
-- marker-plan duration;
-- cancelled or coalesced work;
-- active snapshot memory;
-- active RenderPlan memory.
-
-Recommended prototype targets:
+Presentation may represent:
 
 ```text
-Initial side-panel model preparation: <= 100 ms for typical MVP input
-Incremental item update: <= 50 ms for typical MVP input
-Layout preparation for ordinary viewport changes: <= 50 ms
-Final UI application: owned by ui-adapter, not this contract
+source only
+waiting
+partial translation
+completed translation
+corrected translation
+failed translation item
 ```
 
-A strict `16 ms` Presentation guarantee is not required because heavy layout preparation may run off the UI thread.
+Partial semantics must come from accepted upstream contracts.
 
-Public contracts SHOULD avoid unnecessary duplication of large text payloads, but immutable snapshots may contain bounded repeated data when required for safe independent rendering.
+Presentation MUST NOT treat raw provider token output as accepted Presentation content.
 
 ---
 
-## 17. Security and Privacy Contract
+# 83. Correction Precedence
+
+If accepted upstream data indicates a manual or higher-priority correction:
+
+```text
+older automatic translation
+```
+
+must not overwrite it.
+
+Presentation should use upstream version/lineage metadata rather than local timestamps alone.
+
+---
+
+# 84. Reading Order Contract
+
+Presentation consumes canonical semantic order from accepted upstream content.
+
+Presentation MAY define separate visual ordering metadata.
+
+It MUST NOT silently mutate source semantic order.
+
+Example:
+
+```text
+semanticSequence
+visualPosition
+```
+
+are separate concepts.
+
+---
+
+# 85. Readability Contract
+
+Presentation MUST honor minimum readability thresholds.
+
+It MUST NOT indefinitely reduce font size to force text into original source geometry.
+
+Valid fallback may include:
+
+```text
+wrap
+expand container
+scroll
+collapse secondary source text
+focused overlay
+Side Panel fallback
+```
+
+---
+
+# 86. Geometry Contract
+
+Public geometry must declare coordinate space.
+
+The following are invalid:
+
+* non-finite values;
+* negative dimensions;
+* unknown required coordinate spaces;
+* unsupported transform chain;
+* incompatible source/target revisions;
+* zero-size geometry where projection requires non-zero dimensions.
+
+Invalid overlay geometry MAY still allow a valid Side Panel Presentation.
+
+---
+
+# 87. Security Contract
 
 Presentation MUST NOT:
 
-- store provider credentials;
-- access the network directly;
-- execute scripts from presentation content;
-- access the filesystem directly;
-- log full source or translated content by default;
-- expose native window handles in public contracts;
-- persist user content automatically;
-- retain stopped-session data indefinitely.
-
-Presentation may temporarily process:
-
-- source text;
-- translated text;
-- source geometry;
-- presentation preferences;
-- user-correction metadata;
-- content identifiers.
-
-Persistence is performed only through explicit contracts owned by other modules, primarily `storage`.
+* store provider credentials;
+* call Translation/OCR provider endpoints directly;
+* execute scripts contained in content;
+* expose native handles;
+* dynamically execute content callbacks;
+* bypass Runtime Artifact access policy.
 
 ---
 
-## 18. Compatibility Contract
+# 88. Privacy Contract
 
-Presentation MUST remain independent from concrete technologies such as:
+Presentation may temporarily process:
+
+* source text;
+* translated text;
+* geometry;
+* accepted correction data;
+* profile preferences.
+
+Normal diagnostics MUST NOT contain:
+
+* screenshots;
+* complete source documents;
+* complete Translation Artifact contents;
+* provider prompts;
+* credentials;
+* private window titles.
+
+Presentation persistence requires an explicit external persistence contract.
+
+---
+
+# 89. Resource Contract
+
+Presentation may hold:
+
+```text
+Artifact leases
+temporary mapping structures
+temporary layout state
+CandidatePresentationState
+current committed Presentation
+previous committed Presentation
+```
+
+according to bounded resource policy.
+
+Presentation does not become Artifact owner by acquiring a lease.
+
+All leases MUST be released according to Runtime resource-lifecycle rules.
+
+---
+
+# 90. Performance Contract
+
+The public design must support measuring:
+
+```text
+candidate preparation duration
+mapping duration
+layout duration
+geometry projection duration
+authority revalidation latency
+Presentation commit latency
+UI apply latency
+coalesced operation count
+superseded candidate count
+current Presentation memory
+candidate Presentation memory
+```
+
+Performance targets are implementation targets, not permanent wire compatibility guarantees.
+
+---
+
+# 91. Event Boundary
+
+Presentation events describe Presentation-owned facts.
+
+Successful facts MUST describe already committed Presentation state.
+
+Correct ordering:
+
+```text
+prepare
+    ↓
+validate
+    ↓
+authority revalidate
+    ↓
+commit
+    ↓
+publish success fact
+```
+
+Incorrect ordering:
+
+```text
+publish success
+    ↓
+commit later
+```
+
+Detailed schemas belong to `EVENTS.md`.
+
+---
+
+# 92. Event Bus Is Not the Orchestrator
+
+Presentation MUST NOT require this implicit chain:
+
+```text
+TranslationCompleted
+    ↓
+Presentation automatically starts
+```
+
+for architecture correctness.
+
+Business Pipeline Orchestration / Runtime decides required work.
+
+Events may provide:
+
+* notification;
+* observability;
+* UI update signaling;
+* optional integration.
+
+They must not secretly redefine execution ownership.
+
+---
+
+# 93. Presentation Success Facts
+
+Typical committed-success events:
+
+```text
+PresentationPrepared
+PresentationUpdated
+PresentationLayoutChanged
+PresentationModeChanged
+PresentationCleared
+```
+
+Each should reference:
+
+```text
+presentationContextId
+presentationId
+presentationRevision
+```
+
+where applicable.
+
+---
+
+# 94. Presentation Rejection / Failure Facts
+
+Presentation may expose:
+
+```text
+PresentationRejected
+PresentationFailed
+```
+
+`PresentationRejected` typically means:
+
+* command invalid;
+* candidate invalid;
+* optimistic concurrency conflict;
+* unsupported capability.
+
+`PresentationFailed` should be reserved for Presentation-owned unrecoverable/internal failures.
+
+Runtime cancellation or stale Revision is not automatically Presentation failure.
+
+---
+
+# 95. Contract Compatibility
+
+Presentation contracts MUST remain independent from:
 
 ```text
 Electron
@@ -1351,208 +2392,398 @@ Wails
 Browser Extension APIs
 Android Views
 SwiftUI
+WinUI
+AppKit
+DOM
 Canvas implementations
 ```
 
-Technology-specific adapters may depend on Presentation public contracts.
+Technology-specific UI adapters may depend on Presentation public contracts.
 
-Presentation core MUST NOT import those adapters.
-
-Unknown optional fields MUST be ignored when safe.
-
-Unknown required semantic enum values MUST be rejected or mapped through an explicitly versioned fallback rule.
+Presentation core MUST NOT import concrete adapters.
 
 ---
 
-## 19. Contract Versioning
+# 96. Contract Versioning
 
-The contract version follows semantic versioning.
+Semantic versioning:
 
 ```text
 MAJOR.MINOR.PATCH
 ```
 
-### Patch
+## Patch
 
 May include:
 
-- clarification with no semantic change;
-- additional documentation;
-- compatible validation correction;
-- new optional diagnostics metadata.
+* clarification;
+* documentation correction;
+* compatible validation correction;
+* new optional diagnostics field.
 
-### Minor
+## Minor
 
 May include:
 
-- new optional fields;
-- new commands or queries;
-- new optional capabilities;
-- new enum values that older consumers can safely treat as unknown;
-- new published events.
+* new optional fields;
+* new optional commands;
+* new optional capability;
+* new backward-compatible query;
+* new event fact.
 
-### Major
+## Major
 
 Required for:
 
-- removal of public fields;
-- renaming public commands;
-- changing required-field semantics;
-- changing revision meaning;
-- changing ownership of snapshot or RenderPlan;
-- incompatible enum handling;
-- changing immutable output into mutable shared state.
+* removing required fields;
+* renaming public commands incompatibly;
+* changing PresentationRevision meaning;
+* changing ownership semantics;
+* changing commit model;
+* changing immutable outputs into mutable state;
+* replacing ArtifactRef input with incompatible direct data model.
 
-Every command SHOULD declare `contractVersion`.
-
-Event versioning follows the canonical event convention.
+This Runtime-v2 synchronization is a major contract revision from the previous authority model.
 
 ---
 
-## 20. Architecture Invariants
+# 97. Unknown Fields
 
-The following MUST always remain true:
+Unknown optional fields SHOULD be ignored when safe.
 
-1. Presentation does not perform OCR or translation.
-2. Presentation does not own reading-session lifecycle.
-3. Presentation owns `PresentationSnapshot` and `RenderPlan` semantics.
-4. `ui-adapter` owns actual rendering and platform resource application.
-5. Every visible item has explicit source references.
-6. Coordinate spaces are explicit at public boundaries.
-7. Published snapshots and RenderPlans are immutable.
-8. `presentationRevision` never decreases.
-9. Stale semantic content never becomes current.
-10. Layout changes do not silently change accepted reading order.
-11. Item identity survives non-semantic layout changes.
-12. Rendering frameworks remain unknown to Presentation.
-13. Incomplete translation is represented explicitly rather than hidden as success.
-14. Readability takes priority over forcing overlay placement.
-15. Session stop prevents late Presentation work from becoming visible.
+Unknown required semantic enum values MUST:
+
+* be rejected;
+* or use an explicitly documented version-compatible fallback.
+
+Never silently reinterpret an unknown required value.
 
 ---
 
-## 21. Example Build Flow
+# 98. Architecture Invariants
+
+1. Presentation does not perform OCR.
+
+2. Presentation does not perform Text Processing.
+
+3. Presentation does not execute Translation.
+
+4. Presentation consumes accepted immutable Artifact references.
+
+5. Presentation does not consume raw provider output.
+
+6. Presentation does not own Runtime Revision authority.
+
+7. Presentation does not own WorkItem lifecycle.
+
+8. Presentation does not own Attempt lifecycle.
+
+9. Presentation does not own Runtime retry.
+
+10. Presentation does not own global cancellation authority.
+
+11. `PresentationOperationId` is not a Runtime `WorkItemId`.
+
+12. `PresentationRevision` is distinct from Runtime `RevisionId`.
+
+13. Candidate Presentation state is not committed Presentation state.
+
+14. Prepared does not mean committed.
+
+15. Committed does not mean UI applied.
+
+16. Runtime authority must be valid at Presentation commit.
+
+17. Runtime authority rejection cannot be overridden by Presentation.
+
+18. Presentation owns optimistic concurrency of PresentationRevision.
+
+19. Snapshot and RenderPlan commit atomically as one PresentationRevision.
+
+20. Previous committed Presentation remains current until replacement commit succeeds.
+
+21. Stale candidates cannot overwrite newer committed Presentation state.
+
+22. Accepted upstream Artifacts remain immutable.
+
+23. Presentation does not publish Recognition, SourceDocument, or Translation Artifacts.
+
+24. Presentation does not own native window resources.
+
+25. Presentation does not own DOM or widget instances.
+
+26. Coordinate spaces are explicit.
+
+27. Semantic item identity is independent from array position.
+
+28. Semantic reading order is not silently rewritten by layout.
+
+29. Partial translation is explicitly represented.
+
+30. Manual accepted correction outranks older automatic content.
+
+31. Side Panel fallback is allowed when overlay is unsafe or unreadable.
+
+32. Readability outranks forced exact placement.
+
+33. Events do not replace Runtime orchestration.
+
+34. Success events describe committed Presentation state.
+
+35. Standard diagnostics do not contain complete user reading content.
+
+---
+
+# 99. Example — Initial Build
 
 ```text
-Reading Session accepts content revision 42
-    ↓
+Published Recognition Artifact
+        +
+Published SourceDocument Artifact
+        +
+Published Translation Artifact
+        ↓
 BuildPresentation
-- authority.contentRevision = 42
-- requestedMode = SidePanel
-- target capabilities supplied
-    ↓
-Presentation validates mappings and geometry
-    ↓
-Presentation creates:
-- PresentationSnapshot revision 1
-- RenderPlan revision 1
-    ↓
-BuildPresentationResult
-    ↓
+        ↓
+Presentation validates Artifact compatibility
+        ↓
+Presentation maps PresentationItems
+        ↓
+Presentation resolves effective mode
+        ↓
+CandidateSnapshot
+        +
+CandidateRenderPlan
+        ↓
+CandidatePresentationState
+        ↓
+Runtime authority revalidation
+        ↓
+Presentation commit
+        ↓
+Presentation Revision 1
+        ↓
 PresentationPrepared
-    ↓
-UI Adapter verifies target and revision
-    ↓
-UI Adapter applies RenderPlan
+        ↓
+UI Adapter apply
 ```
 
 ---
 
-## 22. Example Incremental Update Flow
+# 100. Example — Partial Translation Update
 
 ```text
-Presentation revision 4 is visible
-    ↓
-Translation correction is accepted upstream
-    ↓
+Presentation Revision 4 current
+        ↓
+New accepted Translation Artifact
+        ↓
 UpdatePresentationContent
-- expectedPresentationRevision = 4
-- changedTranslationSegments = corrected segment
-    ↓
-Presentation preserves unaffected item identities
-    ↓
-Presentation creates revision 5
-    ↓
-PresentationUpdated
-    ↓
-UI Adapter ignores any later revision 4 plan
+expectedPresentationRevision = 4
+        ↓
+affected PresentationItems updated
+        ↓
+Candidate Revision 5
+        ↓
+authority revalidation
+        ↓
+commit
+        ↓
+Presentation Revision 5
 ```
+
+Unchanged items preserve identity.
 
 ---
 
-## 23. Example Viewport Flow
+# 101. Example — Viewport Coalescing
 
 ```text
-Source viewport changes
-    ↓
-UI Adapter or application shell normalizes viewport data
-    ↓
+Viewport 20
+Viewport 21
+Viewport 22
+        ↓
+reflow 20 obsolete
+reflow 21 obsolete
+        ↓
 RecomputePresentationLayout
-    ↓
-Presentation validates coordinate spaces and authority
-    ↓
-New RenderPlan created
-    ↓
-PresentationLayoutChanged
-    ↓
-UI Adapter applies newest revision only
+viewportRevision = 22
+        ↓
+Candidate Presentation Revision N+1
+        ↓
+commit
 ```
+
+No failure is required for discarded revisions 20 and 21.
 
 ---
 
-## 24. Example Stale Rejection
+# 102. Example — Runtime Revision Superseded
 
 ```text
-Content revision 14 begins Presentation work
-    ↓
-Reading Session advances to content revision 15
-    ↓
-Late work for revision 14 completes
-    ↓
-Authority check fails
-    ↓
-PresentationCommandRejected
-- reasonCode = PRESENTATION_CONTENT_REVISION_STALE
-    ↓
-No current snapshot or RenderPlan is replaced
+Runtime Revision 14
+        ↓
+Presentation candidate prepared
+        ↓
+Runtime Revision 15 becomes current
+        ↓
+candidate 14 reaches commit boundary
+        ↓
+Runtime authority revalidation
+        ↓
+RejectedStale
+        ↓
+candidate discarded
+        ↓
+current Presentation unchanged
+```
+
+Presentation does not change Runtime Revision state.
+
+---
+
+# 103. Example — Presentation Revision Conflict
+
+```text
+Current Presentation Revision 7
+
+Operation A
+expected = 7
+
+Operation B
+expected = 7
+        ↓
+Operation B commits Revision 8
+        ↓
+Operation A reaches commit
+        ↓
+expected 7 != current 8
+        ↓
+Operation A rejected / superseded
+```
+
+Runtime Revision may remain unchanged throughout this flow.
+
+---
+
+# 104. Example — Overlay Fallback
+
+```text
+requestedMode = Overlay
+        ↓
+target supports overlay
+        ↓
+geometry valid
+        ↓
+Vietnamese text cannot satisfy readability threshold
+        ↓
+fallback policy
+        ↓
+effectiveMode = SidePanel
+        ↓
+Candidate records fallback
+        ↓
+commit
+```
+
+This is a successful degraded Presentation.
+
+---
+
+# 105. Example — UI Apply Failure
+
+```text
+Presentation Revision 12 committed
+        ↓
+PresentationUpdated
+        ↓
+UI Adapter apply
+        ↓
+TargetUnavailable
+```
+
+Presentation logical state and actual visual state are now temporarily divergent.
+
+The failure must be observable and handled according to UI/Application recovery policy.
+
+Presentation MUST NOT pretend the UI apply succeeded.
+
+---
+
+# 106. Example — Clear
+
+```text
+Session stopping
+        ↓
+Runtime revokes processing authority
+        ↓
+ClearPresentation
+        ↓
+Presentation current state invalidated
+        ↓
+PresentationCleared
+        ↓
+UI Adapter removes binding / visible content
+```
+
+Native resource destruction remains UI Adapter/platform responsibility.
+
+---
+
+# 107. Deferred Extensions
+
+Deferred contracts include:
+
+* plugin-provided Presentation strategies;
+* persisted user-adjusted overlay geometry;
+* artwork-aware translation placement;
+* image inpainting;
+* translated-image export;
+* framework-specific animation instructions;
+* advanced multi-monitor native placement;
+* collaborative annotations;
+* browser DOM rewriting;
+* print/export page composition;
+* rich annotation systems.
+
+Future extensions MUST preserve:
+
+```text
+Runtime Authority
+≠
+Presentation Commit
+≠
+UI Apply
 ```
 
 ---
 
-## 25. Deferred Contract Extensions
-
-The following are intentionally deferred:
-
-- plugin-provided presentation strategies;
-- persisted user-adjusted overlay geometry;
-- collaborative annotations;
-- image inpainting output;
-- export-oriented page layout;
-- framework-specific animation instructions;
-- multi-monitor native placement contracts;
-- complete accessibility certification contracts;
-- AI-generated artwork-aware placement hints;
-- direct browser DOM mutation contracts.
-
-Future extensions MUST preserve the Presentation/UI Adapter boundary.
-
----
-
-## 26. Related Documents
+# 108. Related Documents
 
 ```text
 .meta/AI_BOOT.md
 .meta/PROJECT_RULE.md
 .meta/MODULE_ROLE.md
 .meta/WORKFLOW.md
+.meta/CHANGE_RULE.md
 
 doc/01-architecture/core/CAPABILITY_MAP.md
 doc/01-architecture/core/DATA_FLOW.md
 doc/01-architecture/core/EVENT_BUS.md
 doc/01-architecture/core/EVENT_CONVENTION.md
 doc/01-architecture/core/STATE_MACHINE.md
+
 doc/01-architecture/modules/MODULE_DEPENDENCY.md
 doc/01-architecture/modules/MODULE_MAP.md
+doc/01-architecture/modules/OWNERSHIP_MAP.md
+
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/BUSINESS_PIPELINE_ORCHESTRATION.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RETRY_POLICY.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+doc/01-architecture/runtime/MEMORY_MODEL.md
+doc/01-architecture/runtime/PERFORMANCE_MODEL.md
+doc/01-architecture/runtime/RUNTIME_OBSERVABILITY.md
 
 doc/02-modules/presentation/MODULE.md
 doc/02-modules/presentation/STATES.md
@@ -1560,8 +2791,10 @@ doc/02-modules/presentation/EVENTS.md
 doc/02-modules/presentation/ERRORS.md
 doc/02-modules/presentation/README.md
 
-doc/02-modules/reading-session/CONTRACT.md
+doc/02-modules/recognition/CONTRACT.md
+doc/02-modules/text-processing/CONTRACT.md
 doc/02-modules/translation/CONTRACT.md
+doc/02-modules/reading-session/CONTRACT.md
 doc/02-modules/preferences/CONTRACT.md
 doc/02-modules/diagnostics/CONTRACT.md
 doc/02-modules/ui-adapter/CONTRACT.md
@@ -1569,17 +2802,89 @@ doc/02-modules/ui-adapter/CONTRACT.md
 
 ---
 
-## 27. Completion Criteria
+# 109. Completion Criteria
 
 This contract is ready for implementation review when:
 
-- every public command has required authority and revision metadata;
-- `PresentationSnapshot` and `RenderPlan` ownership is unambiguous;
-- `ui-adapter` can render without importing Presentation internals;
-- partial translation can be represented without rejecting the complete presentation;
-- item identity rules are testable;
-- stale content and revision conflicts are deterministic;
-- coordinate spaces are explicit;
-- mode fallback is observable;
-- public payloads are serializable and platform-independent;
-- event and error files can refine this contract without redefining its ownership.
+* Presentation accepts published Artifact references rather than raw upstream mutable objects;
+* Runtime identity and Presentation identity are clearly separated;
+* `PresentationOperationId` cannot be confused with WorkItem/Attempt identity;
+* `PresentationRevision` is explicitly independent from Runtime `RevisionId`;
+* Candidate Presentation state exists as a separate concept from committed state;
+* Runtime authority is revalidated rather than reimplemented inside Presentation;
+* PresentationRevision optimistic concurrency is deterministic;
+* Snapshot and RenderPlan commit atomically;
+* Presentation and UI apply lifecycle are explicitly separate;
+* stale Runtime work cannot commit Presentation;
+* stale Presentation operations cannot overwrite newer Presentation revisions;
+* target and viewport revisions protect layout commit;
+* Side Panel/Overlay fallback is contractually observable;
+* partial Translation can be represented;
+* stable item identity rules are testable;
+* public geometry always has coordinate-space semantics;
+* `ui-adapter` requires no Presentation internal types;
+* no contract exposes provider SDK or native UI objects;
+* all public contracts are serializable;
+* EVENTS and ERRORS can refine behavior without redefining ownership.
+
+---
+
+# 110. Summary
+
+The Presentation public boundary is:
+
+```text
+Accepted Runtime ArtifactRefs
+        ↓
+Presentation Command
+        ↓
+Presentation Operation
+        ↓
+CandidatePresentationState
+        ↓
+Runtime Authority Revalidation
+        +
+PresentationRevision Validation
+        ↓
+Atomic Presentation Commit
+        ↓
+PresentationSnapshot
+        +
+RenderPlan
+        ↓
+UI Adapter Apply
+```
+
+Ownership is:
+
+```text
+Runtime Control
+    → Runtime Revision / WorkItem / Attempt / authority
+
+Artifact Store
+    → accepted Runtime Artifacts
+
+Presentation
+    → Presentation semantic state
+    → Candidate Presentation
+    → PresentationRevision
+    → PresentationSnapshot
+    → RenderPlan
+
+UI Adapter / Platform
+    → actual UI resources and rendering
+```
+
+The central contract invariant is:
+
+```text
+Prepared is not committed.
+
+Committed is not rendered.
+
+Runtime authority determines whether work may commit.
+
+PresentationRevision determines which Presentation state is current.
+
+UI Adapter determines whether that state became actual visible UI.
+```

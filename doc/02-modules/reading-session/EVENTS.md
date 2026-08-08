@@ -1,1646 +1,1771 @@
 # Reading Session Events
 
-- Module: Reading Session
-- Identifier: reading-session
-- Layer: Business Orchestration
-- Version: 2.0.0
-- Status: Draft
-- Owner: CRAI Architecture
+> **Project:** CRAI
+> **Module:** `reading-session`
+> **Path:** `doc/02-modules/reading-session/EVENTS.md`
+> **Version:** 3.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2 aligned
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-08
 
 ---
 
 # 1. Purpose
 
-This document defines all business events published and consumed by the Reading Session Module.
+This document defines the event boundary of the Reading Session module.
 
-Unlike STATES.md, which defines business lifecycle,
+It specifies:
 
-EVENTS.md defines business facts.
-
-An event represents something that has already happened.
-
-Events never describe future work.
-
-Events never describe execution progress.
-
-This specification defines:
-
-- business event ownership
-- event categories
-- event contracts
-- event ordering
-- event versioning
-- event delivery guarantees
-- event invariants
-
----
-
-# 2. Event Philosophy
-
-Reading Session follows an event-driven architecture.
-
-Business changes are communicated exclusively through immutable events.
-
-Every event represents a completed business fact.
-
-Examples:
-
-✔ Reading Context changed
-
-✔ New Content Revision exists
-
-✔ Session paused
-
-Examples that are NOT business events:
-
-✘ OCR started
-
-✘ Translation running
-
-✘ Worker queued
-
-✘ GPU selected
-
-Those belong to Runtime.
-
----
-
-## 2.1 Events Describe Facts
-
-Events never describe commands.
-
-Incorrect:
-
-```text
-StartTranslation
+```text id="wma3oi"
+Reading Session-owned facts
+event ownership
+event naming
+canonical event envelope
+ReadingContextRevision semantics
+event ordering
+idempotency
+event/version compatibility
+publication timing
+privacy
+observability
 ```
+
+Reading Session events describe committed facts about:
+
+```text id="m5i3qr"
+Reading Session lifecycle
+Reading Context
+Reading Target
+Reading Source
+Reading Position
+Session Configuration
+```
+
+This document does not define:
+
+```text id="7zbtt3"
+Runtime execution events
+WorkItem events
+Attempt events
+ProcessingIntent events
+Artifact publication events
+Translation events
+Presentation events
+UI rendering events
+```
+
+---
+
+# 2. Core Event Principle
+
+An event describes:
+
+> A fact that has already become true.
+
+Events never request future work.
 
 Correct:
 
-```text
-ProcessingIntentPublished
+```text id="cf7l5l"
+ReadingSessionActivated
+ReadingTargetChanged
+ReadingContextChanged
+ReadingConfigurationChanged
 ```
 
----
+Incorrect:
 
-## 2.2 Events Are Immutable
-
-Once published,
-
-an event never changes.
-
-Corrections always generate new events.
-
-Existing events remain historically valid.
-
----
-
-## 2.3 Events Never Own State
-
-An event reports that state changed.
-
-The event itself never becomes the source of truth.
-
-Source of truth always belongs to:
-
-```text
-ReadingSession
-
-ReadingContext
-
-ContentRevision
-
-ProcessingIntent
+```text id="11it8o"
+RunOCR
+StartTranslation
+RefreshPresentation
+CreateWorkItem
 ```
+
+Those are commands or orchestration decisions.
 
 ---
 
 # 3. Event Ownership
 
-Reading Session owns only business events.
+Reading Session publishes only Reading Session-owned facts.
 
----
+Typical ownership:
 
-## Reading Session Publishes
-
-```text
-ReadingSession*
-
-ReadingContext*
-
-ContentRevision*
-
-ProcessingIntent*
-
-Configuration*
-```
-
----
-
-## Reading Session Never Publishes
-
-```text
-Capture*
-
-Recognition*
-
-Translation*
-
-Presentation*
-
-Worker*
-
-Scheduler*
-
-Queue*
-
-Provider*
-```
-
-Those belong to other modules.
-
----
-
-# 4. Event Categories
-
-Business events are grouped by ownership.
-
-```text
-Reading Session
-
-├── Session Lifecycle Events
-│
-├── Reading Context Events
-│
-├── Content Revision Events
-│
-├── Processing Intent Events
-│
-└── Configuration Events
-```
-
-Each category corresponds to exactly one business object.
-
----
-
-# 5. Event Naming Rules
-
-All event names follow the same convention.
-
-```text
-BusinessObject + Past Tense
-```
-
-Examples:
-
-```text
+```text id="s9p07i"
 ReadingSessionCreated
+    → Reading Session
 
-ReadingContextUpdated
+ReadingContextChanged
+    → Reading Session
 
-ContentRevisionSuperseded
+RuntimeRevisionSuperseded
+    → Runtime
 
-ProcessingIntentPublished
+TranslationArtifactPublished
+    → Artifact / Runtime publication owner
+
+PresentationUpdated
+    → Presentation
+
+PresentationApplied
+    → UI Adapter
 ```
 
-Avoid imperative names.
-
-Incorrect:
-
-```text
-CreateRevision
-
-StartTranslation
-
-RunOCR
-
-RestartPipeline
-```
-
-Those represent commands rather than facts.
+Reading Session MUST NOT publish events owned by another module.
 
 ---
 
-# 6. Event Identity
+# 4. Reading Session Event Categories
 
-Every business event has its own immutable identity.
+Reading Session v3 uses three main event groups:
+
+```text id="fnqwiy"
+Reading Session Events
+├── Session Lifecycle Events
+├── Reading Context Events
+└── Reading Configuration / Navigation Facts
+```
+
+There is no Reading Session-owned:
+
+```text id="ygad86"
+ContentRevision event lifecycle
+ProcessingIntent event lifecycle
+```
+
+---
+
+# 5. Removed Event Categories
+
+The following v2 categories are removed:
+
+```text id="jqgrkf"
+ContentRevisionEvents
+ProcessingIntentEvents
+```
+
+Reason:
+
+```text id="5xgwhf"
+ReadingContextRevision
+    → immutable domain version, not lifecycle object
+
+ProcessingIntent
+    → Business Pipeline Orchestration concern
+```
+
+---
+
+# 6. Canonical Event Envelope
+
+Reading Session events follow the CRAI canonical Event Convention.
 
 Conceptually:
 
-```text
-BusinessEvent
-
-├── EventId
-├── EventType
-├── AggregateId
-├── AggregateVersion
-├── OccurredAt
-├── CorrelationId
-├── CausationId
-└── Payload
+```text id="bvnmcb"
+EventEnvelope
+├── eventId
+├── eventType
+├── eventVersion
+├── occurredAt
+├── producer
+├── aggregateId
+├── aggregateVersion?
+├── correlationId?
+├── causationId?
+├── traceId?
+├── payload
+└── metadata?
 ```
 
-Event identity never changes.
+The canonical Event Convention remains authoritative if field names differ.
+
+Reading Session MUST NOT invent a competing global event envelope.
 
 ---
 
-# 7. Event Versioning
+# 7. Producer
 
-Business events evolve over time.
+Reading Session-owned events use:
 
-Older versions remain understandable.
-
-Breaking changes require new event versions.
-
-Example:
-
-```text
-ReadingContextUpdated v1
-
-↓
-
-ReadingContextUpdated v2
+```text id="1heh4o"
+producer = reading-session
 ```
 
-Existing published events are never rewritten.
+The producer identifies event ownership.
 
 ---
 
-# 8. Event Categories Overview
+# 8. Aggregate Identity
 
-The Reading Session module defines five categories.
+For Reading Session events:
 
-```text
-ReadingSessionEvents
-
-ReadingContextEvents
-
-ContentRevisionEvents
-
-ProcessingIntentEvents
-
-ConfigurationEvents
+```text id="p3gtrg"
+aggregateId = ReadingSessionId
 ```
 
-Each category is described separately below.
+where the event belongs to one ReadingSession aggregate.
 
 ---
 
-# 9. Session Lifecycle Events
+# 9. Aggregate Version
 
-Session Lifecycle events describe changes to the Reading Session itself.
+Reading Session may use:
 
-They never describe processing progress.
+```text id="y9q4re"
+ReadingContextRevision
+```
 
-Defined events:
+as aggregate/domain version metadata when the event reflects a ReadingContext mutation.
 
-```text
+Lifecycle-only events that do not change ReadingContext need not increment ReadingContextRevision.
+
+---
+
+# 10. ReadingContextRevision in Events
+
+Events describing committed ReadingContext mutations MUST carry:
+
+```text id="gy8y6e"
+readingContextRevision
+```
+
+and SHOULD carry:
+
+```text id="hro04z"
+previousReadingContextRevision
+```
+
+when applicable.
+
+Rules:
+
+1. revision identifies committed reading-domain state;
+2. revision changes only after successful domain commit;
+3. rejected commands produce no new revision event;
+4. no-op commands produce no new revision event;
+5. revision does not imply Runtime authority.
+
+---
+
+# 11. Runtime Revision Is Not Event Ordering
+
+Reading Session events MUST NOT use:
+
+```text id="rvs9yj"
+RuntimeRevisionId
+```
+
+as Reading Session event order.
+
+If Runtime identity is included for correlation, it remains external metadata only.
+
+---
+
+# 12. Event Publication Timing
+
+Successful Reading Session facts follow:
+
+```text id="3y66qc"
+Validate command
+    ↓
+Build Candidate domain state
+    ↓
+Commit Reading Session state
+    ↓
+Advance ReadingContextRevision if applicable
+    ↓
+Publish Reading Session fact
+```
+
+Never:
+
+```text id="5j9wmu"
+Publish success event
+    ↓
+attempt state commit
+```
+
+---
+
+# 13. Candidate State Does Not Produce Success Facts
+
+Reading Session should not publish:
+
+```text id="m3r9gc"
+ReadingContextCandidateCreated
+ReadingContextCandidateValidated
+```
+
+as normal business facts.
+
+Those are internal/diagnostic stages.
+
+Only committed domain state is externally authoritative.
+
+---
+
+# 14. Session Lifecycle Event Set
+
+Reading Session v3 may publish:
+
+```text id="2w0acc"
 ReadingSessionCreated
-
 ReadingSessionActivated
-
 ReadingSessionPaused
-
 ReadingSessionResumed
-
 ReadingSessionCompleted
-
 ReadingSessionCancelled
-
 ReadingSessionDisposed
 ```
 
-Each event corresponds to a transition defined in STATES.md.
+If `INITIALIZING` or `COMPLETING` are public lifecycle states, optional events may later be added.
 
-No additional lifecycle events should exist outside this list.
+MVP does not require them.
 
 ---
 
-# 10. ReadingSessionCreated
+# 15. ReadingSessionCreated
 
-Published when a new Reading Session is successfully created.
+## Meaning
 
-Meaning:
+A ReadingSession aggregate was successfully created.
 
-- Session identity exists.
-- Business lifecycle begins.
-- Configuration has been accepted.
+## Typical Payload
 
-Typical payload:
-
-```text
-SessionId
-
-CreatedAt
-
-ConfigurationVersion
+```text id="kf7xlu"
+ReadingSessionCreatedPayload
+├── readingSessionId
+├── lifecycleState
+├── readingContextRevision?
+├── readingSource
+├── initialTarget?
+├── sessionConfigurationSummary
+└── createdAt
 ```
 
-This is always the first event in a session history.
+## Invariants
+
+* event is published after aggregate creation commit;
+* SessionId is stable;
+* event does not imply Runtime processing began.
 
 ---
 
-# 11. ReadingSessionActivated
+# 16. ReadingSessionActivated
 
-Published when the Session becomes Active.
+## Meaning
 
-Typical causes:
+The Reading Session became active for reading-domain interaction.
 
-- initialization completed
-- initial context established
+Typical transition:
 
-Business meaning:
+```text id="ro332q"
+INITIALIZING → ACTIVE
+```
 
-The Reading Session is now allowed to produce Reading Context updates and Processing Intents.
+or an MVP-equivalent activation.
 
-This event does not imply Runtime execution has begun.
+## Payload
 
----
+```text id="ts54nk"
+ReadingSessionActivatedPayload
+├── readingSessionId
+├── lifecycleState
+├── readingContextRevision?
+└── activatedAt
+```
 
-# 12. ReadingSessionPaused
+## Invariant
 
-Published when business progression is paused.
+Activation does not mean:
 
-Business meaning:
-
-No further ProcessingIntent objects should be generated until resumed.
-
-Previously published intents remain historically valid.
-
----
-
-# 13. ReadingSessionResumed
-
-Published when a paused session becomes Active again.
-
-Business evaluation resumes from the current Reading Context.
-
-Historical revisions remain unchanged.
+```text id="mtq43s"
+Capture started
+OCR started
+Translation started
+Presentation ready
+```
 
 ---
 
-# 14. ReadingSessionCompleted
+# 17. ReadingSessionPaused
 
-Published when the reading activity finishes naturally.
+## Meaning
 
-Examples:
+The reading activity was intentionally paused.
 
-- end of reading session
-- user exits normally
-- source completed
+Payload:
 
-After this event,
+```text id="vpyzm0"
+ReadingSessionPausedPayload
+├── readingSessionId
+├── readingContextRevision?
+├── reason?
+└── pausedAt
+```
 
-no new ContentRevision may become Current.
-
----
-
-# 15. ReadingSessionCancelled
-
-Published when the Session ends abnormally.
-
-Typical causes:
-
-- explicit cancellation
-- source unavailable
-- unrecoverable business condition
-
-Cancellation never rewrites previous business history.
+Pause does not imply Runtime cancellation.
 
 ---
 
-# 16. ReadingSessionDisposed
+# 18. ReadingSessionResumed
 
-Published when all business resources have been released.
+## Meaning
 
-This is the final lifecycle event.
+A paused reading activity became active again.
 
-No further Session Lifecycle events may follow.
+Payload:
+
+```text id="kfl4ki"
+ReadingSessionResumedPayload
+├── readingSessionId
+├── readingContextRevision?
+└── resumedAt
+```
+
+Resume does not automatically create a new ReadingContextRevision.
 
 ---
 
-# 17. Reading Context Events
+# 19. ReadingSessionCompleted
 
-Reading Context events describe changes to the current business understanding of what the user is reading.
+## Meaning
 
-These events are produced whenever the ReadingContext changes.
+The reading activity ended normally.
 
-They do not describe how the change was detected.
+Payload:
 
-Detection belongs to Runtime.
+```text id="1q399f"
+ReadingSessionCompletedPayload
+├── readingSessionId
+├── finalReadingContextRevision?
+├── reason
+└── completedAt
+```
 
-Reading Session only publishes the resulting business fact.
+Completion does not mean:
 
-Defined events:
+```text id="3jsl2y"
+all Runtime work completed
+all UI resources disposed
+all Artifacts deleted
+```
 
-```text
-ReadingContextLoading
+---
 
-ReadingContextReady
+# 20. ReadingSessionCancelled
 
-ReadingContextUpdated
+## Meaning
 
+The reading activity itself was canceled.
+
+Payload:
+
+```text id="pfipyg"
+ReadingSessionCancelledPayload
+├── readingSessionId
+├── finalReadingContextRevision?
+├── reason
+└── cancelledAt
+```
+
+Important:
+
+```text id="vi5cve"
+ReadingSessionCancelled
+≠
+RuntimeAttemptCancelled
+```
+
+Reading Session does not publish Runtime cancellation facts.
+
+---
+
+# 21. ReadingSessionDisposed
+
+## Meaning
+
+The ReadingSession aggregate reached its irreversible business disposal state.
+
+Payload:
+
+```text id="yjaclp"
+ReadingSessionDisposedPayload
+├── readingSessionId
+├── lastReadingContextRevision?
+└── disposedAt
+```
+
+No further Reading Session mutation facts may occur for the disposed lifecycle.
+
+---
+
+# 22. Reading Context Event Set
+
+Reading Session v3 may publish:
+
+```text id="t64cg3"
+ReadingContextPrepared
+ReadingContextChanged
 ReadingContextInvalidated
-
 ReadingContextDisposed
 ```
 
----
+`ReadingContextPrepared` is the committed initial-context fact.
 
-# 18. ReadingContextLoading
-
-Published when Reading Session begins constructing a new Reading Context.
-
-Typical causes:
-
-- session activation
-- source change
-- chapter navigation
-- page navigation
-- viewport reconstruction
-
-Business meaning:
-
-A new Reading Context is being established.
-
-This event does not indicate that the context is already usable.
+It does not mean Candidate preparation began.
 
 ---
 
-# 19. ReadingContextReady
+# 23. ReadingContextPrepared
 
-Published when the Reading Context becomes authoritative.
+## Meaning
 
-Business meaning:
+The first valid ReadingContext was committed.
 
-The current reading world has been successfully identified.
+Typical transition:
 
-After this event,
-
-Reading Session may create a new ContentRevision.
-
-Typical payload:
-
-```text
-SessionId
-
-ContextId
-
-SourceId
-
-PageId
-
-ChapterId
-
-ContextVersion
+```text id="pbs56d"
+PREPARING → READY
 ```
 
-Only one ReadingContext may be Ready at any given moment.
+Payload:
+
+```text id="rct1fi"
+ReadingContextPreparedPayload
+├── readingSessionId
+├── readingContextRevision
+├── contextSnapshot
+├── changeReason
+└── committedAt
+```
+
+## Invariants
+
+* context snapshot immutable;
+* revision committed;
+* event occurs after state commit;
+* event does not imply downstream processing.
 
 ---
 
-# 20. ReadingContextUpdated
+# 24. ReadingContextChanged
 
-Published whenever the business understanding of the reading world changes.
+## Meaning
+
+A new committed ReadingContext replaced the previous committed ReadingContext.
+
+Typical transition:
+
+```text id="jrqqd2"
+UPDATING → READY
+```
+
+Payload:
+
+```text id="q0f81l"
+ReadingContextChangedPayload
+├── readingSessionId
+├── previousReadingContextRevision
+├── readingContextRevision
+├── contextSnapshot
+├── changeSet
+├── reason
+└── committedAt
+```
+
+---
+
+# 25. ReadingContextChangeSet
+
+Conceptually:
+
+```text id="02xj8p"
+ReadingContextChangeSet
+├── sourceChanged
+├── targetChanged
+├── positionChanged
+├── sourceLanguageChanged
+├── targetLanguageChanged
+├── configurationChanged
+└── otherDomainChange?
+```
+
+This describes what changed.
+
+It does not say what processing is required.
+
+---
+
+# 26. ReadingContextInvalidated
+
+## Meaning
+
+The current ReadingContext can no longer be trusted as a valid representation of the reading activity.
+
+Payload:
+
+```text id="98nu64"
+ReadingContextInvalidatedPayload
+├── readingSessionId
+├── readingContextRevision?
+├── reasonCode
+├── recoveryHint?
+└── invalidatedAt
+```
 
 Examples:
 
-- page changed
-- chapter changed
-- reading direction changed
-- viewport changed
-- active source changed
+```text id="jb6yys"
+source invalid
+restored context corrupt
+logical target invalid
+domain identity conflict
+```
 
-Business meaning:
+Do not publish this because:
 
-The previously accepted Reading Context is no longer current.
-
-A new business evaluation is required.
-
-This event commonly leads to:
-
-```text
-ContentRevisionCreated
+```text id="wrpa3a"
+OCR failed
+Translation failed
+Runtime timed out
+UI rendering failed
 ```
 
 ---
 
-# 21. ReadingContextInvalidated
+# 27. ReadingContextDisposed
 
-Published when the current Reading Context can no longer represent reality.
+## Meaning
 
-Examples:
+Reading Context state was permanently removed from the Reading Session lifecycle.
 
-- source removed
-- unsupported document
-- inconsistent metadata
-- invalid reading position
+Payload:
 
-Business meaning:
-
-ProcessingIntent generation must stop until a valid context exists.
-
-No Runtime behavior is implied.
-
----
-
-# 22. ReadingContextDisposed
-
-Published when the Reading Context is permanently released.
-
-Typical causes:
-
-- session disposal
-- context replacement
-- resource cleanup
-
-Disposed contexts never become Ready again.
-
----
-
-# 23. Content Revision Events
-
-Content Revision events describe changes to immutable snapshots of the reading world.
-
-Unlike Reading Context,
-
-a ContentRevision never changes after creation.
-
-Instead,
-
-new revisions replace older business authority.
-
-Defined events:
-
-```text
-ContentRevisionCreated
-
-ContentRevisionActivated
-
-ContentRevisionSuperseded
-
-ContentRevisionArchived
-
-ContentRevisionDiscarded
+```text id="f9js36"
+ReadingContextDisposedPayload
+├── readingSessionId
+├── lastReadingContextRevision?
+└── disposedAt
 ```
 
----
-
-# 24. ContentRevisionCreated
-
-Published whenever a new immutable revision is created.
-
-Typical causes:
-
-- Reading Context updated
-- configuration changed
-- language changed
-- reading mode changed
-
-Business meaning:
-
-A new snapshot of the reading world now exists.
-
-The revision is immutable from this moment onward.
-
-Typical payload:
-
-```text
-RevisionId
-
-SessionId
-
-RevisionNumber
-
-CreatedAt
-```
-
-Creation does not automatically make the revision authoritative.
+This does not describe Runtime Artifact cleanup.
 
 ---
 
-# 25. ContentRevisionActivated
+# 28. Navigation / Domain Change Facts
 
-Published when a revision becomes the current business authority.
+Some changes are important enough to deserve specialized facts in addition to `ReadingContextChanged`.
 
-Business meaning:
+Potential events:
 
-This revision replaces the previously active revision.
-
-Only one revision may be active.
-
-Immediately after activation,
-
-future ProcessingIntent objects reference this revision.
-
----
-
-# 26. ContentRevisionSuperseded
-
-Published when a newer revision replaces an existing one.
-
-Business meaning:
-
-The previous revision remains historically valid,
-
-but it is no longer authoritative.
-
-Superseded revisions never become active again.
-
-Typical consumers:
-
-- history storage
-- analytics
-- diagnostics
-- audit timeline
-
----
-
-# 27. ContentRevisionArchived
-
-Published when a historical revision moves into long-term storage.
-
-Business meaning:
-
-The revision remains available for historical inspection.
-
-It no longer participates in active business evaluation.
-
-Archiving never changes revision contents.
-
----
-
-# 28. ContentRevisionDiscarded
-
-Published when a revision is permanently removed.
-
-Business meaning:
-
-The revision is no longer retained by the system.
-
-Discarded revisions cannot be restored through business operations.
-
----
-
-# 29. Revision Event Ordering
-
-The typical lifecycle of a revision is:
-
-```text
-ContentRevisionCreated
-
-↓
-
-ContentRevisionActivated
-
-↓
-
-ContentRevisionSuperseded
-
-↓
-
-ContentRevisionArchived
-
-↓
-
-ContentRevisionDiscarded
-```
-
-Not every revision reaches every stage.
-
-For example,
-
-a revision may be discarded directly after creation if it becomes invalid before activation.
-
----
-
-# 30. Revision Event Rules
-
-The following guarantees always apply.
-
-1. Every revision produces exactly one `ContentRevisionCreated` event.
-
-2. A revision may produce at most one `ContentRevisionActivated` event.
-
-3. Only one revision is active within a Reading Session.
-
-4. Superseded revisions remain immutable.
-
-5. Archived revisions never become active.
-
-6. Discarded revisions never generate additional events.
-
----
-
-# 31. Processing Intent Events
-
-Processing Intent events describe the lifecycle of business intentions generated from a ContentRevision.
-
-These events do not describe execution.
-
-They describe only what business outcomes are required.
-
-Runtime is responsible for deciding how those outcomes are achieved.
-
-Defined events:
-
-```text
-ProcessingIntentCreated
-
-ProcessingIntentPublished
-
-ProcessingIntentAccepted
-
-ProcessingIntentFulfilled
-
-ProcessingIntentObsoleted
-
-ProcessingIntentDiscarded
-```
-
----
-
-# 32. ProcessingIntentCreated
-
-Published when Reading Session generates a new ProcessingIntent.
-
-Typical causes:
-
-- new ContentRevision activated
-- business configuration changed
-- language preference changed
-- reading mode changed
-
-Business meaning:
-
-A new business requirement has been identified.
-
-The ProcessingIntent is still private to Reading Session.
-
-Typical payload:
-
-```text
-IntentId
-
-RevisionId
-
-IntentType
-
-CreatedAt
-```
-
-Creation does not imply Runtime awareness.
-
----
-
-# 33. ProcessingIntentPublished
-
-Published when the ProcessingIntent becomes visible outside Reading Session.
-
-Business meaning:
-
-Reading Session has declared what business outcome is required.
-
-Responsibility for execution may now be assumed by Runtime.
-
-Typical payload:
-
-```text
-IntentId
-
-RevisionId
-
-IntentVersion
-
-PublishedAt
-```
-
-Publishing never guarantees execution.
-
-It only guarantees visibility.
-
----
-
-# 34. ProcessingIntentAccepted
-
-Published when Runtime acknowledges responsibility for the ProcessingIntent.
-
-Business meaning:
-
-The business request has been accepted for execution.
-
-Reading Session still does not know:
-
-- execution order
-- scheduling policy
-- worker allocation
-- provider selection
-
-Those remain Runtime responsibilities.
-
-This event exists solely to establish business acknowledgement.
-
----
-
-# 35. ProcessingIntentFulfilled
-
-Published when the requested business outcome has been achieved.
-
-Business meaning:
-
-The ProcessingIntent no longer requires additional business action.
-
-Examples:
-
-- translated content is available
-- presentation artifact exists
-- requested reading result has been produced
-
-Reading Session evaluates only the existence of the business outcome.
-
-It does not evaluate how that outcome was produced.
-
-Fulfilled ProcessingIntent objects remain historical facts.
-
----
-
-# 36. ProcessingIntentObsoleted
-
-Published when an existing ProcessingIntent is no longer relevant.
-
-Typical causes:
-
-- newer ContentRevision activated
-- Reading Context changed
-- Session completed
-- Session cancelled
-- configuration replaced
-
-Business meaning:
-
-The original business objective should no longer be considered current.
-
-Obsolete intents never become Fulfilled afterward.
-
----
-
-# 37. ProcessingIntentDiscarded
-
-Published when a ProcessingIntent is permanently removed.
-
-Business meaning:
-
-The intent is no longer retained by Reading Session.
-
-Discarded intents never produce additional business events.
-
----
-
-# 38. Processing Intent Event Ordering
-
-The normal lifecycle is:
-
-```text
-ProcessingIntentCreated
-
-↓
-
-ProcessingIntentPublished
-
-↓
-
-ProcessingIntentAccepted
-
-↓
-
-ProcessingIntentFulfilled
-```
-
-Replacement path:
-
-```text
-ProcessingIntentCreated
-
-↓
-
-ProcessingIntentPublished
-
-↓
-
-ProcessingIntentObsoleted
-
-↓
-
-ProcessingIntentDiscarded
-```
-
-Replacement may occur at any point before fulfillment.
-
----
-
-# 39. Processing Intent Rules
-
-The following guarantees always apply.
-
-1. Every ProcessingIntent produces exactly one `ProcessingIntentCreated` event.
-
-2. Every published ProcessingIntent references exactly one ContentRevision.
-
-3. Fulfilled intents never become obsolete.
-
-4. Obsolete intents never become fulfilled.
-
-5. ProcessingIntent events are append-only.
-
-6. Runtime never changes business ownership.
-
----
-
-# 40. Configuration Events
-
-Configuration events describe changes to business configuration affecting the reading experience.
-
-These events represent business facts.
-
-They never instruct Runtime to perform a particular implementation.
-
-Defined events:
-
-```text
-ConfigurationUpdated
-
-LanguageChanged
-
+```text id="p1ltnb"
+ReadingTargetChanged
+ReadingSourceChanged
+ReadingPositionChanged
+ReadingConfigurationChanged
+ReadingLanguageChanged
 ReadingModeChanged
-
-TranslationModeChanged
-
-SourceChanged
 ```
+
+These events are optional specialized domain projections.
+
+The architecture must avoid emitting redundant overlapping events without a clear consumer need.
 
 ---
 
-# 41. ConfigurationUpdated
+# 29. Preferred MVP Event Strategy
 
-Published whenever SessionConfiguration changes.
+For MVP, prefer a compact event set:
 
-Examples:
-
-- OCR preference updated
-- translation preference updated
-- presentation preference updated
-- quality profile changed
-
-Business meaning:
-
-Future ContentRevision evaluation uses the new configuration.
-
-Existing historical revisions remain unchanged.
-
----
-
-# 42. LanguageChanged
-
-Published when the preferred reading language changes.
-
-Examples:
-
-```text
-Chinese
-
-↓
-
-Vietnamese
-```
-
-or
-
-```text
-Japanese
-
-↓
-
-English
-```
-
-Business meaning:
-
-Future ProcessingIntent objects must reflect the new language preference.
-
-Previously fulfilled ProcessingIntent objects remain historically correct.
-
----
-
-# 43. ReadingModeChanged
-
-Published when the reading mode changes.
-
-Examples:
-
-```text
-Comic
-
-↓
-
-Novel
-```
-
-or
-
-```text
-Vertical
-
-↓
-
-Horizontal
-```
-
-Business meaning:
-
-The business interpretation of the reading experience has changed.
-
-Reading Session may create a new ContentRevision.
-
----
-
-# 44. TranslationModeChanged
-
-Published when the preferred translation strategy changes.
-
-Examples:
-
-```text
-Image Overlay
-
-↓
-
-Text View
-```
-
-or
-
-```text
-Automatic
-
-↓
-
-Manual
-```
-
-Business meaning:
-
-Future ProcessingIntent generation follows the new translation strategy.
-
-Existing revisions remain immutable.
-
----
-
-# 45. SourceChanged
-
-Published when the active reading source changes.
-
-Examples:
-
-- browser tab switched
-- different chapter opened
-- different document selected
-- different manga loaded
-
-Business meaning:
-
-The current Reading Context is no longer authoritative.
-
-SourceChanged commonly leads to the following event sequence:
-
-```text
-SourceChanged
-
-↓
-
-ReadingContextUpdated
-
-↓
-
-ContentRevisionCreated
-
-↓
-
-ContentRevisionActivated
-
-↓
-
-ProcessingIntentCreated
-
-↓
-
-ProcessingIntentPublished
-```
-
-SourceChanged never implies a Runtime restart.
-
-Only the business world has changed.
-
----
-
-# 46. Event Ordering
-
-Reading Session guarantees deterministic ordering of business events.
-
-Consumers must observe events in the same logical order in which business facts occur.
-
-Ordering is defined by business causality,
-
-not by transport implementation.
-
----
-
-## 46.1 Ordering Principles
-
-Business events are ordered according to cause and effect.
-
-For example,
-
-a ContentRevision cannot become active before it exists.
-
-Likewise,
-
-a ProcessingIntent cannot be published before it has been created.
-
-Ordering must therefore reflect business reality.
-
----
-
-## 46.2 Typical Session Startup
-
-A newly created Reading Session typically produces the following sequence.
-
-```text
+```text id="5bfb38"
 ReadingSessionCreated
-
-↓
-
 ReadingSessionActivated
-
-↓
-
-ReadingContextLoading
-
-↓
-
-ReadingContextReady
-
-↓
-
-ContentRevisionCreated
-
-↓
-
-ContentRevisionActivated
-
-↓
-
-ProcessingIntentCreated
-
-↓
-
-ProcessingIntentPublished
-```
-
-Every event represents a completed business fact.
-
----
-
-## 46.3 Page Navigation
-
-When the user changes page,
-
-the business ordering is:
-
-```text
-ReadingContextUpdated
-
-↓
-
-ContentRevisionCreated
-
-↓
-
-ContentRevisionActivated
-
-↓
-
-ContentRevisionSuperseded
-
-↓
-
-ProcessingIntentCreated
-
-↓
-
-ProcessingIntentPublished
-
-↓
-
-ProcessingIntentObsoleted
-```
-
-The exact number of obsolete ProcessingIntent objects depends on business history.
-
----
-
-## 46.4 Language Change
-
-Changing the preferred language typically produces:
-
-```text
-LanguageChanged
-
-↓
-
-ContentRevisionCreated
-
-↓
-
-ContentRevisionActivated
-
-↓
-
-ProcessingIntentCreated
-
-↓
-
-ProcessingIntentPublished
-```
-
-Previously fulfilled business history remains unchanged.
-
----
-
-## 46.5 Session Completion
-
-A normal reading session may end with:
-
-```text
+ReadingContextPrepared
+ReadingContextChanged
+ReadingSessionPaused
+ReadingSessionResumed
 ReadingSessionCompleted
-
-↓
-
+ReadingSessionCancelled
+ReadingContextInvalidated
 ReadingSessionDisposed
 ```
 
-No additional business events are produced afterward.
+`ReadingContextChanged.changeSet` provides most fine-grained information.
+
+Specialized events should be added only where they materially simplify consumers.
 
 ---
 
-# 47. Event Delivery
+# 30. ReadingTargetChanged
 
-Reading Session defines semantic delivery requirements.
+If retained as a specialized event:
 
-Transport technology is implementation dependent.
+```text id="kjy6gr"
+ReadingTargetChangedPayload
+├── readingSessionId
+├── previousReadingContextRevision
+├── readingContextRevision
+├── previousTarget?
+├── target
+└── reason
+```
 
-Examples include:
-
-- Event Bus
-- Message Queue
-- Local Dispatcher
-- In-Process Event Publisher
-
-The architecture defines guarantees,
-
-not infrastructure.
-
----
-
-## 47.1 Delivery Guarantees
-
-Business events should satisfy the following properties.
-
-- immutable
-- ordered
-- durable when required
-- uniquely identifiable
-- replayable where supported
+It must correspond to the same committed revision as the related context change.
 
 ---
 
-## 47.2 At-Least-Once Delivery
+# 31. ReadingSourceChanged
 
-Consumers should assume events may be delivered more than once.
+If retained:
 
-Business consumers must therefore be idempotent.
+```text id="p1s5fo"
+ReadingSourceChangedPayload
+├── readingSessionId
+├── previousReadingContextRevision
+├── readingContextRevision
+├── previousSource?
+├── source
+└── reason
+```
 
-Duplicate delivery must never produce duplicate business state.
+It means logical ReadingSource changed.
+
+It does not mean Runtime restart.
 
 ---
 
-## 47.3 Ordering Scope
+# 32. ReadingPositionChanged
 
-Ordering is guaranteed only within a single Reading Session.
+If business-significant ReadingPosition changed:
 
-For example:
+```text id="hfwd6c"
+ReadingPositionChangedPayload
+├── readingSessionId
+├── previousReadingContextRevision
+├── readingContextRevision
+├── previousPosition?
+├── position
+└── reason
+```
 
-```text
-Session A
+Raw scrolling should be normalized/coalesced before Reading Session sees it.
 
-ReadingContextUpdated
+---
 
-↓
+# 33. ReadingConfigurationChanged
 
+Preferred replacement for generic:
+
+```text id="x24wo5"
+ConfigurationUpdated
+```
+
+Payload:
+
+```text id="j4441c"
+ReadingConfigurationChangedPayload
+├── readingSessionId
+├── previousReadingContextRevision
+├── readingContextRevision
+├── changedFields[]
+├── configurationSummary
+└── reason
+```
+
+This fact describes session-specific configuration only.
+
+Persistent preference facts belong to Preferences.
+
+---
+
+# 34. ReadingLanguageChanged
+
+Optional specialized event:
+
+```text id="wgs3ok"
+ReadingLanguageChangedPayload
+├── readingSessionId
+├── previousReadingContextRevision
+├── readingContextRevision
+├── previousSourceLanguage?
+├── sourceLanguage?
+├── previousTargetLanguage?
+└── targetLanguage?
+```
+
+This event does not say:
+
+```text id="9qg06s"
+Translation must run
+```
+
+Business Pipeline Orchestration decides that.
+
+---
+
+# 35. ReadingModeChanged
+
+If reading mode is a Reading Session-owned domain configuration:
+
+```text id="bwcm5c"
+ReadingModeChangedPayload
+├── readingSessionId
+├── previousReadingContextRevision
+├── readingContextRevision
+├── previousReadingMode
+└── readingMode
+```
+
+Do not confuse this with PresentationMode.
+
+---
+
+# 36. ReadingMode vs PresentationMode
+
+Reading mode may mean:
+
+```text id="6i2x7o"
+Comic
+Novel
+Document
+VerticalReading
+PagedReading
+```
+
+Presentation mode may mean:
+
+```text id="5bg4eu"
+SidePanel
+Overlay
+TextReader
+```
+
+Their events must remain owned by their respective domains.
+
+---
+
+# 37. Removed ContentRevision Events
+
+The following v2 events are removed:
+
+```text id="w8o4pc"
 ContentRevisionCreated
+ContentRevisionActivated
+ContentRevisionSuperseded
+ContentRevisionArchived
+ContentRevisionDiscarded
 ```
 
-must remain ordered.
+Replacement semantics:
 
-However,
-
-events from different Reading Sessions may interleave freely.
-
----
-
-## 47.4 Event Replay
-
-Previously published events may be replayed for:
-
-- recovery
-- diagnostics
-- analytics
-- projection rebuilding
-- audit
-
-Replay must never change historical event contents.
-
----
-
-# 48. Event Correlation
-
-Business events frequently participate in larger business flows.
-
-Correlation metadata allows consumers to reconstruct these flows.
-
-Typical metadata includes:
-
-```text
-CorrelationId
-
-CausationId
-
-SessionId
-
-RevisionId
-
-IntentId
+```text id="xm0etn"
+ReadingContextRevision appears
+inside committed ReadingContext events.
 ```
 
-Correlation metadata does not affect event semantics.
-
-It only improves traceability.
+No separate revision lifecycle is required.
 
 ---
 
-## 48.1 CorrelationId
+# 38. Why ContentRevisionActivated Is Removed
 
-CorrelationId groups events belonging to the same logical business activity.
+Previously:
+
+```text id="sp6yvk"
+ContentRevisionCreated
+    ↓
+ContentRevisionActivated
+```
+
+created an unnecessary two-phase business authority model.
+
+v3 uses:
+
+```text id="7x0k2l"
+Candidate ReadingContext
+    ↓
+atomic commit
+    ↓
+ReadingContextRevision N
+is current
+```
+
+There is no externally visible “created but not active revision” business state.
+
+---
+
+# 39. Why ContentRevisionSuperseded Is Removed
+
+A previous ReadingContextRevision does not need a business lifecycle transition.
 
 Example:
 
-```text
-PageChanged
+```text id="hozex9"
+Revision 20 current
+    ↓
+Revision 21 commits
+```
 
-↓
+Revision 20 remains historical if retained.
 
-ReadingContextUpdated
+Runtime execution supersession is a separate Runtime concept.
 
-↓
+---
 
-ContentRevisionCreated
+# 40. Removed ProcessingIntent Events
 
-↓
+The following v2 events are removed:
 
+```text id="l1j77j"
+ProcessingIntentCreated
 ProcessingIntentPublished
+ProcessingIntentAccepted
+ProcessingIntentFulfilled
+ProcessingIntentObsoleted
+ProcessingIntentDiscarded
 ```
 
-All events above may share one CorrelationId.
+They no longer belong to Reading Session.
 
 ---
 
-## 48.2 CausationId
+# 41. Why ProcessingIntentAccepted Is Removed
 
-CausationId identifies the event that directly caused another event.
+This fact requires Reading Session to know:
+
+```text id="f8jzy4"
+Runtime accepted execution responsibility
+```
+
+That is Runtime-owned execution state.
+
+---
+
+# 42. Why ProcessingIntentFulfilled Is Removed
+
+This event required Reading Session to determine:
+
+```text id="v294fc"
+the requested processing objective was fulfilled
+```
+
+That requires processing topology and accepted Artifact knowledge.
+
+Those belong to:
+
+```text id="kk166z"
+Business Pipeline Orchestration
+Runtime
+Artifact lifecycle
+```
+
+not Reading Session.
+
+---
+
+# 43. Events Do Not Replace Pipeline Orchestration
+
+Invalid:
+
+```text id="lgbfjw"
+ReadingContextChanged
+    ↓
+Recognition starts directly
+```
+
+Preferred:
+
+```text id="c89q8z"
+ReadingContextChanged / current context state
+        ↓
+Business Pipeline Orchestration
+        ↓
+pipeline requirement evaluation
+        ↓
+Runtime Control
+```
+
+---
+
+# 44. Event Consumers
+
+Potential consumers of Reading Session facts include:
+
+```text id="0rranq"
+Business Pipeline Orchestration
+Application
+Persistence projection
+Analytics
+Diagnostics
+History
+UI coordination
+```
+
+Processing modules should generally not subscribe directly to Reading Session events to self-orchestrate work.
+
+---
+
+# 45. Consumer Independence
+
+Reading Session publishes facts without assuming:
+
+* subscriber count;
+* subscriber success;
+* subscriber implementation;
+* processing topology.
+
+A failed subscriber does not roll back already committed Reading Session state.
+
+---
+
+# 46. External Input Events
+
+Reading Session has no mandatory direct consumed-event set.
+
+External facts such as:
+
+```text id="99f1si"
+BrowserNavigated
+ViewportChanged
+PreferenceChanged
+UserSelectedRegion
+```
+
+should normally be normalized by Application/Adapters into Reading Session commands.
+
+---
+
+# 47. Why Direct Event Consumption Is Avoided
+
+Direct event-driven domain mutation creates hidden command paths.
+
+Preferred:
+
+```text id="71szl6"
+External Adapter
+    ↓
+normalized application intent
+    ↓
+Reading Session command
+```
+
+This preserves:
+
+* command validation;
+* optimistic concurrency;
+* testability;
+* deterministic mutation.
+
+---
+
+# 48. Correlation
+
+Reading Session events may include:
+
+```text id="y6kzcx"
+correlationId
+causationId
+traceId
+requestId?
+```
+
+to connect business activity across modules.
+
+Correlation metadata does not affect event meaning.
+
+---
+
+# 49. Causation
+
+Typical causation:
+
+```text id="ujkvlt"
+UpdateReadingTarget command
+        ↓
+ReadingContext commit
+        ↓
+ReadingContextChanged
+```
+
+If a specialized `ReadingTargetChanged` event is also emitted, both events may reference the same command causation.
+
+---
+
+# 50. Event Ordering
+
+Reading Session guarantees logical ordering only within one ReadingSession aggregate according to committed domain state.
+
+Ordering is derived from:
+
+```text id="xd7289"
+ReadingContextRevision
++
+Session lifecycle transition order
+```
+
+No global ordering is assumed across different ReadingSessions or modules.
+
+---
+
+# 51. Startup Ordering
+
+A typical startup may produce:
+
+```text id="evp892"
+ReadingSessionCreated
+        ↓
+ReadingContextPrepared
+        ↓
+ReadingSessionActivated
+```
+
+or:
+
+```text id="48e7cl"
+ReadingSessionCreated
+        ↓
+ReadingSessionActivated
+        ↓
+ReadingContextPrepared
+```
+
+depending on whether activation requires initial context.
+
+The final choice must be fixed by `STATES.md`/command semantics.
+
+The event model itself must reflect committed transition order.
+
+---
+
+# 52. Context Update Ordering
 
 Example:
 
-```text
-ReadingContextUpdated
-
-↓
-
-ContentRevisionCreated
+```text id="zk0euu"
+Revision 10 committed
+        ↓
+new domain command
+        ↓
+Revision 11 committed
+        ↓
+ReadingContextChanged revision 11
 ```
 
-The second event references the first as its causal predecessor.
+If specialized events are emitted for the same commit:
 
-This enables complete business event chains.
+```text id="wa4xs3"
+ReadingTargetChanged revision 11
+ReadingContextChanged revision 11
+```
+
+their relative ordering must be documented if consumers depend on it.
+
+Prefer avoiding such dependency.
 
 ---
 
-# 49. Event Consumers
+# 53. Session Completion Ordering
 
-Reading Session publishes events for other modules.
+Typical:
 
-It does not dictate how those modules react.
+```text id="6vc8ue"
+ReadingSessionCompleted
+        ↓
+ReadingSessionDisposed
+```
 
-Potential consumers include:
+if disposal immediately follows completion.
 
-```text
+A completed session may also remain retained before disposal.
+
+---
+
+# 54. Cancellation Ordering
+
+Typical:
+
+```text id="1p5mda"
+ReadingSessionCancelled
+        ↓
+ReadingSessionDisposed
+```
+
+Runtime cancellation events may occur before or after due to independent ownership.
+
+Consumers MUST NOT infer Runtime cancellation completion from ReadingSessionCancelled ordering.
+
+---
+
+# 55. No Cross-Module Global Order
+
+Do not assume:
+
+```text id="x3jzo7"
+ReadingContextChanged
+must globally occur before
+RuntimeRevisionCreated
+```
+
+at transport level.
+
+Use causation/correlation and owner-specific revisions.
+
+---
+
+# 56. Event Idempotency
+
+Duplicate delivery of the same:
+
+```text id="x6c0xd"
+EventId
+```
+
+must not create duplicate logical consumer effects.
+
+Consumers should implement idempotency according to Event Bus delivery profile.
+
+---
+
+# 57. Event Delivery Semantics
+
+Actual delivery guarantees belong to Event Bus architecture.
+
+Reading Session does not redefine:
+
+```text id="rl7de2"
+at-most-once
+at-least-once
+durability
+replay
+ordering implementation
+```
+
+Those are infrastructure/runtime profile decisions.
+
+---
+
+# 58. Event Replay
+
+If Event Bus or Storage supports replay:
+
+* historical event contents remain immutable;
+* replay does not mutate historical facts;
+* consumers must remain idempotent;
+* replay does not make stale ReadingContextRevision current.
+
+Current state comes from Reading Session state/query or authoritative projection.
+
+---
+
+# 59. Events Are Not State
+
+Event:
+
+```text id="3br4k7"
+ReadingContextChanged revision 20
+```
+
+means revision 20 was committed at that point.
+
+State query may later return:
+
+```text id="r0n302"
+ReadingContextRevision 25
+```
+
+Historical event remains correct.
+
+---
+
+# 60. Events Are Not Query Replacement
+
+Consumers needing current Reading Session state should use queries such as:
+
+```text id="cjhc3y"
+GetReadingSession
+GetReadingContext
+GetReadingContextRevision
+GetSessionState
+```
+
+Event delivery alone should not be treated as guaranteed current-state storage.
+
+---
+
+# 61. Event Publication Failure
+
+Reading Session state commit and event publication are separate technical operations.
+
+If:
+
+```text id="rbj7h7"
+ReadingContextRevision 15 committed
+```
+
+but event publication fails:
+
+```text id="9phr2q"
+Revision 15 remains current.
+```
+
+Do not roll back the valid domain commit merely to recreate the event.
+
+---
+
+# 62. Publication Failure Recovery
+
+Possible infrastructure recovery:
+
+```text id="4umlfn"
+outbox
+retry publication
+projection reconciliation
+query-based recovery
+```
+
+Those mechanisms belong to infrastructure/Application policy.
+
+Reading Session does not rerun the domain command automatically.
+
+---
+
+# 63. Privacy
+
+Reading Session event payloads should avoid unnecessary raw reading content.
+
+Prefer:
+
+```text id="1j25gl"
+ReadingSessionId
+ReadingContextRevision
+source identifiers
+target identifiers
+language values
+bounded configuration summary
+change flags
+```
+
+Avoid:
+
+* screenshots;
+* full page text;
+* full translation;
+* raw HTML;
+* authentication data;
+* provider secrets;
+* native handles.
+
+---
+
+# 64. Source Locator Privacy
+
+ReadingSource locators may contain sensitive information.
+
+Events SHOULD avoid publishing complete URLs, filesystem paths, or private identifiers unless required.
+
+Prefer stable opaque source identifiers plus bounded metadata.
+
+---
+
+# 65. Event Versioning
+
+Each event has its own semantic version.
+
+Compatible additions may include:
+
+* new optional fields;
+* new optional metadata;
+* compatible enum extensions.
+
+Major version required when:
+
+* event meaning changes;
+* required field removed;
+* ownership changes;
+* ReadingContextRevision semantics change.
+
+---
+
+# 66. Module Version Migration
+
+Reading Session EVENTS v3 is a major revision because it removes:
+
+```text id="zpgof6"
+ContentRevision lifecycle events
+ProcessingIntent lifecycle events
+```
+
+and replaces them with committed ReadingContextRevision semantics.
+
+---
+
+# 67. Stable Event Set
+
+Recommended v3 core:
+
+```text id="p73dii"
+ReadingSessionCreated
+ReadingSessionActivated
+ReadingSessionPaused
+ReadingSessionResumed
+ReadingSessionCompleted
+ReadingSessionCancelled
+ReadingSessionDisposed
+
+ReadingContextPrepared
+ReadingContextChanged
+ReadingContextInvalidated
+ReadingContextDisposed
+```
+
+Optional specialized facts:
+
+```text id="k6d0zr"
+ReadingTargetChanged
+ReadingSourceChanged
+ReadingPositionChanged
+ReadingConfigurationChanged
+ReadingLanguageChanged
+ReadingModeChanged
+```
+
+---
+
+# 68. Event Error Semantics
+
+Reading Session events themselves should not expose Runtime execution errors.
+
+If a Reading Session command was rejected:
+
+```text id="2d06wx"
+no success domain fact is emitted
+```
+
+A separate `ReadingSessionCommandRejected` event is not required for MVP.
+
+Errors are returned through command contracts and diagnostics.
+
+---
+
+# 69. Failure Facts
+
+Reading Session does not require a general:
+
+```text id="oovnzf"
+ReadingSessionFailed
+```
+
+event in v3 because the lifecycle has no generic `FAILED` state.
+
+Domain invalidity is represented by:
+
+```text id="ya577v"
+ReadingContextInvalidated
+```
+
+and activity termination by:
+
+```text id="wscacp"
+ReadingSessionCancelled
+```
+
+A future fatal-domain event may be introduced only if it has distinct business meaning.
+
+---
+
+# 70. Domain Facts vs Diagnostics
+
+Business events are stable architectural facts.
+
+Diagnostics may record:
+
+```text id="si7ahq"
+candidate validation failed
+revision conflict
+no-op
+duplicate command
+publication latency
+```
+
+without promoting every condition to a business event.
+
+---
+
+# 71. Observability
+
+Useful event metrics:
+
+```text id="m83au9"
+reading_session_event_published_total
+reading_session_event_publish_failed_total
+reading_context_revision_total
+reading_context_changed_total
+reading_context_invalidated_total
+reading_session_lifecycle_transition_total
+```
+
+Avoid user-content labels.
+
+---
+
+# 72. Testing — Ownership
+
+Tests MUST verify Reading Session never publishes:
+
+```text id="u03tk6"
+ProcessingIntentPublished
+ProcessingIntentAccepted
+ProcessingIntentFulfilled
+ContentRevisionSuperseded
+RuntimeRevisionSuperseded
+WorkItemCompleted
+AttemptCancelled
+TranslationCompleted
+PresentationUpdated
+```
+
+---
+
+# 73. Testing — Commit Timing
+
+Tests MUST verify:
+
+```text id="urkrcc"
+state commit
+before
+success event
+```
+
+for:
+
+* ReadingSessionCreated;
+* ReadingSessionActivated;
+* ReadingContextPrepared;
+* ReadingContextChanged;
+* ReadingSessionPaused;
+* ReadingSessionResumed;
+* ReadingSessionCompleted;
+* ReadingSessionCancelled;
+* ReadingSessionDisposed.
+
+---
+
+# 74. Testing — Revision
+
+Tests MUST verify:
+
+* ReadingContextChanged carries committed revision;
+* previous revision is correct;
+* no-op emits no context-change event;
+* rejected candidate emits no success fact;
+* revision never decreases;
+* RuntimeRevisionId is not used as Reading Session event ordering.
+
+---
+
+# 75. Testing — Lifecycle Independence
+
+Tests MUST verify:
+
+```text id="60mygi"
+ReadingSessionCancelled
+```
+
+does not imply a Runtime cancellation event was already published.
+
+Likewise:
+
+```text id="q69uun"
+ReadingSessionCompleted
+```
+
+does not imply Runtime work completed.
+
+---
+
+# 76. Testing — Processing Independence
+
+Tests MUST verify:
+
+* OCR success/failure does not directly produce Reading Session events;
+* Translation completion does not directly produce Reading Session lifecycle events;
+* Presentation commit does not mutate ReadingContext;
+* UI apply failure does not mutate ReadingSession events.
+
+---
+
+# 77. Testing — Event Publication Failure
+
+Tests should verify:
+
+```text id="5q6atl"
+domain commit succeeds
+event publication fails
+```
+
+results in:
+
+```text id="3y37jj"
+domain state remains committed
+```
+
+without duplicate domain execution.
+
+---
+
+# 78. Architecture Invariants
+
+1. Reading Session events describe Reading Session-owned facts only.
+
+2. Events describe facts, not commands.
+
+3. Reading Session events publish only after domain commit.
+
+4. Candidate state produces no success event.
+
+5. ReadingContextRevision is carried by committed context facts.
+
+6. ReadingContextRevision is not a lifecycle event family.
+
+7. ContentRevision lifecycle events are removed.
+
+8. ProcessingIntent events are removed.
+
+9. Runtime execution events remain Runtime-owned.
+
+10. Processing-module events remain module-owned.
+
+11. Presentation events remain Presentation-owned.
+
+12. UI rendering events remain UI Adapter-owned.
+
+13. ReadingSessionCancelled does not mean Runtime Attempt cancellation.
+
+14. ReadingSessionCompleted does not mean processing completion.
+
+15. ReadingContextInvalidated does not mean processing failure.
+
+16. Events do not replace Business Pipeline Orchestration.
+
+17. Processing modules should not self-orchestrate directly from Reading Session events.
+
+18. External UI/browser facts should normally become commands through adapters/Application.
+
+19. Events are immutable.
+
+20. EventId supports idempotency.
+
+21. Ordering is scoped, not global.
+
+22. ReadingContextRevision orders Reading Context state only.
+
+23. Event publication failure does not roll back committed domain state.
+
+24. Replay does not change historical facts.
+
+25. Event payloads remain serializable and platform-independent.
+
+26. Normal payloads avoid raw reading content.
+
+---
+
+# 79. Related Documents
+
+```text id="9u5vwg"
+doc/02-modules/reading-session/MODULE.md
+doc/02-modules/reading-session/CONTRACT.md
+doc/02-modules/reading-session/STATES.md
+doc/02-modules/reading-session/ERRORS.md
+doc/02-modules/reading-session/README.md
+
+doc/01-architecture/core/EVENT_BUS.md
+doc/01-architecture/core/EVENT_CONVENTION.md
+doc/01-architecture/core/STATE_MACHINE.md
+
+doc/01-architecture/modules/OWNERSHIP_MAP.md
+doc/01-architecture/modules/MODULE_DEPENDENCY.md
+
+doc/01-architecture/runtime/BUSINESS_PIPELINE_ORCHESTRATION.md
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/CANCELLATION.md
+```
+
+---
+
+# 80. Completion Criteria
+
+This event specification is synchronized when:
+
+* all events belong to Reading Session-owned domain facts;
+* ProcessingIntent events are absent;
+* ContentRevision lifecycle events are absent;
+* ReadingContextRevision appears only as committed domain version;
+* Runtime authority is absent from event ownership;
+* events publish after state commit;
+* lifecycle events remain independent from Runtime lifecycle;
+* context facts do not imply pipeline execution;
+* external UI/browser signals are normalized outside Reading Session;
+* event publication failure does not invalidate committed state;
+* event ordering uses ReadingSession/ReadingContext semantics;
+* tests cover ownership, revision, lifecycle independence, publication timing, and privacy.
+
+---
+
+# 81. Summary
+
+Reading Session v3 event flow is:
+
+```text id="2ws7ny"
+Application / User Domain Intent
+        ↓
+Reading Session Command
+        ↓
+Domain Validation
+        ↓
+Candidate Reading Context / Lifecycle Change
+        ↓
+Atomic Commit
+        ↓
+ReadingContextRevision if applicable
+        ↓
+Reading Session-owned Fact
+        ↓
+Business Pipeline Orchestration / Other Consumers
+```
+
+Core event ownership is:
+
+```text id="2ollne"
+Reading Session
+    → reading-domain facts
+
+Business Pipeline Orchestration
+    → processing requirement decisions
+
 Runtime
+    → execution facts
 
-Recognition
-
-Translation
+Processing Modules
+    → processing-result facts
 
 Presentation
+    → presentation facts
 
-Analytics
-
-History
-
-Logging
-
-Monitoring
+UI Adapter
+    → rendering/apply facts
 ```
 
-Each consumer decides independently how to interpret business events.
+The central rule is:
 
-Reading Session never assumes downstream behavior.
+```text id="w8trrc"
+Reading Session events say
+what changed in the reading world.
 
----
-
-## 49.1 Consumer Independence
-
-Business events are published without knowledge of subscribers.
-
-Reading Session does not require:
-
-- subscriber existence
-- subscriber success
-- subscriber implementation details
-
-This preserves module independence.
-
----
-
-## 49.2 Business Contract Stability
-
-Consumers depend only on the published event contract.
-
-Internal implementation changes within Reading Session must not alter event meaning.
-
-Stable event contracts enable independent module evolution.
-
----
-
-# 50. Event Invariants
-
-The following guarantees always remain true.
-
----
-
-## 50.1 Business Facts Never Change
-
-Published events are immutable.
-
-Corrections generate new events.
-
-Existing events remain unchanged forever.
-
----
-
-## 50.2 Event Ordering Is Deterministic
-
-Given identical business history,
-
-the same sequence of business events must always be produced.
-
----
-
-## 50.3 Event Ownership Is Unique
-
-Every event belongs to exactly one business module.
-
-Reading Session never publishes Runtime events.
-
-Runtime never publishes Reading Session events.
-
-Ownership is unambiguous.
-
----
-
-## 50.4 Events Never Execute Work
-
-Business events describe completed facts.
-
-They never request execution.
-
-Incorrect:
-
-```text
-RunTranslation
+They do not say
+what processing should run
+or whether execution is still authoritative.
 ```
-
-Correct:
-
-```text
-ProcessingIntentPublished
-```
-
----
-
-## 50.5 Events Never Replace State
-
-Events explain what happened.
-
-State explains what currently exists.
-
-Both are required,
-
-but they serve different architectural purposes.
-
----
-
-## 50.6 Historical Events Remain Valid
-
-Older events remain historically correct,
-
-even when newer revisions replace previous business authority.
-
-Historical truth is never rewritten.
-
----
-
-# 51. Related Documents
-
-This specification works together with the remaining Reading Session documentation.
-
-```text
-README.md
-
-MODULE.md
-
-CONTRACT.md
-
-STATES.md
-
-ERRORS.md
-```
-
-Responsibilities are divided as follows.
-
-| Document | Responsibility |
-|----------|----------------|
-| README | Module overview |
-| MODULE | Responsibilities and ownership |
-| CONTRACT | Public APIs and contracts |
-| STATES | Business lifecycle |
-| EVENTS | Business facts and event contracts |
-| ERRORS | Business error model |
-
-Each document owns a separate architectural concern.
-
----
-
-# 52. Summary
-
-Reading Session communicates exclusively through immutable business events.
-
-The module defines five event categories.
-
-```text
-Reading Session Events
-
-├── Session Lifecycle Events
-├── Reading Context Events
-├── Content Revision Events
-├── Processing Intent Events
-└── Configuration Events
-```
-
-These events describe **what has happened** in the business domain.
-
-They never describe execution,
-
-worker activity,
-
-processing pipelines,
-
-or infrastructure behavior.
-
-Together with `STATES.md`, this document establishes a clear separation between:
-
-- **Business State** (what currently exists)
-- **Business Events** (what has happened)
-
-This separation enables deterministic behavior, append-only business history, independent module evolution, and complete decoupling from Runtime execution.
-
----
-
-# End of Document

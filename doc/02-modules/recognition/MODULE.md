@@ -1,306 +1,348 @@
 # Recognition Module Specification
 
-> Project: CRAI  
-> Module: Recognition  
-> Path: `modules/recognition/MODULE.md`  
-> Version: 1.0  
-> Status: Architecture Draft
+> **Project:** CRAI
+> **Module:** Recognition
+> **Path:** `02-modules/recognition/MODULE.md`
+> **Version:** 1.1
+> **Status:** Architecture Draft
+> **Architecture Reference:** `01-architecture/ocr/`
 
 ---
 
-## 1. Module Definition
+# 1. Module Definition
 
-Recognition là Business Processing Module chịu trách nhiệm chuyển image-based input thành structured, spatially aligned source content.
+Recognition là Core Business Processing Module chịu trách nhiệm chuyển image-based input thành structured source-content candidate để Runtime đánh giá và publish.
 
-Module boundary bắt đầu khi Runtime cung cấp một immutable Recognition Attempt Input hợp lệ.
+Recognition bắt đầu khi Runtime cung cấp một immutable `RecognitionAttemptInput` hợp lệ.
 
-Module boundary kết thúc khi Recognition tạo:
+Recognition kết thúc khi module tạo:
 
-- Candidate Recognition Artifact;
-- module warnings;
-- normalized module error hoặc retry hint;
-- module-specific diagnostics;
-- Attempt Completion để Runtime đánh giá.
+* Candidate Recognition Artifact
+* module warnings
+* normalized module error nếu có
+* retry/fallback hints nếu có
+* diagnostics
+* Attempt Completion
 
 Recognition không trực tiếp tạo authoritative published result.
 
 ```text
 Image Artifact
-    ↓
-Recognition Execution
-    ↓
+      ↓
+Runtime Recognition Attempt
+      ↓
+Recognition Module
+      ↓
 Candidate Recognition Artifact
-    ↓
+      ↓
 Runtime Authority Validation
-    ↓
-Artifact Store Publication
+      ↓
+Artifact Publication
 ```
 
-Recognition là image-to-structured-source module.
+Recognition là module điều phối OCR semantics cho image-based source content.
 
-Nó không phải:
-
-- Capture Module;
-- Observation Module;
-- Text Processing Module;
-- Translation Module;
-- Presentation Module;
-- Runtime Controller;
-- Provider Manager;
-- Storage Module.
-
----
-
-## 2. Module Identity
+Chi tiết semantics của từng OCR stage được định nghĩa tại:
 
 ```text
-Module ID: recognition
-Module Type: Core Business Processing Module
-Primary Domain: Image Text Recognition
-Execution Model: Runtime WorkItem / Attempt
-Primary Input: Image Artifact Reference
-Primary Output: Candidate Recognition Artifact
-Published Output: Recognition Artifact
-State Ownership: Recognition semantic state only
-MVP Priority: Required for image-reading flow
+01-architecture/ocr/
 ```
 
-Recognition có thể bị bypass khi structured source text đã có sẵn từ:
-
-- browser DOM extraction;
-- clipboard text;
-- imported structured document;
-- direct user text input.
+Recognition Module không định nghĩa lại các architecture contract đó.
 
 ---
 
-## 3. Architectural Position
+# 2. Module Identity
+
+```text
+Module ID:
+    recognition
+
+Module Type:
+    Core Business Processing Module
+
+Primary Domain:
+    Image-to-Structured-Source Processing
+
+Execution Model:
+    Runtime WorkItem / Attempt
+
+Primary Input:
+    Image Artifact Reference
+
+Primary Candidate Output:
+    Candidate Recognition Artifact
+
+Published Output:
+    Recognition Artifact
+
+State Ownership:
+    Recognition semantic state only
+
+Execution Authority:
+    Runtime
+
+MVP Priority:
+    Required for image-based reading flow
+```
+
+Recognition có thể được bypass khi structured source text đã tồn tại.
+
+Ví dụ:
+
+* browser DOM extraction
+* clipboard text
+* imported structured document
+* direct text input
+
+---
+
+# 3. Architectural Position
 
 ```text
 Source / Capture
-        ↓
+      ↓
 Observation
-        ↓
+      ↓
 Image Artifact
-        ↓
+      ↓
 Runtime WorkItem
-        ↓
+      ↓
 Recognition Attempt
-        ↓
+      ↓
+Recognition Module
+      ↓
 Candidate Recognition Artifact
-        ↓
-Runtime Validation and Publication
-        ↓
+      ↓
+Runtime Validation
+      ↓
+Artifact Publication
+      ↓
 Recognition Artifact
-        ↓
+      ↓
 Text Processing
 ```
 
 Recognition không tự tạo downstream WorkItem.
 
-Runtime Control và Business Pipeline Orchestration chịu trách nhiệm điều phối bước tiếp theo.
+Runtime Control và Business Pipeline Orchestration quyết định execution tiếp theo.
 
 ---
 
-## 4. Problem Statement
+# 4. Architecture Relationship
 
-Image-based reading content thường không cung cấp structured text đáng tin cậy.
+Recognition Module sử dụng OCR Architecture thay vì định nghĩa lại nó.
+
+Canonical OCR flow:
+
+```text
+Preprocessing
+      ↓
+Detection
+      ↓
+Recognition
+      ↓
+Text Direction
+      ↓
+Layout
+      ↓
+Postprocessing
+      ↓
+OCR Document
+      ↓
+Quality Assessment
+      ↓
+Reading Order
+```
+
+Authoritative documents:
+
+| Concern             | Architecture Owner                      |
+| ------------------- | --------------------------------------- |
+| OCR pipeline        | `01-architecture/ocr/PIPELINE.md`       |
+| Image preprocessing | `01-architecture/ocr/PREPROCESS.md`     |
+| Region / Detection  | `01-architecture/ocr/DETECTION.md`      |
+| Text recognition    | `01-architecture/ocr/RECOGNITION.md`    |
+| Writing direction   | `01-architecture/ocr/TEXT_DIRECTION.md` |
+| Layout              | `01-architecture/ocr/LAYOUT.md`         |
+| OCR Document        | `01-architecture/ocr/POSTPROCESS.md`    |
+| Quality             | `01-architecture/ocr/QUALITY.md`        |
+| Reading Order       | `01-architecture/ocr/READING_ORDER.md`  |
+| OCR Providers       | `01-architecture/ocr/PROVIDERS.md`      |
+
+Recognition Module owns orchestration of those semantics inside a Runtime Attempt.
+
+---
+
+# 5. Responsibilities
+
+Recognition owns the following module responsibilities.
+
+## 5.1 Input Contract Validation
+
+Validate module-level requirements:
+
+* input artifact reference
+* supported artifact type
+* image metadata
+* optional region selection
+* Recognition Profile
+* language/script hints
+* capability requirements
+* configuration compatibility
+* privacy requirements
+
+Runtime authority identity is not validated by Recognition.
+
+Runtime Control owns authority validation.
+
+---
+
+## 5.2 Recognition Planning
+
+Recognition creates an immutable `RecognitionPlan`.
+
+Plan may consider:
+
+* input characteristics
+* Recognition Profile
+* OCR Profile
+* required OCR capabilities
+* language/script hints
+* orientation hints
+* privacy constraints
+* configuration snapshot
+* provider-selection request
+* semantic processing requirements
+
+Recognition Plan describes **what OCR semantics are required**.
+
+Runtime decides **how execution is admitted and scheduled**.
+
+---
+
+## 5.3 OCR Pipeline Coordination
+
+Recognition coordinates the OCR architecture stages required for the current operation.
+
+Conceptually:
+
+```text
+RecognitionAttemptInput
+        ↓
+RecognitionPlan
+        ↓
+OCR Architecture
+        ↓
+OCR Document
+        ↓
+Quality / Reading Order
+        ↓
+Candidate Recognition Artifact
+```
+
+Recognition does not redefine stage semantics.
+
+---
+
+## 5.4 Provider Capability Requirements
+
+Recognition declares required capability characteristics.
 
 Examples:
 
-- manhua;
-- manga;
-- manhwa;
-- screenshots;
-- canvas-based readers;
-- scanned documents;
-- image-only PDFs;
-- embedded page images.
+* detection required
+* recognition required
+* language support
+* script support
+* vertical-text support
+* geometry requirement
+* confidence requirement
+* local-only requirement
+* remote allowed
+* partial output allowed
 
-CRAI cần xác định:
-
-1. vùng nào chứa text;
-2. ký tự nào xuất hiện;
-3. geometry của từng vùng;
-4. orientation và reading direction;
-5. region relationships;
-6. initial reading order;
-7. confidence và uncertainty;
-8. mapping về source coordinate space;
-9. provider provenance và compatibility metadata.
-
-Recognition cung cấp các thông tin này mà không cố diễn giải hoặc dịch nội dung.
+Provider capability semantics belong to OCR Provider Architecture.
 
 ---
 
-## 5. Responsibilities
+## 5.5 Provider Output Normalization Boundary
 
-Recognition sở hữu các trách nhiệm semantic sau.
+Recognition ensures provider-native output reaches OCR Architecture only through normalized CRAI contracts.
 
-### 5.1 Input Contract Validation
-
-Validate:
-
-- InputArtifactRef tồn tại;
-- Artifact type được hỗ trợ;
-- image dimensions;
-- image format;
-- crop bounds;
-- coordinate-space metadata;
-- Recognition Profile;
-- language/script hints;
-- orientation hint;
-- capability requirements;
-- Recognition configuration compatibility.
-
-Runtime identity và authority được Runtime Control validate.
-
-### 5.2 Recognition Planning
-
-Build a Recognition Plan dựa trên:
-
-- input characteristics;
-- Recognition Profile;
-- provider capabilities;
-- language/script hints;
-- orientation hints;
-- preprocessing requirements;
-- device/resource constraints;
-- privacy policy;
-- configuration snapshot.
-
-### 5.3 Image Preparation
-
-Prepare an Attempt-local image view thông qua:
-
-- normalization;
-- resizing;
-- upscaling;
-- grayscale conversion;
-- contrast adjustment;
-- denoising;
-- sharpening;
-- deskewing;
-- thresholding;
-- rotation;
-- inversion;
-- crop/padding;
-- provider-specific preparation.
-
-### 5.4 Text Region Detection
-
-Identify likely text-containing regions.
-
-Detection output có thể gồm:
-
-- RegionId;
-- geometry;
-- detection confidence;
-- orientation;
-- script hint;
-- region classification;
-- detector provenance.
-
-### 5.5 Text Recognition
-
-Convert region image content thành source-language characters.
-
-Output có thể gồm:
-
-- region text;
-- line text;
-- word/character data;
-- recognition confidence;
-- alternatives;
-- orientation metadata;
-- provider provenance.
-
-### 5.6 Coordinate Mapping
-
-Maintain transform chain và map public geometry về source coordinate space.
-
-### 5.7 Initial Reading Order
-
-Create spatial reading-order proposal dựa trên:
-
-- provider order;
-- top-to-bottom rules;
-- left-to-right rules;
-- right-to-left rules;
-- vertical-column rules;
-- orientation;
-- mixed-layout heuristics;
-- Recognition Profile.
-
-### 5.8 Provider Output Normalization
-
-Convert provider-specific output thành provider-independent Recognition domain models.
-
-### 5.9 Candidate Artifact Assembly
-
-Assemble immutable Candidate Recognition Artifact.
-
-### 5.10 Semantic Compatibility
-
-Define metadata cần thiết để xác định hai Recognition Artifact có semantically reusable hay không.
-
-### 5.11 Module Diagnostics
-
-Expose:
-
-- operation timing;
-- warning;
-- quality metadata;
-- provider provenance;
-- plan decision;
-- region count;
-- output completeness;
-- module error classification.
+Provider SDK types must never become public Recognition Artifact fields.
 
 ---
 
-## 6. Non-Responsibilities
+## 5.6 Candidate Artifact Assembly
 
-Recognition không sở hữu:
+Recognition creates an immutable `CandidateRecognitionArtifact`.
 
-- screen/window capture;
-- file discovery;
-- browser-page extraction;
-- source observation;
-- frame-change detection;
-- stable-frame detection;
-- scroll detection;
-- Reading Session lifecycle;
-- Revision authority;
-- WorkItem lifecycle;
-- Attempt lifecycle;
-- Scheduler admission;
-- Work Queue;
-- Runtime retry decision;
-- global cancellation authority;
-- Artifact publication;
-- Artifact payload ownership sau publication;
-- Cache Policy;
-- cache retention;
-- durable persistence;
-- linguistic normalization;
-- semantic OCR correction;
-- sentence segmentation;
-- paragraph reconstruction;
-- dialogue grouping;
-- glossary application;
-- translation;
-- translated-text layout;
-- overlay placement;
-- user-history storage.
-
-Recognition không trực tiếp gọi Translation hoặc Presentation.
+Candidate remains private until Runtime accepts it.
 
 ---
 
-## 7. Runtime Boundary
+## 5.7 Semantic Compatibility
 
-Recognition chạy trong một Runtime Attempt.
+Recognition defines semantic metadata needed to determine whether a Recognition Artifact may be reused for equivalent input.
+
+Recognition does not decide physical cache retention.
+
+---
+
+## 5.8 Module Diagnostics
+
+Recognition may expose:
+
+* phase timings
+* warnings
+* provider provenance
+* quality signals
+* plan decisions
+* output completeness
+* module failure classification
+* compatibility information
+
+Diagnostics must not become hidden execution control.
+
+---
+
+# 6. Non-Responsibilities
+
+Recognition does not own:
+
+* source capture
+* source observation
+* frame-change detection
+* scroll detection
+* Reading Session lifecycle
+* Revision authority
+* WorkItem lifecycle
+* Attempt lifecycle
+* Scheduler admission
+* Work Queue
+* Runtime retry decision
+* cancellation authority
+* Artifact publication authority
+* Artifact retention
+* Cache Policy
+* durable persistence
+* provider lifecycle
+* provider credential storage
+* Text Processing semantics
+* semantic OCR correction
+* Translation
+* translated-text layout
+* Presentation
+* user history
+
+Recognition does not directly call Translation or Presentation implementations.
+
+---
+
+# 7. Runtime Boundary
+
+Recognition executes inside a Runtime Attempt.
 
 ```text
 Runtime creates WorkItem
@@ -311,29 +353,31 @@ Worker receives RecognitionAttemptInput
         ↓
 Recognition executes
         ↓
-CandidateRecognitionArtifact created
+CandidateRecognitionArtifact
         ↓
-AttemptCompletion submitted
+AttemptCompletion
         ↓
-Runtime validates authority
+Runtime authority validation
         ↓
-Artifact Store accepts ownership
+Artifact Store ownership transfer
         ↓
 RecognitionArtifact published
 ```
 
-Recognition không:
+Recognition does not:
 
-- grant authority;
-- decide current Revision;
-- publish accepted Artifact;
-- schedule downstream WorkItem;
-- retry itself;
-- mutate Runtime state.
+* grant authority
+* choose current Revision
+* publish accepted Artifact
+* schedule downstream WorkItem
+* retry itself
+* mutate Runtime state
+
+This boundary from the original specification is preserved.
 
 ---
 
-## 8. Recognition Attempt Input
+# 8. Recognition Attempt Input
 
 ```text
 RecognitionAttemptInput
@@ -348,7 +392,6 @@ RecognitionAttemptInput
 ├── LanguageHints[]
 ├── ScriptHints[]
 ├── OrientationHint?
-├── ReadingDirectionHint?
 ├── RegionSelection?
 ├── ConfigurationSnapshotId
 ├── PrivacyContextRef
@@ -357,19 +400,19 @@ RecognitionAttemptInput
 └── TraceContext
 ```
 
-### Input Rules
+## Input Rules
 
-1. Input Artifact immutable.
-2. Recognition không nhận raw mutable image object qua module boundary.
-3. RegionSelection phải dùng source coordinate space.
-4. Priority và queue metadata không thuộc Recognition input contract.
-5. Provider credential không nằm trong input.
-6. Timeout được Runtime execution context cung cấp.
-7. SessionId có thể absent cho imported standalone image.
+1. Input Artifact is immutable.
+2. Recognition does not receive mutable raw image objects across the module boundary.
+3. RegionSelection uses source coordinate space.
+4. Queue priority is not part of Recognition semantics.
+5. Provider credentials are never included.
+6. Timeout/deadline comes from Runtime Execution Context.
+7. SessionId may be absent for standalone imported images.
 
 ---
 
-## 9. Recognition Operations
+# 9. Recognition Operations
 
 ```text
 RecognitionOperation
@@ -378,38 +421,201 @@ RecognitionOperation
 └── EVALUATE_IMAGE
 ```
 
-### RECOGNIZE_IMAGE
+## RECOGNIZE_IMAGE
 
-Process toàn bộ image.
+Processes a complete image input.
 
-Use cases:
+Typical use:
 
-- comic page;
-- screenshot;
-- scanned page;
-- imported image;
-- stable captured frame.
-
-### RECOGNIZE_REGION
-
-Process selected source-space region.
-
-Use cases:
-
-- manual selection;
-- low-confidence region reprocessing;
-- user-selected bubble;
-- provider comparison.
-
-### EVALUATE_IMAGE
-
-Optional diagnostic/evaluation operation.
-
-Không tạo user-facing Artifact mặc định nếu policy không cho phép.
+* comic page
+* screenshot
+* scanned document
+* imported image
+* stable captured frame
 
 ---
 
-## 10. Recognition Attempt Output
+## RECOGNIZE_REGION
+
+Processes a selected source-space region.
+
+Typical use:
+
+* manual region selection
+* local OCR rerun
+* selected speech bubble
+* evaluation
+* provider comparison
+
+---
+
+## EVALUATE_IMAGE
+
+Diagnostic/evaluation operation.
+
+It does not produce a user-facing artifact by default unless Runtime policy allows it.
+
+---
+
+# 10. Recognition Profile
+
+```text
+RecognitionProfile
+├── AUTOMATIC
+├── COMIC_PAGE
+├── SCREENSHOT
+├── SINGLE_REGION
+└── STRUCTURED_PAGE
+```
+
+Profile affects planning.
+
+It does not change the public Recognition Artifact contract.
+
+---
+
+## AUTOMATIC
+
+Select processing requirements using:
+
+* input characteristics
+* hints
+* architecture capabilities
+* provider capabilities
+
+---
+
+## COMIC_PAGE
+
+Optimized for:
+
+* irregular region layout
+* multiple text regions
+* vertical text
+* text over artwork
+* speech/narration structures
+
+---
+
+## SCREENSHOT
+
+Optimized for:
+
+* application text
+* browser UI
+* mixed structured regions
+* mostly horizontal content
+
+---
+
+## SINGLE_REGION
+
+May bypass page-wide processing that is unnecessary for the selected Region.
+
+---
+
+## STRUCTURED_PAGE
+
+Optimized for:
+
+* columns
+* prose
+* regular line structure
+* document-like layout
+
+---
+
+# 11. Recognition Plan
+
+```text
+RecognitionPlan
+├── PlanId
+├── Operation
+├── RecognitionProfile
+├── OCRProfile
+├── RequiredCapabilities
+├── ProviderSelectionRequest
+├── RegionExecutionPolicy
+├── CompatibilityPolicy
+├── ConfigurationVersions
+└── PrivacyConstraints
+```
+
+The plan is immutable within one Attempt.
+
+Detailed OCR preprocessing, detection, direction, layout, quality and reading-order semantics remain in `01-architecture/ocr/`.
+
+---
+
+# 12. Internal Processing Flow
+
+```text
+Receive RecognitionAttemptInput
+        ↓
+Validate Module Contract
+        ↓
+Build RecognitionPlan
+        ↓
+Resolve OCR Capability Requirements
+        ↓
+Acquire Input Artifact Lease
+        ↓
+Execute Canonical OCR Architecture
+        ↓
+Receive OCR Document
+        ↓
+Apply Quality / Reading Order policy
+        ↓
+Validate Module Invariants
+        ↓
+Assemble CandidateRecognitionArtifact
+        ↓
+Submit AttemptCompletion
+        ↓
+Release Attempt-local Resources
+```
+
+This intentionally replaces the previous MODULE-level duplication of preprocessing, detection, geometry and reading-order algorithms.
+
+---
+
+# 13. Combined and Composed OCR Execution
+
+Recognition may request either execution form.
+
+## Combined
+
+```text
+Image
+    ↓
+Combined OCR Provider
+    ↓
+Normalized OCR contracts
+```
+
+Suitable when a Provider supplies multiple OCR capabilities with acceptable quality.
+
+---
+
+## Composed
+
+```text
+Image
+    ↓
+Detection Capability
+    ↓
+Recognition Capability
+    ↓
+Direction / Layout / Postprocessing
+```
+
+Suitable when specialized capabilities produce better results.
+
+Combined and Composed strategies must still obey the same OCR Architecture contracts.
+
+---
+
+# 14. Recognition Attempt Output
 
 ```text
 RecognitionAttemptOutput
@@ -422,9 +628,9 @@ RecognitionAttemptOutput
 └── CompletionMetadata
 ```
 
-Attempt Output không phải published Recognition Artifact.
+Attempt Output is not a published Recognition Artifact.
 
-Runtime Control quyết định disposition:
+Runtime determines disposition:
 
 ```text
 ACCEPT
@@ -436,7 +642,7 @@ REJECT_INVALID
 
 ---
 
-## 11. Candidate Recognition Artifact
+# 15. Candidate Recognition Artifact
 
 ```text
 CandidateRecognitionArtifact
@@ -446,36 +652,32 @@ CandidateRecognitionArtifact
 ├── ContractVersion
 ├── InputArtifactRef
 ├── ContentIdentity
-├── SourceCoordinateSpace
-├── ProcessedImageMetadata
-├── CoordinateTransform
+├── OCRDocumentRef
+├── ReadingOrderResultRef?
+├── QualityReportRef?
 ├── ProviderProvenance
 ├── LanguageHypotheses[]
 ├── ScriptHypotheses[]
-├── Regions[]
-├── ReadingOrder
 ├── Warnings[]
-├── QualityMetadata
 ├── Completeness
 ├── CompatibilityMetadata
 ├── TraceabilityMetadata
 └── IntegrityMetadata
 ```
 
-Candidate Artifact:
+Candidate Artifact is:
 
-- private cho đến khi accepted;
-- không reusable;
-- không authoritative;
-- không cache eligible mặc định;
-- vẫn thuộc producer/transfer-pending ownership;
-- phải cleanup nếu Runtime reject.
+* private until Runtime acceptance
+* non-authoritative
+* not reusable by default
+* pending ownership transfer
+* cleaned up if Runtime rejects it
 
 ---
 
-## 12. Published Recognition Artifact
+# 16. Published Recognition Artifact
 
-Sau Runtime acceptance và Artifact Store publication:
+After Runtime acceptance:
 
 ```text
 RecognitionArtifact
@@ -484,454 +686,61 @@ RecognitionArtifact
 ├── ArtifactContractVersion
 ├── InputArtifactRef
 ├── ContentIdentity
-├── SourceCoordinateSpace
-├── ProcessedImageMetadata
-├── CoordinateTransform
+├── OCRDocumentRef
+├── ReadingOrderResultRef?
+├── QualityReportRef?
 ├── ProviderProvenance
 ├── LanguageHypotheses[]
 ├── ScriptHypotheses[]
-├── Regions[]
-├── ReadingOrder
 ├── Warnings[]
-├── QualityMetadata
 ├── Completeness
 ├── CompatibilityMetadata
 ├── TraceabilityMetadata
 └── IntegrityMetadata
 ```
 
-Published Recognition Artifact:
+Published Artifact is:
 
-- immutable;
-- provider-independent;
-- spatially aligned;
-- source-traceable;
-- reusable khi Cache Policy và compatibility cho phép;
-- không chứa Runtime Attempt status.
-
----
-
-## 13. Recognized Region Model
-
-```text
-RecognizedRegion
-├── RegionId
-├── Geometry
-├── SourceGeometry
-├── RawText
-├── SurfaceNormalizedText
-├── Lines[]
-├── DetectionConfidence?
-├── RecognitionConfidence?
-├── Orientation
-├── ReadingDirection?
-├── LanguageHint?
-├── ScriptHint?
-├── RegionType?
-├── Alternatives[]
-├── Warnings[]
-├── GeometrySource
-└── ProviderMetadata?
-```
-
-`SurfaceNormalizedText` chỉ cho phép cleanup không thay đổi meaning.
-
-Allowed:
-
-- trimming outer whitespace;
-- normalizing provider line separators;
-- removing provider control characters;
-- deterministic invalid-Unicode cleanup.
-
-Not allowed:
-
-- correcting Chinese characters by semantic context;
-- replacing names;
-- joining sentences;
-- guessing omitted words;
-- semantic punctuation rewriting;
-- translation.
+* immutable
+* provider-independent
+* source-traceable
+* spatially aligned through OCR Document
+* reusable only when compatibility and Cache Policy permit
+* independent of Runtime Attempt status
 
 ---
 
-## 14. Recognized Line Model
+# 17. Recognition Artifact vs OCR Document
+
+This distinction is important.
 
 ```text
-RecognizedLine
-├── LineId
-├── RegionId
-├── Geometry
-├── SourceGeometry
-├── RawText
-├── Confidence?
-├── Orientation
-├── OrderIndex?
-├── GeometrySource
-└── ProviderMetadata?
+OCR Document
+    → OCR Architecture canonical structured result
+
+Recognition Artifact
+    → module-level published artifact
+       referencing OCR results and module metadata
 ```
 
-Line-level output có thể absent.
+Recognition Artifact does not redefine:
 
-Recognition không fabricate line geometry mà không đánh dấu:
+* Region
+* Character
+* Word
+* Line
+* Paragraph
+* Layout Tree
+* Text Direction
+* Reading Order Graph
 
-```text
-INFERRED
-```
+Those semantics remain owned by OCR Architecture.
 
 ---
 
-## 15. Recognition Profile
+# 18. Completeness
 
-```text
-RecognitionProfile
-├── AUTOMATIC
-├── COMIC_PAGE
-├── SCREENSHOT
-├── SINGLE_REGION
-└── STRUCTURED_PAGE
-```
-
-Profile ảnh hưởng plan, không thay public Artifact contract.
-
-### AUTOMATIC
-
-Select strategy từ hints và capabilities.
-
-### COMIC_PAGE
-
-Ưu tiên:
-
-- irregular layout;
-- multiple regions;
-- vertical Chinese;
-- text over artwork;
-- speech-bubble-like structures.
-
-### SCREENSHOT
-
-Ưu tiên:
-
-- horizontal interface text;
-- browser/application labels;
-- mixed structured regions.
-
-### SINGLE_REGION
-
-May skip page-level detection.
-
-### STRUCTURED_PAGE
-
-Ưu tiên:
-
-- regular lines;
-- columns;
-- prose-oriented layout.
-
----
-
-## 16. Recognition Plan
-
-```text
-RecognitionPlan
-├── PlanId
-├── Operation
-├── RecognitionProfile
-├── ImagePreparationPlan
-├── Strategy
-├── DetectionCapabilityRequirement?
-├── RecognitionCapabilityRequirement
-├── ProviderSelectionRequest
-├── RegionExecutionPolicy
-├── CoordinateMappingPolicy
-├── ReadingOrderPolicy
-├── QualityPolicy
-├── ConfigurationVersions
-└── PrivacyConstraints
-```
-
-Plan immutable trong một Attempt.
-
----
-
-## 17. Internal Processing Flow
-
-```text
-Receive RecognitionAttemptInput
-        ↓
-Validate Module Contract
-        ↓
-Build Recognition Plan
-        ↓
-Resolve Provider Capabilities
-        ↓
-Acquire Input Artifact Lease
-        ↓
-Create Attempt-Local Image View
-        ↓
-Apply Image Preparation Plan
-        ↓
-Execute Combined or Composed Recognition
-        ↓
-Normalize Provider Output
-        ↓
-Suppress Invalid/Duplicate Regions
-        ↓
-Map Coordinates to Source Space
-        ↓
-Resolve Initial Reading Order
-        ↓
-Validate Recognition Invariants
-        ↓
-Assemble CandidateRecognitionArtifact
-        ↓
-Submit AttemptCompletion
-        ↓
-Release Temporary Resources and Leases
-```
-
-Cancellation checkpoint được đặt tại bounded boundaries.
-
----
-
-## 18. Combined Recognition Strategy
-
-```text
-Image View
-    ↓
-Combined Recognition Provider
-    ↓
-Detected and Recognized Regions
-```
-
-Phù hợp khi provider cung cấp:
-
-- region detection;
-- text recognition;
-- usable geometry;
-- acceptable confidence;
-- acceptable latency;
-- adequate reading order.
-
-MVP nên ưu tiên combined strategy nếu quality đạt yêu cầu.
-
----
-
-## 19. Composed Recognition Strategy
-
-```text
-Image View
-    ↓
-Detection Provider
-    ↓
-Detected Regions
-    ↓
-Recognition Provider
-    ↓
-Recognized Regions
-```
-
-Phù hợp khi:
-
-- comic-region detection cần specialization;
-- vertical text cần model khác;
-- detection và recognition quality khác nhau;
-- provider evaluation cần tách;
-- region-level fallback cần thiết.
-
-Composed strategy phải giữ provider provenance theo từng phase.
-
----
-
-## 20. Image Preparation Plan
-
-```text
-ImagePreparationPlan
-├── ProfileId
-├── Operations[]
-├── SourceDimensions
-├── TargetDimensions
-├── CoordinateTransform
-├── ProviderSpecific
-├── ConfigurationVersion
-└── EstimatedResourceCost
-```
-
-Possible operations:
-
-```text
-RESIZE
-UPSCALE
-GRAYSCALE
-CONTRAST
-BRIGHTNESS
-THRESHOLD
-DENOISE
-SHARPEN
-DESKEW
-ROTATE
-INVERT
-PAD
-CROP
-COLOR_CHANNEL_SELECTION
-```
-
-Mọi geometry-changing operation phải cập nhật transform chain.
-
----
-
-## 21. Coordinate Transform
-
-```text
-CoordinateTransform
-├── SourceSpace
-├── TargetSpace
-├── CropOffset
-├── ScaleX
-├── ScaleY
-├── Rotation
-├── Padding
-├── TransformChain[]
-└── InverseTransform
-```
-
-Public coordinates phải ở source coordinate space.
-
-Processed-space geometry chỉ dành cho:
-
-- provider normalization;
-- diagnostics;
-- evaluation.
-
----
-
-## 22. Geometry Model
-
-MVP geometry:
-
-```text
-Rectangle
-├── X
-├── Y
-├── Width
-└── Height
-```
-
-Architecture cho phép mở rộng:
-
-```text
-Polygon
-├── Points[]
-└── BoundingRectangle
-```
-
-Consumer không được giả định mọi region luôn axis-aligned rectangle.
-
----
-
-## 23. Reading Direction
-
-```text
-ReadingDirection
-├── UNKNOWN
-├── LEFT_TO_RIGHT
-├── RIGHT_TO_LEFT
-├── TOP_TO_BOTTOM
-├── BOTTOM_TO_TOP
-├── VERTICAL_COLUMNS_RIGHT_TO_LEFT
-├── VERTICAL_COLUMNS_LEFT_TO_RIGHT
-└── MIXED
-```
-
-Reading direction có thể ở:
-
-- request/profile level;
-- page level;
-- region level.
-
-Region-level orientation có precedence trong mixed layout.
-
----
-
-## 24. Reading Order
-
-```text
-ReadingOrderEntry
-├── OrderIndex
-├── RegionId
-├── Source
-├── Confidence
-├── RuleId?
-└── ManuallyOverridden
-```
-
-Possible source:
-
-```text
-PROVIDER
-SPATIAL_HEURISTIC
-ORIENTATION_RULE
-PROFILE_RULE
-USER_OVERRIDE
-```
-
-Array order alone không phải source of truth.
-
-Recognition tạo initial spatial order.
-
-Text Processing có thể tái cấu trúc semantic order nhưng phải giữ traceability.
-
----
-
-## 25. Confidence Model
-
-```text
-Confidence
-├── RawValue?
-├── NormalizedValue?
-├── Level
-├── Source
-└── NormalizationMethod?
-```
-
-Levels:
-
-```text
-UNKNOWN
-LOW
-MEDIUM
-HIGH
-```
-
-Rules:
-
-1. Missing provider confidence → `UNKNOWN`.
-2. Provider values không so sánh trực tiếp nếu chưa normalize.
-3. Normalization provider-specific và documented.
-4. Low confidence không tự discard text.
-5. Low confidence có thể tạo warning/retry hint.
-6. Recognition không tự tạo retry Attempt.
-
----
-
-## 26. Quality Model
-
-```text
-RecognitionQualityMetadata
-├── RegionCoverage
-├── TextCompleteness
-├── GeometryQuality
-├── ReadingOrderQuality
-├── ConfidenceAvailability
-├── LanguageSupportQuality
-├── WarningCount
-└── QualityLevel
-```
-
-Quality metadata không khẳng định linguistic correctness beyond Recognition scope.
-
----
-
-## 27. Completeness
+Recognition uses:
 
 ```text
 RecognitionCompleteness
@@ -941,21 +750,24 @@ RecognitionCompleteness
 └── UNKNOWN
 ```
 
-No-text result có thể thành công:
+An empty OCR result may still represent successful processing.
+
+Example:
 
 ```text
 Completeness = EMPTY_VALID
-Regions = []
-Warnings = [NO_READABLE_TEXT_DETECTED]
+OCR Document contains no readable Regions
 ```
 
-Empty result không tự động là failure.
+Empty does not automatically mean failure.
 
 ---
 
-## 28. Recognition Warnings
+# 19. Module Warnings
 
-Warnings mô tả degraded-but-usable output.
+Recognition may expose degraded-but-usable conditions.
+
+Examples:
 
 ```text
 NO_READABLE_TEXT_DETECTED
@@ -964,73 +776,51 @@ LOW_RECOGNITION_CONFIDENCE
 UNSUPPORTED_ORIENTATION_FALLBACK
 UNSUPPORTED_LANGUAGE_FALLBACK
 READING_ORDER_UNCERTAIN
-OVERLAPPING_REGIONS_SUPPRESSED
-REGION_GEOMETRY_INFERRED
-LINE_GEOMETRY_UNAVAILABLE
 PROVIDER_CONFIDENCE_UNAVAILABLE
-IMAGE_UPSCALED
-IMAGE_DOWNSCALED
 REMOTE_PROVIDER_USED
 PARTIAL_RECOGNITION
-PREPROCESSING_FALLBACK_USED
 ```
 
-Warning structure:
+Warnings are not Runtime terminal outcomes.
 
-```text
-RecognitionWarning
-├── Code
-├── OperationPhase
-├── RegionId?
-├── ProviderId?
-├── MessageKey
-└── Metadata?
-```
-
-Warnings không phải Runtime terminal outcome.
+Detailed Detection/Recognition/Direction quality semantics remain owned by OCR Architecture.
 
 ---
 
-## 29. Module Error Model
+# 20. Module Error Model
 
-Recognition defines module error semantics.
+Recognition owns module-level failure semantics.
 
 ```text
 RecognitionModuleError
 ├── Code
 ├── OperationPhase
-├── RetryHint
-├── AffectedRegionId?
+├── RetryHint?
+├── AffectedScope?
 ├── ProviderErrorRef?
 ├── DiagnosticRef?
 └── Metadata?
 ```
 
-Codes:
+Examples:
 
 ```text
 RECOGNITION_INPUT_INVALID
 RECOGNITION_IMAGE_INVALID
-RECOGNITION_IMAGE_FORMAT_UNSUPPORTED
 RECOGNITION_LANGUAGE_UNSUPPORTED
-RECOGNITION_SCRIPT_UNSUPPORTED
-RECOGNITION_ORIENTATION_UNSUPPORTED
-RECOGNITION_IMAGE_TOO_LARGE
-RECOGNITION_PREPARATION_FAILED
-RECOGNITION_DETECTION_FAILED
-RECOGNITION_TEXT_FAILED
-RECOGNITION_COORDINATE_MAPPING_FAILED
-RECOGNITION_READING_ORDER_FAILED
+RECOGNITION_OPERATION_FAILED
 RECOGNITION_CANDIDATE_INVALID
 RECOGNITION_RESOURCE_EXHAUSTED
 RECOGNITION_INTERNAL_ERROR
 ```
 
-Provider-specific errors normalize qua Provider Adapter và Runtime Error Model.
+Stage-specific semantic errors remain owned by their OCR Architecture documents.
+
+Provider-native errors must be normalized before crossing provider boundaries.
 
 ---
 
-## 30. Retry Hint
+# 21. Retry Hint
 
 Recognition may return:
 
@@ -1038,81 +828,57 @@ Recognition may return:
 RetryHint
 ├── Retryability
 ├── SuggestedStrategy[]
-├── SuggestedDelay?
 ├── AlternativeProviderAllowed
 ├── AlternativePreparationAllowed
 └── ReasonCode
 ```
 
-Possible strategy:
+Possible semantic suggestions:
 
 ```text
 SAME_PROVIDER
 ALTERNATIVE_PROVIDER
-ALTERNATIVE_PREPROCESSING
+ALTERNATIVE_PREPARATION
 REGION_ONLY
 RESOURCE_WAIT
 NO_RETRY
 ```
 
-Runtime Retry Policy quyết định:
+Runtime Retry Policy owns:
 
-- whether retry;
-- when;
-- provider fallback;
-- attempt count;
-- budget;
-- authority revalidation.
+* whether retry occurs
+* retry count
+* delay
+* budget
+* WorkItem/Attempt creation
+* fallback execution
+* authority revalidation
 
-Recognition không gọi retry trực tiếp.
-
----
-
-## 31. Cancellation
-
-Recognition dùng Runtime-provided `CancellationContextRef`.
-
-Checkpoints:
-
-- before Lease acquisition;
-- before image preparation;
-- after image preparation;
-- before provider execution;
-- between bounded region batches;
-- after provider completion;
-- before coordinate mapping;
-- before Candidate assembly;
-- before Completion submission.
-
-Khi provider không cancel được:
-
-```text
-Runtime authority revoked
-        ↓
-Provider execution continues physically
-        ↓
-Attempt becomes draining/abandoned
-        ↓
-Late output rejected
-        ↓
-Resources released on physical completion
-```
-
-Recognition không sở hữu global cancellation registry.
+Recognition never creates its own retry Attempt.
 
 ---
 
-## 32. Authority
+# 22. Cancellation
 
-Recognition không quyết định:
+Recognition consumes Runtime-provided cancellation context.
 
-- current Session;
-- current Revision;
-- accepted Attempt;
-- commit authority;
-- publication authority.
+Meaningful checkpoints include:
 
-Recognition phải preserve:
+* before input acquisition
+* before expensive OCR work
+* between bounded Region batches
+* before Candidate assembly
+* before Completion submission
+
+Recognition does not own the global cancellation registry.
+
+Late provider completion does not regain authority after Runtime revocation.
+
+---
+
+# 23. Authority
+
+Recognition preserves:
 
 ```text
 SessionId?
@@ -1123,297 +889,213 @@ ConfigurationSnapshotId
 InputArtifactRef
 ```
 
-Runtime Control là authority owner.
+but never owns authority over these identities.
+
+Runtime Control remains the authority owner.
 
 ---
 
-## 33. Publication
+# 24. Publication
 
-Recognition không publish accepted Artifact.
+Recognition does not publish accepted Artifact.
 
 ```text
 Candidate Artifact
-    ↓
+      ↓
 Attempt Completion
-    ↓
+      ↓
 Runtime Authority Validation
-    ↓
+      ↓
 Artifact Store Ownership Transfer
-    ↓
+      ↓
 Atomic Publication
 ```
 
-Recognition event không thay thế publication.
+Module event emission does not replace publication.
 
 ---
 
-## 34. Provider Capability Requirement
+# 25. Provider Boundary
 
-Recognition defines capability requirements:
+Recognition declares required OCR capabilities.
+
+OCR Provider Architecture owns:
+
+* Provider Contract
+* Provider Adapter
+* capability semantics
+* provider response normalization
+* provider-native error mapping
+
+Recognition does not redefine the provider model.
+
+See:
 
 ```text
-RecognitionCapabilityRequirements
-├── Languages[]
-├── Scripts[]
-├── Orientations[]
-├── RecognitionProfiles[]
-├── RegionDetectionRequired
-├── TextRecognitionRequired
-├── CombinedRecognitionAllowed
-├── ConfidenceRequired
-├── LineGeometryRequired
-├── CharacterGeometryRequired
-├── PartialOutputAllowed
-├── CancellationPreference
-├── LocalOnly
-├── RemoteAllowed
-├── ExecutionClasses[]
-├── MaximumImageSize
-└── HardwarePreference?
+01-architecture/ocr/PROVIDERS.md
 ```
 
 ---
 
-## 35. Provider Selection Boundary
+# 26. Provider Lifecycle Ownership
 
-```text
-Recognition Plan
-    ↓ capability requirements
-Provider Selection Policy
-    ↓
-Provider Manager
-    ↓
-Selected Provider Adapter
-```
+Recognition does not own:
 
-Recognition không sở hữu system-wide provider health, credential hoặc lifecycle.
+* provider registration
+* initialization
+* model loading
+* provider health
+* GPU context
+* provider concurrency
+* provider client lifetime
+* shutdown
 
----
-
-## 36. Recognition Provider Adapter
-
-```text
-RecognitionProviderAdapter
-├── ProviderIdentity
-├── Capabilities
-├── ValidateRequest
-├── PrepareProviderRequest
-├── Execute
-├── RequestCancellation
-├── NormalizeOutput
-├── NormalizeError
-└── ProviderDiagnostics
-```
-
-Provider-specific SDK object không vượt adapter boundary.
+Those responsibilities belong to Provider Manager / Runtime / Resource Manager according to the applicable infrastructure contracts.
 
 ---
 
-## 37. Provider Capabilities
+# 27. Semantic Compatibility
 
-```text
-RecognitionProviderCapabilities
-├── ProviderId
-├── ProviderVersion
-├── SupportedLanguages[]
-├── SupportedScripts[]
-├── SupportedOrientations[]
-├── SupportedProfiles[]
-├── SupportsRegionDetection
-├── SupportsTextRecognition
-├── SupportsCombinedRecognition
-├── SupportsConfidence
-├── SupportsLineGeometry
-├── SupportsCharacterGeometry
-├── SupportsPartialOutput
-├── SupportsCancellation
-├── SupportsBatching
-├── ExecutionClasses[]
-├── SupportsLocalProcessing
-├── SupportsRemoteProcessing
-├── MaximumWidth?
-├── MaximumHeight?
-├── MaximumPixels?
-├── RecommendedConcurrency
-└── InitializationCost
-```
+Recognition owns the semantic definition of artifact compatibility.
 
-Capabilities phải phản ánh documented hoặc validated behavior.
-
----
-
-## 38. Provider Lifecycle Ownership
-
-Provider Manager owns:
-
-- registration;
-- initialization;
-- health;
-- model loading;
-- client lifetime;
-- GPU/native context;
-- concurrency capacity;
-- shutdown.
-
-Recognition owns only provider-specific semantic contract and normalized output.
-
----
-
-## 39. Artifact Compatibility
-
-Recognition defines:
+Conceptually:
 
 ```text
 RecognitionCompatibilityMetadata
 ├── InputContentIdentity
 ├── RecognitionContractVersion
 ├── RecognitionProfileVersion
-├── PreparationProfileVersion
-├── DetectionModelVersion?
-├── RecognitionModelVersion
+├── OCRPipelineVersion
+├── OCRProfileVersion
 ├── ProviderProfileVersion
 ├── LanguageHints
 ├── ScriptHints
-├── OrientationHints
-├── ReadingOrderPolicyVersion
-├── CoordinateTransformVersion
-├── QualityPolicyVersion
 ├── ConfigurationVersions
 └── PrivacyPartition
 ```
 
-Recognition không quyết định retention hoặc physical cache.
+Exact stage/model versions may be captured through OCR Document lineage rather than duplicated here.
 
 ---
 
-## 40. Artifact Reuse Boundary
+# 28. Reuse Boundary
 
 ```text
 Recognition
     → defines semantic compatibility
 
-Cache Policy
+Runtime Cache Policy
     → decides whether reuse is allowed
 
 Artifact Store
-    → manages runtime Artifact and retention
+    → owns shared runtime artifact lifecycle
 
 Storage
     → provides durable persistence
 ```
 
-RevisionId không phải reuse identity mặc định.
+`RevisionId` alone is not reuse identity.
 
 ---
 
-## 41. Resource Lifecycle
+# 29. Resource Lifecycle
+
+Recognition uses Runtime-managed resources through contracts.
+
+Conceptual flow:
 
 ```text
 Acquire Input Artifact Lease
         ↓
-Create Attempt-Local Image View
-        ↓
-Allocate Preparation Buffers
-        ↓
-Acquire Provider Resource
-        ↓
-Execute Recognition
+Execute Attempt-local OCR processing
         ↓
 Create Candidate Artifact
         ↓
 Transfer Candidate or Cleanup
         ↓
-Release Provider Request Resource
-        ↓
-Release Buffers
+Release Attempt-local resources
         ↓
 Release Input Lease
 ```
 
-Recognition không dispose shared input Artifact.
+Recognition never disposes shared input artifacts directly.
 
 ---
 
-## 42. Recognition Operation Phases
+# 30. Recognition Operation Phases
 
-Phases chỉ dùng cho diagnostics:
+These phases are diagnostic only:
 
 ```text
 VALIDATING
 PLANNING
 ACQUIRING_INPUT
-PREPARING
-DETECTING
-RECOGNIZING
-NORMALIZING
-MAPPING_COORDINATES
-ORDERING
+EXECUTING_OCR
 ASSEMBLING_CANDIDATE
 FINALIZING
 ```
 
-Đây không phải WorkItem/Attempt state machine.
+They are not WorkItem or Attempt states.
+
+Detailed stage execution remains represented by OCR Architecture/diagnostics.
 
 ---
 
-## 43. Concurrency
+# 31. Concurrency
 
-Rules:
+Recognition follows these rules:
 
-1. Recognition không chạy trên UI Context.
-2. Runtime Scheduler controls admission.
-3. Provider Manager controls provider concurrency.
-4. GPU/native provider có thể serial.
-5. Region parallelism bounded.
-6. Worker owns only Attempt-local resources.
-7. Shared input accessed via Resource Lease.
-8. Provider model initialization không request-scoped.
-9. Image copies minimized.
-10. Same Attempt output deterministic với same input/config/provider behavior.
-11. Obsolete work mất authority nhanh.
-12. Shutdown waits only bounded drain.
+1. Runtime Scheduler owns admission.
+2. Provider capacity is externally controlled.
+3. Region-level parallelism must be bounded.
+4. Worker resources are Attempt-local unless explicitly leased.
+5. Input Artifact is accessed through a Resource Lease.
+6. Image copies should be minimized.
+7. Shared provider/model initialization is not request-scoped.
+8. Same semantic input/config should produce equivalent normalized structure where provider behavior permits.
+9. Obsolete work loses authority quickly.
+10. Shutdown uses bounded drain.
 
 ---
 
-## 44. Module State
+# 32. Module State
 
-Recognition giữ persistent mutable state tối thiểu.
+Recognition should keep minimal persistent mutable state.
 
 Allowed module-owned long-lived state:
 
-- static Recognition profiles;
-- quality policy definitions;
-- normalization strategies;
-- provider contract metadata;
-- capability requirement builders.
+* Recognition Profile definitions
+* plan construction rules
+* module error/warning definitions
+* compatibility rules
+* capability requirement builders
+* module diagnostics schema
 
 Not module-owned:
 
-- provider health;
-- loaded models;
-- active WorkItem registry;
-- active Attempt registry;
-- cancellation registry;
-- Artifact retention;
-- Session state.
+* provider health
+* loaded models
+* WorkItem registry
+* Attempt registry
+* cancellation registry
+* Artifact retention
+* Session state
+* Runtime authority
 
 ---
 
-## 45. Events
+# 33. Events
 
-Recognition-specific diagnostic/domain facts:
+Recognition may define module/domain facts such as:
 
 ```text
 RECOGNITION_PLAN_CREATED
-RECOGNITION_PREPARATION_COMPLETED
-RECOGNITION_REGIONS_DETECTED
-RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
-RECOGNITION_READING_ORDER_RESOLVED
+RECOGNITION_OCR_COMPLETED
 RECOGNITION_WARNING_RECORDED
 RECOGNITION_CANDIDATE_CREATED
 ```
 
-Runtime owns:
+Runtime owns execution facts such as:
 
 ```text
 WORKITEM_CREATED
@@ -1426,100 +1108,105 @@ ARTIFACT_PUBLISHED
 
 Events:
 
-- contain no image payload;
-- do not grant authority;
-- do not schedule downstream work;
-- do not create hidden control flow.
+* contain references rather than image payload
+* do not grant authority
+* do not schedule hidden downstream work
+* follow Event Bus architecture
 
 ---
 
-## 46. Observability
+# 34. Observability
 
-Recognition metrics:
+Recognition may expose:
 
 ```text
 recognition.plan_ms
-recognition.input_lease_wait_ms
-recognition.preparation_ms
-recognition.detection_ms
-recognition.text_ms
-recognition.normalization_ms
-recognition.coordinate_mapping_ms
-recognition.ordering_ms
+recognition.execution_ms
 recognition.candidate_assembly_ms
-recognition.total_execution_ms
-recognition.time_to_first_region_ms
+recognition.total_ms
 recognition.region_count
 recognition.character_count
 recognition.warning_count
-recognition.quality_level
+recognition.completeness
 recognition.provider_profile
 recognition.execution_class
-recognition.partial_total
-recognition.empty_valid_total
 ```
 
-Authority validation, ownership transfer và publication latency thuộc Runtime Observability.
+Detailed OCR-stage measurements are owned by their respective architecture/instrumentation boundaries.
 
-Telemetry không chứa raw image hoặc full recognized text.
+Authority validation and publication latency belong to Runtime Observability.
+
+Telemetry must not contain raw image or full recognized text by default.
 
 ---
 
-## 47. Privacy
+# 35. Privacy
 
-1. Raw image bytes không xuất hiện trong normal logs.
-2. Full recognized text không xuất hiện trong production logs.
-3. Credentials không xuất hiện trong module input/output.
-4. Remote execution explicit và traceable.
-5. Local-only input không dùng remote provider.
-6. Temporary image files deleted/released after use.
-7. Events carry references, not payload.
+Recognition must ensure:
+
+1. Raw image bytes do not appear in normal logs.
+2. Full recognized text is not emitted in production logs by default.
+3. Credentials never appear in module input/output.
+4. Remote execution is explicit and traceable.
+5. Local-only input never uses remote provider.
+6. Temporary image resources are released after use.
+7. Events carry references rather than image payload.
 8. Diagnostic capture requires explicit policy.
-9. Output follows privacy partition.
-10. Copyrighted content không retained permanently mặc định.
-11. Content fingerprint không export mặc định.
-12. Provider metadata được sanitize.
+9. Artifact output respects privacy partition.
+10. Provider metadata is sanitized.
 
 ---
 
-## 48. Data Ownership
+# 36. Data Ownership
 
 Recognition owns:
 
-- Recognition contract;
-- region/line semantics;
-- normalized provider representation;
-- raw recognized source text semantics;
-- initial reading-order semantics;
-- confidence normalization rules;
-- quality rules;
-- warning/error semantics;
-- Artifact compatibility semantics;
-- module diagnostics definitions.
+* module boundary
+* Recognition Attempt contract
+* Recognition Plan
+* Candidate Recognition Artifact
+* Recognition Artifact module contract
+* module warnings/errors
+* retry hints
+* compatibility semantics
+* module diagnostics
+* completeness semantics
 
-Recognition does not own:
+Recognition does **not** own:
 
-- source-image payload lifecycle;
-- published Artifact payload;
-- provider instance lifecycle;
-- WorkItem/Attempt state;
-- Runtime authority;
-- Cache retention;
-- Storage persistence;
-- corrected semantic text;
-- Translation output;
-- UI layout.
+* Region semantics
+* Recognition text hierarchy semantics
+* Text Direction semantics
+* Layout Tree semantics
+* OCR Document semantics
+* Quality semantics
+* Reading Order semantics
+
+Those belong to `01-architecture/ocr/`.
+
+Recognition also does not own:
+
+* provider lifecycle
+* WorkItem/Attempt state
+* Runtime authority
+* Artifact retention
+* durable persistence
+* Translation output
+* UI layout
+
+This is the main ownership correction from the previous document. The old specification explicitly claimed ownership of region/line, initial reading order and quality rules; those are now delegated to the authoritative OCR Architecture documents.
 
 ---
 
-## 49. Dependencies
+# 37. Dependencies
 
-Allowed:
+Allowed dependency categories:
 
 ```text
 shared-kernel
 runtime-contracts
 artifact-contracts
+ocr-architecture-contracts
 provider-contracts
 configuration-contracts
 image-primitives
@@ -1528,7 +1215,7 @@ security-contracts
 diagnostics-contracts
 ```
 
-Forbidden direct dependencies:
+Forbidden direct implementation dependencies:
 
 ```text
 translation implementation
@@ -1540,70 +1227,66 @@ capture implementation
 observation implementation
 session implementation
 storage implementation
-glossary implementation
-history implementation
 scheduler implementation
 work-queue implementation
+provider SDK outside Adapter
 ```
 
-Runtime integration happens through contracts.
+Runtime integration occurs through contracts.
 
 ---
 
-## 50. Testing Requirements
+# 38. Testing Requirements
 
-### Unit Tests
+## Unit Tests
 
-- input validation;
-- Recognition Plan;
-- coordinate transforms;
-- geometry mapping;
-- reading-order rules;
-- confidence normalization;
-- quality classification;
-- warning generation;
-- duplicate-region suppression;
-- Candidate invariants;
-- compatibility metadata;
-- provider output normalization.
+Recognition Module tests should focus on module-owned semantics:
 
-### Provider Contract Tests
+* input validation
+* Recognition Plan
+* Candidate assembly
+* completeness
+* warning/error mapping
+* retry hints
+* compatibility metadata
+* ownership invariants
 
-Every adapter must test:
+OCR algorithm semantics should be tested in the OCR Architecture/component implementations that own them.
 
-- valid request;
-- invalid image;
-- unsupported language;
-- empty-valid result;
-- timeout;
-- cancellation request;
-- provider unavailable;
-- coordinate normalization;
-- confidence behavior;
-- partial output;
-- error normalization;
-- privacy/local-only enforcement.
+---
 
-### Runtime Integration Tests
+## Provider Contract Tests
+
+Verify:
+
+* provider adapter isolation
+* capability compatibility
+* valid request mapping
+* normalized result
+* normalized error
+* privacy/local-only enforcement
+
+---
+
+## Runtime Integration Tests
 
 ```text
 Image Artifact
     → Recognition Attempt
-    → Candidate Artifact
+    → Candidate
     → Runtime Publication
 ```
 
 ```text
-Revision A Attempt
-    → Revision B Current
-    → A Candidate Rejected
+Old Revision Attempt
+    → New Revision current
+    → old Candidate rejected
 ```
 
 ```text
-Provider Non-Cancelable
-    → Authority Revoked
-    → Attempt Abandoned
-    → Late Output Rejected
+Non-cancelable Provider
+    → authority revoked
+    → late output rejected
 ```
 
 ```text
@@ -1611,225 +1294,267 @@ Recognition Artifact
     → Text Processing
 ```
 
-### Regression Tests
+---
 
-Compare:
+# 39. MVP Implementation Contract
 
-- detected regions;
-- recognized text;
-- source coordinates;
-- reading order;
-- confidence;
-- warnings;
-- quality;
-- latency;
-- memory;
-- provider compatibility.
+## Input
+
+```text
+Image Artifact Reference
+optional source-space Region
+Simplified Chinese hint
+optional Traditional Chinese hint
+English hint
+Automatic / Comic Page profile
+```
+
+## Output
+
+```text
+Candidate Recognition Artifact
+OCR Document reference
+basic Reading Order result/reference
+Warnings
+Completeness
+Compatibility Metadata
+Quality summary/reference where available
+```
+
+## Runtime Controls
+
+```text
+WorkItem / Attempt identity
+Cancellation Context
+Timeout / Deadline
+Provider Selection
+Authority Validation
+Publication
+Retry
+```
 
 ---
 
-## 51. MVP Implementation Contract
-
-Input:
-
-```text
-- Image Artifact Reference
-- optional source-space region
-- Simplified Chinese hint
-- optional Traditional Chinese hint
-- English hint
-- Automatic or Comic Page profile
-```
-
-Output:
-
-```text
-- rectangular text regions
-- raw recognized text
-- source-space geometry
-- initial reading order
-- confidence when available
-- warnings
-- quality metadata
-- compatibility metadata
-- Candidate Recognition Artifact
-```
-
-Control is provided by Runtime:
-
-```text
-- WorkItem / Attempt identity
-- cancellation context
-- timeout/deadline
-- provider selection policy
-- authority validation
-- publication
-- retry
-```
+# 40. MVP Non-Requirements
 
 MVP does not require:
 
-- handwriting;
-- sound-effect understanding;
-- character-level geometry;
-- polygon output;
-- provider marketplace;
-- semantic OCR repair;
-- inpainting;
-- translated-text insertion;
-- distributed Recognition;
-- streaming per-character publication.
+* handwriting recognition
+* full SFX semantic understanding
+* character-level geometry everywhere
+* polygon output everywhere
+* provider marketplace
+* semantic OCR repair
+* inpainting
+* translated-text insertion
+* distributed Recognition
+* per-character streaming publication
 
 ---
 
-## 52. Acceptance Criteria
+# 41. Acceptance Criteria
 
-Architecture is acceptable when:
+Recognition Module architecture is acceptable when:
 
-1. Provider implementation replaceable.
-2. Recognition Artifact independent from SDK types.
-3. Every public geometry maps to source coordinates.
-4. Runtime cancellation/authority prevents stale publication.
-5. Text Processing consumes Artifact without provider knowledge.
-6. Recognition does not call Translation.
-7. Local-only policy enforceable.
-8. Raw recognition text preserved.
-9. Reading order explicitly represented.
-10. Session and imported-image use cases supported.
-11. Errors/warnings normalized.
-12. Provider quality benchmarkable.
-13. Recognition creates Candidate only.
-14. Artifact Store owns published payload.
-15. Retry/cancel/publication are not module-owned.
-16. Compatibility metadata supports safe reuse.
-17. Attempt-local resources release correctly.
-18. Normal telemetry remains content-free.
+1. OCR Provider implementation is replaceable.
+2. Recognition Artifact is independent from Provider SDK types.
+3. Public OCR geometry remains source-traceable through OCR Document.
+4. Runtime prevents stale publication.
+5. Text Processing consumes Recognition Artifact without Provider knowledge.
+6. Recognition never directly invokes Translation.
+7. Local-only execution policy is enforceable.
+8. Raw OCR source text is preserved by OCR Architecture.
+9. Reading Order is explicit and externally owned.
+10. Errors and warnings are normalized.
+11. Recognition creates Candidate only.
+12. Runtime owns acceptance/publication.
+13. Retry and cancellation are not module-owned.
+14. Compatibility metadata supports safe reuse.
+15. Attempt-local resources release correctly.
+16. Normal telemetry remains content-free.
+17. OCR semantic concepts have a single owner in `01-architecture/ocr/`.
 
 ---
 
-## 53. Architecture Invariants
+# 42. Architecture Invariants
 
-1. Recognition accepts only image-based input.
-2. Input Artifact immutable.
+1. Recognition accepts image-based input.
+
+2. Input Artifact is immutable.
+
 3. Recognition never mutates source image.
+
 4. Recognition creates Candidate Artifact only.
-5. Recognition never grants authority.
+
+5. Recognition never grants Runtime authority.
+
 6. Recognition never publishes accepted Artifact.
+
 7. Runtime Control owns authority.
-8. Artifact Store owns published payload.
-9. Recognition never owns WorkItem lifecycle.
-10. Recognition never owns Attempt lifecycle.
-11. Recognition never retries itself.
-12. Recognition uses Runtime cancellation context.
-13. Provider lifecycle belongs to Provider Manager.
-14. Provider SDK types stay inside adapter.
-15. Every public region maps to source coordinate space.
-16. Geometry-changing preparation preserves transform chain.
-17. Reading order explicit.
-18. Raw text preserved.
-19. Missing confidence remains unknown.
-20. Warning differs from failure.
-21. Empty text may be valid success.
-22. User corrections never overwrite raw Artifact.
-23. Local-only never uses remote provider.
-24. Recognition does not call Translation.
-25. Recognition does not render UI.
-26. Image payload never travels through Event Bus.
-27. Cache compatibility belongs to Recognition semantics.
-28. Cache retention belongs to Runtime.
-29. Durable persistence belongs to Storage.
-30. Worker never owns shared input payload.
-31. Input Lease released after Attempt use.
-32. Candidate rejection triggers cleanup.
-33. Late provider output cannot gain authority.
-34. Same input/config produces deterministic normalized structure where provider behavior permits.
-35. Recognition remains usable outside active Reading Session.
+
+8. Artifact Store owns published payload lifecycle.
+
+9. Recognition does not own WorkItem lifecycle.
+
+10. Recognition does not own Attempt lifecycle.
+
+11. Recognition does not retry itself.
+
+12. Recognition observes Runtime cancellation.
+
+13. Provider lifecycle is external to Recognition.
+
+14. Provider SDK types stay behind Adapter boundaries.
+
+15. OCR geometry remains traceable to source coordinates.
+
+16. OCR semantic models are owned by `01-architecture/ocr/`.
+
+17. Raw source text is not semantically rewritten by Recognition.
+
+18. Missing confidence remains explicit rather than fabricated.
+
+19. Warning differs from failure.
+
+20. Empty OCR result may be valid success.
+
+21. User correction never silently overwrites machine OCR artifact.
+
+22. Local-only input never uses remote Provider.
+
+23. Recognition does not perform Translation.
+
+24. Recognition does not render UI.
+
+25. Image payload never travels through Event Bus.
+
+26. Recognition defines semantic compatibility.
+
+27. Runtime owns cache retention.
+
+28. Storage owns durable persistence.
+
+29. Shared input is accessed via lease/reference.
+
+30. Candidate rejection triggers cleanup.
+
+31. Late output cannot regain authority.
+
+32. Same semantic input/config should produce equivalent normalized structure where Provider behavior permits.
+
+33. Recognition remains usable outside an active Reading Session.
+
+34. Detection, Recognition, Direction, Layout, Postprocessing, Quality and Reading Order semantics are never redefined inside this module specification.
 
 ---
 
-## 54. Open Architecture Decisions
+# 43. Open Architecture Decisions
 
-- first Recognition provider;
-- local vs remote default;
-- combined vs composed strategy;
-- required vertical-Chinese accuracy;
-- default Preparation Profile;
-- provider-specific preparation ownership;
-- speech-bubble detection ownership;
-- script detection timing;
-- region alternatives retention;
-- partial Candidate exposure;
-- timeout values;
-- concurrency limits;
-- confidence normalization;
-- default reading-order algorithm;
-- character-level geometry need;
-- long-page splitting;
-- GPU model-loading policy;
-- Traditional Chinese MVP support;
-- polygon geometry timing.
+Implementation-dependent decisions still requiring prototype/benchmark evidence include:
 
-Decisions phải dựa trên prototype và benchmark.
+* first OCR Provider
+* local vs remote default
+* combined vs composed execution
+* vertical-Chinese quality requirement
+* default OCR/Recognition Profile
+* Provider-specific image preparation
+* partial Candidate exposure
+* timeout defaults
+* concurrency limits
+* confidence normalization strategy
+* long-page processing strategy
+* GPU model-loading policy
+* Traditional Chinese MVP level
+* polygon geometry timing
+
+These decisions must not alter the module ownership boundaries defined above.
 
 ---
 
-## 55. Related Documents
+# 44. Related Documents
 
 ```text
-modules/recognition/README.md
-modules/recognition/CONTRACT.md
-modules/recognition/PIPELINE.md
-modules/recognition/PROVIDER.md
-modules/recognition/PREPROCESSING.md
-modules/recognition/REGION_DETECTION.md
-modules/recognition/TEXT_RECOGNITION.md
-modules/recognition/COORDINATE_MODEL.md
-modules/recognition/READING_ORDER.md
-modules/recognition/QUALITY_MODEL.md
-modules/recognition/EVENTS.md
-modules/recognition/ERRORS.md
-modules/recognition/CONFIG.md
-modules/recognition/OBSERVABILITY.md
-runtime/PIPELINE_RUNTIME.md
-runtime/RESOURCE_LIFECYCLE.md
-runtime/CANCELLATION.md
-runtime/RETRY_POLICY.md
-runtime/CACHE_POLICY.md
-modules/text-processing/README.md
+01-architecture/ocr/README.md
+01-architecture/ocr/PIPELINE.md
+01-architecture/ocr/PREPROCESS.md
+01-architecture/ocr/DETECTION.md
+01-architecture/ocr/RECOGNITION.md
+01-architecture/ocr/TEXT_DIRECTION.md
+01-architecture/ocr/LAYOUT.md
+01-architecture/ocr/POSTPROCESS.md
+01-architecture/ocr/QUALITY.md
+01-architecture/ocr/READING_ORDER.md
+01-architecture/ocr/PROVIDERS.md
+
+01-architecture/runtime/RESOURCE_LIFECYCLE.md
+01-architecture/runtime/CANCELLATION.md
+01-architecture/runtime/RETRY_POLICY.md
+01-architecture/runtime/CACHE_POLICY.md
+
+02-modules/recognition/CONTRACT.md
+02-modules/recognition/STATES.md
+02-modules/recognition/EVENTS.md
+02-modules/recognition/ERRORS.md
+02-modules/recognition/README.md
+
+02-modules/text-processing/
 ```
 
 ---
 
-## 56. Summary
+# 45. Summary
 
-Recognition transforms immutable image input into structured spatial source content.
+Recognition transforms immutable image input into a module-level candidate for structured source content.
 
 ```text
 Image Artifact
-    ↓
+      ↓
+Runtime Recognition Attempt
+      ↓
 Recognition Plan
-    ↓
-Preparation
-    ↓
-Detection and Recognition
-    ↓
-Geometry and Reading Order
-    ↓
+      ↓
+OCR Architecture
+      ↓
+OCR Document
+      ↓
+Quality / Reading Order
+      ↓
 Candidate Recognition Artifact
-    ↓
-Runtime Validation and Publication
+      ↓
+Runtime Validation
+      ↓
+Published Recognition Artifact
 ```
 
 Core boundaries:
 
 ```text
-Recognition owns visual extraction semantics.
+OCR Architecture
+    owns OCR semantics.
 
-Runtime owns WorkItem, Attempt, authority, cancellation and retry.
+Recognition Module
+    owns module orchestration,
+    Candidate Artifact,
+    module compatibility,
+    warnings/errors
+    and Runtime integration.
 
-Provider Manager owns provider lifecycle.
+Runtime
+    owns WorkItem,
+    Attempt,
+    authority,
+    cancellation,
+    retry
+    and publication decisions.
 
-Artifact Store owns published shared payload.
+Provider Integration
+    owns Provider abstraction
+    and Adapter boundaries.
 
-Text Processing owns semantic preparation for Translation.
+Artifact Store
+    owns published shared payload lifecycle.
+
+Text Processing
+    owns semantic preparation
+    after Recognition.
 ```

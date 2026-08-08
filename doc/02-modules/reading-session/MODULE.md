@@ -1,1603 +1,2371 @@
 # Reading Session Module
 
-- Module: Reading Session
-- Identifier: reading-session
-- Layer: Business Orchestration
-- Version: 2.0.0
-- Status: Draft
-- Owner: CRAI Architecture
+> **Project:** CRAI
+> **Module:** `reading-session`
+> **Path:** `doc/02-modules/reading-session/MODULE.md`
+> **Version:** 3.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2 aligned
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-08
 
 ---
 
-# 1. Purpose
+# 1. Module Definition
 
-The Reading Session Module is the business orchestration layer responsible for managing a user's reading activity throughout its entire lifecycle.
+Reading Session is the CRAI domain module responsible for representing and maintaining a user's active reading activity.
 
-A Reading Session represents a continuous interaction between a user and a readable source. The source may be a web page, comic, novel, ebook, PDF document, image collection, or any future content provider supported by CRAI.
-
-Unlike processing modules, Reading Session never performs OCR, translation, rendering, recognition, or any business processing itself.
-
-Its responsibility is to determine **what should happen** during a reading activity.
-
-The responsibility of determining **how work is executed** belongs to the Runtime Architecture.
-
-This separation allows the reading domain to evolve independently from execution technologies, processing engines, hardware acceleration, scheduling strategies, or AI providers.
-
-Reading Session therefore serves as the domain authority for everything related to a reading activity while remaining completely independent from runtime implementation details.
-
----
-
-# 2. Design Philosophy
-
-Reading Session is designed around five core principles.
-
-## 2.1 Reading First
-
-Everything inside CRAI ultimately exists to support a user's reading experience.
-
-The user never starts an OCR task.
-
-The user never starts a Translation task.
-
-The user never starts a Capture task.
-
-The user starts reading.
-
-Everything else exists only because reading requires it.
-
-For this reason the Reading Session represents the primary business object inside the system.
-
----
-
-## 2.2 Business Before Execution
-
-Reading Session decides business intentions.
-
-Runtime decides execution.
-
-Workers perform execution.
-
-This separation prevents business logic from becoming coupled to execution logic.
-
-For example,
-
-Reading Session may determine that a newly visible comic panel requires translation.
-
-It does not determine:
-
-- execution priority
-- execution thread
-- GPU allocation
-- batching
-- queue ordering
-- retry strategy
-- resource reservation
-
-Those belong entirely to Runtime Control.
-
----
-
-## 2.3 Stateless Processing
-
-Processing modules should remain as stateless as possible.
-
-Whenever possible, OCR, Translation, Recognition, Text Processing and Presentation operate using immutable requests generated from Reading Session state.
-
-Long-lived business state must never migrate into processing modules.
-
-Doing so would make the pipeline difficult to restart, parallelize or recover.
-
----
-
-## 2.4 Revision Driven Architecture
-
-Every meaningful change to the reading context produces a new Content Revision.
-
-The revision represents a snapshot of the reading world.
-
-Instead of modifying previous work, CRAI continuously creates newer revisions.
-
-Older revisions naturally become obsolete.
-
-This approach provides:
-
-- deterministic execution
-- cache safety
-- race-condition resistance
-- easier cancellation
-- easier replay
-- easier debugging
-
----
-
-## 2.5 Runtime Independence
-
-Reading Session must never assume:
-
-- synchronous execution
-- asynchronous execution
-- local execution
-- remote execution
-- cloud execution
-- GPU execution
-- CPU execution
-
-Its responsibility ends after expressing business intent.
-
-How the intent becomes executable work belongs entirely to Runtime Architecture.
-
----
-
-# 3. Goals
-
-The module exists to achieve the following goals.
-
-## 3.1 Represent Reading
-
-Represent an ongoing reading activity using a single consistent domain model.
-
-Regardless of whether the user is reading:
-
-- manga
-- manhua
-- manhwa
-- web novel
-- EPUB
-- PDF
-- screenshots
-- scanned documents
-
-the reading experience should be represented using the same business concepts.
-
----
-
-## 3.2 Maintain Reading Context
-
-Reading is contextual.
-
-Translation quality depends heavily on surrounding information.
-
-Reading Session therefore maintains a consistent reading context including:
-
-- current source
-- current page
-- current chapter
-- visible viewport
-- reading direction
-- active language
-- translation configuration
-- user preferences
-- current revision
-
-This context becomes the authoritative business state for downstream processing.
-
----
-
-## 3.3 Coordinate Business Activities
-
-Reading Session coordinates the business lifecycle of processing without performing processing itself.
-
-Examples include:
-
-- reading started
-- page changed
-- viewport moved
-- language changed
-- translation mode changed
-- session paused
-- session resumed
-- session finished
-
-Each event may require different downstream work.
-
-Reading Session determines which business actions are required.
-
----
-
-## 3.4 Protect Reading Consistency
-
-A user should never receive results belonging to an obsolete reading state.
-
-If the user scrolls to another page while OCR is still running,
-
-the old OCR result should never become visible simply because it finishes later.
-
-Reading Session achieves this by maintaining immutable Content Revisions.
-
-Every downstream request references the revision that originated it.
-
-Late results from obsolete revisions are rejected by Runtime before reaching Presentation.
-
----
-
-## 3.5 Support Future Reading Models
-
-Reading Session should support future reading modes without redesign.
-
-Examples include:
-
-- dual-page reading
-- vertical scrolling
-- infinite scrolling
-- AI assisted reading
-- collaborative reading
-- synchronized mobile reading
-- cloud synchronized sessions
-- multi-device continuation
-
-The domain model should remain stable even as execution technology evolves.
-
----
-
-# 4. Responsibilities
-
-Reading Session owns the business lifecycle of a reading activity.
-
-Its responsibilities include, but are not limited to, the following areas.
-
-## 4.1 Session Lifecycle
-
-Reading Session owns:
-
-- session creation
-- session initialization
-- session activation
-- session suspension
-- session resumption
-- session completion
-- session cancellation
-- session disposal
-
-No other module may change the lifecycle state of a Reading Session.
-
----
-
-## 4.2 Reading Context
-
-Reading Session owns the authoritative reading context.
-
-This includes:
-
-- current source
-- current page
-- active viewport
-- current chapter
-- active language
-- reading direction
-- translation mode
-- selected region
-- session configuration
-- user reading preferences
-
-Processing modules may observe this context but never modify it.
-
----
-
-## 4.3 Content Revision
-
-Reading Session is the owner of Content Revision.
-
-Every meaningful change to reading context generates a new immutable revision.
-
-Examples include:
-
-- browser navigation
-- chapter change
-- page change
-- viewport change
-- language change
-- OCR mode change
-- translation provider change
-- reading mode change
-- manual refresh
-- user selection change
-
-Each revision becomes a new business snapshot.
-
-Previous revisions remain immutable until discarded by Runtime.
-
----
-
-## 4.4 Processing Intent
-
-Reading Session determines which processing activities are required.
-
-Examples:
-
-- Capture Required
-- OCR Required
-- Text Processing Required
-- Translation Required
-- Presentation Refresh Required
-
-These are business intentions.
-
-They are **not execution commands**.
-
-Runtime decides whether, when and how those intentions become executable work.
-
----
-
-## 4.5 Session Coordination
-
-Reading Session coordinates relationships between business activities.
-
-For example,
-
-A language change may require:
-
-- new OCR
-- new translation
-- new presentation
-
-A viewport movement may require:
-
-- capture refresh
-- OCR reuse
-- translation reuse
-- presentation rebuild
-
-Reading Session determines these dependencies according to business rules.
-
-Execution remains outside the module.
-
----
-
-## 4.6 Event Publication
-
-Reading Session publishes business lifecycle events.
-
-Typical examples include:
-
-- SessionCreated
-- SessionStarted
-- SessionActivated
-- SessionUpdated
-- ReadingContextChanged
-- ContentRevisionCreated
-- SessionPaused
-- SessionResumed
-- SessionCancelled
-- SessionCompleted
-
-These events describe business state changes.
-
-They do not describe processing progress.
-
----
-
-## 4.7 Configuration Ownership
-
-Reading Session owns runtime-independent configuration for a reading activity.
-
-Examples include:
-
-- target language
-- source language
-- translation provider preference
-- OCR strategy preference
-- reading mode
-- cache preference
-- auto translation mode
-- presentation preference
-
-Processing modules consume configuration but never own it.
-
----
-
-# 5. Non-Responsibilities
-
-To preserve architectural boundaries, Reading Session explicitly does **not** perform or own the following responsibilities.
-
-## 5.1 Image Capture
-
-Image acquisition belongs to the Capture Module.
-
-Reading Session may request that new visual content be processed, but it never captures pixels directly.
-
----
-
-## 5.2 OCR
-
-Reading Session never recognizes text.
-
-OCR belongs exclusively to the Recognition domain.
-
----
-
-## 5.3 Text Normalization
-
-Cleaning, segmentation, tokenization and normalization belong to Text Processing.
-
----
-
-## 5.4 Translation
-
-Translation engines are external business processors.
-
-Reading Session never translates text.
-
----
-
-## 5.5 Presentation Rendering
-
-Presentation owns rendering decisions.
-
-Reading Session never builds UI models.
-
----
-
-## 5.6 Runtime Scheduling
-
-Reading Session never decides:
-
-- execution priority
-- worker selection
-- queue ordering
-- concurrency level
-- retry timing
-- batching strategy
-
-These belong to Runtime Architecture.
-
----
-
-## 5.7 Resource Management
-
-Reading Session never manages:
-
-- memory pools
-- thread pools
-- GPU resources
-- network connections
-- worker lifetimes
-- execution queues
-
-These are Runtime concerns.
-
----
-
-## 5.8 Persistence
-
-Reading Session is not responsible for persistence implementation.
-
-It may expose business state for persistence modules, but storage mechanisms remain outside its boundary.
-
----
-
-# 6. Architectural Position
-
-Reading Session occupies the highest business layer inside the CRAI processing architecture.
+Its primary responsibility is:
 
 ```text
-                User
-                  │
-                  ▼
-        Reading Session
-                  │
-                  ▼
-        Runtime Control
-                  │
-                  ▼
-            Scheduler
-                  │
-                  ▼
-         Processing Modules
-                  │
-                  ▼
-           Presentation
+User Reading Intent
+        +
+Reading Source
+        +
+Reading Target
+        +
+Session-specific Configuration
+        ↓
+Reading Session Domain Logic
+        ↓
+Committed Reading State
+        ↓
+ReadingContextSnapshot
+        +
+ReadingContextRevision
+        +
+Reading Domain Facts
 ```
-
-Reading Session expresses **business intent**.
-
-Runtime converts business intent into executable work.
-
-Processing modules perform execution.
-
-Presentation exposes accepted results to the user.
-
----
-
-# 7. Domain Model
-
-The Reading Session Module owns the business representation of an active reading activity.
-
-Rather than exposing implementation details, the module defines a stable domain model that remains consistent regardless of runtime implementation or processing technology.
-
-Every concept inside this model represents business state rather than execution state.
-
-Execution state belongs to Runtime Architecture.
-
----
-
-## 7.1 Core Domain Objects
-
-The module owns the following domain entities.
-
-```text
-ReadingSession
-├── SessionContext
-├── ReadingSource
-├── ReadingTarget
-├── ContentRevision
-├── SessionConfiguration
-├── SessionState
-├── ReadingStatistics
-└── ReadingMetadata
-```
-
-These entities together describe everything required to represent a user's reading activity.
-
----
-
-## 7.2 ReadingSession
-
-ReadingSession is the aggregate root of the module.
-
-Every business operation performed during a reading activity belongs to exactly one ReadingSession.
-
-The session provides:
-
-- lifecycle ownership
-- business identity
-- context ownership
-- revision ownership
-- configuration ownership
-
-Nothing outside the Reading Session Module may directly modify its internal state.
-
-All changes occur through business operations defined by this module.
-
----
-
-## 7.3 SessionContext
-
-SessionContext represents the current business environment of an active session.
-
-It contains information required for downstream processing but does not contain processing results.
-
-Typical fields include:
-
-- current source
-- current page
-- chapter identifier
-- visible viewport
-- active language
-- target language
-- selected reading mode
-- translation configuration
-- active ContentRevision
-
-The context always represents the latest accepted reading state.
-
----
-
-## 7.4 ReadingSource
-
-ReadingSource identifies where readable content originates.
-
-Examples include:
-
-- browser tab
-- desktop application
-- local image
-- PDF document
-- EPUB
-- online novel
-- comic website
-- clipboard image
-
-The Reading Source remains independent from processing technologies.
-
-Changing OCR engines should never affect ReadingSource.
-
----
-
-## 7.5 ReadingTarget
-
-ReadingTarget identifies the specific content currently being read.
-
-Examples include:
-
-- current comic page
-
-- visible manga panel
-
-- selected paragraph
-
-- viewport
-
-- selected image region
-
-- current PDF page
-
-ReadingTarget may change frequently while the ReadingSource remains unchanged.
-
----
-
-## 7.6 SessionConfiguration
-
-SessionConfiguration stores business preferences associated with a reading activity.
-
-Examples include:
-
-- source language
-
-- target language
-
-- translation provider preference
-
-- OCR preference
-
-- presentation mode
-
-- auto translate enabled
-
-- translation quality level
-
-- reading direction
-
-Configuration is mutable.
-
-Configuration changes generate new Content Revisions whenever downstream processing becomes affected.
-
----
-
-## 7.7 ReadingMetadata
-
-Metadata stores descriptive information about the reading activity.
-
-Examples:
-
-- creation time
-
-- last activity
-
-- source type
-
-- session identifier
-
-- application identifier
-
-- user identifier
-
-Metadata never participates in business decision making.
-
-It exists primarily for diagnostics, persistence and analytics.
-
----
-
-## 7.8 ReadingStatistics
-
-Statistics describe the progress of a reading activity.
-
-Possible information includes:
-
-- pages viewed
-
-- chapters completed
-
-- translation count
-
-- OCR count
-
-- processing duration
-
-- active reading time
-
-Statistics never influence processing decisions.
-
----
-
-# 8. Reading Context
-
-Reading Context represents the current business understanding of what the user is reading.
-
-Everything downstream depends on this context.
-
-Whenever the context changes, the system reevaluates required processing.
-
----
-
-## 8.1 Context Authority
-
-Reading Session is the only authority capable of producing an official Reading Context.
-
-Processing modules may observe context.
-
-They never create or modify it.
-
----
-
-## 8.2 Context Consistency
-
-At any point in time,
-
-a Reading Session exposes exactly one active Reading Context.
-
-There is never ambiguity regarding:
-
-- active page
-
-- active chapter
-
-- active viewport
-
-- active language
-
-- active revision
-
-This guarantee simplifies downstream processing.
-
----
-
-## 8.3 Context Evolution
-
-Reading Context evolves through immutable revisions.
-
-Instead of modifying previous context,
-
-Reading Session creates a new snapshot.
-
-Example:
-
-```text
-Revision 15
-
-Page 8
-Viewport A
-Language JP
-
-↓
-
-User Scrolls
-
-↓
-
-Revision 16
-
-Page 8
-Viewport B
-Language JP
-```
-
-The previous revision remains immutable.
-
----
-
-## 8.4 Context Stability
-
-Minor execution failures never invalidate Reading Context.
-
-For example,
-
-an OCR failure does not change what the user is reading.
-
-Only business events may change Reading Context.
-
----
-
-# 9. Content Revision Model
-
-Content Revision is one of the most important concepts in CRAI.
-
-It represents a complete immutable snapshot of the reading context.
-
-Everything downstream references ContentRevision.
-
----
-
-## 9.1 Why Content Revision Exists
-
-Without revisions,
-
-late processing results could overwrite newer content.
-
-Example:
-
-```text
-User opens Page 1
-
-↓
-
-OCR starts
-
-↓
-
-User jumps to Page 8
-
-↓
-
-OCR(Page1) finishes
-
-↓
-
-Wrong translation appears
-```
-
-Revision ownership prevents this situation.
-
----
-
-## 9.2 Immutable Revision
-
-A Content Revision is immutable.
-
-Once created,
-
-it can never be modified.
-
-Changing any business property creates a completely new revision.
-
----
-
-## 9.3 Revision Identity
-
-Every revision owns a unique identifier.
-
-Example:
-
-```text
-Revision 1001
-
-Revision 1002
-
-Revision 1003
-```
-
-Identifiers are strictly increasing within a session.
-
----
-
-## 9.4 Revision Creation
-
-Typical revision triggers include:
-
-- page navigation
-
-- viewport movement
-
-- chapter change
-
-- language change
-
-- source replacement
-
-- OCR mode change
-
-- translation mode change
-
-- presentation mode change
-
-- manual refresh
-
-Not every UI event creates a revision.
-
-Only business-significant changes do.
-
----
-
-## 9.5 Revision Lifetime
-
-A revision exists until:
-
-- session termination
-
-or
-
-- runtime discards obsolete history
-
-Discarding history never changes revision identity.
-
----
-
-## 9.6 Revision Authority
-
-Only Reading Session creates Content Revisions.
-
-No downstream module may create, replace or modify them.
-
----
-
-# 10. Processing Intent Model
-
-Processing Intent represents business requirements rather than executable work.
-
-This distinction is fundamental.
-
----
-
-## 10.1 Business Intent
 
 Reading Session answers:
 
-"What work is required?"
+> **What is the user currently reading, and what is the current business state of that reading activity?**
 
-It never answers:
+It does not answer:
 
-"How should work execute?"
+> Which processing pipeline should now run?
 
----
+That belongs to Business Pipeline Orchestration.
 
-## 10.2 Intent Types
+It does not answer:
 
-Typical intents include:
+> How should required processing execute?
 
-- Capture Required
-
-- OCR Required
-
-- Text Processing Required
-
-- Translation Required
-
-- Presentation Refresh Required
-
-Future versions may introduce additional intent types without redesigning the module.
+That belongs to Runtime Control.
 
 ---
 
-## 10.3 Intent Independence
-
-Multiple intents may exist simultaneously.
-
-Example:
+# 2. Module Identity
 
 ```text
-Language Changed
-
-↓
-
-OCR Required
-
-↓
-
-Translation Required
-
-↓
-
-Presentation Refresh Required
+Module ID: reading-session
+Module Type: Core Reading Domain Module
+Primary Domain: User reading activity
+Aggregate Root: ReadingSession
+Primary State: ReadingContext
+Primary Revision: ReadingContextRevision
+Execution Authority: Runtime Control
+Pipeline Decision Owner: Business Pipeline Orchestration
+Persistence Implementation: Storage
+MVP Priority: Required
 ```
 
-The order of execution is not determined here.
+Reading Session is a long-lived business-domain module.
+
+It is not a processing module.
+
+It is not a Runtime execution module.
+
+It is not the pipeline orchestrator.
 
 ---
 
-## 10.4 Runtime Responsibility
+# 3. Architectural Position
 
-Runtime receives Processing Intent.
-
-Runtime decides:
-
-- whether execution begins
-
-- execution priority
-
-- scheduling
-
-- batching
-
-- retry
-
-- cancellation
-
-Reading Session remains unaware of these implementation details.
-
----
-
-# 11. Coordination Model
-
-Reading Session coordinates business relationships.
-
-It never coordinates execution.
-
----
-
-## 11.1 Coordination Responsibility
-
-The module determines dependencies between business activities.
-
-For example,
-
-changing the reading language invalidates existing translations.
-
-Therefore Translation becomes required.
-
-This is a business decision.
-
----
-
-## 11.2 Execution Responsibility
-
-Runtime transforms business decisions into executable work.
-
-Workers perform execution.
-
-Reading Session never communicates directly with workers.
-
----
-
-## 11.3 Accepted Coordination Flow
+The primary architecture is:
 
 ```text
-User Action
-
-↓
-
+User / Application Intent
+        ↓
 Reading Session
+        ↓
+Committed Reading Context
+        +
+Reading Domain Facts
+        ↓
+Business Pipeline Orchestration
+        ↓
+Runtime Control
+        ↓
+Processing Modules
+        ↓
+Accepted Artifacts
+        ↓
+Presentation
+        ↓
+UI Adapter
+```
 
-↓
+The ownership split is:
 
-Business Intent
+```text
+Reading Session
+    → what the user is reading
 
-↓
+Business Pipeline Orchestration
+    → what processing capabilities are required
 
 Runtime Control
+    → what execution is currently authoritative
+      and how work progresses
 
-↓
+Processing Modules
+    → module-specific candidate results
 
-Scheduler
-
-↓
-
-Workers
-
-↓
-
-Accepted Result
-
-↓
+Artifact Store
+    → accepted runtime Artifacts
 
 Presentation
-```
+    → committed user-visible Presentation state
 
-Every stage owns exactly one responsibility.
+UI Adapter
+    → actual platform rendering
+```
 
 ---
 
-## 11.4 Forbidden Coordination
+# 4. Why Reading Session Exists
 
-The following architecture is prohibited.
+CRAI processes reading content across many possible surfaces:
+
+* browser pages;
+* comics;
+* images;
+* novels;
+* EPUB;
+* PDF;
+* captured application content;
+* future structured readers.
+
+Those environments differ technically.
+
+The business concept does not.
+
+The user is performing a reading activity.
+
+Reading Session provides one stable business model for that activity independent from:
+
+* OCR engine;
+* Translation provider;
+* Runtime implementation;
+* scheduler;
+* desktop framework;
+* browser framework;
+* storage backend.
+
+---
+
+# 5. Reading-First Principle
+
+Users do not conceptually begin by starting:
 
 ```text
 OCR
-
-↓
-
 Translation
-
-↓
-
+Capture
 Presentation
 ```
 
-Processing modules must never invoke each other directly.
+They begin a reading activity.
 
-All coordination passes through Runtime using contracts defined by the architecture.
-
----
-
-# 12. Ownership Model
-
-One of the primary objectives of the Reading Session Module is to establish clear ownership boundaries across the CRAI architecture.
-
-Ownership determines which module has the authority to create, modify, validate, or invalidate a specific business concept.
-
-Without explicit ownership, multiple modules may attempt to control the same state, leading to race conditions, inconsistent behavior, and tightly coupled implementations.
-
-Reading Session therefore serves as the sole business authority for the reading domain.
-
----
-
-## 12.1 Ownership Philosophy
-
-Every business concept must have exactly one owner.
-
-Ownership includes the authority to:
-
-- create
-- modify
-- validate
-- invalidate
-- retire
-
-No ownership may be shared between modules.
-
-Other modules may observe or consume business state but never mutate it.
-
----
-
-## 12.2 Reading Session Owns
-
-The Reading Session Module owns:
-
-- ReadingSession
-- SessionContext
-- ReadingSource
-- ReadingTarget
-- ContentRevision
-- SessionConfiguration
-- SessionLifecycle
-- ReadingContext
-- ProcessingIntent
-
-These concepts exist only because a user is reading.
-
----
-
-## 12.3 Runtime Owns
-
-Runtime Architecture owns execution.
-
-Examples include:
-
-- work queue
-- execution scheduling
-- cancellation propagation
-- resource allocation
-- retry strategy
-- execution timeout
-- worker lifecycle
-- result acceptance
-
-Reading Session has no authority over runtime implementation.
-
----
-
-## 12.4 Processing Modules Own
-
-Each processing module owns only its internal execution state.
-
-Examples:
-
-Capture
-
-- CaptureRequest
-- CaptureResult
-
-Recognition
-
-- OCRRequest
-- OCRResult
-
-Translation
-
-- TranslationRequest
-- TranslationResult
-
-Presentation
-
-- PresentationSnapshot
-- RenderPlan
-
-Reading Session never modifies these objects.
-
----
-
-## 12.5 Ownership Matrix
-
-| Concept | Owner |
-|---------|-------|
-| Reading Session | Reading Session |
-| Session Context | Reading Session |
-| Reading Source | Reading Session |
-| Reading Target | Reading Session |
-| Content Revision | Reading Session |
-| Processing Intent | Reading Session |
-| Runtime Queue | Runtime |
-| Scheduler | Runtime |
-| Worker | Runtime |
-| Capture Result | Capture |
-| OCR Result | Recognition |
-| Translation Result | Translation |
-| Presentation Snapshot | Presentation |
-
-Ownership is exclusive.
-
-No concept should ever appear with multiple owners.
-
----
-
-# 13. Lifecycle Model
-
-The lifecycle of a Reading Session represents the evolution of a user's reading activity.
-
-It is independent of execution.
-
-Processing failures do not automatically terminate a Reading Session.
-
----
-
-## 13.1 Session Lifecycle
+Therefore CRAI should preserve a business model centered on:
 
 ```text
-Created
-
-↓
-
-Initializing
-
-↓
-
-Active
-
-↓
-
-Paused
-
-↓
-
-Active
-
-↓
-
-Completing
-
-↓
-
-Completed
-
-↓
-
-Disposed
+ReadingSession
+ReadingSource
+ReadingTarget
+ReadingPosition
+ReadingContext
+SessionConfiguration
 ```
 
-Cancellation may occur from any active state.
+Processing exists to support those concepts.
+
+Processing lifecycle must not leak back into the Reading Session aggregate.
 
 ---
 
-## 13.2 Session Creation
+# 6. Core Responsibility
 
-Session creation establishes:
+Reading Session owns the business state of an active reading activity.
 
-- session identifier
-- initial context
-- initial configuration
-- initial ContentRevision
-- initial state
+Typical responsibilities include:
 
-No processing begins automatically until business intent is produced.
-
----
-
-## 13.3 Session Activation
-
-A session becomes Active when it is capable of accepting user interaction.
-
-Activation does not imply that processing has finished.
-
-Processing continues independently.
+```text
+session lifecycle
+reading source identity
+current logical reading target
+reading position
+session-specific configuration
+reading-context snapshots
+ReadingContextRevision
+domain validation
+domain state changes
+reading-domain event publication
+```
 
 ---
 
-## 13.4 Session Update
+# 7. Explicit Non-Responsibilities
 
-While active, the session continuously evaluates business changes.
+Reading Session does not own:
 
-Typical triggers include:
+```text
+Capture execution
+Recognition execution
+Text Processing execution
+Translation execution
+Presentation construction
+Pipeline dependency evaluation
+WorkItem lifecycle
+Attempt lifecycle
+Runtime Revision
+Runtime authority
+Runtime cancellation
+Runtime retry
+Artifact publication
+UI rendering
+technical viewport lifecycle
+persistent storage implementation
+```
 
-- page navigation
-- viewport movement
-- chapter change
-- language change
-- configuration update
-- source replacement
-
-Each update may create a new ContentRevision.
-
----
-
-## 13.5 Session Pause
-
-Pause suspends business progression.
-
-No new Processing Intent is produced while paused.
-
-Already executing work may continue or be cancelled depending on Runtime policy.
-
----
-
-## 13.6 Session Resume
-
-Resuming re-enables business evaluation.
-
-A new ContentRevision may be created if the source changed during suspension.
+This boundary is mandatory.
 
 ---
 
-## 13.7 Session Completion
+# 8. Reading Session vs Business Pipeline Orchestration
 
-Completion occurs when the reading activity naturally ends.
+This is a fundamental separation.
+
+Reading Session determines:
+
+```text
+Page changed
+Target language changed
+Reading target changed
+Session paused
+Session resumed
+Reading source replaced
+```
+
+Business Pipeline Orchestration determines:
+
+```text
+Does this change require Capture?
+Can Recognition be reused?
+Does Translation need rerunning?
+Can an existing Artifact be reused?
+Does Presentation need rebuilding?
+```
+
+Reading Session MUST NOT maintain pipeline dependency rules.
+
+---
+
+# 9. Reading Session vs Runtime Control
+
+Reading Session owns business state.
+
+Runtime Control owns execution authority.
+
+```text
+ReadingContextRevision
+    → version of reading-domain state
+
+RuntimeRevisionId
+    → version of current execution intent
+```
+
+These are distinct revision domains.
+
+Reading Session MUST NOT:
+
+* create RuntimeRevisionId;
+* determine Runtime WorkItem authority;
+* mark Attempts superseded;
+* reject Runtime completion;
+* manage Runtime cancellation tokens;
+* schedule retry.
+
+---
+
+# 10. Reading Session vs Processing Modules
+
+Reading Session never directly invokes:
+
+```text
+Capture
+Recognition
+Text Processing
+Translation
+Presentation
+```
+
+Processing modules do not mutate Reading Session.
+
+The relationship is mediated through:
+
+```text
+Business Pipeline Orchestration
++
+Runtime Control
+```
+
+---
+
+# 11. Aggregate Root
+
+The aggregate root is:
+
+```text
+ReadingSession
+```
+
+Conceptually:
+
+```text
+ReadingSession
+├── ReadingSessionId
+├── SessionState
+├── ReadingContext
+├── ReadingContextRevision
+├── SessionConfiguration
+├── ReadingProgress
+└── ReadingMetadata
+```
+
+All mutation of ReadingSession business state occurs through Reading Session commands/domain operations.
+
+---
+
+# 12. ReadingSessionId
+
+`ReadingSessionId` identifies one logical reading activity.
 
 Examples:
 
-- browser closed
-- document finished
-- user exits reading mode
+```text
+reading a comic chapter
+reading a novel
+reading a PDF
+reading content in a browser tab
+```
 
-Completion publishes lifecycle events before disposal.
+A ReadingSessionId is not:
 
----
-
-## 13.8 Session Disposal
-
-Disposal permanently releases business resources.
-
-Disposed sessions may never return to Active.
-
----
-
-# 14. Cancellation Model
-
-Cancellation exists to preserve business correctness rather than improve performance.
-
-Performance is only a secondary benefit.
+* a Runtime Session ID unless architecture explicitly aliases them;
+* a WorkItem ID;
+* a browser tab handle;
+* a native window handle.
 
 ---
 
-## 14.1 Business Cancellation
+# 13. ReadingContext
 
-Reading Session determines that previous business intent is no longer valid.
+`ReadingContext` represents the currently committed business understanding of the reading activity.
 
-Examples:
+Conceptually:
 
-- page changed
-- viewport changed
-- chapter changed
-- source replaced
-- language changed
+```text
+ReadingContext
+├── readingSessionId
+├── readingSource
+├── readingTarget
+├── readingPosition?
+├── sourceLanguage?
+├── targetLanguage?
+├── sessionConfigurationRef
+├── contextRevision
+└── updatedAt
+```
 
-These events revoke the authority of older ContentRevisions.
+It describes business state.
 
----
-
-## 14.2 Runtime Cancellation
-
-Runtime receives cancellation requests and determines how execution should stop.
-
-Possible mechanisms include:
-
-- cooperative cancellation
-- queue removal
-- timeout
-- worker interruption
-
-Reading Session remains unaware of implementation.
+It contains no processing results.
 
 ---
 
-## 14.3 Late Results
+# 14. ReadingContextSnapshot
 
-Processing may complete after cancellation.
+A `ReadingContextSnapshot` is an immutable representation of one committed Reading Context revision.
 
-Late results are not considered errors.
+```text
+ReadingContextSnapshot
+├── readingSessionId
+├── readingContextRevision
+├── source
+├── target
+├── position?
+├── sessionConfiguration
+├── contentIdentity
+└── createdAt
+```
 
-Instead,
-
-they are simply obsolete.
-
-Runtime rejects obsolete results before Presentation consumes them.
+A snapshot may be passed to orchestration or Runtime as immutable provenance.
 
 ---
 
-## 14.4 Revision Revocation
+# 15. ReadingContextRevision
 
-Cancellation never modifies existing revisions.
+Reading Session owns:
 
-Instead,
+```text
+ReadingContextRevision
+```
 
-Reading Session revokes their authority.
+It represents changes to committed reading-domain state.
 
 Example:
 
 ```text
-Revision 18
-
-↓
-
-User Scroll
-
-↓
-
-Revision 19
-
-↓
-
-Revision 18 becomes obsolete
+ReadingContextRevision 31
+    ↓
+user moves to next page
+    ↓
+ReadingContextRevision 32
 ```
 
-Revision 18 still exists historically.
+Rules:
 
-It simply no longer represents the active reading world.
-
----
-
-# 15. Dependency Model
-
-Reading Session interacts with other modules exclusively through contracts.
-
-Direct implementation coupling is prohibited.
+1. monotonic within one ReadingSession;
+2. immutable once committed;
+3. only Reading Session creates it;
+4. does not itself grant Runtime execution authority;
+5. is not PresentationRevision;
+6. is not Artifact version.
 
 ---
 
-## 15.1 Upstream Dependencies
+# 16. Deprecation of `ContentRevision`
 
-Reading Session may receive business requests from:
-
-- User Interface
-- Browser Adapter
-- Automation
-- Session Recovery
-- External API
-
-These requests initiate business operations.
-
----
-
-## 15.2 Downstream Dependencies
-
-Reading Session publishes business intent consumed by:
-
-- Runtime Control
-
-Reading Session never invokes Capture, Recognition, Translation or Presentation directly.
-
-Those interactions are delegated through Runtime.
-
----
-
-## 15.3 Architectural Dependency
+The previous Reading Session specification used:
 
 ```text
-User
+ContentRevision
+```
 
-↓
+for both:
+
+```text
+reading-context version
++
+downstream execution authority
+```
+
+That overloaded meaning is deprecated.
+
+The preferred business-domain term is now:
+
+```text
+ReadingContextRevision
+```
+
+Runtime execution authority uses:
+
+```text
+RuntimeRevisionId
+```
+
+This removes ambiguity between:
+
+```text
+business state changed
+```
+
+and:
+
+```text
+execution result may still commit
+```
+
+---
+
+# 17. Revision Separation
+
+CRAI therefore has distinct revision/version domains.
+
+```text
+ReadingContextRevision
+    owner: Reading Session
+
+RuntimeRevisionId
+    owner: Runtime Control
+
+Artifact version / identity
+    owner: Artifact contracts/store
+
+PresentationRevision
+    owner: Presentation
+
+ViewportRevision
+    owner: UI Adapter / normalized viewport owner
+
+Preference/Profile version
+    owner: Preferences
+```
+
+No module should use another owner's revision as if it were its own lifecycle counter.
+
+---
+
+# 18. ReadingSource
+
+`ReadingSource` identifies the logical source from which readable content originates.
+
+Examples:
+
+```text
+BrowserDocument
+ComicDocument
+ImageCollection
+PdfDocument
+EpubDocument
+ClipboardContent
+ApplicationSurface
+```
+
+Conceptually:
+
+```text
+ReadingSource
+├── sourceId
+├── sourceKind
+├── sourceIdentity
+├── title?
+├── locator?
+└── metadata?
+```
+
+ReadingSource must remain independent from technical implementation handles.
+
+---
+
+# 19. ReadingSource Boundary
+
+ReadingSource may identify:
+
+```text
+a browser document
+```
+
+but must not contain:
+
+```text
+DOM Node
+browser process handle
+native HWND
+framework-specific object
+```
+
+Technical handles belong to adapters/platform integration.
+
+---
+
+# 20. ReadingTarget
+
+`ReadingTarget` identifies the logical portion of the source currently relevant to reading.
+
+Examples:
+
+* comic page;
+* chapter;
+* PDF page;
+* paragraph;
+* selected image;
+* logical content region;
+* structured document location.
+
+Conceptually:
+
+```text
+ReadingTarget
+├── targetId
+├── targetKind
+├── sourceId
+├── contentIdentity
+├── logicalLocator?
+└── metadata?
+```
+
+---
+
+# 21. ReadingTarget vs PresentationTarget
+
+These are different concepts.
+
+```text
+ReadingTarget
+    → what content the user is reading
+
+PresentationTarget
+    → where Presentation should display output
+```
+
+Example:
+
+```text
+ReadingTarget
+    = Comic Page 42
+
+PresentationTarget
+    = Companion Side Panel
+```
+
+Reading Session owns ReadingTarget.
+
+Presentation/UI architecture owns PresentationTarget semantics.
+
+---
+
+# 22. ReadingPosition
+
+Reading Session may maintain business-level reading position.
+
+Examples:
+
+```text
+chapter 4
+page 18
+paragraph anchor
+scroll-progress percentage
+logical item index
+```
+
+ReadingPosition should not become a dump of raw UI geometry.
+
+Technical pixel viewport belongs elsewhere.
+
+---
+
+# 23. Viewport Boundary
+
+The previous model treated viewport as authoritative Reading Session state.
+
+Runtime v2 requires a distinction.
+
+Technical viewport information such as:
+
+```text
+pixel width
+pixel height
+screen transform
+target revision
+device scale
+platform coordinate space
+```
+
+belongs to UI Adapter/platform integration.
+
+Reading Session may store business-relevant reading position derived from UI interaction.
+
+If normalized viewport state must participate in orchestration, it should be referenced through a stable external snapshot rather than re-owned by Reading Session.
+
+---
+
+# 24. SessionConfiguration
+
+Reading Session owns session-specific reading decisions.
+
+Conceptually:
+
+```text
+SessionConfiguration
+├── sourceLanguageOverride?
+├── targetLanguageOverride?
+├── readingMode?
+├── autoTranslate?
+├── translationQualityPreference?
+├── recognitionModePreference?
+├── presentationModePreference?
+└── sessionOverrides[]
+```
+
+This is session-scoped domain configuration.
+
+---
+
+# 25. Preferences Boundary
+
+Persistent user defaults belong to:
+
+```text
+Preferences
+```
+
+Reading Session may consume a resolved configuration snapshot and apply session-specific overrides.
+
+Therefore:
+
+```text
+Preferences
+    owns persistent/default preference
 
 Reading Session
+    owns active session-specific selection/override
+```
 
-↓
+Reading Session MUST NOT become the persistence owner of global Preferences.
 
-Runtime
+---
 
-↓
+# 26. Provider Preference Boundary
 
-Processing
+A user may express a session preference such as:
 
-↓
+```text
+prefer high-quality translation
+prefer local OCR
+```
 
+Reading Session may preserve that user choice.
+
+Actual provider resolution and execution configuration belong to the appropriate orchestration/provider/runtime layer.
+
+Reading Session MUST NOT instantiate or select provider implementations directly.
+
+---
+
+# 27. Session Lifecycle
+
+Reading Session owns its business lifecycle.
+
+Primary states:
+
+```text
+CREATED
+INITIALIZING
+ACTIVE
+PAUSED
+COMPLETING
+COMPLETED
+DISPOSED
+```
+
+Optional cancellation/termination semantics are defined precisely in `STATES.md`.
+
+Processing failures do not automatically change Reading Session lifecycle.
+
+---
+
+# 28. Session Creation
+
+Creation establishes:
+
+```text
+ReadingSessionId
+initial ReadingSource
+initial ReadingTarget?
+initial SessionConfiguration
+initial ReadingContextRevision
+initial lifecycle state
+```
+
+Creation itself does not schedule processing.
+
+---
+
+# 29. Session Activation
+
+A session becomes `ACTIVE` when it can accept reading-domain operations.
+
+Activation does not imply:
+
+```text
+Capture completed
+Recognition completed
+Translation completed
+Presentation displayed
+```
+
+Those are independent lifecycles.
+
+---
+
+# 30. Session Pause
+
+Pause means business progression is temporarily suspended according to Reading Session semantics.
+
+While paused:
+
+* new reading-domain mutations may be rejected or buffered according to contract;
+* no assumption is made about already-running Runtime work.
+
+Reading Session does not cancel Runtime work itself.
+
+---
+
+# 31. Session Resume
+
+Resume returns the Reading Session to active business operation.
+
+If the underlying source changed while paused, Application/integration may submit a new reading-target update after resume.
+
+Reading Session then commits a new ReadingContextRevision as required.
+
+---
+
+# 32. Session Completion
+
+Completion indicates the reading activity naturally ended.
+
+Examples:
+
+* user leaves reader;
+* document finished;
+* reading mode explicitly ended.
+
+Completion does not directly dispose Runtime/UI resources.
+
+Other owners respond through their own lifecycle contracts.
+
+---
+
+# 33. Session Disposal
+
+Disposal means Reading Session business state is no longer active.
+
+Disposed sessions cannot return to Active.
+
+Physical persistence cleanup and Runtime resource disposal remain outside Reading Session.
+
+---
+
+# 34. Reading Context Mutation
+
+A meaningful domain change follows:
+
+```text
+Current ReadingContext
+        ↓
+Domain Command
+        ↓
+Validate
+        ↓
+Build Candidate ReadingContext
+        ↓
+Commit
+        ↓
+ReadingContextRevision + 1
+        ↓
+Publish Reading Domain Fact
+```
+
+Reading Session mutation is independent from downstream processing completion.
+
+---
+
+# 35. Revision Creation Rules
+
+A new ReadingContextRevision is created only when committed reading-domain state changes.
+
+Typical examples:
+
+```text
+ReadingTarget changed
+ReadingSource replaced
+target language changed
+source language override changed
+session reading mode changed
+session-level processing preference changed
+reading position changed when business-significant
+```
+
+Not every raw UI event creates a revision.
+
+---
+
+# 36. Revision No-Op Rule
+
+Equivalent domain state should not create an unnecessary revision.
+
+Examples:
+
+```text
+same target selected again
+same language selected again
+same session mode applied again
+equivalent source identity received
+```
+
+A no-op preserves the current ReadingContextRevision.
+
+---
+
+# 37. High-Frequency UI Changes
+
+Raw scrolling or mouse movement may occur at high frequency.
+
+Reading Session should not create one ReadingContextRevision for every technical event.
+
+Instead:
+
+```text
+UI Adapter / Application
+        ↓
+normalize / coalesce
+        ↓
+business-significant reading change
+        ↓
+Reading Session update
+```
+
+This protects Runtime and cache efficiency.
+
+---
+
+# 38. Reading Domain Facts
+
+Reading Session publishes facts describing committed reading-domain state changes.
+
+Typical examples may include:
+
+```text
+ReadingSessionCreated
+ReadingSessionActivated
+ReadingContextChanged
+ReadingTargetChanged
+ReadingConfigurationChanged
+ReadingSessionPaused
+ReadingSessionResumed
+ReadingSessionCompleted
+ReadingSessionDisposed
+```
+
+Exact names belong to `EVENTS.md`.
+
+---
+
+# 39. Domain Events Are Not Pipeline Commands
+
+A Reading Session event means:
+
+```text
+this reading-domain fact occurred
+```
+
+It does not mean:
+
+```text
+execute OCR now
+translate now
+capture now
+```
+
+Business Pipeline Orchestration consumes relevant facts/state and decides what processing is required.
+
+---
+
+# 40. Removal of `ProcessingIntent` Ownership
+
+The previous module owned:
+
+```text
+Capture Required
+OCR Required
+Text Processing Required
+Translation Required
+Presentation Refresh Required
+```
+
+as `ProcessingIntent`.
+
+That ownership is removed from Reading Session v3.
+
+Reason:
+
+Those decisions require pipeline dependency, reuse, Artifact compatibility, capability availability, and processing rules.
+
+Those responsibilities belong to:
+
+```text
+Business Pipeline Orchestration
+```
+
+Reading Session should not duplicate them.
+
+---
+
+# 41. Business Pipeline Orchestration
+
+Business Pipeline Orchestration may compare:
+
+```text
+previous ReadingContextSnapshot
+new ReadingContextSnapshot
+available accepted Artifacts
+capabilities
+pipeline policy
+```
+
+and determine:
+
+```text
+Capture required?
+Recognition reusable?
+Text Processing required?
+Translation reusable?
+Presentation update required?
+```
+
+Reading Session only provides trustworthy domain state.
+
+---
+
+# 42. Example — Target Language Change
+
+Reading Session responsibility:
+
+```text
+Current target language = Vietnamese
+        ↓
+User selects English
+        ↓
+Validate
+        ↓
+Commit new ReadingContext
+        ↓
+ReadingContextRevision 25
+        ↓
+ReadingConfigurationChanged
+```
+
+Then separately:
+
+```text
+Business Pipeline Orchestration
+        ↓
+determines Translation needs reevaluation
+        ↓
+Runtime creates execution work
+```
+
+Reading Session never creates Translation WorkItems.
+
+---
+
+# 43. Example — Comic Page Change
+
+```text
+ReadingTarget = Page 10
+        ↓
+User moves to Page 11
+        ↓
+Reading Session commits:
+ReadingTarget = Page 11
+ReadingContextRevision = N+1
+        ↓
+ReadingTargetChanged
+```
+
+Pipeline Orchestration then decides whether Page 11 requires:
+
+* new capture;
+* Recognition;
+* Artifact reuse;
+* Translation;
+* Presentation.
+
+---
+
+# 44. Example — Viewport Movement
+
+Raw viewport movement does not automatically imply:
+
+```text
+new ReadingContextRevision
+```
+
+Possible flow:
+
+```text
+UI viewport changes rapidly
+        ↓
+UI Adapter normalizes/coalesces
+        ↓
+Application determines reading target/position materially changed
+        ↓
+Reading Session command
+        ↓
+new ReadingContextRevision if domain state changed
+```
+
+Presentation-only reflow may require no Reading Session revision at all.
+
+---
+
+# 45. Example — Presentation Mode Change
+
+A session-specific user preference may change from:
+
+```text
+SidePanel
+```
+
+to:
+
+```text
+Overlay
+```
+
+Reading Session may commit the preference change if Presentation mode is considered reading-domain configuration.
+
+However:
+
+```text
+Does existing Presentation need rebuild?
+Can Overlay run?
+Is geometry sufficient?
+```
+
+belongs outside Reading Session.
+
+---
+
+# 46. Runtime Revision Creation
+
+Reading Session does not create RuntimeRevisionId.
+
+A new committed ReadingContext may cause Business Pipeline Orchestration/Runtime integration to establish a new execution Revision.
+
+Conceptually:
+
+```text
+ReadingContextRevision 30
+        ↓
+orchestration decision
+        ↓
+RuntimeRevisionId R100
+```
+
+The mapping need not be 1:1.
+
+---
+
+# 47. Reading Revision vs Runtime Revision
+
+One ReadingContextRevision may require several Runtime changes.
+
+One Runtime Revision may also process work derived from one stable Reading Context.
+
+No architecture rule requires:
+
+```text
+ReadingContextRevision == RuntimeRevisionId
+```
+
+or:
+
+```text
+one ReadingContextRevision
+=
+exactly one Runtime Revision
+```
+
+They are independent identity domains.
+
+---
+
+# 48. Runtime Authority
+
+Runtime owns whether asynchronous work may commit/publish.
+
+Reading Session does not “revoke” Runtime work authority directly.
+
+Instead:
+
+```text
+Reading domain changes
+        ↓
+new ReadingContextRevision committed
+        ↓
+Orchestration/Runtime receives new intent
+        ↓
+Runtime establishes new authority
+        ↓
+old Runtime work may become superseded
+```
+
+The Runtime owns the supersession decision.
+
+---
+
+# 49. Cancellation Boundary
+
+The previous architecture described business cancellation as Reading Session revoking older ContentRevision authority.
+
+That model is removed.
+
+Reading Session may emit a domain fact that makes previous processing less relevant.
+
+Runtime then determines:
+
+* cancellation;
+* supersession;
+* queue removal;
+* cooperative stop;
+* result rejection.
+
+Reading Session does not own Runtime cancellation.
+
+---
+
+# 50. Late Results
+
+Late processing results are handled by Runtime authority checks.
+
+Reading Session does not receive raw module completion in order to decide whether it is stale.
+
+Required pattern:
+
+```text
+Attempt completes physically
+        ↓
+Runtime validates authority
+        ↓
+accepted or rejected
+```
+
+Only accepted Artifacts may reach downstream Presentation workflows.
+
+---
+
+# 51. Artifact Boundary
+
+Reading Session does not own processing Artifacts.
+
+Examples:
+
+```text
+CapturedFrameArtifact
+RecognitionArtifact
+SourceDocumentArtifact
+TranslationArtifact
+```
+
+Reading Session may reference Artifact provenance when useful, but it must not mutate or publish those Artifacts.
+
+---
+
+# 52. Presentation Boundary
+
+Reading Session does not construct:
+
+```text
+PresentationSnapshot
+RenderPlan
+PresentationItem
+```
+
+Presentation owns those concepts.
+
+Reading Session describes:
+
+```text
+what is being read
+```
+
+Presentation describes:
+
+```text
+how accepted reading information should be represented to the user
+```
+
+---
+
+# 53. Reading Progress
+
+Reading Session may own domain-level reading progress when useful.
+
+Examples:
+
+```text
+current chapter
+current page
+logical reading position
+chapter completed
+```
+
+It should not own infrastructure metrics such as:
+
+```text
+OCR count
+Translation latency
+GPU duration
+WorkItem duration
+```
+
+Those belong to telemetry/diagnostics/runtime observability.
+
+---
+
+# 54. ReadingMetadata
+
+ReadingMetadata contains descriptive domain metadata.
+
+Examples:
+
+```text
+createdAt
+lastReadingActivityAt
+sourceKind
+document title?
+chapter label?
+```
+
+Metadata should not contain:
+
+* provider credentials;
+* Runtime worker state;
+* native handles;
+* complete page content.
+
+---
+
+# 55. Concurrency
+
+Reading Session business mutations for one ReadingSession must be logically serialized.
+
+Concurrent commands may be accepted physically, but committed ReadingContext revisions must be deterministic.
+
+Example:
+
+```text
+Current = Revision 20
+
+Command A expects 20
+Command B expects 20
+
+B commits Revision 21
+
+A reaches commit
+    ↓
+expected 20 != current 21
+    ↓
+reject / retry with latest domain state
+```
+
+This is Reading Session optimistic concurrency.
+
+It is not Runtime execution authority.
+
+---
+
+# 56. Candidate Reading Context
+
+Reading Session should prepare state changes before committing them.
+
+Conceptually:
+
+```text
+CandidateReadingContext
+├── basedOnRevision
+├── candidateRevision
+├── source
+├── target
+├── position
+├── configuration
+└── changeSet
+```
+
+Candidate state is not externally authoritative until committed.
+
+---
+
+# 57. Atomic Reading Commit
+
+Commit should atomically update:
+
+```text
+ReadingContextRevision
++
+ReadingContextSnapshot
++
+Session-owned indexes/references
+```
+
+Domain facts publish only after commit.
+
+---
+
+# 58. Session State vs Reading Context Revision
+
+Lifecycle state and context revision are distinct.
+
+Example:
+
+```text
+SessionState = ACTIVE
+ReadingContextRevision = 52
+```
+
+A page change may produce:
+
+```text
+ACTIVE / 53
+```
+
+without changing lifecycle state.
+
+Pause may change lifecycle state and may or may not require a ReadingContextRevision depending on the final contract.
+
+`STATES.md` will define the exact rule.
+
+---
+
+# 59. Session Lifecycle vs Runtime Lifecycle
+
+These must never be equated.
+
+```text
+Reading Session ACTIVE
+```
+
+does not mean:
+
+```text
+Runtime WorkItem RUNNING
+```
+
+Likewise:
+
+```text
+Runtime Attempt FAILED
+```
+
+does not mean:
+
+```text
+Reading Session FAILED
+```
+
+Processing failure normally leaves the reading activity active.
+
+---
+
+# 60. Error Ownership
+
+Reading Session owns only reading-domain errors.
+
+Examples:
+
+* invalid ReadingSessionId;
+* invalid lifecycle transition;
+* invalid ReadingTarget;
+* invalid session configuration;
+* ReadingContextRevision conflict;
+* disposed session mutation;
+* candidate context invariant violation.
+
+It does not own:
+
+* OCR failure;
+* Translation failure;
+* Runtime timeout;
+* retry exhaustion;
+* Artifact publication failure;
+* Presentation failure;
+* UI apply failure.
+
+---
+
+# 61. Dependency Rules
+
+Reading Session may depend on stable contracts for:
+
+```text
+core identifiers
+reading-domain primitives
+resolved preference/configuration values
+normalized source identity
+normalized user/application intents
+diagnostics abstraction
+```
+
+Reading Session must not directly depend on:
+
+```text
+Capture implementation
+Recognition implementation
+Translation implementation
+Presentation implementation
+Scheduler implementation
+Event Bus implementation
+Storage backend
+UI framework
+browser APIs
+operating-system APIs
+provider SDKs
+```
+
+---
+
+# 62. Direct Processing Calls Are Forbidden
+
+Invalid:
+
+```text
+Reading Session
+    ↓
+Recognition.execute()
+```
+
+Invalid:
+
+```text
+Reading Session
+    ↓
+Translation.translate()
+```
+
+Invalid:
+
+```text
+Reading Session
+    ↓
+Presentation.build()
+```
+
+Correct:
+
+```text
+Reading Session domain change
+        ↓
+Business Pipeline Orchestration
+        ↓
+Runtime Control
+        ↓
+processing contract
+```
+
+---
+
+# 63. Event Bus Boundary
+
+Reading Session may publish reading-domain facts.
+
+It must not rely on Event Bus as hidden pipeline orchestration.
+
+For example:
+
+```text
+ReadingTargetChanged
+```
+
+may be observed by orchestration.
+
+But Reading Session does not require:
+
+```text
+ReadingTargetChanged
+    → Recognition automatically starts
+```
+
+as a module invariant.
+
+---
+
+# 64. Persistence Boundary
+
+Reading Session state may require persistence for:
+
+* session restoration;
+* reading continuation;
+* reading position;
+* session configuration.
+
+Reading Session owns persistence semantics.
+
+Storage owns persistence implementation.
+
+Reading Session MUST NOT directly depend on:
+
+```text
+SQLite
+PostgreSQL
+filesystem
+browser storage
+cloud database
+```
+
+---
+
+# 65. Session Restoration
+
+A restored session record is not automatically active.
+
+Conceptually:
+
+```text
+Stored Reading Session
+        ↓
+load through Storage contract
+        ↓
+validate domain state
+        ↓
+Candidate restored ReadingSession
+        ↓
+commit restoration
+```
+
+Invalid persisted state must not become authoritative Reading Context.
+
+---
+
+# 66. Privacy
+
+Reading Session may contain sensitive reading-domain metadata.
+
+Normal diagnostics should avoid:
+
+* page content;
+* source text;
+* translated text;
+* screenshots;
+* browser HTML;
+* private URLs where unnecessary.
+
+Prefer:
+
+```text
+ReadingSessionId
+source kind
+target kind
+revision
+state
+bounded identifiers
+```
+
+---
+
+# 67. Performance
+
+Reading Session is not responsible for processing latency.
+
+Its performance goals are domain-state goals:
+
+```text
+fast domain mutation
+bounded revision creation
+low memory for long sessions
+deterministic concurrency
+minimal unnecessary context revisions
+efficient immutable snapshots
+```
+
+Avoid generating ReadingContextRevision for meaningless technical noise.
+
+---
+
+# 68. Multiple Reading Sessions
+
+Architecture should permit multiple independent ReadingSessions.
+
+Example:
+
+```text
+Session A
+    → comic
+
+Session B
+    → novel
+
+Session C
+    → PDF
+```
+
+Each owns:
+
+```text
+its own lifecycle
+its own ReadingContext
+its own ReadingContextRevision sequence
+```
+
+Runtime may execute work from multiple sessions concurrently.
+
+---
+
+# 69. Multi-Surface Reading
+
+A single Reading Session may eventually support several logical Presentation/reading surfaces.
+
+This must not require Reading Session to own native UI surfaces.
+
+Future models may add:
+
+```text
+ReadingView
+ReadingPane
+LogicalSurfaceAssociation
+```
+
+only if needed by reading-domain semantics.
+
+---
+
+# 70. Reading Context Invariants
+
+1. One ReadingSession has at most one current committed ReadingContext.
+
+2. Every committed ReadingContext belongs to exactly one ReadingSession.
+
+3. ReadingContextSnapshot is immutable.
+
+4. ReadingContextRevision is monotonic within the ReadingSession.
+
+5. Only Reading Session creates ReadingContextRevision.
+
+6. Candidate ReadingContext is not current state.
+
+7. Reading Session mutation is logically serialized.
+
+8. No-op domain changes do not require a new revision.
+
+---
+
+# 71. Ownership Invariants
+
+1. Reading Session owns reading-domain state.
+
+2. Reading Session does not own pipeline orchestration.
+
+3. Business Pipeline Orchestration owns processing-requirement decisions.
+
+4. Runtime owns RuntimeRevisionId.
+
+5. Runtime owns WorkItem.
+
+6. Runtime owns Attempt.
+
+7. Runtime owns execution authority.
+
+8. Runtime owns cancellation and retry execution.
+
+9. Artifact Store owns accepted Artifact lifecycle.
+
+10. Presentation owns PresentationRevision.
+
+11. UI Adapter owns technical viewport/surface lifecycle.
+
+12. Preferences owns persistent user preference state.
+
+---
+
+# 72. Processing Invariants
+
+1. Reading Session never performs Capture.
+
+2. Reading Session never performs Recognition.
+
+3. Reading Session never performs Text Processing.
+
+4. Reading Session never performs Translation.
+
+5. Reading Session never constructs Presentation.
+
+6. Reading Session never invokes processing implementations directly.
+
+7. Reading Session never schedules workers.
+
+8. Reading Session never decides queue ordering.
+
+9. Reading Session never determines Runtime retry.
+
+10. Reading Session never accepts/rejects Runtime Attempt completion.
+
+---
+
+# 73. Revision Invariants
+
+1. `ContentRevision` is deprecated as an overloaded execution-authority term.
+
+2. `ReadingContextRevision` identifies reading-domain state.
+
+3. `RuntimeRevisionId` identifies Runtime execution authority.
+
+4. `PresentationRevision` identifies committed Presentation state.
+
+5. Artifact identities/versions remain Artifact-owned.
+
+6. Revision identities from different domains are never numerically compared for authority.
+
+7. A ReadingContextRevision does not automatically invalidate Runtime work itself.
+
+8. Runtime decides supersession through Runtime authority rules.
+
+---
+
+# 74. Lifecycle Invariants
+
+1. Session lifecycle is independent from processing lifecycle.
+
+2. Processing failure does not automatically terminate Reading Session.
+
+3. Session pause does not directly mutate Runtime Attempt state.
+
+4. Session completion does not directly destroy UI/native resources.
+
+5. Session disposal is irreversible.
+
+6. Restored persisted state must be validated before activation.
+
+---
+
+# 75. Example — Normal Reading Flow
+
+```text
+User opens comic
+        ↓
+CreateReadingSession
+        ↓
+ReadingSession CREATED
+        ↓
+Activate
+        ↓
+ReadingSession ACTIVE
+        ↓
+ReadingTarget = Page 1
+ReadingContextRevision = 1
+        ↓
+Reading domain fact
+        ↓
+Business Pipeline Orchestration
+        ↓
+Runtime Revision established
+        ↓
+Capture / Recognition / Translation
+        ↓
+accepted Artifacts
+        ↓
 Presentation
 ```
 
-Dependencies flow downward.
+---
 
-Authority never flows upward.
+# 76. Example — Page Change During OCR
+
+```text
+ReadingContextRevision 10
+ReadingTarget = Page 4
+        ↓
+Runtime work running
+        ↓
+User selects Page 5
+        ↓
+Reading Session commits:
+ReadingContextRevision 11
+ReadingTarget = Page 5
+        ↓
+Business Pipeline Orchestration reacts
+        ↓
+Runtime establishes newer execution authority
+        ↓
+old OCR physically completes
+        ↓
+Runtime rejects obsolete completion
+```
+
+Reading Session does not inspect the OCR result.
 
 ---
 
-# 16. Design Principles
+# 77. Example — Presentation-Only Reflow
 
-The Reading Session Module follows several architectural principles.
+```text
+ReadingTarget unchanged
+ReadingContext unchanged
+        ↓
+window resized
+        ↓
+UI Adapter emits normalized viewport information
+        ↓
+Application requests Presentation reflow
+        ↓
+PresentationRevision changes
+```
 
----
+ReadingContextRevision may remain unchanged.
 
-## Single Source of Truth
-
-Only one active Reading Context exists for a session.
-
----
-
-## Immutable Revisions
-
-Business history is never modified.
-
-New revisions replace old authority.
-
----
-
-## Explicit Ownership
-
-Every business concept has one owner.
+This is why Presentation and Reading revisions must remain separate.
 
 ---
 
-## Runtime Independence
+# 78. Example — Translation Provider Preference Change
 
-Business logic never depends on execution technology.
+```text
+User changes session translation preference
+        ↓
+Reading Session validates session override
+        ↓
+ReadingContextRevision N+1
+        ↓
+ReadingConfigurationChanged
+        ↓
+Business Pipeline Orchestration evaluates impact
+        ↓
+Runtime may schedule new Translation work
+```
 
----
-
-## Loose Coupling
-
-Modules communicate using contracts and events.
-
-Never through direct orchestration.
-
----
-
-## Future Compatibility
-
-The business model must remain stable as new OCR engines, AI providers, rendering systems and execution environments are introduced.
-
----
-
-# 17. Performance Goals
-
-Although Reading Session is not responsible for execution performance, its business model should encourage efficient execution.
-
-Goals include:
-
-- minimize unnecessary ContentRevisions
-- maximize cache reuse opportunities
-- reduce redundant processing
-- avoid duplicate business intent
-- minimize invalid processing
-- support long-running sessions
-- support future multi-session reading
-- support distributed execution
-- remain deterministic under concurrency
+Reading Session does not instantiate the new provider.
 
 ---
 
-# 18. Architecture Invariants
+# 79. Example — Pause
 
-The following invariants must always remain true.
+```text
+ACTIVE
+  ↓
+PauseReadingSession
+  ↓
+PAUSED
+```
 
-1. Every ReadingSession has exactly one active ReadingContext.
+Reading Session publishes a domain fact.
 
-2. Every ReadingContext belongs to exactly one ReadingSession.
+Runtime/Application policy separately determines whether existing processing:
 
-3. Every ContentRevision belongs to exactly one ReadingSession.
+```text
+continues
+is deprioritized
+is canceled
+```
 
-4. Every ProcessingIntent references exactly one ContentRevision.
-
-5. ContentRevisions are immutable.
-
-6. Business state may only be modified by Reading Session.
-
-7. Runtime may never modify ReadingContext.
-
-8. Processing modules may never modify SessionContext.
-
-9. Presentation may never modify business state.
-
-10. Processing modules never invoke each other directly.
-
-11. Reading Session never schedules execution.
-
-12. Reading Session never performs business processing.
-
-13. Runtime never owns business state.
-
-14. Only one active ContentRevision exists within a ReadingSession.
-
-15. Obsolete ContentRevisions never reach Presentation.
-
-16. Session disposal is irreversible.
-
-17. Ownership boundaries must never overlap.
-
-18. Every business decision must be deterministic given identical input state.
+Reading Session does not perform that execution action directly.
 
 ---
 
-# 19. Related Documents
+# 80. Example — Session Completion
 
-The Reading Session Module serves as the architectural foundation for the remaining Reading Session specifications.
+```text
+ACTIVE
+  ↓
+CompleteReadingSession
+  ↓
+COMPLETING
+  ↓
+COMPLETED
+```
 
-The following documents extend this module specification:
+Completion means the business reading activity ended.
 
-- CONTRACT.md
-- STATES.md
-- EVENTS.md
-- ERRORS.md
-- README.md
-
-These documents inherit the terminology, ownership rules, architectural boundaries, and invariants defined in this specification.
-
-No downstream document may redefine concepts introduced by this module.
-
-Instead, they provide implementation contracts, lifecycle definitions, event specifications, error semantics, and usage guidance while remaining fully consistent with the architecture established here.
+Runtime work, Presentation clearing, persistence, and UI disposal follow their respective owners' policies.
 
 ---
 
-# End of Document
+# 81. Conceptual Internal Components
+
+Reading Session may internally contain responsibilities such as:
+
+```text
+Reading Session
+├── ReadingSession Aggregate
+├── Session Lifecycle Policy
+├── Reading Context Manager
+├── Reading Context Revision Manager
+├── Reading Source Validator
+├── Reading Target Validator
+├── Session Configuration Resolver
+├── Reading Position Policy
+├── Candidate Context Builder
+├── Domain Commit Coordinator
+├── Domain Event Builder
+└── Diagnostics
+```
+
+These are logical responsibilities, not mandatory code folders.
+
+---
+
+# 82. Testing Strategy
+
+Reading Session must be testable without:
+
+```text
+OCR provider
+Translation provider
+Capture implementation
+Scheduler
+GPU
+native window
+browser DOM
+Storage backend
+```
+
+---
+
+# 83. Unit Tests
+
+Test:
+
+* session creation;
+* lifecycle validation;
+* context mutation;
+* ReadingContextRevision monotonicity;
+* no-op behavior;
+* target validation;
+* source replacement;
+* configuration changes;
+* optimistic concurrency;
+* candidate isolation;
+* domain event-after-commit behavior;
+* disposal irreversibility.
+
+---
+
+# 84. Ownership Tests
+
+Verify Reading Session never:
+
+* creates RuntimeRevisionId;
+* creates WorkItem;
+* creates Attempt;
+* changes Runtime authority;
+* performs retry;
+* calls processing modules;
+* publishes processing-completion facts;
+* builds PresentationSnapshot;
+* owns UI viewport lifecycle.
+
+---
+
+# 85. Integration Tests
+
+Verify:
+
+```text
+Reading Session domain mutation
+        ↓
+domain fact/state
+        ↓
+Business Pipeline Orchestration
+```
+
+without requiring Reading Session to know processing topology.
+
+Also verify Runtime may change execution state without mutating ReadingSession.
+
+---
+
+# 86. Concurrency Tests
+
+Test:
+
+* two target changes from same expected ReadingContextRevision;
+* configuration change racing target change;
+* pause racing domain update;
+* completion racing update;
+* stale domain command after newer revision;
+* no duplicate revision for equivalent update.
+
+---
+
+# 87. Architecture Decisions
+
+## 87.1 Reading Session Is a Domain Module
+
+It is no longer classified as:
+
+```text
+Business Orchestration
+```
+
+Preferred classification:
+
+```text
+Core Reading Domain
+```
+
+---
+
+## 87.2 Pipeline Decisions Are External
+
+Reading Session does not own `ProcessingIntent`.
+
+Business Pipeline Orchestration owns pipeline requirement evaluation.
+
+---
+
+## 87.3 Runtime Authority Is External
+
+Reading Session does not revoke execution authority.
+
+Runtime Control owns that lifecycle.
+
+---
+
+## 87.4 `ContentRevision` Is Replaced
+
+The ambiguous `ContentRevision` term should migrate toward:
+
+```text
+ReadingContextRevision
+```
+
+for business state.
+
+---
+
+## 87.5 Technical Viewport Is External
+
+Reading Session owns reading position/target semantics.
+
+UI Adapter owns technical viewport/surface state.
+
+---
+
+## 87.6 Persistent Preferences Are External
+
+Preferences owns durable user defaults.
+
+Reading Session owns session-specific resolved choices and overrides.
+
+---
+
+# 88. Architecture Invariants
+
+1. Reading Session is the aggregate owner of one reading activity.
+
+2. Reading Session owns ReadingContext.
+
+3. Reading Session owns ReadingContextRevision.
+
+4. ReadingContextRevision is immutable once committed.
+
+5. Reading Session does not own RuntimeRevisionId.
+
+6. Reading Session does not own Runtime execution authority.
+
+7. Reading Session does not own WorkItem or Attempt.
+
+8. Reading Session does not own processing retry.
+
+9. Reading Session does not directly cancel Runtime work.
+
+10. Reading Session does not own pipeline dependency evaluation.
+
+11. Reading Session does not own `ProcessingIntent` in v3.
+
+12. Business Pipeline Orchestration determines required processing.
+
+13. Processing modules never mutate Reading Session.
+
+14. Reading Session never directly calls processing implementations.
+
+15. Reading Session does not publish processing completion facts.
+
+16. Reading Session does not accept/reject processing results.
+
+17. Reading Session does not own accepted Artifact lifecycle.
+
+18. Reading Session does not own Presentation state.
+
+19. Reading Session does not own native rendering.
+
+20. ReadingTarget and PresentationTarget remain distinct.
+
+21. Reading position and technical viewport remain distinct.
+
+22. Persistent preferences and session overrides remain distinct.
+
+23. Reading lifecycle and Runtime lifecycle remain distinct.
+
+24. Processing failure does not automatically end Reading Session.
+
+25. No-op domain changes do not create unnecessary revisions.
+
+26. Domain state mutation is atomic.
+
+27. Candidate ReadingContext is not authoritative before commit.
+
+28. Domain facts are published only after business-state commit.
+
+29. Reading Session does not use Event Bus as a hidden workflow engine.
+
+30. Session disposal is irreversible.
+
+31. Diagnostics remain privacy-safe.
+
+32. Domain contracts remain platform-independent.
+
+---
+
+# 89. Related Documents
+
+```text
+.meta/AI_BOOT.md
+.meta/PROJECT_RULE.md
+.meta/MODULE_ROLE.md
+.meta/WORKFLOW.md
+.meta/CHANGE_RULE.md
+
+doc/01-architecture/core/CAPABILITY_MAP.md
+doc/01-architecture/core/DATA_FLOW.md
+doc/01-architecture/core/EVENT_BUS.md
+doc/01-architecture/core/EVENT_CONVENTION.md
+doc/01-architecture/core/STATE_MACHINE.md
+
+doc/01-architecture/modules/MODULE_DEPENDENCY.md
+doc/01-architecture/modules/MODULE_MAP.md
+doc/01-architecture/modules/OWNERSHIP_MAP.md
+
+doc/01-architecture/runtime/BUSINESS_PIPELINE_ORCHESTRATION.md
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RETRY_POLICY.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+doc/01-architecture/runtime/MEMORY_MODEL.md
+doc/01-architecture/runtime/RUNTIME_OBSERVABILITY.md
+
+doc/02-modules/reading-session/CONTRACT.md
+doc/02-modules/reading-session/STATES.md
+doc/02-modules/reading-session/EVENTS.md
+doc/02-modules/reading-session/ERRORS.md
+doc/02-modules/reading-session/README.md
+
+doc/02-modules/preferences/MODULE.md
+doc/02-modules/presentation/MODULE.md
+```
+
+---
+
+# 90. Documentation Ownership
+
+This file defines:
+
+* Reading Session module identity;
+* reading-domain ownership;
+* aggregate boundary;
+* ReadingContext;
+* ReadingContextRevision;
+* ReadingSource;
+* ReadingTarget;
+* lifecycle ownership;
+* Runtime boundary;
+* Business Pipeline Orchestration boundary;
+* Presentation boundary;
+* Preferences boundary;
+* architecture invariants.
+
+Detailed public contracts belong to:
+
+```text
+CONTRACT.md
+```
+
+Detailed lifecycle transitions belong to:
+
+```text
+STATES.md
+```
+
+Detailed Reading Session-owned facts belong to:
+
+```text
+EVENTS.md
+```
+
+Detailed domain error semantics belong to:
+
+```text
+ERRORS.md
+```
+
+---
+
+# 91. Completion Criteria
+
+The Reading Session module is architecturally usable when:
+
+* ReadingSession aggregate ownership is explicit;
+* ReadingContext is immutable after commit;
+* ReadingContextRevision is monotonic and module-owned;
+* `ContentRevision` execution-authority ambiguity is removed;
+* RuntimeRevisionId is clearly external;
+* processing pipeline decisions are outside Reading Session;
+* `ProcessingIntent` ownership has moved to Business Pipeline Orchestration;
+* session lifecycle is independent from Runtime lifecycle;
+* target/position semantics are separate from technical viewport;
+* session configuration is separate from persistent Preferences;
+* no processing module directly depends on Reading Session internals;
+* Reading Session never directly invokes processing;
+* domain facts publish after commit;
+* candidate domain state is isolated;
+* concurrency is deterministic;
+* tests can run without Runtime workers or providers.
+
+---
+
+# 92. Summary
+
+Reading Session v3 is CRAI's reading-domain state authority.
+
+Its core flow is:
+
+```text
+User / Application Reading Intent
+        ↓
+Reading Session
+        ↓
+Candidate Reading Context
+        ↓
+Domain Validation
+        ↓
+Atomic Reading Commit
+        ↓
+ReadingContextRevision
+        +
+ReadingContextSnapshot
+        ↓
+Reading Domain Facts
+        ↓
+Business Pipeline Orchestration
+        ↓
+Runtime Control
+        ↓
+Processing
+```
+
+The critical ownership model is:
+
+```text
+Reading Session
+    owns what the user is reading
+
+Business Pipeline Orchestration
+    owns what processing is required
+
+Runtime Control
+    owns which execution is authoritative
+
+Processing Modules
+    own module-specific processing semantics
+
+Presentation
+    owns committed user-visible presentation
+
+UI Adapter
+    owns actual platform rendering
+```
+
+The central invariant is:
+
+```text
+ReadingContextRevision describes
+the reading world.
+
+RuntimeRevisionId describes
+the execution world.
+
+They must never be treated
+as the same authority.
+```

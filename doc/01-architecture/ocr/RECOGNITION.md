@@ -1,154 +1,172 @@
 # Text Recognition
 
-> Status: Draft
-> Version: 1.0
-> Layer: OCR Pipeline
-> Depends On: Detection
-> Next Layer: Reading Order
+> **Status:** Draft
+> **Version:** 1.1
+> **Layer:** OCR Architecture
+> **Depends On:** Detection
+> **Next Layer:** Text Direction, Layout Analysis, OCR Postprocessing
 
 ---
 
 # 1. Purpose
 
-## Overview
+Text Recognition là giai đoạn chuyển visual text trong từng Detection Region thành dữ liệu văn bản có cấu trúc.
 
-Text Recognition là giai đoạn thứ hai trong OCR Pipeline.
+Nếu:
 
-Nếu Detection trả lời câu hỏi:
-
-> **"Text nằm ở đâu?"**
+```text
+Detection
+    → "Text nằm ở đâu?"
+```
 
 thì Recognition trả lời:
 
-> **"Text là gì?"**
+```text
+"What is the text?"
+```
 
-Recognition nhận các Region đã được Detection phát hiện, phân tích nội dung bên trong từng Region và chuyển đổi hình ảnh thành dữ liệu văn bản có cấu trúc.
+Recognition không chỉ tạo một chuỗi ký tự.
 
-Recognition không chỉ tạo ra chuỗi ký tự mà còn xây dựng mô hình văn bản đầy đủ phục vụ Translation, Presentation và AI Processing.
-
----
-
-## Objectives
-
-Recognition phải:
-
-* chuyển đổi hình ảnh thành văn bản
-* giữ nguyên ý nghĩa của nội dung gốc
-* hỗ trợ nhiều ngôn ngữ
-* hỗ trợ nhiều kiểu bố cục
-* tạo dữ liệu có cấu trúc
-* cung cấp Confidence cho nhiều cấp độ
-* độc lập với OCR Provider
-
----
-
-## Responsibilities
-
-Recognition chịu trách nhiệm:
-
-* nhận Region từ Detection
-* tiền xử lý Region nếu cần
-* nhận dạng ký tự
-* xác định ngôn ngữ
-* xây dựng Paragraph
-* xây dựng Line
-* xây dựng Word
-* xây dựng Character
-* đánh giá Confidence
-* sinh Recognition Result
-
-Recognition không chịu trách nhiệm:
-
-* Translation
-* Grammar Correction
-* Spell Checking
-* Reading Order
-* Text Layout
-* Rendering
+Nó tạo một representation có cấu trúc để các stage phía sau có thể sử dụng mà không cần truy cập lại OCR Provider.
 
 ---
 
 # 2. Scope
 
-Recognition chỉ xử lý nội dung bên trong từng Region.
+Recognition chịu trách nhiệm:
 
-Recognition không quan tâm:
+* nhận Detection Result
+* xử lý từng Region
+* chuẩn bị Region cho recognition khi cần
+* nhận dạng ký tự
+* xác định source-language/script metadata
+* xây dựng Character
+* xây dựng Word khi phù hợp
+* xây dựng Line
+* xây dựng Paragraph trong phạm vi Region
+* đánh giá Recognition Confidence
+* tạo Recognition Result
 
-* vị trí của Region trên trang
-* thứ tự đọc của trang
-* ngữ nghĩa của câu
-* dịch thuật
+Recognition không chịu trách nhiệm:
 
-Các vấn đề trên thuộc module khác.
+* Text Detection
+* page-level Reading Order
+* Layout Tree
+* Translation
+* grammar correction
+* semantic rewriting
+* rendering
+* Runtime scheduling
+* Runtime retry
+* Runtime cancellation
+* Event Bus semantics
+* global cache lifecycle
 
 ---
 
-# 3. Terminology
+# 3. Goals
+
+Recognition hướng tới:
+
+* Accuracy
+* Consistency
+* Provider Independence
+* Structured Output
+* Multi-language Support
+* Traceability
+* Replaceability
+* Testability
+
+---
+
+# 4. Non-Goals
+
+Recognition không thực hiện:
+
+* Machine Translation
+* semantic NLP
+* text summarization
+* source meaning correction
+* speaker identification
+* speech bubble detection
+* page Reading Order
+* Presentation layout
+
+---
+
+# 5. Architecture Position
+
+```text
+Processed Image
+      │
+      ▼
+Detection
+      │
+      ▼
+Detection Result
+      │
+      ▼
+Recognition
+      │
+      ▼
+Recognition Result
+      │
+      ├──► Text Direction
+      ├──► Layout Analysis
+      └──► OCR Postprocessing
+```
+
+Recognition không giao tiếp trực tiếp với business modules hoặc Presentation.
+
+---
+
+# 6. Terminology
 
 ## Recognition
 
-Quá trình chuyển hình ảnh thành văn bản.
+Quá trình chuyển visual Region thành source-language text có cấu trúc.
+
+---
+
+## Recognition Result
+
+Canonical output của Recognition.
 
 ---
 
 ## Recognized Region
 
-Kết quả nhận dạng của một Region.
+Recognition output ứng với một Detection Region.
 
 ---
 
 ## Character
 
-Đơn vị nhỏ nhất của văn bản.
-
-Ví dụ:
-
-```text
-你
-A
-あ
-。
-？
-！
-```
+Đơn vị text nhỏ nhất mà Recognition contract biểu diễn.
 
 ---
 
 ## Word
 
-Một nhóm Character tạo thành một từ.
-
-Ví dụ:
-
-```text
-Hello
-
-Recognition
-
-ChatGPT
-```
-
-Đối với một số ngôn ngữ như tiếng Trung hoặc tiếng Nhật, Word có thể không tồn tại rõ ràng.
+Nhóm Character tạo thành một lexical unit khi language/provider/profile hỗ trợ khái niệm này.
 
 ---
 
 ## Line
 
-Một dòng văn bản.
-
-Line không phụ thuộc Paragraph.
+Một chuỗi Character/Word thuộc cùng một visual line.
 
 ---
 
 ## Paragraph
 
-Một nhóm nhiều Line liên quan đến cùng một nội dung.
+Một nhóm Line thuộc cùng một textual unit trong phạm vi Region.
 
 ---
 
 ## Script
 
-Hệ thống chữ viết.
+Writing system.
 
 Ví dụ:
 
@@ -163,467 +181,936 @@ Ví dụ:
 
 ---
 
-## Writing Mode
+## Language
 
-Cách trình bày văn bản.
+Source language metadata được Recognition hoặc Provider suy luận.
 
-Ví dụ:
+Language không đồng nghĩa Script.
 
-* Horizontal
-* Vertical
-* Mixed
+---
+
+## Writing Mode Hint
+
+Metadata sơ bộ về cách text được trình bày.
+
+Authoritative direction semantics thuộc `TEXT_DIRECTION.md`.
 
 ---
 
 ## Recognition Provider
 
-Engine thực hiện OCR.
+Engine/adapter thực hiện visual recognition.
+
+Pipeline không phụ thuộc Provider cụ thể.
+
+---
+
+# 7. Core Input
+
+Recognition nhận:
+
+```text
+Detection Result
++
+Region Geometry
++
+Region Type
++
+Detection Metadata
++
+Effective Recognition Profile
+```
+
+Có thể nhận thêm:
+
+* language hint
+* script hint
+* writing-mode hint
+* provider capability hint
+
+---
+
+# 8. Core Output
+
+Recognition tạo:
+
+```text
+Recognition Result
+```
+
+bao gồm:
+
+* Region Results
+* Paragraphs
+* Lines
+* Words
+* Characters
+* Language
+* Script
+* Recognition Confidence
+* Provider-neutral metadata
+
+---
+
+# 9. High-Level Recognition Flow
+
+```text
+Detection Result
+      │
+      ▼
+1. Region Validation
+      │
+      ▼
+2. Region Preparation
+      │
+      ▼
+3. Recognition Context Resolution
+      │
+      ▼
+4. Provider Invocation
+      │
+      ▼
+5. Provider Result Normalization
+      │
+      ▼
+6. Text Structure Construction
+      │
+      ▼
+7. Confidence Assembly
+      │
+      ▼
+8. Recognition Result Assembly
+```
+
+Một Provider có thể gộp nhiều bước nội bộ.
+
+CRAI contract vẫn phải giữ cùng semantics.
+
+---
+
+# 10. Stage 1 — Region Validation
+
+Recognition kiểm tra:
+
+* Region ID tồn tại
+* Geometry hợp lệ
+* source image/version hợp lệ
+* Region nằm trong bounds
+* Region có thể xử lý
+* Recognition Profile hợp lệ
+
+Recognition không tự sửa Region geometry sai.
+
+Geometry ownership thuộc Detection.
+
+---
+
+# 11. Stage 2 — Region Preparation
+
+Recognition có thể cần chuẩn bị Region trước khi provider invocation.
 
 Ví dụ:
+
+* crop
+* padding
+* local rotation correction
+* local upscale
+* contrast adjustment
+* format conversion
+
+Đây là preparation cục bộ cho Recognition Region.
+
+Global image preprocessing vẫn thuộc `PREPROCESS.md`.
+
+---
+
+# 12. Region Preparation Boundary
+
+Recognition-specific preparation không được:
+
+* thay đổi Detection Region semantics
+* thay Region ID bằng identity không truy vết được
+* làm mất mapping về source coordinates
+
+Derived region image phải giữ lineage cần thiết.
+
+---
+
+# 13. Stage 3 — Recognition Context Resolution
+
+Recognition Context có thể sử dụng:
+
+* Recognition Profile
+* language hint
+* script hint
+* Region Type
+* writing-mode hint
+* privacy classification
+* provider capability requirements
+
+Context resolution phải provider-neutral.
+
+---
+
+# 14. Stage 4 — Provider Invocation
+
+Recognition gọi OCR Provider thông qua Provider Contract.
+
+Conceptually:
+
+```text
+Recognition
+    ↓
+OCR Provider Contract
+    ↓
+Provider Adapter
+    ↓
+OCR Engine
+```
+
+Recognition không gọi trực tiếp SDK/API của provider.
+
+---
+
+# 15. Provider Request
+
+Provider request có thể chứa:
+
+* prepared region image reference
+* expected language
+* script hint
+* region type
+* recognition mode
+* timeout hint
+* privacy classification
+
+Provider-specific request schema không được trở thành public OCR contract.
+
+---
+
+# 16. Stage 5 — Provider Result Normalization
+
+Provider-native output phải được normalize trước khi rời adapter boundary.
+
+Có thể normalize:
+
+* text
+* character alternatives
+* word structure
+* line structure
+* geometry
+* language
+* script
+* confidence
+* provider metadata
+
+CRAI downstream không phụ thuộc provider-native response.
+
+---
+
+# 17. Recognition Result Model
+
+```text
+Recognition Result
+├── Metadata
+├── Region Results[]
+│   ├── Region Reference
+│   ├── Paragraphs[]
+│   ├── Lines[]
+│   ├── Words[]
+│   ├── Characters[]
+│   ├── Language
+│   ├── Script
+│   ├── Writing Mode Hint
+│   ├── Confidence
+│   └── Optional Provider Metadata
+└── Statistics
+```
+
+Provider Metadata phải optional và không được dùng làm dependency bắt buộc ở downstream.
+
+---
+
+# 18. Recognition Document Structure
+
+Trong mỗi Region:
+
+```text
+Region
+  └── Paragraph
+       └── Line
+            └── Word
+                 └── Character
+```
+
+Không phải mọi language đều cần `Word`.
+
+Contract phải cho phép Word layer optional hoặc provider/profile-dependent.
+
+---
+
+# 19. Character Model
+
+Character có thể chứa:
+
+* Character ID
+* Unicode Value
+* Geometry
+* Recognition Confidence
+* Script
+* Rotation metadata
+* Region Reference
+* Metadata
+
+Character phải giữ liên kết tới Region nguồn.
+
+---
+
+# 20. Character Identity
+
+Character ID chỉ ổn định trong phạm vi Recognition Result revision tương ứng.
+
+Nếu Recognition chạy lại và output thay đổi đáng kể, một revision mới phải được tạo.
+
+Không silent-mutate published Character.
+
+---
+
+# 21. Word Model
+
+Word có thể chứa:
+
+* Word ID
+* Text
+* Character References
+* Geometry
+* Confidence
+* Language
+* Metadata
+
+Với Chinese/Japanese hoặc các language không có clear word boundary, Word có thể:
+
+* do Provider sinh
+* do profile quyết định
+* bị bỏ trống
+
+Recognition không được ép segmentation giả tạo chỉ để luôn có Word.
+
+---
+
+# 22. Line Model
+
+Line có thể chứa:
+
+* Line ID
+* Text
+* Geometry
+* Character/Word References
+* Direction Hint
+* Confidence
+* Metadata
+
+Authoritative line-direction semantics thuộc `TEXT_DIRECTION.md`.
+
+---
+
+# 23. Paragraph Model
+
+Paragraph đại diện cho textual grouping trong phạm vi Region.
+
+Có thể chứa:
+
+* Paragraph ID
+* Lines
+* Text
+* Geometry
+* Language
+* Confidence
+* Metadata
+
+Recognition không nối Paragraph semantic qua nhiều Region.
+
+Cross-region structure thuộc các stage phía sau.
+
+---
+
+# 24. Recognized Text
+
+Recognized Text phải giữ source-language content.
+
+Recognition không tự:
+
+* translate
+* rewrite
+* spell-correct
+* grammar-correct
+* glossary-replace
+* semantic-normalize
+
+Raw provider text và normalized recognition text có thể tách biệt nếu contract yêu cầu.
+
+---
+
+# 25. Language Metadata
+
+Recognition có thể xác định:
+
+* dominant language
+* candidate languages
+* mixed-language state
+
+Language metadata là recognition signal.
+
+Nó không được dùng một mình để quyết định page Reading Order.
+
+---
+
+# 26. Script Metadata
+
+Script mô tả writing system.
+
+Ví dụ:
+
+```text
+Han
+Latin
+Hiragana
+Katakana
+Hangul
+```
+
+Mixed Script phải được hỗ trợ.
+
+---
+
+# 27. Writing Mode Hint
+
+Recognition Provider có thể trả:
+
+* Horizontal
+* Vertical
+* Mixed
+* Unknown
+
+Đây chỉ là hint.
+
+Authoritative writing-direction result thuộc `TEXT_DIRECTION.md`.
+
+---
+
+# 28. Recognition Confidence
+
+Recognition Confidence phản ánh mức độ tin cậy của recognized text.
+
+Có thể tồn tại ở:
+
+* Character
+* Word
+* Line
+* Paragraph
+* Region
+* Recognition Result
+
+---
+
+# 29. Confidence Semantics
+
+Recognition Confidence không được trộn trực tiếp với:
+
+* Detection Confidence
+* Direction Confidence
+* Reading Confidence
+
+Mỗi confidence có owner riêng.
+
+Quality Assessment có thể aggregate chúng ở bước sau.
+
+---
+
+# 30. Confidence Aggregation
+
+Parent confidence không bắt buộc bằng trung bình của child confidence.
+
+Ví dụ:
+
+```text
+Region Confidence
+≠ average(Character Confidence)
+```
+
+Aggregation algorithm có thể phụ thuộc Provider/Recognition Profile.
+
+Contract chỉ yêu cầu semantics ổn định và metadata đủ rõ.
+
+---
+
+# 31. Geometry Ownership
+
+Recognition có thể nhận hoặc bổ sung Character/Word/Line geometry.
+
+Nhưng canonical Region geometry vẫn thuộc Detection.
+
+Recognition không được thay đổi Region bounds để sửa Detection một cách âm thầm.
+
+Nếu phát hiện geometry mismatch:
+
+* report diagnostics
+* tạo recognition-local geometry
+* giữ source relationship rõ ràng
+
+---
+
+# 32. Result Immutability
+
+Published Recognition Result phải immutable.
+
+Nếu cần:
+
+* rerun
+* manual correction
+* provider fallback
+* improved model
+
+thì phải tạo:
+
+```text
+new Recognition Result revision
+```
+
+không sửa silent result cũ.
+
+---
+
+# 33. Manual Correction Boundary
+
+Recognition output có thể được người dùng hoặc downstream correction workflow sửa.
+
+Nhưng manual correction không được overwrite raw machine output.
+
+Nên giữ:
+
+```text
+Machine Recognition
++
+Correction Layer / New Revision
+```
+
+Ownership của user correction workflow thuộc module tương ứng.
+
+---
+
+# 34. Provider Independence
+
+Recognition Provider có thể là:
 
 * PaddleOCR
 * EasyOCR
 * Tesseract
 * Google Vision
-* Azure OCR
-* Custom AI Model
+* Azure Vision
+* custom model
 
-Recognition Layer không phụ thuộc Provider cụ thể.
-
----
-
-# 4. Goals
-
-Recognition được thiết kế nhằm đạt các mục tiêu sau.
-
-## Accuracy
-
-Nhận dạng đúng nội dung.
+Public Recognition Result không thay đổi theo provider.
 
 ---
 
-## Consistency
+# 35. Multi-Provider Compatibility
 
-Cùng một đầu vào phải tạo ra cùng một Recognition Result.
-
----
-
-## Extensibility
-
-Có thể thay OCR Provider mà không ảnh hưởng Pipeline.
-
----
-
-## Provider Independence
-
-Pipeline chỉ làm việc với Recognition Contract.
-
-Không làm việc trực tiếp với API của Provider.
-
----
-
-## Structured Result
-
-Recognition không trả về String đơn giản.
-
-Recognition phải tạo ra dữ liệu có cấu trúc.
-
----
-
-## Multi-language
-
-Hỗ trợ đồng thời nhiều ngôn ngữ.
+Nếu CRAI dùng nhiều Provider, mỗi output vẫn phải normalize về cùng Recognition Contract.
 
 Ví dụ:
 
 ```text
-你好 World!
-
-こんにちは ChatGPT
-
-한국어 English 日本語
+Region A → Provider 1
+Region B → Provider 2
 ```
 
----
-
-## High Performance
-
-Cho phép:
-
-* Batch Recognition
-* Parallel Recognition
-* Incremental Recognition
+Downstream không cần biết sự khác nhau của Provider API.
 
 ---
 
-# 5. Non-Goals
+# 36. Detection Integration
 
-Recognition không thực hiện:
+Recognition sử dụng Detection-owned concepts:
 
-* Machine Translation
-* NLP
-* Text Summarization
-* Context Understanding
-* Image Captioning
-* Character Identification
-* Speech Bubble Analysis
-* Reading Order
-
----
-
-# 6. Architecture Position
-
-Recognition nằm ngay sau Detection.
-
-```text
-Image
-
-↓
-
-Detection
-
-↓
-
-Recognition
-
-↓
-
-Reading Order
-
-↓
-
-Text Processing
-
-↓
-
-Translation
-```
-
-Recognition không truy cập trực tiếp Image Source.
-
-Recognition chỉ làm việc với Detection Result.
-
----
-
-# 7. Recognition Pipeline
-
-Pipeline chuẩn gồm:
-
-```text
-Region
-
-↓
-
-Region Validation
-
-↓
-
-Image Crop
-
-↓
-
-Image Enhancement
-
-↓
-
-Writing Mode Detection
-
-↓
-
-Language Estimation
-
-↓
-
-Character Recognition
-
-↓
-
-Word Construction
-
-↓
-
-Line Construction
-
-↓
-
-Paragraph Construction
-
-↓
-
-Confidence Evaluation
-
-↓
-
-Recognition Result
-```
-
-Một số Provider có thể gộp nhiều bước thành một.
-
-Pipeline nội bộ của CRAI vẫn giữ nguyên Contract.
-
----
-
-# 8. Recognition Lifecycle
-
-## Stage 1
-
-Nhận Detection Result.
-
----
-
-## Stage 2
-
-Lọc Region không hợp lệ.
-
----
-
-## Stage 3
-
-Crop ảnh.
-
----
-
-## Stage 4
-
-Chuẩn hóa ảnh.
-
----
-
-## Stage 5
-
-Nhận dạng văn bản.
-
----
-
-## Stage 6
-
-Xây dựng cấu trúc.
-
----
-
-## Stage 7
-
-Đánh giá Confidence.
-
----
-
-## Stage 8
-
-Sinh Recognition Result.
-
----
-
-# 9. Inputs
-
-Recognition nhận:
-
-* Detection Result
+* Region
 * Region Geometry
 * Region Type
-* Detection Metadata
 * Detection Confidence
-* Recognition Profile
+* Region hierarchy hints
 
-Không nhận:
-
-* Translation Result
-* Reading Order
-* Presentation Data
+Recognition không redefine chúng.
 
 ---
 
-# 10. Outputs
+# 37. Text Direction Integration
 
-Recognition trả về:
+Text Direction sử dụng:
 
-* Recognition Result
-* Paragraph List
-* Line List
-* Word List
-* Character List
-* Confidence
-* Metadata
+* recognized Character/Line geometry
+* language/script metadata
+* provider direction hint
 
-Không trả về:
+Recognition chỉ cung cấp dữ liệu.
 
-* Translation
-* Reading Order
-* Render Layout
+Text Direction mới là owner của final direction semantics.
 
 ---
 
-# 11. Recognition Result Model
+# 38. Layout Integration
 
-Recognition Result là Contract chuẩn giữa Recognition và các module phía sau.
+Layout Analysis có thể dùng Recognition Result để hiểu:
+
+* text block extent
+* line grouping
+* textual occupancy
+
+Layout vẫn sở hữu Page/Panel/Container/Block organization.
+
+Recognition không sở hữu Layout Tree.
+
+---
+
+# 39. Postprocessing Integration
+
+OCR Postprocessing hợp nhất:
+
+```text
+Detection Result
++
+Recognition Result
++
+Direction Result
++
+Layout Result
+```
+
+thành canonical `OCR Document`.
+
+Recognition không tự xây OCR Document cuối cùng.
+
+---
+
+# 40. Quality Integration
+
+Quality Assessment có thể dùng:
+
+* Recognition Confidence
+* empty result rate
+* missing Character/Line
+* suspicious language/script mismatch
+
+Quality không thay đổi Recognition Result.
+
+---
+
+# 41. Runtime Integration
+
+Recognition không sở hữu:
+
+* Queued / Running lifecycle
+* execution attempts
+* Scheduler behavior
+* Runtime retry
+* cancellation authority
+* stale-result authority
+
+Runtime điều phối execution.
+
+Recognition chỉ tạo semantic output/failure information.
+
+---
+
+# 42. Retry Integration
+
+Recognition có thể cung cấp:
+
+* recognition failure category
+* low-confidence result
+* provider availability hint
+* fallback recommendation
+
+Nhưng không tự schedule retry.
+
+Retry ownership thuộc Runtime.
+
+---
+
+# 43. Cache Integration
+
+Recognition có thể định nghĩa semantic compatibility.
+
+Ví dụ result không còn compatible khi:
+
+* Region changes
+* image version changes
+* Recognition Profile changes
+* provider/model capability version changes
+* relevant language/script hint changes
+
+Global cache lifecycle thuộc Runtime.
+
+---
+
+# 44. Event Integration
+
+Recognition có thể tạo domain facts như:
+
+```text
+RecognitionCompleted
+RecognitionFailed
+RegionRecognized
+```
+
+Meaning thuộc Recognition.
+
+Event delivery/envelope thuộc Event Bus.
+
+---
+
+# 45. Error Integration
+
+Recognition-specific semantic errors có thể gồm:
+
+* InvalidRegion
+* UnsupportedLanguage
+* ProviderUnavailable
+* InvalidProviderResponse
+* RecognitionResultInvalid
+* EmptyRecognitionResult
+
+Provider-native errors phải được map trước khi crossing Recognition boundary.
+
+Runtime Error Model sở hữu execution normalization.
+
+---
+
+# 46. Observability Integration
+
+Recognition có thể cung cấp measurements như:
+
+* Region recognition duration
+* recognized character count
+* empty result count
+* confidence distribution
+* language/script distribution
+* provider identity
+* model version
+
+Telemetry transport thuộc Runtime/Infrastructure.
+
+---
+
+# 47. Privacy
+
+Recognition có thể xử lý private text content.
+
+Do đó:
+
+* không log full recognized text mặc định
+* provider request phải tuân thủ privacy policy
+* provider metadata không được chứa secret
+* local-only content không được gửi remote provider
+
+---
+
+# 48. Determinism
+
+Cùng:
+
+```text
+Prepared Region semantic identity
++
+Recognition Profile
++
+Recognition Strategy / Model Version
+```
+
+nên tạo structurally equivalent Recognition Result, ngoại trừ provider nondeterminism được record rõ.
+
+---
+
+# 49. Architecture Invariants
+
+Recognition phải luôn đảm bảo:
+
+1. Chỉ nhận dạng source-language text.
+
+2. Không thực hiện Translation.
+
+3. Không sửa semantic meaning.
+
+4. Không sở hữu Region semantics.
+
+5. Không thay đổi Detection Geometry âm thầm.
+
+6. Recognition Result phải provider-neutral.
+
+7. Provider-native response không crossing public boundary.
+
+8. Character / Word / Line / Paragraph phải giữ mapping về Region nguồn.
+
+9. Word là optional khi language không có clear lexical boundary.
+
+10. Recognition Confidence không đồng nghĩa Detection Confidence.
+
+11. Writing Mode từ Provider chỉ là hint cho Text Direction.
+
+12. Published Recognition Result phải immutable.
+
+13. Rerun tạo revision mới.
+
+14. Recognition không sở hữu Reading Order.
+
+15. Recognition không sở hữu Layout Tree.
+
+16. Recognition không sở hữu Runtime scheduling.
+
+17. Recognition không sở hữu Runtime retry.
+
+18. Recognition không sở hữu cancellation authority.
+
+19. Recognition không sở hữu global cache lifecycle.
+
+20. Downstream không cần truy cập lại OCR Provider để hiểu Recognition Result.
+
+---
+
+# 50. Recommended MVP Recognition
+
+MVP nên giữ đơn giản:
+
+```text
+Detection Region
+      ↓
+Region Validation
+      ↓
+Crop / Minimal Preparation
+      ↓
+Primary OCR Provider
+      ↓
+Provider Result Normalization
+      ↓
+Character / Line Construction
+      ↓
+Basic Confidence
+      ↓
+Recognition Result
+```
+
+MVP nên hỗ trợ:
+
+* Simplified Chinese
+* Traditional Chinese
+* English
+* horizontal text
+* vertical text khi Provider hỗ trợ
+* Character output
+* Line output
+* optional Word output
+* Paragraph trong Region
+* language/script metadata
+* Recognition Confidence
+* provider-neutral Result
+
+Không bắt buộc ngay:
+
+* multi-provider voting
+* advanced lexical segmentation
+* semantic correction
+* learned reconstruction
+* full document-language inference
+
+---
+
+# 51. Ownership References
+
+| Concern                | Owner               |
+| ---------------------- | ------------------- |
+| Region                 | `DETECTION.md`      |
+| Region Geometry        | `DETECTION.md`      |
+| Recognition Result     | `RECOGNITION.md`    |
+| Character              | `RECOGNITION.md`    |
+| Word                   | `RECOGNITION.md`    |
+| Line                   | `RECOGNITION.md`    |
+| Paragraph              | `RECOGNITION.md`    |
+| Recognition Confidence | `RECOGNITION.md`    |
+| Writing Direction      | `TEXT_DIRECTION.md` |
+| Layout Tree            | `LAYOUT.md`         |
+| OCR Document           | `POSTPROCESS.md`    |
+| Quality                | `QUALITY.md`        |
+| Reading Order          | `READING_ORDER.md`  |
+| Provider Contract      | `PROVIDERS.md`      |
+| Retry                  | Runtime             |
+| Cancellation           | Runtime             |
+| Scheduling             | Runtime             |
+| Cache Lifecycle        | Runtime             |
+| Event Transport        | Event Bus           |
+| Telemetry Transport    | Infrastructure      |
+
+---
+
+# 52. Summary
+
+Text Recognition chuyển:
+
+```text
+Detection Region
+```
+
+thành:
 
 ```text
 Recognition Result
-
-├── Recognition Metadata
-
-├── Region Results
-
-│      ├── Region
-
-│      ├── Paragraphs
-
-│      ├── Lines
-
-│      ├── Words
-
-│      ├── Characters
-
-│      ├── Language
-
-│      ├── Script
-
-│      ├── Writing Mode
-
-│      ├── Confidence
-
-│      └── Provider Metadata
-
-└── Statistics
 ```
 
-Recognition Result phải đủ giàu thông tin để các module phía sau không cần truy cập lại OCR Provider.
-
----
-
-# 12. Recognition Document Model
-
-Recognition không chỉ tạo String.
-
-Recognition xây dựng một cây dữ liệu văn bản.
+với:
 
 ```text
-Recognition Document
-
-└── Region
-
-      └── Paragraph
-
-            └── Line
-
-                  └── Word
-
-                        └── Character
+Source Text
++
+Character / Word / Line / Paragraph
++
+Language / Script
++
+Recognition Confidence
++
+Metadata
 ```
 
-Mỗi cấp trong cây có ID độc lập.
+Recognition trả lời:
 
-Điều này cho phép:
+```text
+What is the text?
+```
 
-* chỉnh sửa riêng từng Word
-* thay thế Character
-* render từng Line
-* highlight Paragraph
-* dịch từng Segment
-* cache từng Region
+Boundary tổng quát:
 
----
+```text
+Detection
+    → where
 
-# 13. Recognized Text
+Recognition
+    → what
 
-Recognized Text biểu diễn nội dung văn bản sau khi OCR hoàn tất.
+Text Direction
+    → how written
 
-Nội dung phải giữ nguyên theo ảnh gốc.
+Layout
+    → how organized
 
-Recognition không tự ý sửa lỗi chính tả.
+Reading Order
+    → in what order
+```
 
-Không tự ý chuẩn hóa dấu câu.
+Nguyên tắc cốt lõi:
 
-Không tự ý thay đổi khoảng trắng nếu chưa có quy tắc rõ ràng.
+```text
+Detection owns Region.
 
----
+Recognition owns recognized text.
 
-# 14. Character Model
+Text Direction owns writing direction.
 
-Character là đơn vị nhỏ nhất trong Recognition.
-
-Mỗi Character nên bao gồm:
-
-* Character ID
-* Unicode Value
-* Bounding Geometry
-* Confidence
-* Script
-* Rotation
-* Metadata
-
-Character phải giữ liên kết với Region gốc để hỗ trợ Presentation và Debugging.
-
----
-
-# 15. Word Model
-
-Word là tập hợp các Character có mối liên hệ ngữ cảnh hoặc khoảng cách phù hợp.
-
-Đối với các ngôn ngữ không có khái niệm từ rõ ràng (ví dụ tiếng Trung hoặc tiếng Nhật), Word có thể được Provider tạo ra hoặc để trống theo Recognition Profile.
-
-Word nên lưu:
-
-* Word ID
-* Text
-* Character List
-* Geometry
-* Confidence
-* Language
-* Metadata
-
----
-
-# 16. Line Model
-
-Line đại diện cho một dòng văn bản liên tục trong cùng Region.
-
-Line có thể gồm nhiều Word hoặc nhiều Character tùy Writing Mode.
-
-Thông tin tối thiểu:
-
-* Line ID
-* Text
-* Geometry
-* Direction
-* Word List
-* Confidence
-* Metadata
-
----
-
-# 17. Paragraph Model
-
-Paragraph là tập hợp nhiều Line cùng thuộc một đơn vị nội dung.
-
-Recognition chỉ xây dựng cấu trúc Paragraph trong phạm vi một Region.
-
-Việc nối Paragraph giữa nhiều Region thuộc trách nhiệm của Reading Order và Text Processing.
-
-Paragraph nên bao gồm:
-
-* Paragraph ID
-* Line List
-* Text
-* Geometry
-* Language
-* Confidence
-* Metadata
-
----
-
-# 18. Confidence Model
-
-Recognition đánh giá độ tin cậy ở nhiều cấp thay vì chỉ một giá trị duy nhất.
-
-Các cấp độ bao gồm:
-
-* Character Confidence
-* Word Confidence
-* Line Confidence
-* Paragraph Confidence
-* Region Confidence
-* Recognition Confidence
-
-Confidence ở cấp cha không nhất thiết bằng trung bình của cấp con.
-
-Thuật toán tổng hợp Confidence là trách nhiệm của Recognition Provider hoặc Recognition Engine, nhưng Recognition Contract phải luôn lưu đầy đủ các giá trị này để các module phía sau có thể đưa ra quyết định phù hợp.
+Runtime owns execution.
+```

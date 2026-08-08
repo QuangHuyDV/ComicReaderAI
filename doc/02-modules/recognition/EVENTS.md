@@ -1,93 +1,103 @@
 # Recognition Module Events
 
-> Project: CRAI  
-> Module: Recognition  
-> Path: `doc/02-modules/recognition/EVENTS.md`  
-> Version: 1.0  
-> Status: Architecture Draft
+> **Project:** CRAI
+> **Module:** Recognition
+> **Path:** `02-modules/recognition/EVENTS.md`
+> **Version:** 1.1
+> **Status:** Architecture Draft
+> **Related:** `MODULE.md`, `CONTRACT.md`, `STATES.md`, `01-architecture/ocr/`
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-Tài liệu này định nghĩa event contract của Recognition Module theo Runtime v2.
+Tài liệu này định nghĩa event contract mà Recognition Module thực sự sở hữu.
 
-Nó đặc tả:
+Recognition events dùng để truyền các **facts đã xảy ra** tại module boundary.
 
-- event ownership;
-- event categories;
-- shared event envelope;
-- Runtime correlation context;
-- Recognition domain facts;
-- Recognition progress facts;
-- warning/error facts;
-- diagnostic facts;
-- Candidate event boundary;
-- Runtime event boundary;
-- Provider Manager event boundary;
-- consumed-event policy;
-- ordering;
-- delivery và idempotency;
-- privacy;
-- publication failure behavior;
-- consumer expectations;
-- MVP event set;
-- testing;
-- invariants.
+Chúng hỗ trợ:
 
-Tài liệu này chỉ định nghĩa event-driven communication.
+* diagnostics
+* observability
+* optional progress
+* warnings
+* module errors
+* Candidate traceability
+* cancellation/deadline observations
 
-Command/data contracts nằm trong:
+Recognition events không định nghĩa:
+
+* OCR stage semantics
+* Runtime lifecycle
+* Attempt terminal outcome
+* retry execution
+* cancellation authority
+* Artifact publication
+* Provider lifecycle
+* Quality semantics
+* Reading Order semantics
+* downstream orchestration
+
+Command/data contract nằm trong:
 
 ```text
-doc/02-modules/recognition/CONTRACT.md
+02-modules/recognition/CONTRACT.md
 ```
 
-Recognition state ownership nằm trong:
+State ownership nằm trong:
 
 ```text
-doc/02-modules/recognition/STATES.md
+02-modules/recognition/STATES.md
+```
+
+OCR semantic ownership nằm trong:
+
+```text
+01-architecture/ocr/
 ```
 
 ---
 
-## 2. Event Role of Recognition
+# 2. Event Role of Recognition
 
-Recognition là processing module được Runtime invoke trong một Attempt.
+Recognition được Runtime invoke trong một Attempt.
 
 ```text
 Runtime Attempt
-    ↓
-Recognition Execution
-    ↓
+      ↓
+Recognition Module
+      ↓
 Optional Recognition Facts
-    ↓
+      ↓
 Candidate Submitted to Runtime
 ```
 
 Recognition events:
 
-- report facts đã xảy ra;
-- hỗ trợ diagnostics, observability và optional progress;
-- không xác định Attempt terminal outcome;
-- không cấp authority;
-- không publish authoritative Artifact;
-- không trigger downstream work trực tiếp;
-- không thay Attempt Completion contract.
+* describe facts already observed/produced
+* may support diagnostics and observability
+* are optional for correctness
+* never grant authority
+* never publish authoritative Artifact
+* never replace Attempt Completion
+* never create hidden business orchestration
 
-Không có Recognition event nào bắt buộc cho correctness.
+MVP correctness không phụ thuộc Recognition-specific events.
 
 ---
 
-## 3. Event Ownership
+# 3. Event Ownership
 
 Recognition owns:
 
 ```text
-Recognition domain facts
-Recognition progress facts
-Recognition warning/error facts
-Recognition diagnostic facts
+Recognition Plan Facts
+Recognition Execution Facts
+Recognition Candidate Facts
+Recognition Warning Facts
+Recognition Module Error Facts
+Recognition Cancellation / Deadline Observations
+Recognition Diagnostic Facts
 ```
 
 Recognition does not own:
@@ -98,29 +108,67 @@ ATTEMPT_COMPLETED
 ATTEMPT_FAILED
 ATTEMPT_CANCELED
 ATTEMPT_ABANDONED
+
+AUTHORITY_ACCEPTED
 AUTHORITY_REJECTED
+
 ARTIFACT_PUBLISHED
+ARTIFACT_PUBLICATION_REJECTED
+
 PROVIDER_READY
 PROVIDER_DEGRADED
 PROVIDER_UNAVAILABLE
-CONFIG_ACTIVATED
-SESSION_STOPPED
-APPLICATION_SHUTDOWN_REQUESTED
+
+QUALITY_REPORT_CREATED
+READING_ORDER_RESOLVED
 ```
 
-Các event trên thuộc Runtime hoặc component owner tương ứng.
+Các facts trên thuộc owner tương ứng.
 
 ---
 
-## 4. Event Design Principles
+# 4. OCR Event Boundary
 
-### 4.1 Events Represent Facts
+Recognition Module không redefine events cho từng OCR stage.
+
+Không publish dưới namespace Recognition:
+
+```text
+RECOGNITION_PREPARATION_COMPLETED
+RECOGNITION_REGIONS_DETECTED
+RECOGNITION_REGION_PROCESSED
+RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
+RECOGNITION_READING_ORDER_RESOLVED
+RECOGNITION_QUALITY_EVALUATED
+```
+
+Nếu cần stage-level tracing, sử dụng:
+
+```text
+OCR diagnostics / telemetry
+```
+
+theo authoritative OCR Architecture.
+
+Recognition chỉ cần biết:
+
+```text
+OCR execution started / completed / failed
+```
+
+ở mức module orchestration.
+
+---
+
+# 5. Event Design Principles
+
+## 5.1 Facts, Not Commands
 
 Correct:
 
 ```text
 RECOGNITION_PLAN_CREATED
-RECOGNITION_REGIONS_DETECTED
+RECOGNITION_OCR_EXECUTION_COMPLETED
 RECOGNITION_CANDIDATE_VALIDATED
 ```
 
@@ -128,105 +176,135 @@ Avoid:
 
 ```text
 RECOGNITION_CREATE_PLAN
-RECOGNITION_DETECT_REGIONS
+RECOGNITION_RUN_OCR
 RECOGNITION_VALIDATE_CANDIDATE
 ```
 
-### 4.2 Events Are Optional for Correctness
+---
 
-Recognition execution phải thành công ngay cả khi Event Bus unavailable.
+## 5.2 Optional for Correctness
 
-Candidate submission đi qua Attempt Completion, không qua event.
+Nếu Event Bus unavailable:
 
-### 4.3 Events Are Immutable
-
-Published event không được mutate.
-
-Correction hoặc additional fact cần event mới.
-
-### 4.4 Events Are Safe to Duplicate
-
-Every event has unique `EventId`.
-
-Consumers deduplicate by EventId.
-
-### 4.5 Events Are Not Globally Ordered
-
-Ordering chỉ causal/best-effort trong một Attempt hoặc Revision partition.
-
-### 4.6 Events Do Not Grant Authority
-
-Event occurrence không chứng minh:
-
-- Revision còn current;
-- Attempt được accepted;
-- Candidate được published;
-- downstream work được phép chạy.
-
-### 4.7 Large Payloads Travel by Reference
-
-Event Bus không carry:
-
-- image bytes;
-- Candidate payload;
-- Recognition Artifact payload;
-- provider raw response;
-- diagnostic image;
-- full recognized text.
-
-### 4.8 Privacy Is Contractual
-
-Normal Recognition events chứa operational metadata only.
+* Recognition vẫn execute
+* Candidate vẫn submit qua Attempt Completion
+* Runtime correctness không thay đổi
 
 ---
 
-## 5. Event Naming
+## 5.3 Immutable
 
-Canonical architectural names use:
+Published event immutable.
+
+Correction cần event mới.
+
+---
+
+## 5.4 Duplicate Safe
+
+Mỗi event có `EventId`.
+
+Consumer deduplicate theo `EventId`.
+
+---
+
+## 5.5 No Global Ordering
+
+Không giả định global event order.
+
+Chỉ causal/best-effort order theo Attempt/partition.
+
+---
+
+## 5.6 No Authority
+
+Recognition event không chứng minh:
+
+* Revision còn current
+* Attempt accepted
+* Candidate published
+* downstream work được phép chạy
+
+---
+
+## 5.7 Reference-Only Large Data
+
+Không truyền qua Event Bus:
+
+* image bytes
+* OCR Document payload
+* Candidate payload
+* Recognition Artifact payload
+* Quality Report payload
+* Reading Order graph
+* raw Provider response
+* full recognized text
+
+Dùng reference khi thật sự cần.
+
+---
+
+## 5.8 Privacy by Contract
+
+Default event content:
+
+```text
+OPERATIONAL_METADATA
+```
+
+---
+
+# 6. Event Naming
+
+Canonical name:
 
 ```text
 UPPER_SNAKE_CASE
 ```
 
-Format:
+Pattern:
 
 ```text
 RECOGNITION_<FACT>
 ```
 
-Examples:
+Ví dụ:
 
 ```text
 RECOGNITION_PLAN_CREATED
-RECOGNITION_PREPARATION_COMPLETED
-RECOGNITION_REGIONS_DETECTED
+RECOGNITION_OCR_EXECUTION_COMPLETED
+RECOGNITION_CANDIDATE_VALIDATED
 ```
 
-Transport adapters may map to topics such as:
+Transport topic có thể map thành:
 
 ```text
 recognition.plan_created
 ```
 
-Canonical event identity remains the architectural name.
+nhưng canonical identity vẫn là architectural event name.
 
 ---
 
-## 6. Event Categories
+# 7. Event Categories
 
 ```text
 Recognition Events
 ├── Domain Facts
-├── Progress Facts
-├── Warning/Error Facts
+├── Execution Facts
+├── Warning / Error Facts
 └── Diagnostic Facts
 ```
 
-No Recognition-owned lifecycle category exists.
+Không tồn tại Recognition-owned terminal lifecycle category.
 
 ---
 
-## 7. Shared Event Envelope
+# 8. Shared Event Envelope
+
+Recognition sử dụng Event Bus envelope chuẩn.
+
+Conceptually:
 
 ```text
 RecognitionEventEnvelope<T>
@@ -243,64 +321,42 @@ RecognitionEventEnvelope<T>
 └── Payload
 ```
 
+Envelope semantics thuộc Event Bus Architecture.
+
+Recognition không redefine:
+
+* delivery guarantee
+* transport retry
+* subscriber behavior
+* retention
+
 ---
 
-## 8. Envelope Fields
+# 9. Contract Version
 
-### EventId
-
-```text
-EventId = opaque string
-```
-
-Requirements:
-
-1. unique within retention window;
-2. immutable;
-3. not reused;
-4. safe for deduplication;
-5. not interpreted for business meaning.
-
-### EventName
-
-Canonical Recognition event name.
-
-### ContractVersion
+Initial revised Recognition event contract:
 
 ```text
-1.0.0
+1.1.0
 ```
 
 Consumers reject unsupported major version.
 
-### ProducerModule
-
-```text
-recognition
-```
-
-Provider adapters do not publish Recognition public facts under provider-specific namespaces.
-
-### OccurredAt
-
-UTC timestamp.
-
-### PrivacyClassification
-
-```text
-OPERATIONAL_METADATA
-PROTECTED_DIAGNOSTIC_REFERENCE
-```
-
-Default:
-
-```text
-OPERATIONAL_METADATA
-```
+Unknown minor/additive fields phải được xử lý an toàn.
 
 ---
 
-## 9. Trace Context
+# 10. Producer Module
+
+```text
+ProducerModule = recognition
+```
+
+Provider Adapter không publish public Recognition facts dưới provider-specific namespace.
+
+---
+
+# 11. Trace Context
 
 ```text
 TraceContext
@@ -310,17 +366,17 @@ TraceContext
 └── Baggage?
 ```
 
-Baggage must not contain:
+Baggage không chứa:
 
-- image data;
-- recognized text;
-- credential;
-- provider request body;
-- private source path.
+* image
+* recognized text
+* credentials
+* provider request body
+* sensitive path
 
 ---
 
-## 10. Recognition Event Runtime Context
+# 12. Recognition Event Runtime Context
 
 ```text
 RecognitionEventContext
@@ -330,7 +386,6 @@ RecognitionEventContext
 ├── WorkItemId
 ├── AttemptId
 ├── CandidateArtifactId?
-├── ArtifactId?
 ├── InputArtifactId?
 ├── ProviderId?
 ├── ConfigurationSnapshotId
@@ -340,20 +395,20 @@ RecognitionEventContext
 └── BusinessStageId?
 ```
 
-### Rules
+Rules:
 
-1. RevisionId, WorkItemId, AttemptId required.
-2. SessionId optional for standalone image.
-3. CandidateArtifactId only after Candidate exists.
-4. ArtifactId appears only in externally sourced Runtime/Artifact event, not ordinary Recognition Candidate fact.
-5. ProviderId optional before provider execution.
-6. No RequestId lifecycle identity is created by Recognition.
-7. No retry attempt integer; AttemptId is authoritative identity.
-8. No priority or queue class in Recognition event context.
+1. `RevisionId`, `WorkItemId`, `AttemptId` required.
+2. `SessionId` optional.
+3. `CandidateArtifactId` chỉ sau khi Candidate tồn tại.
+4. Published `ArtifactId` không được Recognition tự thêm trước publication.
+5. ProviderId optional.
+6. Retry count không embedded.
+7. Priority/Queue class không embedded.
+8. Runtime context chỉ phục vụ traceability.
 
 ---
 
-## 11. Partition Key
+# 13. Partition Key
 
 Recommended:
 
@@ -361,7 +416,7 @@ Recommended:
 AttemptId
 ```
 
-for Attempt-local facts.
+cho Attempt-local facts.
 
 Alternative:
 
@@ -369,102 +424,213 @@ Alternative:
 RevisionId
 ```
 
-for Revision-scoped diagnostics.
+cho Revision-level diagnostics.
 
-Selection must follow Event Convention.
+Selection tuân Event Convention.
 
 ---
 
-## 12. Sequence Number
+# 14. Sequence Number
 
 Optional monotonic sequence per partition.
 
-Example:
+Ví dụ:
 
 ```text
 RECOGNITION_PLAN_CREATED                  1
-RECOGNITION_PREPARATION_COMPLETED         2
-RECOGNITION_REGIONS_DETECTED              3
-RECOGNITION_CANDIDATE_VALIDATED           4
+RECOGNITION_OCR_EXECUTION_COMPLETED       2
+RECOGNITION_CANDIDATE_VALIDATED           3
+RECOGNITION_CANDIDATE_SUBMITTED           4
 ```
 
-Consumers must still tolerate:
+Consumer vẫn phải chịu được:
 
-- duplicates;
-- delays;
-- missing optional facts;
-- out-of-order delivery.
+* missing optional fact
+* delayed fact
+* duplicate
+* out-of-order delivery
 
 ---
 
-## 13. Domain Facts
+# 15. Canonical Domain Facts
 
 Core Recognition domain facts:
 
 ```text
 RECOGNITION_PLAN_CREATED
+RECOGNITION_OCR_EXECUTION_COMPLETED
 RECOGNITION_CANDIDATE_VALIDATED
 RECOGNITION_CANDIDATE_SUBMITTED
 ```
 
-These describe semantic milestones only.
+Đây là semantic milestones ở **module boundary**.
 
 ---
 
-## 14. `RECOGNITION_PLAN_CREATED`
+# 16. RECOGNITION_PLAN_CREATED
 
-### Meaning
+## Meaning
 
-A valid immutable Recognition Plan has been built for an Attempt.
+Một immutable `RecognitionPlan` hợp lệ đã được tạo.
 
-### Payload
+State relation:
+
+```text
+RecognitionPlanState = READY
+```
+
+---
+
+## Payload
 
 ```text
 RecognitionPlanCreatedEvent
 ├── PlanId
-├── Strategy
 ├── RecognitionOperation
 ├── RecognitionProfile
+├── OCRProfileRef?
 ├── CapabilityRequirementSummary
-├── PreparationProfileId?
-├── CoordinatePolicyVersion
-├── ReadingOrderPolicyVersion
-├── QualityPolicyVersion
+├── ExecutionStrategy
+├── ConfigurationSnapshotId
 ├── PrivacyMode
 ├── ExecutionClasses[]
 ├── EstimatedResourceCost?
 └── CreatedAt
 ```
 
-### Rules
+---
 
-1. emitted after Plan state becomes READY;
-2. no provider credential;
-3. provider selection may still be external/pending;
-4. no image reference;
-5. no raw Recognition options containing sensitive fields;
-6. optional for correctness;
-7. does not mean Attempt has started provider execution.
+## ExecutionStrategy
+
+Có thể biểu diễn:
+
+```text
+COMBINED_OCR
+COMPOSED_OCR
+SINGLE_REGION
+DIAGNOSTIC
+```
+
+Đây là module orchestration strategy.
+
+Không encode chi tiết:
+
+* Detection model
+* Reading Order policy
+* Quality policy
+* coordinate algorithm
+* preprocessing algorithm
 
 ---
 
-## 15. `RECOGNITION_CANDIDATE_VALIDATED`
+## Rules
 
-### Meaning
+1. emit sau Plan READY
+2. optional for correctness
+3. no credentials
+4. no image payload
+5. no provider SDK object
+6. provider selection có thể chưa final
+7. không đồng nghĩa OCR execution started
 
-A Candidate Recognition Artifact passed Recognition semantic validation.
+---
 
-### Payload
+# 17. RECOGNITION_OCR_EXECUTION_COMPLETED
+
+## Meaning
+
+Recognition Module đã hoàn tất việc điều phối OCR Architecture cho Attempt hiện tại và có OCR-level result/reference để tiếp tục Candidate assembly.
+
+Nó không có nghĩa:
+
+* Candidate valid
+* Attempt successful
+* Artifact published
+
+---
+
+## Payload
+
+```text
+RecognitionOCRExecutionCompletedEvent
+├── OCRDocumentRef?
+├── ReadingOrderResultRef?
+├── QualityReportRef?
+├── ProviderProvenanceSummary
+├── Completeness
+├── WarningCount
+├── ExecutionDurationMs
+└── CompletedAt
+```
+
+---
+
+## Rules
+
+1. không embed OCR Document
+2. không embed Reading Order graph
+3. không embed Quality Report
+4. output refs optional theo Plan
+5. no full OCR text
+6. no Region/Line/Character dump
+7. event is informational
+8. Candidate assembly may still fail
+
+---
+
+# 18. Why No OCR Stage Events Here
+
+Recognition no longer publishes events like:
+
+```text
+REGIONS_DETECTED
+TEXT_RECOGNIZED
+DIRECTION_ANALYZED
+LAYOUT_RESOLVED
+QUALITY_EVALUATED
+READING_ORDER_RESOLVED
+```
+
+vì các concept này có owner riêng.
+
+Nếu một concrete consumer thật sự cần stage diagnostics:
+
+```text
+OCR Architecture
+    → defines semantic diagnostic fact
+
+Telemetry/Event infrastructure
+    → transports it
+```
+
+Recognition Module không trở thành second owner.
+
+---
+
+# 19. RECOGNITION_CANDIDATE_VALIDATED
+
+## Meaning
+
+Candidate đã vượt Recognition module-level validation.
+
+State:
+
+```text
+CandidateValidationState = VALID
+```
+
+---
+
+## Payload
 
 ```text
 RecognitionCandidateValidatedEvent
 ├── CandidateArtifactId
 ├── ArtifactType
+├── OCRDocumentRef
+├── ReadingOrderResultRef?
+├── QualityReportRef?
 ├── Completeness
-├── QualityLevel
-├── RegionCount
-├── LineCount
-├── CharacterCount
 ├── WarningCount
 ├── ProviderProvenanceSummary
 ├── CompatibilityMetadataVersion
@@ -472,26 +638,31 @@ RecognitionCandidateValidatedEvent
 └── ValidatedAt
 ```
 
-### Rules
+---
 
-1. no Candidate payload;
-2. no full recognized text;
-3. Candidate is not authoritative;
-4. Candidate is not published;
-5. event does not grant ownership transfer;
-6. event does not trigger Text Processing;
-7. Runtime may later reject Candidate;
-8. empty-valid Candidate is allowed.
+## Rules
+
+1. no Candidate payload
+2. no OCR payload
+3. no full recognized text
+4. Candidate vẫn non-authoritative
+5. event không transfer ownership
+6. event không trigger Text Processing
+7. Runtime có thể reject Candidate
+8. EMPTY_VALID allowed
+9. Quality may be poor while Candidate is contract-valid
 
 ---
 
-## 16. `RECOGNITION_CANDIDATE_SUBMITTED`
+# 20. RECOGNITION_CANDIDATE_SUBMITTED
 
-### Meaning
+## Meaning
 
-Recognition submitted a valid Candidate through Attempt Completion to Runtime.
+Recognition đã submit Candidate cho Runtime qua Attempt Completion path.
 
-### Payload
+---
+
+## Payload
 
 ```text
 RecognitionCandidateSubmittedEvent
@@ -508,170 +679,74 @@ SubmissionMode
 └── DIAGNOSTIC_EVALUATION
 ```
 
-### Rules
+---
 
-1. submission is not publication;
-2. no ArtifactId yet;
-3. no downstream orchestration;
-4. Candidate must not be mutated afterward;
-5. Runtime disposition may be accepted or rejected;
-6. optional fact only.
+## Rules
+
+1. submission ≠ publication
+2. no published ArtifactId
+3. no downstream trigger
+4. Candidate immutable after submission
+5. Runtime disposition may accept/reject
+6. event optional
 
 ---
 
-## 17. Progress Facts
+# 21. Optional Execution Progress Fact
+
+Recognition MAY expose one coarse-grained progress event:
 
 ```text
-RECOGNITION_PREPARATION_COMPLETED
-RECOGNITION_REGIONS_DETECTED
-RECOGNITION_REGION_PROCESSED
-RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
-RECOGNITION_READING_ORDER_RESOLVED
+RECOGNITION_PHASE_CHANGED
 ```
 
-Progress facts:
-
-- optional;
-- best-effort;
-- sampleable;
-- not required for correctness;
-- not authoritative;
-- not terminal;
-- not downstream triggers.
+chỉ khi có concrete consumer.
 
 ---
 
-## 18. `RECOGNITION_PREPARATION_COMPLETED`
+# 22. RECOGNITION_PHASE_CHANGED
 
-### Payload
+## Payload
 
 ```text
-RecognitionPreparationCompletedEvent
-├── PreparationProfileId?
-├── OperationCount
-├── SourceWidth
-├── SourceHeight
-├── ProcessedWidth
-├── ProcessedHeight
-├── GeometryChanged
-├── DurationMs
-└── CompletedAt
+RecognitionPhaseChangedEvent
+├── PreviousPhase
+├── CurrentPhase
+├── PhaseStartedAt
+└── ProgressHint?
 ```
 
-### Rules
+Allowed module phases:
 
-1. no processed image;
-2. no temporary path;
-3. no provider secret;
-4. geometry-changing operations tracked internally;
-5. may be omitted under sampling.
+```text
+VALIDATING
+PLANNING
+ACQUIRING_INPUT
+EXECUTING_OCR
+ASSEMBLING_CANDIDATE
+VALIDATING_CANDIDATE
+FINALIZING
+FINISHED
+```
+
+Không expose internal OCR sub-stages qua Recognition phase model.
 
 ---
 
-## 19. `RECOGNITION_REGIONS_DETECTED`
+## Rules
 
-### Payload
-
-```text
-RecognitionRegionsDetectedEvent
-├── DetectedRegionCount
-├── LowConfidenceRegionCount
-├── OrientationSummary
-├── DetectionProviderId?
-├── DetectionDurationMs
-└── DetectedAt
-```
-
-Trusted in-process extension may include bounded region summaries:
-
-```text
-RegionSummary
-├── RegionId
-├── Geometry
-├── Orientation
-└── ConfidenceLevel
-```
-
-No recognized text.
+* optional
+* sampleable
+* not authoritative
+* not persisted for correctness
+* no payload content
+* consumers tolerate missing transitions
 
 ---
 
-## 20. `RECOGNITION_REGION_PROCESSED`
+# 23. Warning and Error Facts
 
-### Meaning
-
-One bounded region operation completed.
-
-### Payload
-
-```text
-RecognitionRegionProcessedEvent
-├── RegionId
-├── RegionIndex
-├── TotalRegionCount
-├── ConfidenceLevel
-├── CharacterCount
-├── DurationMs
-└── ProcessedAt
-```
-
-### Rules
-
-1. bounded/sampled frequency;
-2. no text content;
-3. may arrive out of spatial order;
-4. not a partial Artifact;
-5. consumers do not start Translation from it;
-6. may be lost.
-
----
-
-## 21. `RECOGNITION_PROVIDER_OUTPUT_NORMALIZED`
-
-### Payload
-
-```text
-RecognitionProviderOutputNormalizedEvent
-├── ProviderId
-├── ProviderRequestId?
-├── RegionCount
-├── LineCount
-├── ConfidenceAvailable
-├── GeometrySourceSummary
-├── WarningCount
-├── NormalizationDurationMs
-└── NormalizedAt
-```
-
-ProviderRequestId should remain trace-only when cardinality/privacy policy requires.
-
----
-
-## 22. `RECOGNITION_READING_ORDER_RESOLVED`
-
-### Payload
-
-```text
-RecognitionReadingOrderResolvedEvent
-├── OrderedRegionCount
-├── ReadingDirection
-├── OrderSource
-├── ConfidenceLevel
-├── WarningCount
-├── DurationMs
-└── ResolvedAt
-```
-
-### Rules
-
-1. full order remains in Candidate/Artifact;
-2. event is informational;
-3. uncertain order explicit;
-4. not a downstream trigger.
-
----
-
-## 23. Warning and Error Facts
+Recognition owns:
 
 ```text
 RECOGNITION_WARNING_RECORDED
@@ -680,20 +755,20 @@ RECOGNITION_CANCELLATION_OBSERVED
 RECOGNITION_DEADLINE_OBSERVED
 ```
 
-These facts do not define Runtime terminal outcomes.
+Không event nào trong nhóm này định nghĩa Runtime terminal outcome.
 
 ---
 
-## 24. `RECOGNITION_WARNING_RECORDED`
+# 24. RECOGNITION_WARNING_RECORDED
 
-### Payload
+## Payload
 
 ```text
 RecognitionWarningRecordedEvent
 ├── WarningCode
 ├── Severity
 ├── OperationPhase
-├── RegionId?
+├── ScopeRef?
 ├── ProviderId?
 ├── Metadata?
 └── RecordedAt
@@ -701,20 +776,22 @@ RecognitionWarningRecordedEvent
 
 Rules:
 
-- no full text;
-- no provider raw response;
-- duplicates may be aggregated;
-- warning is not failure.
+* no full text
+* no raw provider response
+* warning ≠ failure
+* OCR-stage warning có thể được reference, không redefine semantics
 
 ---
 
-## 25. `RECOGNITION_MODULE_ERROR_RECORDED`
+# 25. RECOGNITION_MODULE_ERROR_RECORDED
 
-### Meaning
+## Meaning
 
-Recognition produced a normalized module error.
+Recognition tạo normalized module-level error.
 
-### Payload
+---
+
+## Payload
 
 ```text
 RecognitionModuleErrorRecordedEvent
@@ -722,26 +799,28 @@ RecognitionModuleErrorRecordedEvent
 ├── OperationPhase
 ├── Retryability
 ├── SuggestedStrategies[]
-├── ProviderErrorCode?
+├── ProviderErrorRef?
 ├── ProviderId?
 ├── DiagnosticsRef?
 └── RecordedAt
 ```
 
-### Rules
+---
 
-1. not a terminal event;
-2. Runtime may retry, cancel, abandon or fail Attempt;
-3. no credential;
-4. no full provider response;
-5. no raw recognized text;
-6. does not emit `recognition.failed`.
+## Rules
+
+1. not terminal Runtime event
+2. Runtime may retry/fail/cancel/abandon
+3. no credential
+4. no provider raw response
+5. no full recognized content
+6. no `RECOGNITION_FAILED` terminal event
 
 ---
 
-## 26. `RECOGNITION_CANCELLATION_OBSERVED`
+# 26. RECOGNITION_CANCELLATION_OBSERVED
 
-### Payload
+## Payload
 
 ```text
 RecognitionCancellationObservedEvent
@@ -753,15 +832,23 @@ RecognitionCancellationObservedEvent
 └── Metadata?
 ```
 
-This fact means Recognition observed CancellationContext.
+Meaning:
 
-It does not mean Runtime committed `ATTEMPT_CANCELED`.
+```text
+Recognition observed CancellationContext.
+```
+
+Không có nghĩa:
+
+```text
+ATTEMPT_CANCELED
+```
 
 ---
 
-## 27. `RECOGNITION_DEADLINE_OBSERVED`
+# 27. RECOGNITION_DEADLINE_OBSERVED
 
-### Payload
+## Payload
 
 ```text
 RecognitionDeadlineObservedEvent
@@ -773,11 +860,13 @@ RecognitionDeadlineObservedEvent
 └── ObservedAt
 ```
 
-Runtime owns final timeout disposition.
+Runtime owns timeout/terminal disposition.
 
 ---
 
-## 28. Diagnostic Facts
+# 28. Diagnostic Facts
+
+Allowed optional diagnostics:
 
 ```text
 RECOGNITION_DIAGNOSTIC_RECORDED
@@ -785,19 +874,20 @@ RECOGNITION_BENCHMARK_SAMPLE_RECORDED
 RECOGNITION_INVARIANT_VIOLATION_RECORDED
 ```
 
-Diagnostic facts:
+Requirements:
 
-- development/protected only;
-- not normal workflow inputs;
-- may contain references, not payloads;
-- bounded retention;
-- access controlled.
+* bounded
+* protected when necessary
+* reference-oriented
+* not workflow input
+* not authoritative
+* appropriate retention
 
 ---
 
-## 29. Candidate Event Boundary
+# 29. Candidate Event Boundary
 
-Recognition Candidate facts describe only:
+Recognition Candidate facts có thể mô tả:
 
 ```text
 Candidate assembled
@@ -805,7 +895,7 @@ Candidate validated
 Candidate submitted
 ```
 
-They do not describe:
+Recognition không mô tả:
 
 ```text
 Candidate accepted
@@ -816,31 +906,39 @@ Artifact retained
 Artifact evicted
 ```
 
-Those belong to Runtime/Artifact Store/Resource Manager.
+Những facts này thuộc Runtime/Artifact Store/Resource owner.
 
 ---
 
-## 30. Runtime Event Boundary
+# 30. Runtime Event Boundary
 
-Runtime owns canonical execution events:
+Runtime owns:
 
 ```text
 WORKITEM_CREATED
+
 ATTEMPT_STARTED
 ATTEMPT_COMPLETED
 ATTEMPT_FAILED
 ATTEMPT_CANCELED
 ATTEMPT_ABANDONED
+
 AUTHORITY_ACCEPTED
 AUTHORITY_REJECTED
 LATE_COMPLETION_REJECTED
 ```
 
-Recognition must not duplicate them with module-specific terminal lifecycle events.
+Recognition không tạo alias terminal event như:
+
+```text
+RECOGNITION_COMPLETED
+RECOGNITION_FAILED
+RECOGNITION_CANCELED
+```
 
 ---
 
-## 31. Artifact Store Event Boundary
+# 31. Artifact Store Event Boundary
 
 Artifact Store owns:
 
@@ -849,15 +947,17 @@ OWNERSHIP_TRANSFER_REQUESTED
 OWNERSHIP_TRANSFERRED
 ARTIFACT_PUBLISHED
 ARTIFACT_PUBLICATION_REJECTED
-RESOURCE_LOGICALLY_DISPOSED
-RESOURCE_PHYSICALLY_DISPOSED
 ```
 
-Text Processing starts from orchestrated published Artifact availability, not Recognition Candidate events.
+Resource lifecycle events thuộc Resource owner tương ứng.
+
+Text Processing bắt đầu từ Runtime-orchestrated published Artifact availability.
+
+Không bắt đầu từ Recognition Candidate event.
 
 ---
 
-## 32. Provider Manager Event Boundary
+# 32. Provider Manager Event Boundary
 
 Provider Manager owns:
 
@@ -871,38 +971,83 @@ PROVIDER_DRAINING
 PROVIDER_STOPPED
 ```
 
-Recognition only observes provider snapshot/capability through contracts.
-
-It does not publish:
+Recognition không publish:
 
 ```text
-recognition.provider_ready
-recognition.provider_degraded
-recognition.provider_unavailable
+RECOGNITION_PROVIDER_READY
+RECOGNITION_PROVIDER_UNAVAILABLE
 ```
 
 ---
 
-## 33. Consumed Event Policy
+# 33. OCR Quality Event Boundary
 
-Recognition should not subscribe directly to broad workflow events.
-
-Recognition does not directly consume:
+Quality semantics thuộc:
 
 ```text
-source.image_imported
-observation.stable_frame_ready
-recognition.requested
-recognition.cancellation_requested
-session.stopped
-source.closed
-application.shutdown_requested
-configuration.recognition_changed
+01-architecture/ocr/QUALITY.md
 ```
 
-Runtime Control, Business Pipeline Orchestration, Configuration Service hoặc component owner handles these facts.
+Recognition không publish:
 
-Recognition receives explicit execution contracts:
+```text
+RECOGNITION_QUALITY_EVALUATED
+```
+
+Nếu architecture cần một semantic event, owner phải là Quality concern, ví dụ conceptually:
+
+```text
+OCR_QUALITY_ASSESSED
+```
+
+Recognition Candidate event chỉ reference `QualityReportRef`.
+
+---
+
+# 34. Reading Order Event Boundary
+
+Reading Order semantics thuộc:
+
+```text
+01-architecture/ocr/READING_ORDER.md
+```
+
+Recognition không publish:
+
+```text
+RECOGNITION_READING_ORDER_RESOLVED
+```
+
+Candidate/OCR execution fact có thể reference:
+
+```text
+ReadingOrderResultRef
+```
+
+nếu result tồn tại.
+
+---
+
+# 35. Consumed Event Policy
+
+Recognition không subscribe trực tiếp broad workflow events.
+
+Không trực tiếp consume:
+
+```text
+SOURCE_IMPORTED
+STABLE_FRAME_READY
+SESSION_STOPPED
+SOURCE_CLOSED
+APPLICATION_SHUTDOWN_REQUESTED
+CONFIGURATION_CHANGED
+RECOGNITION_REQUESTED
+RECOGNITION_RETRY_REQUESTED
+```
+
+Runtime/Business Orchestration xử lý các facts đó.
+
+Recognition nhận explicit execution contracts:
 
 ```text
 RecognitionAttemptInput
@@ -915,131 +1060,123 @@ ProviderAvailabilitySnapshot
 
 ---
 
-## 34. No Hidden Orchestration
+# 36. No Hidden Orchestration
 
-Recognition Event handlers must not:
+Recognition event handler không được:
 
-- create WorkItem;
-- create Attempt;
-- cancel Session;
-- start retry;
-- select current Revision;
-- publish Artifact;
-- trigger Text Processing;
-- mutate Provider Manager;
-- activate Configuration;
-- stop Runtime.
+* create WorkItem
+* create Attempt
+* trigger retry
+* cancel Session
+* select current Revision
+* publish Artifact
+* trigger Text Processing
+* mutate Provider Manager
+* activate Configuration
+* stop Runtime
 
-Event subscription must never become hidden business pipeline orchestration.
+Event subscription không trở thành hidden pipeline.
 
 ---
 
-## 35. Ordering
+# 37. Preferred Causal Order
 
-Preferred causal order for one Attempt:
+Typical Attempt:
 
 ```text
 RECOGNITION_PLAN_CREATED
-    ↓
-RECOGNITION_PREPARATION_COMPLETED
-    ↓
-RECOGNITION_REGIONS_DETECTED
-    ↓
-RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
-    ↓
-RECOGNITION_READING_ORDER_RESOLVED
-    ↓
+        ↓
+RECOGNITION_OCR_EXECUTION_COMPLETED
+        ↓
 RECOGNITION_CANDIDATE_VALIDATED
-    ↓
+        ↓
 RECOGNITION_CANDIDATE_SUBMITTED
 ```
 
-But:
-
-- phases may be skipped;
-- optional facts may be absent;
-- delivery may be delayed;
-- transport may duplicate;
-- Runtime correctness must not depend on this sequence.
-
----
-
-## 36. Delivery Guarantees
-
-Assume at-least-once delivery when Event Bus persists/retries.
-
-Possible effects:
-
-- duplicate facts;
-- delayed facts;
-- missing sampled progress facts;
-- out-of-order facts;
-- fact arrives after Attempt terminal event;
-- Candidate fact arrives after Runtime rejected Completion.
-
-Consumers must handle safely.
-
----
-
-## 37. Consumer Deduplication
-
-Consumers maintain:
+Optional interleaving:
 
 ```text
-ProcessedEvent
-├── EventId
-├── HandlerId
-└── ProcessedAt
+RECOGNITION_PHASE_CHANGED
+RECOGNITION_WARNING_RECORDED
+RECOGNITION_MODULE_ERROR_RECORDED
+RECOGNITION_CANCELLATION_OBSERVED
+RECOGNITION_DEADLINE_OBSERVED
 ```
 
-Duplicate EventId must not:
-
-- update UI twice;
-- create WorkItem;
-- append duplicate diagnostic row;
-- increment business counter twice.
-
-Aggregate metrics may deduplicate or use idempotent counters according to telemetry design.
+Runtime correctness không được phụ thuộc event order này.
 
 ---
 
-## 38. Late Facts
+# 38. Delivery Guarantees
 
-A Recognition fact may arrive after Runtime terminal outcome.
+Recognition tuân Event Bus guarantee.
 
-Example:
+Nếu Event Bus cung cấp at-least-once:
+
+consumer phải chịu:
+
+* duplicates
+* delays
+* out-of-order facts
+* missing optional progress
+* facts arriving after Attempt terminal state
+
+Recognition EVENTS document không redefine delivery semantics.
+
+---
+
+# 39. Consumer Deduplication
+
+Consumer deduplicate theo:
+
+```text
+EventId
+```
+
+Duplicate event không được:
+
+* create duplicate WorkItem
+* display duplicate authoritative result
+* duplicate business counter
+* append duplicate durable diagnostic record
+
+---
+
+# 40. Late Facts
+
+Ví dụ:
 
 ```text
 ATTEMPT_CANCELED
-    ↓
-delayed RECOGNITION_REGIONS_DETECTED
+        ↓
+late RECOGNITION_OCR_EXECUTION_COMPLETED
 ```
 
-Consumer behavior:
+Consumer:
 
-- keep for diagnostics if useful;
-- do not change Runtime state;
-- do not trigger downstream processing;
-- do not publish Artifact;
-- mark late when trace context allows.
+* may retain for diagnostics
+* must not change Runtime state
+* must not publish Candidate
+* must not trigger downstream processing
+* may mark as late
 
 ---
 
-## 39. Stale Completion
+# 41. Stale Completion
 
-Staleness is not decided by Recognition event consumer.
+Staleness không được quyết định bởi Recognition event consumer.
 
-Canonical flow:
+Canonical path:
 
 ```text
 Attempt Completion
-    ↓
+      ↓
 Runtime Authority Validation
-    ↓
-Accepted or Rejected Stale
+      ↓
+ACCEPT / REJECT_STALE
 ```
 
-Recognition facts preserve:
+Recognition facts giữ:
 
 ```text
 RevisionId
@@ -1047,211 +1184,278 @@ WorkItemId
 AttemptId
 ```
 
-Runtime owns stale rejection.
+để correlation.
 
 ---
 
-## 40. Privacy Classification
+# 42. Privacy Classification
 
-Normal Recognition facts:
+Default:
 
 ```text
 OPERATIONAL_METADATA
 ```
 
-Allowed:
+Optional:
 
-- Runtime IDs;
-- provider ID;
-- counts;
-- duration;
-- warning/error code;
-- confidence level;
-- quality/completeness;
-- CandidateArtifactId;
-- sanitized diagnostics reference.
+```text
+PROTECTED_DIAGNOSTIC_REFERENCE
+```
+
+Allowed normal fields:
+
+* Runtime IDs
+* Provider ID
+* CandidateArtifactId
+* OCR/Quality/ReadingOrder ArtifactRefs when safe
+* count summary
+* duration
+* warning/error code
+* Completeness
+* sanitized diagnostics ref
 
 Forbidden:
 
 ```text
-image_bytes
-image_base64
-raw_image_path
-complete_raw_text
-complete_surface_text
-provider_api_key
-provider_access_token
-authorization_header
-provider_full_response
-temporary_file_credentials
-translated_text
-user_glossary_content
+image bytes
+raw image paths
+complete OCR text
+provider credentials
+authorization headers
+provider full response
+translated text
+user glossary content
 ```
 
 ---
 
-## 41. Geometry in Events
+# 43. Geometry in Recognition Events
 
-Geometry may be included only when:
+Recognition events should not normally contain geometry.
 
-- bounded;
-- required by a concrete trusted consumer;
-- privacy classification allows;
-- event channel is approved;
-- no text content accompanies it.
+Geometry belongs to OCR artifacts/contracts.
 
-Default public facts use counts/summaries only.
+Only include a bounded geometry reference/summary when:
+
+* concrete trusted consumer exists
+* privacy allows
+* Event Convention allows
+* event remains bounded
+
+Default:
+
+```text
+use ArtifactRef / EntityRef
+```
 
 ---
 
-## 42. Remote Provider Disclosure
+# 44. Remote Provider Disclosure
 
-When remote provider is used, safe facts may include:
+Safe metadata may include:
 
 ```text
 ProviderId
-ExecutionLocation = REMOTE_SERVICE
+ExecutionLocation
+RemoteExecutionUsed
 PrivacyClassification
-RemoteExecutionUsed = true
 ```
 
-No image/text payload included.
+No image/text payload.
 
-Remote provider use is primarily recorded in Candidate provenance and Runtime Observability.
+Primary provenance remains in Candidate/Artifact.
 
 ---
 
-## 43. Diagnostic Event Security
+# 45. Diagnostic Security
 
 Protected diagnostics may reference:
 
-- processed image Artifact;
-- provider raw-response Artifact;
-- region visualization Artifact;
-- benchmark sample;
-- comparison report.
+* processed image Artifact
+* provider raw-response Artifact
+* OCR visualization Artifact
+* benchmark sample
+* comparison report
 
 Requirements:
 
-- explicit diagnostic mode;
-- authorization;
-- secure Artifact reference;
-- bounded retention;
-- redaction;
-- auditability;
-- no direct unrestricted file path.
-
-Normal modules must not consume protected diagnostic stream.
+* explicit diagnostic mode
+* authorization
+* bounded retention
+* redaction
+* auditability
+* secure Artifact reference
+* no unrestricted file path
 
 ---
 
-## 44. Event Publication Failure
+# 46. Event Publication Failure
 
-If a Recognition fact cannot be published:
+Nếu optional Recognition fact publish thất bại:
 
 ```text
-Record bounded local diagnostic if possible
-    ↓
-Retry/drop according to Event Bus policy
-    ↓
-Continue Recognition correctness path
+record bounded local diagnostic if possible
+        ↓
+Event Bus policy retry/drop
+        ↓
+continue Recognition correctness path
 ```
 
 Rules:
 
-1. do not rerun Recognition;
-2. do not fail Attempt solely due to optional fact failure;
-3. do not block Runtime Control;
-4. do not block Candidate submission;
-5. reuse EventId for idempotent retry;
-6. increment dropped-event metric when applicable.
+1. do not rerun Recognition
+2. do not fail Attempt solely because optional fact failed
+3. do not block Candidate submission
+4. do not block Runtime
+5. idempotent retry reuses EventId
+6. record dropped-event metric when applicable
 
-Artifact publication failure is separate and belongs to Artifact Store.
-
----
-
-## 45. Event Bus Unavailable
-
-Recognition execution must continue if:
-
-- Attempt contract is in-process/direct;
-- Candidate can be submitted through Runtime Completion;
-- correctness does not require events.
-
-When Event Bus unavailable:
-
-- suppress optional facts;
-- preserve critical diagnostics locally if bounded;
-- report observability degradation;
-- do not invent terminal event fallback.
+Artifact publication failure là concern khác.
 
 ---
 
-## 46. Consumer Expectations
+# 47. Event Bus Unavailable
 
-### Diagnostics
+Recognition vẫn tiếp tục nếu execution contract/direct Runtime completion path hoạt động.
 
-May consume all Recognition facts.
+Behavior:
 
-Uses:
-
-- phase timing;
-- region count;
-- warning/error rate;
-- quality/completeness distribution;
-- provider normalization behavior;
-- Candidate validation;
-- cancellation observation;
-- late fact detection.
-
-Diagnostics must not infer semantic OCR quality from operational success alone.
-
-### Presentation
-
-May consume safe progress summaries for optional developer/progress UI.
-
-Must not:
-
-- treat progress fact as authoritative result;
-- start Translation;
-- display full recognized text from Event Bus;
-- couple to provider details.
-
-### Text Processing
-
-Must not consume Recognition facts for correctness.
-
-Text Processing receives published `RecognitionArtifact` through Runtime orchestration.
-
-### Session / Business Orchestration
-
-Consumes Runtime lifecycle and authority events, not Recognition terminal events.
-
-### Provider Manager
-
-Does not consume Recognition facts to change provider lifecycle automatically unless an explicit Runtime health policy exists outside this module.
+* suppress optional facts
+* preserve bounded diagnostics if appropriate
+* report observability degradation
+* never invent terminal fallback events
 
 ---
 
-## 47. Event Contract Examples
+# 48. Consumer Expectations — Diagnostics
 
-### Plan Created
+Diagnostics may consume all Recognition facts.
+
+Possible uses:
+
+* plan creation timing
+* OCR execution duration
+* Candidate validation timing
+* warning/error rate
+* Completeness distribution
+* Provider provenance
+* cancellation/deadline observation
+* late fact detection
+
+Diagnostics không suy luận OCR quality chỉ từ module success.
+
+---
+
+# 49. Consumer Expectations — Presentation
+
+Presentation may consume safe coarse progress only when a real UI need exists.
+
+It must not:
+
+* treat progress fact as result
+* read full OCR output from Event Bus
+* trigger Translation
+* depend on Provider internals
+
+---
+
+# 50. Consumer Expectations — Text Processing
+
+Text Processing không consume Recognition event for correctness.
+
+It receives:
+
+```text
+Published RecognitionArtifact
+```
+
+through Runtime orchestration.
+
+---
+
+# 51. Consumer Expectations — Business Orchestration
+
+Business Orchestration consumes:
+
+* Runtime lifecycle
+* authority
+* published Artifact availability
+
+Không dùng Recognition diagnostic facts làm authoritative pipeline trigger.
+
+---
+
+# 52. MVP Event Set
+
+MVP correctness requires:
+
+```text
+no Recognition-specific event
+```
+
+Recommended optional MVP facts:
+
+```text
+RECOGNITION_CANDIDATE_VALIDATED
+RECOGNITION_WARNING_RECORDED
+RECOGNITION_MODULE_ERROR_RECORDED
+```
+
+Useful optional diagnostic fact:
+
+```text
+RECOGNITION_OCR_EXECUTION_COMPLETED
+```
+
+Development-only:
+
+```text
+RECOGNITION_PLAN_CREATED
+RECOGNITION_PHASE_CHANGED
+RECOGNITION_DIAGNOSTIC_RECORDED
+```
+
+Không thêm event nếu chưa có concrete consumer.
+
+---
+
+# 53. Deferred Extensions
+
+Potential future module facts:
+
+```text
+RECOGNITION_PARTIAL_CANDIDATE_VALIDATED
+RECOGNITION_LONG_PAGE_CHUNK_COMPLETED
+RECOGNITION_PROVIDER_COMPARISON_RECORDED
+RECOGNITION_STREAM_SEGMENT_OBSERVED
+```
+
+Không bao gồm:
+
+```text
+RECOGNITION_QUALITY_EVALUATED
+RECOGNITION_READING_ORDER_RESOLVED
+```
+
+vì ownership đã thuộc OCR Architecture.
+
+---
+
+# 54. Example — Plan Created
 
 ```json
 {
   "event_id": "evt_rec_plan_001",
   "event_name": "RECOGNITION_PLAN_CREATED",
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "producer_module": "recognition",
   "occurred_at": "2026-08-03T01:15:42.190Z",
   "privacy_classification": "OPERATIONAL_METADATA",
   "partition_key": "attempt_01",
-  "sequence_number": 1,
   "trace_context": {
     "trace_id": "trace_01"
   },
   "runtime_context": {
-    "application_instance_id": "app_01",
     "session_id": "session_01",
     "revision_id": "revision_104",
     "work_item_id": "work_recognition_104",
@@ -1263,13 +1467,15 @@ Does not consume Recognition facts to change provider lifecycle automatically un
   },
   "payload": {
     "plan_id": "plan_rec_104_01",
-    "strategy": "COMBINED_RECOGNITION",
     "recognition_operation": "RECOGNIZE_IMAGE",
     "recognition_profile": "COMIC_PAGE",
-    "preparation_profile_id": "comic_default_v1",
-    "coordinate_policy_version": "1",
-    "reading_order_policy_version": "comic_mixed_v1",
-    "quality_policy_version": "interactive_v1",
+    "ocr_profile_ref": "ocr_comic_default",
+    "execution_strategy": "COMBINED_OCR",
+    "capability_requirement_summary": [
+      "DETECTION",
+      "RECOGNITION",
+      "VERTICAL_TEXT"
+    ],
     "privacy_mode": "LOCAL_ONLY",
     "execution_classes": ["GPU", "CPU"],
     "created_at": "2026-08-03T01:15:42.190Z"
@@ -1277,29 +1483,76 @@ Does not consume Recognition facts to change provider lifecycle automatically un
 }
 ```
 
-### Candidate Validated
+---
+
+# 55. Example — OCR Execution Completed
+
+```json
+{
+  "event_id": "evt_rec_ocr_completed_001",
+  "event_name": "RECOGNITION_OCR_EXECUTION_COMPLETED",
+  "contract_version": "1.1.0",
+  "producer_module": "recognition",
+  "occurred_at": "2026-08-03T01:15:42.840Z",
+  "privacy_classification": "OPERATIONAL_METADATA",
+  "partition_key": "attempt_01",
+  "trace_context": {
+    "trace_id": "trace_01"
+  },
+  "runtime_context": {
+    "session_id": "session_01",
+    "revision_id": "revision_104",
+    "work_item_id": "work_recognition_104",
+    "attempt_id": "attempt_01",
+    "configuration_snapshot_id": "config_42",
+    "recognition_operation": "RECOGNIZE_IMAGE",
+    "recognition_profile": "COMIC_PAGE",
+    "operation_phase": "EXECUTING_OCR"
+  },
+  "payload": {
+    "ocr_document_ref": {
+      "artifact_id": "ocr_document_candidate_104"
+    },
+    "reading_order_result_ref": {
+      "artifact_id": "reading_order_candidate_104"
+    },
+    "quality_report_ref": {
+      "artifact_id": "quality_report_candidate_104"
+    },
+    "provider_provenance_summary": {
+      "provider_id": "local_ocr_01",
+      "execution_location": "LOCAL_PROCESS"
+    },
+    "completeness": "COMPLETE",
+    "warning_count": 1,
+    "execution_duration_ms": 612,
+    "completed_at": "2026-08-03T01:15:42.840Z"
+  }
+}
+```
+
+---
+
+# 56. Example — Candidate Validated
 
 ```json
 {
   "event_id": "evt_rec_candidate_valid_001",
   "event_name": "RECOGNITION_CANDIDATE_VALIDATED",
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "producer_module": "recognition",
   "occurred_at": "2026-08-03T01:15:42.871Z",
   "privacy_classification": "OPERATIONAL_METADATA",
   "partition_key": "attempt_01",
-  "sequence_number": 5,
   "trace_context": {
     "trace_id": "trace_01"
   },
   "runtime_context": {
-    "application_instance_id": "app_01",
     "session_id": "session_01",
     "revision_id": "revision_104",
     "work_item_id": "work_recognition_104",
     "attempt_id": "attempt_01",
     "candidate_artifact_id": "candidate_recognition_104",
-    "provider_id": "local_recognition_01",
     "configuration_snapshot_id": "config_42",
     "recognition_operation": "RECOGNIZE_IMAGE",
     "recognition_profile": "COMIC_PAGE",
@@ -1308,16 +1561,20 @@ Does not consume Recognition facts to change provider lifecycle automatically un
   "payload": {
     "candidate_artifact_id": "candidate_recognition_104",
     "artifact_type": "RECOGNITION_ARTIFACT",
+    "ocr_document_ref": {
+      "artifact_id": "ocr_document_candidate_104"
+    },
+    "reading_order_result_ref": {
+      "artifact_id": "reading_order_candidate_104"
+    },
+    "quality_report_ref": {
+      "artifact_id": "quality_report_candidate_104"
+    },
     "completeness": "COMPLETE",
-    "quality_level": "DEGRADED",
-    "region_count": 12,
-    "line_count": 18,
-    "character_count": 143,
     "warning_count": 1,
     "provider_provenance_summary": {
-      "provider_id": "local_recognition_01",
-      "execution_location": "LOCAL_PROCESS",
-      "execution_class": "GPU"
+      "provider_id": "local_ocr_01",
+      "execution_location": "LOCAL_PROCESS"
     },
     "compatibility_metadata_version": "1",
     "validation_duration_ms": 3,
@@ -1328,164 +1585,175 @@ Does not consume Recognition facts to change provider lifecycle automatically un
 
 ---
 
-## 48. MVP Event Set
+# 57. Testing Requirements
 
-MVP correctness requires no Recognition-specific event.
+## Envelope
 
-Recommended optional MVP facts:
-
-```text
-RECOGNITION_CANDIDATE_VALIDATED
-RECOGNITION_WARNING_RECORDED
-RECOGNITION_MODULE_ERROR_RECORDED
-```
-
-Development-only optional facts:
-
-```text
-RECOGNITION_PLAN_CREATED
-RECOGNITION_PREPARATION_COMPLETED
-RECOGNITION_REGIONS_DETECTED
-RECOGNITION_READING_ORDER_RESOLVED
-```
-
-Do not add an event without a concrete consumer.
+* EventId unique
+* ContractVersion supported
+* UTC timestamp
+* producer = recognition
+* Runtime context valid
+* Privacy Classification present
+* no credentials
 
 ---
 
-## 49. Deferred Event Extensions
+## Plan Fact
 
-Potential future facts:
-
-```text
-RECOGNITION_PARTIAL_CANDIDATE_VALIDATED
-RECOGNITION_LONG_PAGE_CHUNK_PROCESSED
-RECOGNITION_PROVIDER_COMPARISON_RECORDED
-RECOGNITION_QUALITY_EVALUATED
-RECOGNITION_STREAM_SEGMENT_RECEIVED
-RECOGNITION_MANUAL_REVIEW_REQUESTED
-```
-
-Deferred because they introduce:
-
-- streaming semantics;
-- partial Artifact lifecycle;
-- extra retention;
-- consumer complexity;
-- stronger ordering requirements.
+* emitted only after READY Plan
+* no OCR internal policy duplication
+* no Provider SDK fields
+* no image data
 
 ---
 
-## 50. Testing Requirements
+## OCR Execution Fact
 
-### Envelope
-
-- unique EventId;
-- supported ContractVersion;
-- UTC timestamp;
-- producer_module = recognition;
-- Runtime context complete;
-- no credential;
-- privacy classification present.
-
-### Domain Facts
-
-- Plan fact after READY Plan;
-- Candidate valid fact after semantic validation;
-- Candidate submit fact only once;
-- empty-valid Candidate summary;
-- partial Candidate summary;
-- no authoritative publication implication.
-
-### Progress Facts
-
-- optional facts may be omitted;
-- duplicate delivery safe;
-- out-of-order delivery safe;
-- bounded region facts;
-- no text content;
-- no image content.
-
-### Warning/Error Facts
-
-- warning separate from error;
-- module error not terminal event;
-- cancellation observed not Attempt canceled;
-- deadline observed not terminal state;
-- retry hint sanitized.
-
-### Boundaries
-
-- no Recognition terminal lifecycle event;
-- no provider lifecycle event;
-- no WorkItem creation from fact;
-- no Text Processing trigger;
-- no Artifact publication from fact.
-
-### Privacy
-
-- no image bytes;
-- no complete OCR text;
-- no raw provider response;
-- no credentials;
-- no temporary sensitive path;
-- remote use disclosed safely.
-
-### Failure
-
-- Event Bus unavailable does not fail Recognition;
-- event retry uses same EventId;
-- dropped fact recorded;
-- Candidate submission unaffected.
+* refs only
+* no OCR payload
+* no Quality payload
+* no Reading Graph
+* valid Completeness
+* safe Provider summary
 
 ---
 
-## 51. Event Invariants
+## Candidate Fact
+
+* CandidateValidated only after module validation
+* CandidateSubmitted at most once
+* Candidate facts do not imply publication
+* stale Runtime rejection remains possible
+
+---
+
+## Warning/Error Facts
+
+* warning separate from error
+* module error not terminal Runtime event
+* cancellation observed ≠ Attempt canceled
+* deadline observed ≠ Attempt failed
+
+---
+
+## Boundaries
+
+* no Recognition terminal event
+* no Provider lifecycle event
+* no Quality-owned event
+* no ReadingOrder-owned event
+* no WorkItem creation
+* no Artifact publication
+* no Text Processing trigger
+
+---
+
+## Privacy
+
+* no raw image
+* no full OCR text
+* no Provider response
+* no credentials
+* safe remote disclosure
+* protected diagnostic refs controlled
+
+---
+
+## Failure
+
+* Event Bus unavailable does not fail Recognition
+* retry uses same EventId
+* dropped fact does not block Candidate
+* optional progress loss tolerated
+
+---
+
+# 58. Event Invariants
 
 1. Recognition facts are immutable.
+
 2. Every fact has unique EventId.
-3. Every fact declares ContractVersion.
-4. Every fact contains RevisionId, WorkItemId and AttemptId.
+
+3. Every fact carries ContractVersion.
+
+4. Attempt-local facts carry RevisionId, WorkItemId and AttemptId.
+
 5. Recognition emits no terminal Attempt event.
+
 6. Recognition emits no authoritative Artifact publication event.
-7. Recognition emits no provider lifecycle event.
-8. Recognition facts do not create WorkItem.
-9. Recognition facts do not trigger retry.
-10. Recognition facts do not cancel Session.
-11. Recognition facts do not grant authority.
-12. Candidate validated does not mean published.
-13. Candidate submitted does not mean accepted.
-14. Progress facts are optional.
-15. Consumers do not depend on progress facts for correctness.
-16. Duplicate delivery does not duplicate business work.
-17. Global ordering is not assumed.
-18. Late facts do not change Runtime state.
-19. Raw image never appears in normal facts.
-20. Complete recognized text never appears in normal facts.
-21. Provider credentials never appear.
-22. Provider SDK types never appear.
-23. Event publication failure does not rerun Recognition.
-24. Event publication failure does not block Candidate submission.
-25. Remote execution is disclosed safely.
-26. Geometry payload is bounded and opt-in.
-27. Warning is not failure.
-28. Module error fact is not terminal outcome.
-29. Cancellation observed is not cancellation authority.
-30. Text Processing consumes published Artifact, not Recognition event.
-31. ArtifactRef appears only when external owner has published it.
-32. CandidateArtifactId may appear before publication.
-33. Recognition does not consume broad workflow events directly.
-34. Runtime correctness is Event Bus independent.
-35. Diagnostic events have stricter access and retention.
-36. Transport topic naming does not replace canonical event identity.
-37. Unknown event minor additions are handled safely.
+
+7. Recognition emits no Provider lifecycle event.
+
+8. Recognition does not redefine OCR stage events.
+
+9. Recognition does not redefine Quality events.
+
+10. Recognition does not redefine Reading Order events.
+
+11. Recognition facts do not create WorkItem.
+
+12. Recognition facts do not trigger retry.
+
+13. Recognition facts do not cancel Session.
+
+14. Recognition facts do not grant authority.
+
+15. Candidate VALID does not mean published.
+
+16. Candidate SUBMITTED does not mean accepted.
+
+17. Progress facts are optional.
+
+18. Consumers do not depend on progress facts for correctness.
+
+19. Duplicate delivery cannot duplicate business execution.
+
+20. Global order is not assumed.
+
+21. Late facts do not mutate Runtime state.
+
+22. Raw images never appear in normal facts.
+
+23. Full OCR content never appears in normal facts.
+
+24. Provider credentials never appear.
+
+25. Provider SDK types never appear.
+
+26. Event publication failure does not rerun Recognition.
+
+27. Event publication failure does not block Candidate submission.
+
+28. Remote execution is disclosed safely.
+
+29. Geometry is reference-first and bounded when included.
+
+30. Warning is not failure.
+
+31. Module error fact is not terminal outcome.
+
+32. Cancellation observation is not cancellation authority.
+
+33. Text Processing consumes published Artifact, not Recognition events.
+
+34. Recognition does not consume broad workflow events directly.
+
+35. Runtime correctness is Event Bus-independent.
+
+36. Protected diagnostic events have stricter access/retention.
+
+37. Unknown additive event fields are handled safely.
+
 38. Unsupported major version is rejected.
+
 39. Event metadata remains bounded.
-40. No hidden orchestration through subscriptions.
+
+40. No hidden orchestration exists through Recognition subscriptions.
 
 ---
 
-## 52. Related Documents
+# 59. Related Documents
 
 ```text
 doc/02-modules/recognition/README.md
@@ -1494,44 +1762,66 @@ doc/02-modules/recognition/CONTRACT.md
 doc/02-modules/recognition/STATES.md
 doc/02-modules/recognition/ERRORS.md
 
-doc/01-architecture/core/EVENT_BUS.md
-doc/01-architecture/core/EVENT_CONVENTION.md
-doc/01-architecture/runtime/PIPELINE_RUNTIME.md
-doc/01-architecture/runtime/RUNTIME_OBSERVABILITY.md
-doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+doc/01-architecture/ocr/PIPELINE.md
+doc/01-architecture/ocr/DETECTION.md
+doc/01-architecture/ocr/RECOGNITION.md
+doc/01-architecture/ocr/TEXT_DIRECTION.md
+doc/01-architecture/ocr/LAYOUT.md
+doc/01-architecture/ocr/POSTPROCESS.md
+doc/01-architecture/ocr/QUALITY.md
+doc/01-architecture/ocr/READING_ORDER.md
+doc/01-architecture/ocr/PROVIDERS.md
+
+doc/01-architecture/EVENT_BUS.md
 doc/01-architecture/runtime/CANCELLATION.md
 doc/01-architecture/runtime/RETRY_POLICY.md
-
-doc/01-architecture/ocr/PIPELINE.md
-doc/01-architecture/ocr/QUALITY.md
-doc/01-architecture/ocr/PROVIDERS.md
+doc/01-architecture/runtime/RUNTIME_OBSERVABILITY.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
 ```
 
 ---
 
-## 53. Summary
+# 60. Summary
 
-Recognition events now communicate optional module facts:
+Recognition events communicate only module-level facts.
 
 ```text
-Plan Created
-    ↓
-Progress Facts
-    ↓
+Recognition Plan Created
+        ↓
+OCR Execution Completed
+        ↓
 Candidate Validated
-    ↓
+        ↓
 Candidate Submitted
 ```
 
-They do not communicate authoritative execution lifecycle.
+Optional observations may accompany the flow:
+
+```text
+Warning
+Module Error
+Cancellation Observed
+Deadline Observed
+Phase Changed
+Diagnostics
+```
+
+OCR Architecture owns:
+
+```text
+OCR stage semantics
+Quality semantics
+Reading Order semantics
+Provider semantic contracts
+```
 
 Runtime owns:
 
 ```text
 Attempt Outcome
 Authority
-Cancellation
 Retry
+Cancellation
 ```
 
 Artifact Store owns:
@@ -1550,11 +1840,15 @@ Provider Health
 Provider Capacity
 ```
 
-The central rule is:
+The core rule is:
 
 ```text
-Recognition events explain what Recognition observed or produced.
+Recognition events explain
+what the Recognition Module observed or produced.
 
-They never decide whether the work still matters,
-and they never publish the authoritative result.
+They do not redefine OCR internals.
+
+They do not decide whether work still matters.
+
+They do not publish the authoritative result.
 ```

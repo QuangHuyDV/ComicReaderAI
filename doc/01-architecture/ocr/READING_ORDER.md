@@ -1,104 +1,73 @@
 # Reading Order
 
-> Status: Draft
-> Version: 1.0
-> Layer: OCR Pipeline
-> Depends On: Detection, Recognition, Text Direction, Layout Analysis, OCR Postprocessing
-> Next Layer: Text Model, Segmentation, Translation
+> **Status:** Draft
+> **Version:** 1.1
+> **Layer:** OCR Architecture
+> **Depends On:** Detection, Recognition, Text Direction, Layout Analysis, OCR Postprocessing
+> **Next Layer:** Text Processing
 
 ---
 
 # 1. Purpose
 
-## Overview
-
-Reading Order là giai đoạn xác định thứ tự đọc hợp lý của các Region, Block, Container và Panel trong OCR Document.
+Reading Order xác định thứ tự đọc hợp lý của các entity trong `OCR Document`.
 
 Nếu:
 
-* Detection trả lời:
+```text
+Detection
+    → "Text nằm ở đâu?"
 
-> "Text nằm ở đâu?"
+Recognition
+    → "Text là gì?"
 
-* Recognition trả lời:
+Text Direction
+    → "Text được viết theo hướng nào?"
 
-> "Text là gì?"
-
-* Text Direction trả lời:
-
-> "Text được viết theo hướng nào?"
-
-* Layout Analysis trả lời:
-
-> "Các vùng được tổ chức như thế nào?"
+Layout Analysis
+    → "Các vùng được tổ chức như thế nào?"
+```
 
 thì Reading Order trả lời:
 
-> "Các vùng này phải được đọc theo thứ tự nào?"
+```text
+"Các entity này phải được đọc theo thứ tự nào?"
+```
 
-Reading Order là cầu nối giữa dữ liệu hình học của OCR và dữ liệu ngôn ngữ dùng cho Text Processing và Translation.
-
----
-
-## Objectives
-
-Reading Order phải:
-
-* xác định thứ tự đọc của toàn trang
-* xác định thứ tự đọc trong từng Panel
-* xác định thứ tự đọc trong từng Container
-* xác định thứ tự đọc trong từng Block
-* hỗ trợ nhiều kiểu truyện
-* hỗ trợ nhiều hướng đọc
-* duy trì khả năng ánh xạ về Region gốc
-* độc lập với Translation Provider
-
----
-
-## Responsibilities
-
-Reading Order chịu trách nhiệm:
-
-* xây dựng quan hệ trước-sau
-* xác định chuỗi đọc
-* giải quyết xung đột thứ tự
-* sử dụng Layout và Text Direction
-* tạo Reading Order Graph
-* tạo Ordered OCR Document
-* cung cấp Confidence cho từng quyết định
-
-Reading Order không chịu trách nhiệm:
-
-* OCR
-* sửa nội dung Recognition
-* dịch văn bản
-* tách câu ngôn ngữ
-* render nội dung
-* xác định nhân vật đang nói
+Reading Order là ranh giới cuối giữa cấu trúc hình học của OCR và dữ liệu nguồn có thứ tự để chuyển sang Text Processing.
 
 ---
 
 # 2. Scope
 
-Reading Order hoạt động trên OCR Document đã được Postprocessing chuẩn hóa.
+Reading Order chịu trách nhiệm:
 
-Reading Order có thể xử lý:
+* xác định thứ tự đọc toàn trang
+* xác định thứ tự cục bộ trong Panel
+* xác định thứ tự trong Container
+* xác định thứ tự trong Block
+* tạo quan hệ trước-sau
+* xây dựng Reading Order Graph
+* giải quyết xung đột thứ tự
+* tạo Main Reading Sequence
+* tạo Auxiliary Sequence
+* đánh giá Reading Confidence
+* giữ mapping về entity gốc
 
-* Page
-* Panel
-* Container
-* Block
-* Region
-* Paragraph
-* Line
+Reading Order không chịu trách nhiệm:
 
-Reading Order không trực tiếp xử lý:
-
-* Character Recognition
-* Image Enhancement
+* OCR
+* thay đổi Recognition Result
+* thay đổi Geometry
+* thay đổi Layout Tree
+* thay đổi Text Direction
 * Translation
-* Font Layout
-* Text Rendering
+* semantic text reconstruction
+* Runtime scheduling
+* Runtime retry
+* Runtime cancellation
+* Event Bus behavior
+* global cache lifecycle
 
 ---
 
@@ -106,27 +75,29 @@ Reading Order không trực tiếp xử lý:
 
 ## Reading Order
 
-Thứ tự logic mà các phần tử văn bản nên được đọc.
+Thứ tự logic mà các entity nên được đọc.
 
 ---
 
 ## Reading Sequence
 
-Danh sách tuyến tính của các phần tử đã được sắp xếp.
+Danh sách tuyến tính của các entity đã được sắp xếp.
 
 Ví dụ:
 
 ```text
-Region A → Region B → Region C
+Region A
+    ↓
+Region B
+    ↓
+Region C
 ```
 
 ---
 
 ## Reading Order Graph
 
-Đồ thị biểu diễn quan hệ trước-sau giữa các phần tử.
-
-Ví dụ:
+Đồ thị biểu diễn quan hệ thứ tự.
 
 ```text
 A → B
@@ -135,64 +106,98 @@ B → D
 C → D
 ```
 
+Node đại diện cho entity.
+
+Edge đại diện cho:
+
+```text
+precedes
+```
+
 ---
 
 ## Precedence Relationship
 
-Quan hệ cho biết một phần tử phải được đọc trước phần tử khác.
+Quan hệ:
+
+```text
+A precedes B
+```
+
+nghĩa là A nên được đọc trước B trong một scope cụ thể.
 
 ---
 
 ## Local Order
 
-Thứ tự đọc trong phạm vi nhỏ.
+Thứ tự trong một phạm vi nhỏ.
 
 Ví dụ:
 
-* trong một Bubble
-* trong một Panel
-* trong một Block
+* Panel
+* Container
+* Block
+* Region
 
 ---
 
 ## Global Order
 
-Thứ tự đọc của toàn bộ trang hoặc toàn bộ tài liệu.
+Thứ tự của các entity cấp cao trên toàn Page.
 
 ---
 
-## Reading Context
+## Main Sequence
 
-Tập hợp thông tin được dùng để xác định thứ tự đọc.
+Chuỗi nội dung chính phục vụ Text Processing.
 
 Ví dụ:
 
-* ngôn ngữ
-* loại truyện
-* hướng chữ
-* kiểu Layout
-* Region Type
-* Detection Profile
+* Speech Bubble
+* Narration
+* important source text
+
+---
+
+## Auxiliary Sequence
+
+Chuỗi nội dung phụ.
+
+Ví dụ:
+
+* SFX
+* UI Text
+* Watermark
+* Advertisement
 
 ---
 
 ## Reading Profile
 
-Cấu hình điều khiển chiến lược Reading Order.
+Cấu hình ảnh hưởng tới chiến lược Reading Order.
+
+---
+
+## Reading Strategy
+
+Thuật toán cụ thể dùng để tạo Reading Order Result.
 
 ---
 
 # 4. Goals
 
-Reading Order hướng tới:
+Reading Order phải:
 
-* đúng ngữ cảnh
-* ổn định
-* có thể giải thích
-* dễ Debug
-* hỗ trợ nhiều kiểu bố cục
-* không phụ thuộc OCR Provider
-* giữ liên kết với dữ liệu gốc
+* deterministic
+* explainable
+* provider-neutral
+* stable
+* hierarchy-aware
+* geometry-aware
+* direction-aware
+* hỗ trợ nhiều loại tài liệu
+* giữ identity của entity gốc
+* không làm thay đổi dữ liệu OCR
 
 ---
 
@@ -200,13 +205,14 @@ Reading Order hướng tới:
 
 Reading Order không thực hiện:
 
-* Translation
+* Character Recognition
+* Image Processing
 * Grammar Analysis
-* Named Entity Recognition
-* Dialogue Attribution
-* Speaker Identification
-* Semantic Rewriting
-* Visual Rendering
+* Translation
+* semantic rewriting
+* speaker identification
+* font layout
+* rendering
 
 ---
 
@@ -214,741 +220,297 @@ Reading Order không thực hiện:
 
 ```text
 Image
-
-↓
-
+   ↓
 Preprocessing
-
-↓
-
+   ↓
 Detection
-
-↓
-
+   ↓
 Recognition
-
-↓
-
+   ↓
 Text Direction
-
-↓
-
+   ↓
 Layout Analysis
-
-↓
-
+   ↓
 OCR Postprocessing
-
-↓
-
+   ↓
+OCR Document
+   ↓
 Reading Order
-
-↓
-
-Text Model
-
-↓
-
-Segmentation
-
-↓
-
+   ↓
+Ordered Source Data
+   ↓
+Text Processing
+   ↓
 Translation
 ```
 
-Reading Order là bước cuối cùng còn phụ thuộc mạnh vào Geometry và Layout trước khi dữ liệu được chuyển sang Text Domain.
+Reading Order hoạt động trên dữ liệu OCR đã được chuẩn hóa.
+
+Nó không cần truy cập trực tiếp OCR Provider.
 
 ---
 
-# 7. High-Level Pipeline
+# 7. Core Input Model
+
+Input chính:
 
 ```text
 OCR Document
-
-↓
-
-Input Validation
-
-↓
-
-Reading Context Construction
-
-↓
-
-Hierarchy Analysis
-
-↓
-
-Candidate Relationship Generation
-
-↓
-
-Precedence Scoring
-
-↓
-
-Conflict Resolution
-
-↓
-
-Graph Construction
-
-↓
-
-Cycle Detection
-
-↓
-
-Topological Ordering
-
-↓
-
-Sequence Validation
-
-↓
-
-Reading Order Result
++
+Layout Tree
++
+Spatial Relationship Graph
++
+Direction Metadata
++
+Reading Profile
 ```
 
----
+Các thông tin có thể được sử dụng:
 
-# 8. Reading Order Lifecycle
-
-## Stage 1: Input Validation
-
-Kiểm tra OCR Document, Layout Tree, Direction Metadata và Region Geometry.
-
----
-
-## Stage 2: Context Construction
-
-Xây dựng Reading Context từ:
-
-* Language
-* Script
-* Writing Mode
-* Document Type
-* Page Type
-* Region Type
-* Layout Metadata
-
----
-
-## Stage 3: Candidate Generation
-
-Sinh các quan hệ thứ tự có thể xảy ra giữa các phần tử.
-
----
-
-## Stage 4: Scoring
-
-Đánh giá mức độ hợp lý của từng quan hệ.
-
----
-
-## Stage 5: Graph Construction
-
-Tạo Reading Order Graph.
-
----
-
-## Stage 6: Conflict Resolution
-
-Loại bỏ hoặc giảm ưu tiên các quan hệ mâu thuẫn.
-
----
-
-## Stage 7: Linearization
-
-Chuyển Graph thành Reading Sequence.
-
----
-
-## Stage 8: Validation
-
-Kiểm tra tính đầy đủ, tính nhất quán và khả năng ánh xạ.
-
----
-
-# 9. Inputs
-
-Reading Order nhận:
-
-* OCR Document
-* Layout Tree
-* Relationship Graph
-* Direction Result
 * Region Type
 * Geometry
-* Recognition Metadata
-* Reading Profile
-
-Thông tin tùy chọn:
-
-* Document Language
-* Source Type
-* Manga Mode
-* Webtoon Mode
-* Novel Mode
-* User Preference
+* Writing Mode
+* Line Direction
+* Paragraph Direction
+* Layout hierarchy
+* Detection metadata
+* Recognition metadata
+* source/document type
+* user preference
 
 ---
 
-# 10. Outputs
+# 8. Core Output Model
 
-Reading Order trả về:
-
-* Reading Order Result
-* Reading Order Graph
-* Reading Sequence
-* Local Reading Sequences
-* Confidence
-* Diagnostics
-* Statistics
-
-Reading Order không tạo bản sao tách rời khỏi OCR Document mà phải giữ tham chiếu đến Entity ID gốc.
-
----
-
-# 11. Reading Order Result Model
+Reading Order tạo:
 
 ```text
 Reading Order Result
-
-├── Metadata
-
-├── Global Sequence
-
-├── Panel Sequences
-
-├── Container Sequences
-
-├── Block Sequences
-
-├── Graph
-
-├── Confidence
-
-├── Diagnostics
-
-└── Statistics
 ```
 
-Mỗi phần tử trong Sequence phải tham chiếu đến một Entity tồn tại trong OCR Document.
+bao gồm:
+
+```text
+Reading Order Result
+├── Metadata
+├── Reading Order Graph
+├── Main Sequence
+├── Auxiliary Sequence
+├── Local Sequences
+├── Confidence
+└── Diagnostics
+```
+
+Mọi entity trong output phải tham chiếu entity gốc bằng ID.
+
+Reading Order không clone dữ liệu OCR thành một model độc lập mất lineage.
 
 ---
 
-# 12. Ordered Entity Model
+# 9. Canonical Reading Order Pipeline
 
-Một Ordered Entity nên bao gồm:
-
-* Entity ID
-* Entity Type
-* Order Index
-* Parent Order ID
-* Previous Entity ID
-* Next Entity ID
-* Confidence
-* Source Rules
-* Metadata
-
-Entity Type có thể là:
-
-* Panel
-* Container
-* Block
-* Region
-* Paragraph
-* Line
+```text
+OCR Document
+     ↓
+1. Input Validation
+     ↓
+2. Reading Context Resolution
+     ↓
+3. Hierarchy Analysis
+     ↓
+4. Candidate Generation
+     ↓
+5. Candidate Scoring
+     ↓
+6. Graph Construction
+     ↓
+7. Conflict Resolution
+     ↓
+8. Cycle Detection
+     ↓
+9. Linearization
+     ↓
+10. Sequence Validation
+     ↓
+Reading Order Result
+```
 
 ---
 
-# 13. Reading Hierarchy
+# 10. Stage 1 — Input Validation
 
-Reading Order phải tuân theo cấu trúc phân cấp.
+Kiểm tra:
+
+* OCR Document hợp lệ
+* Layout Tree hợp lệ
+* Direction Metadata tồn tại khi cần
+* entity reference hợp lệ
+* Geometry hợp lệ
+* Reading Profile hợp lệ
+
+Reading Order không tự sửa input bị hỏng.
+
+---
+
+# 11. Stage 2 — Reading Context Resolution
+
+Reading Context được tạo từ:
+
+* document type
+* page type
+* Reading Profile
+* layout hierarchy
+* writing mode
+* direction metadata
+* Region Type
+* user preference
+
+Context không được dựa vào một tín hiệu duy nhất.
+
+Ví dụ:
+
+```text
+Language Code
+```
+
+không đủ để quyết định toàn bộ Page Reading Mode.
+
+---
+
+# 12. Stage 3 — Hierarchy Analysis
+
+Reading Order phải ưu tiên Layout Tree khi hierarchy đáng tin cậy.
 
 Ví dụ:
 
 ```text
 Page
-
-└── Panel
-
-    └── Container
-
-        └── Block
-
-            └── Region
-
-                └── Paragraph
-
-                    └── Line
+ └── Panel
+      └── Container
+           └── Block
+                └── Region
+                     └── Paragraph
+                          └── Line
 ```
-
-Không nên sắp xếp trực tiếp mọi Region trên toàn trang nếu Layout Tree đã cung cấp cấu trúc cha-con đáng tin cậy.
 
 Chiến lược mặc định:
 
-1. Sắp xếp Panel.
-2. Sắp xếp Container trong Panel.
-3. Sắp xếp Block trong Container.
-4. Sắp xếp Region trong Block.
-5. Sắp xếp Paragraph và Line trong Region.
+1. sắp xếp Panel
+2. sắp xếp Container trong Panel
+3. sắp xếp Block trong Container
+4. sắp xếp Region trong Block
+5. sắp xếp Paragraph và Line trong Region
+
+Không nên flatten toàn bộ Page rồi sort mọi Region cùng lúc nếu hierarchy đã tồn tại.
 
 ---
 
-# 14. Global and Local Order
+# 13. Stage 4 — Candidate Generation
 
-## Global Order
-
-Global Order mô tả thứ tự của các phần tử cấp cao trên toàn trang.
-
-Ví dụ:
-
-```text
-Panel 1 → Panel 2 → Panel 3
-```
-
----
-
-## Local Order
-
-Local Order mô tả thứ tự trong từng phạm vi.
-
-Ví dụ:
-
-```text
-Panel 2
-
-Bubble A → Bubble B → Narration C
-```
-
-Việc tách Global Order và Local Order giúp:
-
-* giảm độ phức tạp
-* dễ Debug
-* dễ thay chiến lược
-* tránh xung đột toàn cục không cần thiết
-
----
-
-# 15. Reading Modes
-
-Hệ thống nên hỗ trợ tối thiểu các Reading Mode sau:
-
-* Left-to-Right Page
-* Right-to-Left Page
-* Top-to-Bottom Scroll
-* Vertical Column
-* Mixed Layout
-* Unknown
-
-Reading Mode có thể được xác định ở:
-
-* Document Level
-* Page Level
-* Panel Level
-* Container Level
-
-Reading Mode cấp thấp hơn có thể ghi đè cấp cao hơn nếu có Confidence đủ cao.
-
----
-
-# 16. Left-to-Right Reading
-
-Phù hợp với:
-
-* truyện phương Tây
-* tài liệu tiếng Việt
-* tài liệu tiếng Anh
-* website thông thường
-
-Quy tắc cơ bản:
-
-1. ưu tiên phần tử phía trên
-2. trong cùng hàng, ưu tiên phần tử bên trái
-3. sau đó chuyển xuống hàng tiếp theo
-
-Ví dụ:
-
-```text
-A B
-C D
-```
-
-Thứ tự:
-
-```text
-A → B → C → D
-```
-
----
-
-# 17. Right-to-Left Reading
-
-Phù hợp với manga Nhật hoặc tài liệu có bố cục RTL.
-
-Quy tắc cơ bản:
-
-1. ưu tiên phần tử phía trên
-2. trong cùng hàng, ưu tiên phần tử bên phải
-3. sau đó chuyển xuống hàng tiếp theo
-
-Ví dụ:
-
-```text
-A B
-C D
-```
-
-Thứ tự:
-
-```text
-B → A → D → C
-```
-
-Reading Direction của văn bản bên trong Bubble không nhất thiết giống Reading Order của các Bubble trên trang.
-
----
-
-# 18. Top-to-Bottom Reading
-
-Phù hợp với:
-
-* Webtoon
-* trang cuộn dọc
-* nội dung theo luồng liên tục
-* ảnh dài
-
-Quy tắc chính:
-
-1. ưu tiên phần tử có vị trí cao hơn
-2. sử dụng khoảng cách dọc làm tín hiệu chính
-3. chỉ dùng quan hệ trái-phải khi các phần tử cùng cụm
-
-Ví dụ:
-
-```text
-A
-↓
-B
-↓
-C
-```
-
----
-
-# 19. Vertical Column Reading
-
-Với văn bản dọc, cần phân biệt:
-
-* hướng Character trong cột
-* hướng chuyển giữa các cột
-
-Ví dụ tiếng Nhật truyền thống:
-
-* Character đi từ trên xuống dưới
-* cột đi từ phải sang trái
-
-Reading Order phải lưu riêng:
-
-* Intra-column Order
-* Inter-column Order
-
-Không được gộp hai khái niệm này thành một Direction duy nhất.
-
----
-
-# 20. Mixed Reading Mode
-
-Một trang có thể chứa:
-
-* Panel RTL
-* UI LTR
-* SFX xoay
-* Narration dọc
-* quảng cáo ngang
-
-Trong trường hợp Mixed Mode:
-
-* xác định Reading Mode theo từng Container hoặc Block
-* không ép toàn bộ trang về một hướng
-* ưu tiên Layout Hierarchy
-* giữ Unknown khi không đủ bằng chứng
-
----
-
-# 21. Panel Ordering
-
-Panel Ordering là bước đầu tiên trong truyện tranh có nhiều khung.
-
-Các tín hiệu gồm:
-
-* vị trí hình học
-* hàng và cột
-* kích thước Panel
-* khoảng trắng
-* đường viền
-* Reading Mode
-* Panel Overlap
-* Panel Nesting
-
-Panel lớn không mặc định luôn được đọc trước.
-
-Panel lồng bên trong Panel khác phải được xử lý theo Parent-Child Relationship.
-
----
-
-# 22. Row and Column Analysis
-
-Reading Order có thể nhóm các phần tử thành:
-
-* Row
-* Column
-* Cluster
-
-Hai phần tử có thể thuộc cùng Row khi:
-
-* vùng chiếu theo trục Y giao nhau đủ lớn
-* tâm theo trục Y gần nhau
-* chiều cao tương thích
-
-Tương tự, cùng Column khi:
-
-* vùng chiếu theo trục X giao nhau đủ lớn
-* tâm theo trục X gần nhau
-* chiều rộng tương thích
-
-Ngưỡng phải thuộc Reading Profile, không hard-code trong Contract.
-
----
-
-# 23. Container Ordering
-
-Trong mỗi Panel, các Container như Speech Bubble và Narration Box cần được sắp xếp riêng.
-
-Các tín hiệu:
-
-* vị trí
-* loại Region
-* Bubble Tail
-* hướng trang
-* khoảng cách
-* quan hệ chồng lấn
-* Alignment
-
-Speech Bubble không mặc định luôn được đọc trước Narration Box.
-
-Quyết định phải dựa trên bố cục cụ thể.
-
----
-
-# 24. Bubble Ordering
-
-Bubble Ordering là trường hợp đặc biệt quan trọng.
-
-Các quy tắc có thể gồm:
-
-* Top-first
-* Direction-aware
-* Nearest-neighbor
-* Cluster-aware
-* Tail-assisted
-* Panel-constrained
-
-Bubble Tail có thể hỗ trợ xác định liên kết với nhân vật nhưng không đủ để xác định thứ tự đọc một cách độc lập.
-
----
-
-# 25. Narration Ordering
-
-Narration Box thường:
-
-* nằm đầu Panel
-* nằm cuối Panel
-* xen giữa hội thoại
-* trải ngang nhiều Panel
-
-Reading Order phải dựa vào Geometry và Layout thay vì luôn đặt Narration trước hoặc sau Dialogue.
-
-Narration toàn trang có thể thuộc Page Level thay vì Panel Level.
-
----
-
-# 26. SFX Ordering
-
-Sound Effects thường không tham gia luồng hội thoại chính.
-
-Reading Profile nên cho phép:
-
-* Exclude SFX
-* Include SFX Inline
-* Include SFX After Dialogue
-* Include SFX by Position
-
-Mặc định, SFX nên có mức ưu tiên thấp hơn Speech Bubble và Narration nhưng không bị xóa khỏi OCR Document.
-
----
-
-# 27. Background Text Ordering
-
-Background Text có thể:
-
-* thuộc bối cảnh
-* bổ sung ý nghĩa
-* không cần dịch
-* cần dịch theo yêu cầu người dùng
-
-Reading Profile nên quyết định Background Text có tham gia Reading Sequence hay không.
-
-Nếu tham gia, nó nên được đặt theo vị trí tự nhiên trong Panel nhưng không phá vỡ chuỗi Dialogue chính.
-
----
-
-# 28. UI, Watermark and Advertisement
-
-Các loại sau thường không thuộc nội dung truyện:
-
-* UI Text
-* Watermark
-* Advertisement
-
-Mặc định:
-
-* không tham gia Main Reading Sequence
-* được giữ trong Auxiliary Sequence
-* có thể bật lại theo Profile
-
-Việc loại khỏi Sequence không đồng nghĩa xóa khỏi OCR Document.
-
----
-
-# 29. Spatial Relationship Rules
-
-Reading Order có thể sử dụng các quan hệ:
-
-* above
-* below
-* left_of
-* right_of
-* inside
-* contains
-* overlaps
-* adjacent
-* aligned
-* touching
-
-Ví dụ với LTR:
-
-```text
-A above B
-```
-
-thường tạo:
-
-```text
-A → B
-```
-
-Nhưng quan hệ hình học chỉ là tín hiệu, không phải kết luận tuyệt đối.
-
----
-
-# 30. Precedence Candidate Generation
-
-Với mỗi cặp Entity phù hợp, hệ thống có thể sinh Candidate:
+Reading Order tạo các candidate relationship:
 
 ```text
 A precedes B
 ```
 
-Candidate nên lưu:
+Candidate có thể chứa:
 
-* Source Entity
-* Target Entity
-* Rule ID
-* Weight
-* Confidence
-* Scope
-* Evidence
+```text
+sourceEntityId
+targetEntityId
+scope
+ruleId
+weight
+confidence
+evidence
+```
 
-Không nên tạo Candidate giữa mọi cặp nếu số lượng Entity lớn.
+Candidate nên được tạo trong scope phù hợp.
 
-Có thể giới hạn theo:
+Ví dụ:
 
 * cùng Parent
 * cùng Row
 * cùng Column
-* Neighbor Distance
-* Spatial Index
+* cùng Panel
+* spatial neighbors
+
+Không cần so sánh tất cả entity với tất cả entity.
 
 ---
 
-# 31. Precedence Scoring
+# 14. Stage 5 — Candidate Scoring
 
-Mỗi Candidate được đánh giá dựa trên nhiều tín hiệu.
+Candidate có thể được đánh giá bằng:
 
-Ví dụ:
+* hierarchy compatibility
+* Reading Mode
+* vertical position
+* horizontal position
+* row/column relationship
+* spatial distance
+* alignment
+* Region Type
+* Direction metadata
+* provider hints
 
-* Vertical Position Score
-* Horizontal Position Score
-* Direction Compatibility
-* Layout Hierarchy Score
-* Region Type Priority
-* Distance Score
-* Alignment Score
-* Provider Hint Score
+Cách scoring thuộc `Reading Strategy`.
 
-Tổng điểm không nên chỉ là trung bình đơn giản.
-
-Cách tính phải được cấu hình bởi Reading Strategy.
+Contract không hard-code một công thức duy nhất.
 
 ---
 
-# 32. Rule Priority
+# 15. Rule Priority
 
-Các quy tắc nên có mức ưu tiên rõ ràng.
+Các rule phải có thứ tự ưu tiên rõ ràng.
 
-Ví dụ:
+Một hierarchy khuyến nghị:
 
+```text
 1. Parent-Child Constraint
 2. Explicit Layout Relationship
 3. Reading Mode
-4. Row/Column Grouping
-5. Spatial Distance
-6. Region Type Preference
-7. Provider Hint
-8. Fallback Position
-
-Quy tắc ưu tiên thấp không được phá vỡ Constraint của quy tắc ưu tiên cao.
-
----
-
-# 33. Reading Order Graph
-
-Graph gồm:
-
-* Node: Entity cần sắp xếp
-* Edge: Quan hệ precedes
-* Weight: mức tin cậy
-* Evidence: nguồn quyết định
-
-Ví dụ:
-
-```text
-A ──▶ B
-│     │
-▼     ▼
-C ──▶ D
+4. Row / Column Structure
+5. Direction Metadata
+6. Spatial Relationship
+7. Region Type Preference
+8. Provider Hint
+9. Stable Fallback
 ```
 
-Graph có thể là DAG sau khi Conflict Resolution hoàn tất.
+Rule ưu tiên thấp không được phá hard constraint của rule ưu tiên cao hơn.
 
 ---
 
-# 34. Conflict Resolution
+# 16. Stage 6 — Graph Construction
 
-Conflict xảy ra khi có các quan hệ như:
+Reading Order Graph chứa:
+
+```text
+Node
+    = Ordered Entity
+
+Edge
+    = Precedence Relationship
+```
+
+Mỗi Edge có thể chứa:
+
+```text
+weight
+confidence
+ruleId
+evidence
+```
+
+Graph là representation chính trước khi linearization.
+
+---
+
+# 17. Stage 7 — Conflict Resolution
+
+Conflict xảy ra khi:
 
 ```text
 A → B
@@ -963,123 +525,509 @@ B → C
 C → A
 ```
 
-Chiến lược xử lý:
+Resolution có thể dựa trên:
 
-* loại Edge có Weight thấp hơn
-* ưu tiên Constraint cấp cao hơn
-* sử dụng Layout Hierarchy
-* dùng Fallback Strategy
-* ghi Diagnostics
+* rule priority
+* confidence
+* hierarchy
+* direction
+* fallback strategy
 
-Không được bỏ qua Conflict mà vẫn tiếp tục Linearization.
+Không được âm thầm bỏ qua conflict.
 
----
-
-# 35. Cycle Detection
-
-Reading Order Graph phải được kiểm tra Cycle trước khi sắp xếp tuyến tính.
-
-Nếu phát hiện Cycle:
-
-1. xác định Edge yếu nhất
-2. kiểm tra Rule Priority
-3. loại hoặc giảm Edge phù hợp
-4. chạy lại Cycle Detection
-5. ghi lại quyết định
-
-Nếu không thể giải quyết, Scope đó phải được đánh dấu `Ambiguous`.
+Quyết định phải có thể xuất hiện trong Diagnostics.
 
 ---
 
-# 36. Topological Ordering
+# 18. Stage 8 — Cycle Detection
 
-Sau khi Graph trở thành DAG, hệ thống có thể sử dụng Topological Sort để tạo Sequence.
+Graph phải không còn cycle trước khi linearization.
 
-Khi có nhiều Node cùng hợp lệ tại một thời điểm, dùng Tie-breaker:
+Nếu có cycle:
+
+1. xác định edge xung đột
+2. kiểm tra priority
+3. so sánh confidence
+4. loại hoặc giảm edge phù hợp
+5. kiểm tra lại graph
+
+Nếu không thể giải quyết chắc chắn:
+
+```text
+scope = Ambiguous
+```
+
+Ambiguous là quality information của Reading Order.
+
+Không đồng nghĩa Runtime failure.
+
+---
+
+# 19. Stage 9 — Linearization
+
+Khi graph trở thành DAG, Reading Order có thể tạo sequence tuyến tính.
+
+Topological ordering là một strategy phù hợp.
+
+Nếu có nhiều node cùng hợp lệ, tie-breaker phải deterministic.
+
+Có thể dùng:
 
 * Reading Mode
 * Geometry
-* Stable ID
-* Detection Index
+* stable source order
+* stable entity identity
 
-Tie-breaker phải ổn định để cùng một đầu vào tạo cùng một kết quả.
+Không được phụ thuộc:
 
----
-
-# 37. Stable Ordering
-
-Reading Order phải có tính Deterministic.
-
-Cùng:
-
-* OCR Document
-* Reading Profile
-* Strategy Version
-
-phải tạo cùng Reading Sequence.
-
-Không nên phụ thuộc vào:
-
-* thứ tự Map
-* thứ tự xử lý Thread
-* thời điểm hoàn tất Provider
-* ID ngẫu nhiên không ổn định
+* thread completion order
+* map iteration order
+* provider response timing
 
 ---
 
-# 38. Unknown and Ambiguous Order
+# 20. Stage 10 — Sequence Validation
 
-Khi không đủ bằng chứng:
+Sequence phải đảm bảo:
 
-* không ép Confidence cao
-* dùng Fallback Position Order
-* đánh dấu Ambiguous
-* ghi Diagnostics
-
-Fallback có thể là:
-
-* Top-to-Bottom, Left-to-Right
-* Top-to-Bottom, Right-to-Left
-* Detection Index
-* Provider Sequence
-
-Fallback phải được ghi rõ trong Result Metadata.
+* mọi Entity ID tồn tại
+* không duplicate trái contract
+* không thiếu Main Entity
+* Previous/Next reference hợp lệ
+* Parent scope hợp lệ
+* hard constraints không bị vi phạm
+* entity bị exclude phải có reason
 
 ---
 
-# 39. Partial Ordering
+# 21. Reading Hierarchy
 
-Không phải lúc nào cũng cần một thứ tự tuyệt đối cho mọi phần tử.
+Reading Order phải giữ logic global/local.
+
+```text
+Page
+    ↓
+Panel Sequence
+    ↓
+Container Sequence
+    ↓
+Block Sequence
+    ↓
+Region Sequence
+    ↓
+Paragraph / Line Sequence
+```
+
+Điều này giúp giảm conflict toàn cục.
+
+---
+
+# 22. Global Order
+
+Global Order tập trung vào entity cấp cao.
 
 Ví dụ:
 
-* hai SFX độc lập
-* Background Text không liên quan
-* Watermark ngoài luồng chính
-
-Hệ thống có thể giữ Partial Order trong Graph và chỉ Linearize Main Sequence.
-
-Auxiliary Entity có thể nằm trong Sequence riêng.
+```text
+Panel 1
+   ↓
+Panel 2
+   ↓
+Panel 3
+```
 
 ---
 
-# 40. Main and Auxiliary Sequences
+# 23. Local Order
 
-Reading Order Result nên hỗ trợ:
+Local Order hoạt động trong một parent scope.
 
-## Main Sequence
+Ví dụ:
 
-Nội dung chính cần đưa sang Text Processing và Translation.
+```text
+Panel 2
+
+Bubble A
+   ↓
+Bubble B
+   ↓
+Narration C
+```
+
+Local ordering phải giữ parent identity.
+
+---
+
+# 24. Reading Modes
+
+Reading Order phải hỗ trợ tối thiểu:
+
+```text
+LeftToRight
+RightToLeft
+TopToBottom
+VerticalColumns
+Mixed
+Unknown
+```
+
+Reading Mode có thể tồn tại ở:
+
+* Document
+* Page
+* Panel
+* Container
+
+Scope nhỏ hơn có thể override scope lớn hơn khi metadata đủ tin cậy.
+
+---
+
+# 25. Left-to-Right
+
+Quy tắc cơ bản:
+
+1. ưu tiên entity phía trên
+2. trong cùng row, ưu tiên bên trái
+3. chuyển xuống row tiếp theo
+
+Ví dụ:
+
+```text
+A B
+C D
+```
+
+→
+
+```text
+A → B → C → D
+```
+
+---
+
+# 26. Right-to-Left
+
+Quy tắc cơ bản:
+
+1. ưu tiên entity phía trên
+2. trong cùng row, ưu tiên bên phải
+3. chuyển xuống row tiếp theo
+
+Ví dụ:
+
+```text
+A B
+C D
+```
+
+→
+
+```text
+B → A → D → C
+```
+
+Page Reading Order không đồng nghĩa Text Direction bên trong Region.
+
+---
+
+# 27. Top-to-Bottom
+
+Phù hợp cho:
+
+* Webtoon
+* long-scroll content
+* vertical feed-like pages
+
+Tín hiệu chính:
+
+* vertical position
+* vertical distance
+* local grouping
+
+Horizontal relation chỉ nên là tín hiệu cục bộ.
+
+---
+
+# 28. Vertical Column Reading
+
+Với vertical text cần tách:
+
+```text
+IntraColumnOrder
+```
+
+và
+
+```text
+InterColumnOrder
+```
+
+Ví dụ:
+
+```text
+characters:
+top → bottom
+
+columns:
+right → left
+```
+
+Không được biểu diễn cả hai bằng một Direction đơn giản.
+
+---
+
+# 29. Mixed Reading Mode
+
+Một Page có thể chứa nhiều mode.
+
+Ví dụ:
+
+* manga dialogue RTL
+* UI LTR
+* vertical narration
+* rotated SFX
+
+Trong Mixed Mode:
+
+* ưu tiên hierarchy
+* xác định mode theo scope
+* không ép toàn Page về một direction
+* giữ Unknown nếu chưa đủ bằng chứng
+
+---
+
+# 30. Panel Ordering
+
+Panel Ordering sử dụng:
+
+* geometry
+* layout hierarchy
+* rows/columns
+* whitespace
+* border
+* overlap
+* nesting
+* Reading Mode
+
+Panel lớn không mặc định đọc trước.
+
+Nested Panel phải tôn trọng Parent-Child Relationship.
+
+---
+
+# 31. Container Ordering
+
+Các Container như:
+
+* Speech Bubble
+* Narration Box
+* UI Container
+
+được sắp xếp trong parent scope.
+
+Tín hiệu gồm:
+
+* position
+* type
+* hierarchy
+* direction
+* overlap
+* distance
+* alignment
+
+Region Type chỉ là một signal.
+
+Không phải hard truth.
+
+---
+
+# 32. Bubble Ordering
+
+Bubble Ordering có thể dùng:
+
+* top-first
+* direction-aware
+* cluster-aware
+* geometry-aware
+* tail-assisted
+
+Bubble tail không đủ để xác định reading order độc lập.
+
+---
+
+# 33. Narration
+
+Narration có thể:
+
+* nằm đầu Panel
+* cuối Panel
+* xen giữa dialogue
+* nằm ở Page scope
+
+Không áp đặt một priority cứng rằng Narration luôn trước hoặc luôn sau Dialogue.
+
+---
+
+# 34. SFX
+
+SFX thường không thuộc dialogue sequence chính.
+
+Reading Profile có thể:
+
+```text
+Exclude
+IncludeInline
+IncludeAfterDialogue
+IncludeByPosition
+```
+
+SFX không được xóa khỏi OCR Document chỉ vì không thuộc Main Sequence.
+
+---
+
+# 35. UI, Watermark and Advertisement
+
+Mặc định:
+
+```text
+Main Sequence
+    → excluded
+
+Auxiliary Sequence
+    → retained
+```
+
+Reading Profile có thể thay đổi behavior.
+
+Exclusion khỏi Reading Sequence không đồng nghĩa xóa entity nguồn.
+
+---
+
+# 36. Spatial Relationships
+
+Reading Order có thể sử dụng các relation đã được Layout định nghĩa:
+
+* above
+* below
+* left_of
+* right_of
+* inside
+* contains
+* overlaps
+* adjacent
+* aligned
+* touching
+
+Reading Order chỉ dùng các relation này làm evidence.
+
+Spatial semantics vẫn thuộc `LAYOUT.md`.
+
+---
+
+# 37. Row and Column Grouping
+
+Reading Strategy có thể nhóm entity thành:
+
+```text
+Row
+Column
+Cluster
+```
+
+Ngưỡng grouping phải thuộc Reading Profile hoặc Strategy.
+
+Không hard-code trong public contract.
+
+---
+
+# 38. Provider Hints
+
+Một Provider có thể cung cấp order hint.
+
+Provider hint chỉ được dùng như:
+
+* candidate
+* tie-breaker
+* fallback signal
+* validation signal
+
+Provider sequence không phải authoritative truth.
+
+Hint phải được map về CRAI Entity ID.
+
+---
+
+# 39. Reading Strategies
+
+Reading Order hỗ trợ Strategy abstraction.
+
+Ví dụ:
+
+* Geometric Strategy
+* Layout Strategy
+* Graph Strategy
+* Manga Strategy
+* Webtoon Strategy
+* Document Strategy
+* Hybrid Strategy
+* AI-assisted Strategy
+
+Mọi Strategy phải cùng tạo:
+
+```text
+Reading Order Result
+```
+
+---
+
+# 40. Hybrid Strategy
+
+Hybrid Strategy có thể kết hợp:
+
+* Geometry
+* Layout Tree
+* Text Direction
+* Region Type
+* Provider Hint
+* AI-generated hint
+
+AI hint không được phá hard constraint nếu không có evidence đủ mạnh.
+
+---
+
+# 41. Partial Ordering
+
+Không phải mọi entity đều cần nằm trong một sequence tuyệt đối.
+
+Ví dụ:
+
+* SFX độc lập
+* Watermark
+* Background annotation
+
+Graph có thể giữ partial order.
+
+Main Sequence chỉ linearize nội dung cần cho Text Processing.
+
+---
+
+# 42. Main Sequence
+
+Main Sequence chứa nội dung chính cần xử lý tiếp.
 
 Ví dụ:
 
 * Speech Bubble
 * Narration
-* Important Background Text
+* important Background Text
 
-## Auxiliary Sequence
+Selection phụ thuộc Reading Profile.
 
-Nội dung phụ.
+---
+
+# 43. Auxiliary Sequence
+
+Auxiliary Sequence giữ nội dung không thuộc luồng chính.
 
 Ví dụ:
 
@@ -1088,571 +1036,272 @@ Ví dụ:
 * Watermark
 * Advertisement
 
-Việc phân loại phụ thuộc Reading Profile.
+Entity vẫn phải giữ mapping tới OCR Document.
 
 ---
 
-# 41. Cross-Panel Relationships
+# 44. Unknown and Ambiguous Order
 
-Thông thường, Entity trong Panel trước được đọc trước Entity trong Panel sau.
+Khi thiếu evidence:
 
-Tuy nhiên có ngoại lệ:
+* giữ Confidence thấp
+* dùng stable fallback
+* đánh dấu Ambiguous
+* ghi Diagnostics
 
-* Bubble kéo dài qua nhiều Panel
-* Narration phủ toàn trang
-* Panel lồng nhau
-* Layout phi tuyến
+Không được giả tạo certainty.
 
-Cross-Panel Edge chỉ nên được tạo khi:
-
-* có bằng chứng Layout mạnh
-* Parent Scope cho phép
-* không phá vỡ Panel Order chính
-
----
-
-# 42. Cross-Page Reading Order
-
-Reading Order trong file này chủ yếu xử lý Page Level.
-
-Cross-Page Order nên đơn giản:
+Fallback có thể là:
 
 ```text
-Page N → Page N+1
+TopToBottom + LeftToRight
+TopToBottom + RightToLeft
+Stable Source Order
+Provider Hint
 ```
 
-Các trường hợp đặc biệt:
-
-* trang đôi
-* ảnh dài bị cắt
-* trang tải không đúng thứ tự
-* Webtoon nhiều Segment
-
-cần Metadata từ Source hoặc Document Runtime.
-
-Reading Order không nên tự suy đoán số trang khi thiếu dữ liệu nguồn.
+Fallback phải được ghi trong metadata.
 
 ---
 
-# 43. Double-Page Spread
+# 45. Cross-Panel Relationships
 
-Một ảnh có thể chứa hai trang truyện.
-
-Hệ thống cần xác định:
-
-* Left Page
-* Right Page
-* Spread Reading Mode
-
-Với manga RTL:
+Mặc định:
 
 ```text
-Right Page → Left Page
+Panel order
+    ↓
+local order inside each panel
 ```
 
-Với comic LTR:
+Cross-panel edge chỉ nên xuất hiện khi:
 
-```text
-Left Page → Right Page
-```
-
-Sau đó mới áp dụng Reading Order nội bộ từng trang.
+* Layout evidence đủ mạnh
+* Parent scope cho phép
+* không phá primary panel order
 
 ---
 
-# 44. Webtoon Reading Order
+# 46. Double-Page Spread
 
-Webtoon thường có đặc điểm:
-
-* ảnh dài
-* khoảng cách dọc lớn
-* ít Panel kín
-* nội dung nối liên tục
-* Bubble xen theo chiều dọc
-
-Chiến lược ưu tiên:
-
-1. Vertical Position
-2. Cluster theo khoảng cách
-3. Local Horizontal Relationship
-4. Container Order
-5. Stable Fallback
-
-Không nên áp dụng Row-based Comic Layout một cách máy móc.
-
----
-
-# 45. Novel and Plain Text Reading Order
-
-Với trang tiểu thuyết hoặc văn bản thuần:
-
-* Column Detection quan trọng hơn Panel Detection
-* Paragraph Order quan trọng hơn Bubble Order
-* Header/Footer có thể tách khỏi Main Sequence
-* Footnote cần Sequence riêng hoặc liên kết tham chiếu
-
-Reading Profile phải cho phép chuyển chiến lược theo loại tài liệu.
-
----
-
-# 46. Mixed-Language Documents
-
-Ngôn ngữ khác nhau có thể dùng hướng khác nhau trong cùng trang.
+Double-page spread cần xác định page-level order trước.
 
 Ví dụ:
 
-* tiếng Nhật dọc
-* tiếng Anh ngang
+Manga:
+
+```text
+Right Page
+    ↓
+Left Page
+```
+
+LTR comic:
+
+```text
+Left Page
+    ↓
+Right Page
+```
+
+Sau đó mới xử lý local order trong từng Page.
+
+---
+
+# 47. Webtoon
+
+Webtoon ưu tiên:
+
+```text
+Vertical Position
+    ↓
+Vertical Clustering
+    ↓
+Local Horizontal Relationship
+    ↓
+Container Order
+```
+
+Không áp dụng row-based comic strategy một cách máy móc.
+
+---
+
+# 48. Novel / Plain Text
+
+Với document/novel:
+
+* Column structure quan trọng hơn Panel
+* Paragraph order quan trọng hơn Bubble
+* Header/Footer có thể nằm ngoài Main Sequence
+* Footnote có thể cần sequence/reference riêng
+
+Reading Strategy phải thích ứng theo document type.
+
+---
+
+# 49. Mixed-Language Content
+
+Language không quyết định toàn bộ page order.
+
+Ví dụ cùng Page có thể có:
+
+* Chinese vertical
+* English horizontal
 * UI LTR
-* ghi chú xoay
+* rotated label
 
-Reading Order nên dùng:
-
-* Page Reading Mode cho cấu trúc lớn
-* Local Writing Mode cho nội dung bên trong Entity
-
-Không dùng Language Code đơn lẻ để quyết định toàn bộ thứ tự trang.
-
----
-
-# 47. Reading Strategy
-
-Reading Strategy là thuật toán cụ thể dùng để xây dựng thứ tự.
-
-Các chiến lược có thể gồm:
-
-* Geometric Strategy
-* Layout Tree Strategy
-* Graph Strategy
-* Manga Strategy
-* Webtoon Strategy
-* Document Strategy
-* Hybrid Strategy
-* AI-assisted Strategy
-
-Mọi Strategy phải triển khai cùng Reading Order Contract.
-
----
-
-# 48. Hybrid Strategy
-
-Hybrid Strategy kết hợp:
-
-* Rule-based Geometry
-* Layout Hierarchy
-* Direction Metadata
-* Provider Hint
-* AI Model
-
-Chiến lược này phù hợp cho CRAI vì không có một thuật toán duy nhất hoạt động tốt cho mọi loại truyện.
-
-AI Hint không được tự động ghi đè Constraint cứng nếu không có Confidence đủ cao.
-
----
-
-# 49. Provider Hints
-
-Một số OCR hoặc Layout Provider có thể trả về Reading Order.
-
-Provider Hint có thể được dùng làm:
-
-* Candidate
-* Tie-breaker
-* Fallback
-* Validation Signal
-
-Không được coi Provider Sequence là nguồn sự thật tuyệt đối.
-
-Provider Hint phải được chuẩn hóa về Entity ID của CRAI.
+Page-level order và local writing direction phải được tách riêng.
 
 ---
 
 # 50. Reading Confidence
 
-Confidence cần được lưu ở nhiều cấp:
+Reading Confidence có thể tồn tại ở:
 
-* Edge Confidence
-* Local Sequence Confidence
-* Panel Order Confidence
-* Global Order Confidence
+* Edge
+* Local Sequence
+* Panel Order
+* Global Sequence
 
-Global Confidence không nhất thiết bằng trung bình của Edge Confidence.
+Global Confidence không nhất thiết bằng trung bình Edge Confidence.
 
-Một Sequence có thể có Confidence cao dù một số Auxiliary Entity có Confidence thấp.
+Quality Assessment có thể sử dụng Reading Confidence nếu Reading Order nằm trong quality boundary tương ứng.
 
 ---
 
 # 51. Confidence Factors
 
-Confidence có thể dựa trên:
+Có thể gồm:
 
-* độ rõ của Layout
-* mức độ đồng thuận giữa Rules
-* số Conflict
-* số Fallback Decision
-* độ tin cậy của Direction
-* độ tin cậy của Panel Detection
-* khoảng cách hình học
-* Provider Agreement
+* Layout clarity
+* Direction confidence
+* number of conflicts
+* fallback usage
+* geometric separation
+* rule agreement
+* provider agreement
 
-Quality Assessment có thể sử dụng các chỉ số này để quyết định Retry hoặc Manual Review.
-
----
-
-# 52. Sequence Validation
-
-Reading Sequence phải được kiểm tra:
-
-* không chứa Entity không tồn tại
-* không lặp Entity trái quy tắc
-* không thiếu Main Entity
-* Order Index liên tục
-* Previous/Next Reference hợp lệ
-* Parent Scope hợp lệ
-* không vi phạm Constraint cứng
+Confidence computation thuộc Strategy/Profile.
 
 ---
 
-# 53. Completeness Rules
+# 52. Explainability
 
-Mỗi Entity được cấu hình tham gia Reading Order phải xuất hiện:
+Một ordering decision quan trọng nên có thể giải thích.
 
-* đúng một lần trong Main Sequence
-* hoặc đúng một lần trong Auxiliary Sequence
-* hoặc được ghi rõ là Excluded
+Ví dụ:
 
-Không được âm thầm bỏ mất Entity.
+```text
+Bubble B precedes Bubble A
 
----
+Evidence:
+- Page Mode = RTL
+- same Row
+- B is right of A
+- confidence = high
+```
 
-# 54. Exclusion Rules
-
-Entity có thể bị loại khỏi Main Sequence khi:
-
-* Region Type bị Profile bỏ qua
-* Confidence quá thấp
-* dữ liệu không hợp lệ
-* thuộc Advertisement
-* thuộc Watermark
-* bị trùng lặp
-
-Exclusion phải được ghi trong Diagnostics với Reason Code.
+Explainability có thể được giữ trong Diagnostics thay vì lightweight production result.
 
 ---
 
-# 55. Duplicate Handling
+# 53. Duplicate Handling
 
-Hai Region có thể chứa cùng nội dung do:
+Reading Order không xóa OCR entity.
 
-* Provider Detect trùng
-* Region Merge lỗi
-* ảnh chồng
-* Watermark lặp
+Nếu có duplicate candidate, nó có thể:
 
-Reading Order không trực tiếp xóa dữ liệu OCR nhưng có thể:
+* chọn một entity vào Main Sequence
+* đánh dấu entity khác là Auxiliary
+* đánh dấu Excluded
+* ghi diagnostics
 
-* chỉ chọn một Entity vào Main Sequence
-* đánh dấu Duplicate Candidate
-* chuyển Entity còn lại sang Excluded hoặc Auxiliary
-
-Quyết định cuối về xóa dữ liệu thuộc Postprocessing hoặc Quality Workflow.
+Việc sửa hoặc xóa source OCR data không thuộc Reading Order.
 
 ---
 
-# 56. Incremental Reading Order
+# 54. Manual Override
 
-Trong chế độ cuộn hoặc OCR thời gian thực, chỉ một phần trang có thể thay đổi.
+Reading Order có thể hỗ trợ override semantic như:
 
-Incremental Reading Order phải:
+* reorder entity
+* exclude entity
+* include entity
+* lock precedence relationship
 
-* giữ Order ID cũ khi có thể
-* chỉ tính lại Scope bị ảnh hưởng
-* nối Sequence mới với Sequence cũ
-* tránh làm thay đổi toàn bộ thứ tự không cần thiết
+Override phải tồn tại tách khỏi immutable OCR result.
+
+Runtime/persistence của override thuộc owner tương ứng.
+
+---
+
+# 55. Override Precedence
+
+Một precedence khuyến nghị:
+
+```text
+User Override
+    ↓
+Locked Project Rule
+    ↓
+Document Profile
+    ↓
+Reading Strategy
+    ↓
+Provider Hint
+    ↓
+Fallback
+```
+
+User Override không bị tự động mất khi Reading Order chạy lại nếu input identity vẫn tương thích.
+
+---
+
+# 56. Incremental Semantics
+
+Reading Order có thể hỗ trợ recomputation theo scope.
+
+Ví dụ:
+
+* thêm Region mới cuối Webtoon
+* thay đổi một Panel
+* thay đổi một Container
+
+Semantic requirement:
+
+```text
+unchanged scope
+    → preserve order when possible
+
+changed scope
+    → recompute only affected order
+```
+
+Scheduling và incremental execution authority thuộc Runtime.
 
 ---
 
 # 57. Sequence Stability
 
-Khi thêm Region mới ở cuối Webtoon, thứ tự trước đó không nên bị thay đổi.
+Ordering không nên thay đổi không cần thiết khi input cũ không đổi.
 
-Khi thêm Region nằm giữa trang, chỉ Scope liên quan nên được sắp xếp lại.
+Điều này quan trọng cho:
 
-Sequence Stability đặc biệt quan trọng cho:
-
-* overlay thời gian thực
-* subtitle-like display
+* overlay
 * reading history
-* translation cache
+* translation mapping
+* user correction
+* incremental OCR
+
+Stability là semantic requirement của Reading Order.
 
 ---
 
-# 58. Reading Order Cache
+# 58. Reading Order Compatibility
 
-Cache Key nên bao gồm:
-
-* OCR Document ID
-* OCR Document Version
-* Layout Version
-* Direction Version
-* Reading Profile
-* Strategy Version
-
-Cache phải bị invalid khi:
-
-* Geometry thay đổi
-* Layout thay đổi
-* Region Type thay đổi
-* Reading Mode thay đổi
-* Profile thay đổi
-
----
-
-# 59. Reading Order Events
-
-Các Event khuyến nghị:
-
-```text
-ReadingOrderRequested
-ReadingOrderStarted
-ReadingContextResolved
-ReadingCandidateGenerated
-ReadingConflictDetected
-ReadingConflictResolved
-ReadingSequenceGenerated
-ReadingOrderCompleted
-ReadingOrderFailed
-ReadingOrderCancelled
-```
-
-Tên Event thực tế phải tuân theo Event Convention chung của CRAI.
-
----
-
-# 60. Reading Order State Machine
-
-Luồng trạng thái khuyến nghị:
-
-```text
-Created
-
-↓
-
-Queued
-
-↓
-
-Analyzing
-
-↓
-
-BuildingGraph
-
-↓
-
-ResolvingConflicts
-
-↓
-
-Linearizing
-
-↓
-
-Validating
-
-↓
-
-Completed
-```
-
-Trạng thái kết thúc khác:
-
-```text
-Failed
-Cancelled
-Ambiguous
-```
-
-`Ambiguous` có thể là trạng thái hoàn thành có cảnh báo, tùy Runtime Contract.
-
----
-
-# 61. Error Model
-
-Các lỗi có thể gồm:
-
-* InvalidOCRDocument
-* MissingLayoutTree
-* MissingDirectionData
-* InvalidHierarchy
-* GraphCycleUnresolved
-* EntityReferenceMissing
-* StrategyUnavailable
-* ProfileInvalid
-* SequenceValidationFailed
-
-Lỗi Provider-specific không được rò rỉ trực tiếp ra Reading Order Contract.
-
----
-
-# 62. Diagnostics
-
-Diagnostics nên lưu:
-
-* Rule đã áp dụng
-* Candidate bị loại
-* Conflict
-* Cycle
-* Fallback Decision
-* Excluded Entity
-* Ambiguous Scope
-* Confidence Breakdown
-
-Diagnostics rất quan trọng vì Reading Order thường khó Debug chỉ bằng Sequence cuối cùng.
-
----
-
-# 63. Explainability
-
-Mỗi quan hệ quan trọng nên có thể giải thích.
+Result phải lưu đủ version identity để xác định compatibility.
 
 Ví dụ:
-
-```text
-Bubble B được đọc trước Bubble A vì:
-
-- Page Mode: RTL
-- cùng Row
-- B nằm bên phải A
-- Confidence: 0.93
-```
-
-Explainability không cần bật trong Production Result nhẹ, nhưng phải có khả năng thu thập ở Debug Mode.
-
----
-
-# 64. Performance Considerations
-
-Reading Order cần tối ưu cho:
-
-* nhiều Region
-* ảnh Webtoon dài
-* Batch Page
-* Runtime thời gian thực
-
-Không nên so sánh toàn bộ cặp Entity theo O(n²) khi có thể dùng:
-
-* Spatial Index
-* R-tree
-* Grid Partition
-* Row/Column Clustering
-* Parent Scope Filtering
-* Nearest Neighbor Search
-
----
-
-# 65. Scalability
-
-Reading Order phải hỗ trợ:
-
-* một Region
-* một Page
-* Double-page Spread
-* Webtoon dài
-* Chapter nhiều Page
-* Batch Processing
-* nhiều Session đồng thời
-
-Cross-Page Order không nên làm tăng chi phí tính toán của từng Page độc lập.
-
----
-
-# 66. Testing Strategy
-
-Cần kiểm thử tối thiểu:
-
-* LTR Comic
-* RTL Manga
-* Vertical Japanese Text
-* Webtoon
-* Novel Page
-* Mixed Layout
-* Overlapping Bubble
-* Nested Panel
-* Double-page Spread
-* Ambiguous Layout
-* Missing Direction
-* Provider Order Conflict
-
----
-
-# 67. Golden Test Cases
-
-Reading Order rất phù hợp với Golden Test.
-
-Mỗi Test Case gồm:
-
-* ảnh hoặc OCR Fixture
-* Layout Tree
-* Expected Graph
-* Expected Sequence
-* Expected Confidence Range
-* Expected Diagnostics
-
-Golden Test phải kiểm tra cả Main Sequence và Auxiliary Sequence.
-
----
-
-# 68. Benchmark Metrics
-
-Các chỉ số có thể gồm:
-
-* Sequence Accuracy
-* Pairwise Order Accuracy
-* Panel Order Accuracy
-* Bubble Order Accuracy
-* Cycle Rate
-* Fallback Rate
-* Ambiguous Rate
-* Processing Latency
-* Memory Usage
-
-Pairwise Order Accuracy phù hợp hơn Exact Sequence Accuracy trong các trường hợp có nhiều thứ tự tương đương hợp lệ.
-
----
-
-# 69. Manual Override
-
-Hệ thống nên hỗ trợ người dùng hoặc công cụ chỉnh sửa:
-
-* đổi vị trí Entity
-* kéo thả thứ tự
-* loại Entity khỏi Sequence
-* thêm Entity vào Main Sequence
-* khóa một quan hệ trước-sau
-
-Manual Override phải được lưu tách khỏi OCR Result gốc.
-
----
-
-# 70. Override Precedence
-
-Thứ tự ưu tiên khuyến nghị:
-
-1. User Override
-2. Locked Project Rule
-3. Document Profile
-4. Reading Strategy
-5. Provider Hint
-6. Fallback
-
-User Override không nên bị tự động ghi đè khi Pipeline chạy lại, trừ khi người dùng chủ động xóa Override.
-
----
-
-# 71. Versioning
-
-Reading Order Result phải lưu:
 
 * Contract Version
 * Strategy ID
@@ -1660,92 +1309,218 @@ Reading Order Result phải lưu:
 * Reading Profile Version
 * OCR Document Version
 
-Kết quả cache từ Strategy Version cũ phải được đánh giá lại trước khi tái sử dụng.
+Breaking semantic changes phải versioned.
 
 ---
 
-# 72. Compatibility
+# 59. Diagnostics
 
-Strategy mới phải:
+Diagnostics có thể chứa:
 
-* đọc được OCR Document Contract hiện hành
-* không thay đổi Entity ID
-* không làm mất Metadata
-* xuất đúng Reading Order Result Contract
+* rule applied
+* candidate rejected
+* conflict
+* cycle resolution
+* fallback
+* excluded entity
+* ambiguous scope
+* confidence breakdown
 
-Nếu có Breaking Change, phải tăng Contract Version.
-
----
-
-# 73. Security and Privacy
-
-Reading Order chủ yếu xử lý dữ liệu cục bộ và không cần gửi nội dung ra ngoài.
-
-Nếu sử dụng AI-assisted Strategy từ xa:
-
-* phải tuân theo Privacy Profile
-* chỉ gửi dữ liệu tối thiểu
-* không gửi ảnh nếu chỉ cần Geometry
-* không ghi log nội dung nhạy cảm mặc định
-* phải hỗ trợ tắt Remote Strategy
+Diagnostics không thay thế Reading Order Result.
 
 ---
 
-# 74. Architecture Invariants
+# 60. Runtime Integration
 
-Reading Order phải luôn đảm bảo:
+Reading Order chỉ cung cấp semantic output.
 
-* không thay đổi nội dung Recognition
-* không thay đổi Geometry
-* không thay đổi Layout Tree
-* không thay đổi Text Direction
-* chỉ tạo quan hệ thứ tự và Sequence
-* mọi Ordered Entity phải ánh xạ về Entity gốc
-* không được âm thầm loại Entity
-* Graph phải không có Cycle trước Linearization
-* cùng Input và Strategy Version phải cho cùng Output
-* Provider Hint không phải nguồn sự thật tuyệt đối
-* Main Sequence và Auxiliary Sequence phải được phân biệt rõ
-* Reading Order Result phải độc lập với Translation Provider
-* các module phía sau không cần tự suy luận lại thứ tự từ Geometry
+Runtime sở hữu:
+
+* scheduling
+* cancellation
+* retry
+* attempt lifecycle
+* queue
+* execution state
+* stale authority
+
+Reading Order không tự schedule lại chính nó.
 
 ---
 
-# 75. Future Extensions
+# 61. Cache Integration
 
-Kiến trúc phải cho phép mở rộng:
+Reading Order định nghĩa semantic compatibility.
 
-* AI-based Reading Order
-* Speaker-aware Bubble Ordering
-* Cross-page Dialogue Flow
-* Temporal Order cho Animated Comic
-* Interactive Reading Path
-* User-personalized Reading Mode
-* Learned Strategy từ Manual Override
-* Multi-column Academic Document
-* Footnote and Reference Graph
-* Multi-page Spread Analysis
-* Collaborative Order Editing
+Ví dụ result có thể không còn compatible nếu:
+
+* OCR Document thay đổi
+* Layout version thay đổi
+* Direction version thay đổi
+* Reading Profile thay đổi
+* Strategy version thay đổi
+
+Global cache lifecycle thuộc Runtime Cache Policy.
 
 ---
 
-# 76. Summary
+# 62. Event Integration
 
-Reading Order chuyển OCR Document từ một tập hợp phần tử có cấu trúc không gian thành một chuỗi đọc có ý nghĩa.
+Reading Order có thể tạo domain facts như:
 
-Đầu vào chính:
+```text
+ReadingOrderCompleted
+ReadingOrderAmbiguous
+ReadingOrderFailed
+```
+
+Ý nghĩa semantic thuộc Reading Order.
+
+Event delivery, envelope và transport thuộc Event Bus.
+
+---
+
+# 63. Error Integration
+
+Reading Order có thể tạo lỗi semantic như:
+
+```text
+InvalidOCRDocument
+MissingLayoutTree
+MissingDirectionData
+InvalidHierarchy
+GraphCycleUnresolved
+EntityReferenceMissing
+StrategyUnavailable
+SequenceValidationFailed
+```
+
+Các lỗi này phải map vào Runtime Error Model khi crossing Runtime boundary.
+
+---
+
+# 64. Architecture Invariants
+
+Reading Order luôn phải đảm bảo:
+
+1. Không thay đổi Recognition content.
+
+2. Không thay đổi Detection Geometry.
+
+3. Không thay đổi Layout Tree.
+
+4. Không thay đổi Text Direction.
+
+5. Chỉ tạo order relationships và sequences.
+
+6. Mọi Ordered Entity phải tham chiếu entity nguồn.
+
+7. Không âm thầm bỏ entity.
+
+8. Graph phải acyclic trước linearization.
+
+9. Same semantic input + same Strategy Version phải tạo structurally equivalent order.
+
+10. Provider Hint không phải authoritative truth.
+
+11. Main Sequence và Auxiliary Sequence phải tách rõ.
+
+12. Ambiguous order phải được biểu diễn thay vì che giấu.
+
+13. Reading Order không sở hữu Runtime scheduling.
+
+14. Reading Order không sở hữu Retry.
+
+15. Reading Order không sở hữu Cancellation authority.
+
+16. Reading Order không sở hữu global cache lifecycle.
+
+17. Reading Order không định nghĩa Event Bus semantics.
+
+18. Translation không được tự suy luận lại Reading Order từ Geometry nếu Reading Order Result hợp lệ đã tồn tại.
+
+---
+
+# 65. Recommended MVP Strategy
+
+MVP nên ưu tiên strategy đơn giản và deterministic.
 
 ```text
 OCR Document
-+
-Layout Tree
-+
+    ↓
+Layout Hierarchy
+    ↓
 Text Direction
-+
-Region Type
+    ↓
+Page Reading Mode
+    ↓
+Local Geometry Rules
+    ↓
+Reading Order Graph
+    ↓
+Conflict Resolution
+    ↓
+Stable Sequence
 ```
 
-Đầu ra chính:
+MVP nên hỗ trợ:
+
+* LTR page
+* RTL page
+* vertical column text
+* Webtoon top-to-bottom
+* basic Panel ordering
+* Bubble ordering
+* Main/Auxiliary separation
+* stable fallback
+* Ambiguous result
+* manual override compatibility
+
+Các strategy nâng cao như:
+
+* speaker-aware ordering
+* cross-page semantic flow
+* learned user strategy
+* AI-based ordering
+
+có thể để sau.
+
+---
+
+# 66. Ownership References
+
+| Concern                  | Owner               |
+| ------------------------ | ------------------- |
+| Region                   | `DETECTION.md`      |
+| Region Type              | `DETECTION.md`      |
+| Recognition Text Model   | `RECOGNITION.md`    |
+| Writing Mode / Direction | `TEXT_DIRECTION.md` |
+| Layout Tree              | `LAYOUT.md`         |
+| Spatial Relationships    | `LAYOUT.md`         |
+| OCR Document             | `POSTPROCESS.md`    |
+| Quality Report           | `QUALITY.md`        |
+| Reading Order Graph      | `READING_ORDER.md`  |
+| Main/Auxiliary Sequence  | `READING_ORDER.md`  |
+| Retry                    | Runtime             |
+| Cancellation             | Runtime             |
+| Scheduling               | Runtime             |
+| Cache lifecycle          | Runtime             |
+| Event transport          | Event Bus           |
+| Error normalization      | Runtime Error Model |
+
+---
+
+# 67. Summary
+
+Reading Order chuyển:
+
+```text
+OCR Document
+```
+
+từ một tập hợp entity có geometry và hierarchy
+
+thành:
 
 ```text
 Reading Order Graph
@@ -1754,11 +1529,37 @@ Main Reading Sequence
 +
 Auxiliary Sequence
 +
-Confidence
-+
-Diagnostics
+Reading Confidence
 ```
 
-Reading Order là ranh giới cuối giữa OCR Domain và Text Domain.
+Flow tổng quát:
 
-Sau bước này, CRAI có thể xây dựng Text Document, chia Translation Segment và truyền nội dung sang Translation Pipeline mà không cần các module ngôn ngữ tự phân tích lại bố cục ảnh.
+```text
+OCR Document
+    ↓
+Hierarchy
+    ↓
+Candidates
+    ↓
+Scoring
+    ↓
+Graph
+    ↓
+Conflict Resolution
+    ↓
+Linearization
+    ↓
+Validated Reading Sequence
+```
+
+Nguyên tắc cốt lõi:
+
+```text
+Layout defines structure.
+
+Text Direction defines writing direction.
+
+Reading Order defines precedence.
+
+Runtime defines execution.
+```

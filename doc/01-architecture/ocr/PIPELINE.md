@@ -1,108 +1,118 @@
 # OCR Pipeline
 
-- **Document:** OCR Architecture / Pipeline
-- **Version:** 1.0.0
-- **Status:** Draft
-- **Owner:** CRAI Architecture
-- **Last Updated:** 2026-07-28
+> **Status:** Draft
+> **Version:** 1.1.0
+> **Owner:** CRAI Architecture
+> **Layer:** OCR Architecture
+> **Related:** `PREPROCESS.md`, `DETECTION.md`, `RECOGNITION.md`, `TEXT_DIRECTION.md`, `LAYOUT.md`, `POSTPROCESS.md`, `QUALITY.md`, `READING_ORDER.md`, `PROVIDERS.md`
 
 ---
 
-# Purpose
+# 1. Purpose
 
-This document defines the end-to-end OCR processing pipeline used by CRAI to transform an image into structured, traceable and reviewable recognized text.
+OCR Pipeline định nghĩa luồng xử lý chuẩn của CRAI để chuyển dữ liệu hình ảnh thành dữ liệu nguồn có cấu trúc, có thể truy vết và sẵn sàng cho các bước xử lý tiếp theo.
 
-The OCR Pipeline covers image preparation, text-region discovery, recognition, geometric reconstruction, normalization, validation and result publication.
+Pipeline chịu trách nhiệm mô tả:
 
-It does not perform translation, translated-text rendering, source acquisition or persistent binary storage.
+* các stage OCR chính
+* thứ tự và dependency giữa các stage
+* input/output của từng stage
+* boundary giữa các tài liệu OCR
+* điểm kết thúc của OCR processing
+* cách các artifact OCR được truyền giữa các stage
 
----
+Pipeline không định nghĩa chi tiết thuật toán của từng stage.
 
-# Scope
-
-The pipeline supports image-based reading sources such as:
-
-- Manga, manhua and manhwa pages
-- Browser images
-- Screen captures
-- Scanned pages
-- Imported image files
-- Rasterized document pages
-- Cropped user-selected regions
-
-The architecture must support Simplified Chinese, Traditional Chinese and English as initial source languages while remaining language-neutral at the contract level.
+Các quy tắc chuyên biệt thuộc tài liệu owner tương ứng.
 
 ---
 
-# Pipeline Position
+# 2. Scope
+
+OCR Pipeline áp dụng cho các nguồn ảnh như:
+
+* manga
+* manhua
+* manhwa
+* browser images
+* screen captures
+* scanned pages
+* imported images
+* rasterized document pages
+* user-selected image regions
+
+Nguồn ngôn ngữ ban đầu gồm:
+
+* Simplified Chinese
+* Traditional Chinese
+* English
+
+Contract phải giữ khả năng mở rộng sang các ngôn ngữ khác.
+
+---
+
+# 3. Non-Goals
+
+OCR Pipeline không chịu trách nhiệm:
+
+* Translation
+* semantic text rewriting
+* grammar correction
+* source acquisition
+* UI rendering
+* overlay rendering
+* persistent storage implementation
+* Runtime scheduling
+* Runtime retry ownership
+* Runtime cancellation ownership
+* Event Bus semantics
+* telemetry implementation
+* resource lifecycle implementation
+* provider credential ownership
+
+Các concern trên thuộc Runtime, Infrastructure hoặc Business Module tương ứng.
+
+---
+
+# 4. Architecture Position
 
 ```text
 Capture / Import
       │
       ▼
-Source Image
+Source Image Artifact
       │
       ▼
 OCR Pipeline
       │
-      ├──► Structured OCR Result
-      ├──► Text Regions
-      ├──► Reading Order
-      ├──► Confidence and Diagnostics
-      └──► Derived OCR Images
-                │
-                ▼
-       Translation Pipeline
-                │
-                ▼
-          Presentation
+      ▼
+OCR Document
+      │
+      ├──► Quality Assessment
+      │
+      └──► Reading Order
+               │
+               ▼
+        Ordered Source Data
+               │
+               ▼
+        Text Processing
+               │
+               ▼
+          Translation
+               │
+               ▼
+         Presentation
 ```
 
-OCR ends when CRAI has a validated structured representation of the source text and its relationship to the source image.
+OCR Pipeline kết thúc khi CRAI có một `OCR Document` hợp lệ và provider-neutral.
 
 ---
 
-# Primary Design Goals
-
-The OCR Pipeline should provide:
-
-- Accurate recognition of text in complex visual layouts
-- Stable mapping between recognized text and image coordinates
-- Support for horizontal and vertical writing
-- Support for mixed languages and scripts
-- Non-destructive processing of source images
-- Provider-independent execution
-- Partial retry without restarting the entire page
-- Deterministic caching and invalidation
-- Observable quality and performance
-- Graceful degradation when confidence is low
-- Cancellation at every expensive stage
-
----
-
-# Non-Goals
-
-The OCR Pipeline is not responsible for:
-
-- Translating recognized text
-- Rewriting dialogue
-- Choosing translated terminology
-- Painting over source text
-- Rendering translated text into speech bubbles
-- Downloading or capturing source content
-- Persisting raw image bytes directly
-- Managing the full Reading Session lifecycle
-- Owning global provider credentials
-- Guaranteeing semantic correctness beyond recognition
-
-Those responsibilities belong to Translation, Presentation, Capture, Storage, Reading Session, Preferences and Provider Management.
-
----
-
-# Canonical Pipeline
+# 5. Canonical OCR Flow
 
 ```text
-OCR Request
+Input Image
     │
     ▼
 1. Request Validation
@@ -117,1246 +127,1062 @@ OCR Request
 4. OCR Profile Resolution
     │
     ▼
-5. Cache Lookup
+5. Cache Compatibility Check
     │
-    ├── Cache Hit ──────────────────────────────┐
-    │                                           │
-    ▼                                           │
-6. Preprocessing                               │
-    │                                           │
-    ▼                                           │
-7. Text Region Detection                       │
-    │                                           │
-    ▼                                           │
-8. Region Preparation                          │
-    │                                           │
-    ▼                                           │
-9. Text Recognition                            │
-    │                                           │
-    ▼                                           │
-10. Geometry Reconstruction                    │
-    │                                           │
-    ▼                                           │
-11. Reading Order Resolution                   │
-    │                                           │
-    ▼                                           │
-12. Text Normalization                         │
-    │                                           │
-    ▼                                           │
-13. Confidence Evaluation                      │
-    │                                           │
-    ▼                                           │
-14. Quality Validation                         │
-    │                                           │
-    ├── Retry / Fallback                        │
-    │                                           │
-    ▼                                           │
-15. Result Assembly ◄──────────────────────────┘
+    ├── reusable result ───────────────┐
+    │                                  │
+    ▼                                  │
+6. Preprocessing                       │
+    │                                  │
+    ▼                                  │
+7. Text Detection                      │
+    │                                  │
+    ▼                                  │
+8. Region Preparation                  │
+    │                                  │
+    ▼                                  │
+9. Text Recognition                    │
+    │                                  │
+    ▼                                  │
+10. Geometry Reconstruction            │
+    │                                  │
+    ▼                                  │
+11. Text Direction Analysis            │
+    │                                  │
+    ▼                                  │
+12. Layout Analysis                    │
+    │                                  │
+    ▼                                  │
+13. OCR Postprocessing                 │
+    │                                  │
+    ▼                                  │
+14. OCR Document Assembly ◄────────────┘
     │
     ▼
-16. Cache Write
+15. Quality Assessment
+    │
+    ▼
+16. Reading Order
     │
     ▼
 17. Result Publication
 ```
 
-Stages may be skipped, combined or executed in parallel when the selected OCR strategy explicitly supports it. The externally visible result must remain equivalent to the canonical contract.
+Một implementation có thể gộp hoặc tối ưu một số bước khi provider hỗ trợ nhiều capability cùng lúc.
+
+Tuy nhiên contract đầu ra phải giữ nguyên semantics của pipeline chuẩn.
 
 ---
 
-# Stage 1: Request Validation
+# 6. Stage 1 — Request Validation
 
-The pipeline validates the OCR request before allocating expensive resources.
+Mục tiêu:
 
-Validation includes:
+xác nhận request đủ hợp lệ trước khi sử dụng resource đắt tiền.
 
-- Request ID is present
-- Session and Page references are valid
-- Input Image ID exists
-- Requested image version is available
-- Image role is acceptable for OCR
-- Target region is within image bounds
-- Requested language hints are supported
-- OCR mode is supported
-- Cancellation token is active
-- Resource and cost limits are valid
+Input có thể chứa:
 
-Invalid requests must fail before provider invocation.
+* Session identity
+* Revision identity
+* Image Artifact reference
+* optional target region
+* OCR Profile reference
+* language hints
+* privacy classification
+
+Validation kiểm tra:
+
+* image tồn tại
+* image version hợp lệ
+* target region nằm trong bounds
+* OCR mode được hỗ trợ
+* profile hợp lệ
+* privacy policy cho phép xử lý yêu cầu
+
+Output:
+
+```text
+Validated OCR Request
+```
+
+Runtime state hoặc cancellation lifecycle không được định nghĩa tại đây.
 
 ---
 
-# Stage 2: Input Resolution
+# 7. Stage 2 — Input Resolution
 
-The pipeline resolves the authoritative image and optional target region.
+Mục tiêu:
+
+xác định chính xác image artifact và region sẽ được OCR.
 
 Possible inputs:
 
-- Complete normalized page image
-- Complete source image when normalization is unnecessary
-- User-selected region
-- Previously detected text region
-- Region scheduled for retry
+* full page
+* normalized page
+* user-selected region
+* previously detected region
+* retry region
 
-The resolved input contains:
+Output phải giữ:
 
-- Image ID
-- Image version
-- Asset ID
-- Dimensions
-- Canonical coordinate space
-- Region bounds, when applicable
-- Parent lineage
-- Content hash
+* Image ID
+* Image Version
+* dimensions
+* coordinate space
+* region bounds
+* lineage
+* content hash
 
-The pipeline must never infer coordinates against a different image version than the one declared by the request.
-
----
-
-# Stage 3: Image Normalization
-
-Image normalization creates a stable visual input for later stages.
-
-Possible operations:
-
-- Apply orientation metadata
-- Convert unsupported color mode
-- Remove unsupported animation frames
-- Normalize alpha handling
-- Correct rotation
-- Correct perspective
-- Deskew scanned content
-- Constrain excessive dimensions
-- Decode into a supported pixel format
-
-Normalization creates a derived Image when pixels, dimensions or coordinate space change.
-
-The source image remains immutable.
-
-Required output metadata includes:
-
-- Derived Image ID
-- Parent Image ID
-- Applied transforms
-- Output dimensions
-- Output content hash
-- Mapping to parent coordinates
+Pipeline không được trộn geometry của nhiều image version.
 
 ---
 
-# Stage 4: OCR Profile Resolution
+# 8. Stage 3 — Image Normalization
 
-An OCR Profile defines the processing behavior for a request.
+Mục tiêu:
 
-The effective profile may be resolved from:
+đưa input về trạng thái hình ảnh ổn định trước các bước OCR tiếp theo.
+
+Có thể bao gồm:
+
+* orientation normalization
+* decode normalization
+* color-space normalization
+* size constraints
+* rotation correction
+* perspective correction
+
+Source image phải giữ immutable.
+
+Nếu image thay đổi geometry, transform mapping phải được giữ.
+
+Chi tiết thuộc:
 
 ```text
-Request Override
-      ↓
-Session Preference
-      ↓
-Source Profile
-      ↓
-Global Preference
-      ↓
-System Default
+PREPROCESS.md
 ```
 
-A profile may contain:
-
-- Pipeline version
-- Recognition mode
-- Expected languages
-- Script hints
-- Reading direction
-- Detection strategy
-- Preprocessing strategy
-- Recognition provider policy
-- Region padding
-- Upscaling policy
-- Confidence thresholds
-- Retry policy
-- Fallback policy
-- Cache policy
-- Resource limits
-- Privacy policy
-
-Profile resolution is deterministic and the resolved profile revision must be recorded in the result.
-
 ---
 
-# Stage 5: Cache Lookup
+# 9. Stage 4 — OCR Profile Resolution
 
-The pipeline checks for reusable OCR output before processing.
+OCR Profile mô tả policy xử lý OCR của request.
 
-A cache key should include at least:
+Profile có thể ảnh hưởng:
 
-- Input content hash
-- Input region
-- Image version
-- OCR Pipeline version
-- OCR Profile revision
-- Detection strategy version
-- Recognition provider and model capability version
-- Language and script hints
-- Preprocessing configuration hash
-- Normalization configuration version
+* expected language/script
+* preprocessing behavior
+* detection behavior
+* recognition behavior
+* quality thresholds
+* provider capability requirements
+* privacy constraints
 
-A result must not be reused when any semantic input affecting recognition has changed.
+Profile resolution phải deterministic.
 
-Cache entries may exist at several levels:
-
-- Full-page OCR result
-- Region-detection result
-- Prepared region image
-- Per-region recognition result
-- Reading-order result
-- Normalized text result
-
-Partial cache reuse is allowed when lineage and compatibility can be proven.
-
----
-
-# Stage 6: Preprocessing
-
-Preprocessing improves recognition quality without changing source semantics.
-
-Possible operations:
-
-- Grayscale conversion
-- Contrast adjustment
-- Binarization
-- Denoising
-- Sharpening
-- Upscaling
-- Border removal
-- Background suppression
-- Color-channel isolation
-- Speech-bubble enhancement
-- Text-stroke enhancement
-- Inversion for light text on dark background
-
-Preprocessing may generate one or more candidate OCR input images.
+Output:
 
 ```text
-Normalized Image
-      │
-      ├──► General OCR Input
-      ├──► High-Contrast Input
-      ├──► Inverted Input
-      └──► Upscaled Input
+Effective OCR Profile
 ```
 
-Candidate generation should be policy-driven. The pipeline must avoid applying every filter blindly because excessive preprocessing increases latency and may damage text features.
+Runtime retry policy không thuộc OCR Profile ownership.
 
 ---
 
-# Stage 7: Text Region Detection
+# 10. Stage 5 — Cache Compatibility Check
 
-Text Region Detection locates areas likely to contain readable text.
+Pipeline có thể kiểm tra xem kết quả OCR tương thích đã tồn tại hay chưa.
 
-A detected region should contain:
+OCR Architecture chỉ sở hữu **semantic compatibility**.
 
-- Region ID
-- Polygon or bounding box
-- Detection confidence
-- Orientation estimate
-- Script or language hint, when available
-- Region type hint
-- Parent Image ID and version
-- Detector version
+Compatibility có thể phụ thuộc:
 
-Possible region types:
+* image content hash
+* image version
+* region
+* OCR profile version
+* detection behavior version
+* recognition behavior version
+* preprocessing version
+* relevant language/script hint
 
-- Dialogue
-- Narration
-- Caption
-- Sound effect
-- Label
-- Sign
-- Interface text
-- Unknown text
+Nếu semantic inputs thay đổi, result cũ không được xem là tương đương.
 
-Region typing is advisory. Recognition must not depend on perfect classification.
+Global cache lifecycle, eviction và storage policy thuộc Runtime.
 
-Detection may be performed by:
+Chi tiết:
 
-- Dedicated text detector
-- OCR provider with layout support
-- Local vision model
-- Site-specific adapter
-- User selection
-- Hybrid detection
+```text
+runtime/CACHE_POLICY.md
+```
 
 ---
 
-# Stage 8: Region Preparation
+# 11. Stage 6 — Preprocessing
 
-Each detected region may be prepared independently for recognition.
+Preprocessing chuẩn bị hình ảnh cho Detection và Recognition.
 
-Typical operations:
+Input:
 
-- Crop region
-- Add safe padding
-- Rectify rotated polygon
-- Correct perspective
-- Upscale small text
-- Select preprocessing candidate
-- Detect text orientation
-- Split oversized region
-- Merge fragmented regions when justified
+```text
+Resolved Image
++
+Effective OCR Profile
+```
 
-Every prepared region must retain a transform back to the canonical page coordinate space.
+Output:
 
-Region preparation creates transient buffers or derived `region_crop` / `ocr_input` Images according to retention policy.
+```text
+Processed Image
++
+Transform Metadata
+```
 
----
+Chi tiết thuộc:
 
-# Stage 9: Text Recognition
-
-Text Recognition converts prepared visual regions into recognition candidates.
-
-The recognition layer must be provider independent.
-
-A recognition request may include:
-
-- Prepared image reference or in-memory image buffer
-- Expected languages
-- Script hints
-- Orientation
-- Region type
-- Character whitelist or blacklist
-- Recognition mode
-- Timeout
-- Privacy classification
-
-A recognition response may contain:
-
-- Raw text
-- Character, token or line alternatives
-- Confidence values
-- Word or character geometry
-- Detected language
-- Detected script
-- Provider metadata
-- Model version
-- Processing duration
-
-Provider-specific response formats must be normalized before leaving the provider adapter.
+```text
+PREPROCESS.md
+```
 
 ---
 
-# Stage 10: Geometry Reconstruction
+# 12. Stage 7 — Text Detection
 
-Recognition geometry is converted into CRAI's canonical coordinate space.
+Detection trả lời:
 
-This stage:
+```text
+Where is the text?
+```
 
-- Maps provider coordinates to prepared-region coordinates
-- Maps region coordinates to OCR-input coordinates
-- Maps OCR-input coordinates to normalized-image coordinates
-- Maps normalized-image coordinates to source-image coordinates when required
-- Validates bounds after every transform
-- Preserves polygon geometry when available
+Input:
+
+```text
+Processed Image
+```
+
+Output:
+
+```text
+Detection Result
+```
+
+Detection Result chứa các Region cùng geometry và detection-specific metadata.
+
+Pipeline không định nghĩa chi tiết:
+
+* Region Type
+* Polygon
+* Mask
+* Region hierarchy
+* merge/split rules
+
+Những nội dung đó thuộc:
+
+```text
+DETECTION.md
+```
+
+---
+
+# 13. Stage 8 — Region Preparation
+
+Các Region được chuẩn bị để Recognition xử lý.
+
+Có thể bao gồm:
+
+* crop
+* padding
+* rectification
+* local orientation adjustment
+* upscaling
+* region-specific preprocessing selection
+
+Mọi derived region phải giữ mapping về coordinate space gốc.
+
+Stage này không thay đổi Region identity semantics.
+
+---
+
+# 14. Stage 9 — Text Recognition
+
+Recognition trả lời:
+
+```text
+What is the text?
+```
+
+Input:
+
+```text
+Prepared Region
++
+Recognition Policy
+```
+
+Output:
+
+```text
+Recognition Result
+```
+
+Recognition có thể tạo:
+
+* Character
+* Word
+* Line
+* Paragraph
+* recognized text
+* language/script metadata
+* recognition confidence
+
+Provider-native response không được vượt Provider Adapter boundary.
+
+Chi tiết thuộc:
+
+```text
+RECOGNITION.md
+PROVIDERS.md
+```
+
+---
+
+# 15. Stage 10 — Geometry Reconstruction
+
+Mục tiêu:
+
+đưa geometry từ provider hoặc prepared region về canonical coordinate space của CRAI.
+
+Conceptual mapping:
 
 ```text
 Provider Coordinates
         ↓
 Prepared Region Coordinates
         ↓
-OCR Input Coordinates
+Processed Image Coordinates
         ↓
-Normalized Image Coordinates
-        ↓
-Source Image Coordinates
+Canonical Source Coordinates
 ```
 
-Rounding must not cause text polygons to move outside valid image bounds.
+Pipeline phải giữ:
 
-The exact transform chain must be retained for diagnostics and rendering compatibility.
+* exact source image version
+* transform lineage
+* region identity
+* reversible mapping khi đủ dữ liệu
 
----
-
-# Stage 11: Reading Order Resolution
-
-Reading Order Resolution determines the sequence in which recognized regions and lines should be consumed.
-
-Supported patterns may include:
-
-- Horizontal left-to-right
-- Horizontal right-to-left
-- Vertical top-to-bottom, columns right-to-left
-- Vertical top-to-bottom, columns left-to-right
-- Mixed page layout
-- Panel-aware comic order
-- Explicit user-defined order
-
-Inputs may include:
-
-- Region geometry
-- Line geometry
-- Orientation
-- Script
-- Panel layout
-- Speech-bubble relationships
-- Source preferences
-- Provider order hints
-
-Reading order must be represented explicitly. Array position alone must not be treated as authoritative without an order revision or ordering metadata.
-
-When order is uncertain, the result should preserve alternatives or mark the order as low confidence rather than silently presenting a false certainty.
+Geometry semantics thuộc Detection/Layout contracts tương ứng.
 
 ---
 
-# Stage 12: Text Normalization
+# 16. Stage 11 — Text Direction Analysis
 
-Text Normalization converts provider output into a stable OCR text representation.
-
-Possible operations:
-
-- Unicode normalization
-- Standardize line breaks
-- Remove provider artifacts
-- Normalize whitespace
-- Join fragmented glyphs
-- Preserve meaningful punctuation
-- Preserve source-script characters
-- Normalize repeated OCR control characters
-- Associate lines with regions
-- Mark uncertain characters
-
-Normalization must not:
-
-- Translate text
-- Rewrite style
-- Replace names using a glossary
-- Correct meaning through unsupported guesses
-- Remove intentional punctuation or sound effects solely because they appear unusual
-
-Raw provider text must remain available for diagnostics and manual comparison when retention policy permits.
-
----
-
-# Stage 13: Confidence Evaluation
-
-CRAI computes normalized confidence independent of any one provider.
-
-Confidence may be evaluated at:
-
-- Character level
-- Token level
-- Line level
-- Region level
-- Reading-order level
-- Page level
-
-Evaluation may consider:
-
-- Provider confidence
-- Detection confidence
-- Agreement between recognition candidates
-- Language-model plausibility
-- Expected script match
-- Character corruption rate
-- Geometry consistency
-- Empty-result anomalies
-- Region size and resolution
-- Retry history
-
-Provider confidence values must not be compared directly unless calibrated to CRAI's normalized confidence model.
-
----
-
-# Stage 14: Quality Validation
-
-Quality validation decides whether a result can be accepted, retried, downgraded or rejected.
-
-Validation checks may include:
-
-- Required text exists for detected text-like regions
-- Geometry lies inside the referenced image
-- Text and geometry counts are consistent
-- Declared script matches observed characters
-- Reading order contains no cycles
-- Region identifiers are unique
-- Result schema is valid
-- Confidence meets the selected threshold
-- Provider response is complete
-- Cancellation did not occur during assembly
-
-Possible outcomes:
+Text Direction trả lời:
 
 ```text
-Accepted
-AcceptedWithWarnings
-RetryRegion
-RetryPage
-UseFallback
-RequiresUserReview
-Rejected
-Cancelled
+How is the text written?
 ```
 
-A low-confidence result is not automatically a technical failure. It may remain useful for manual correction or side-panel presentation.
-
----
-
-# Stage 15: Result Assembly
-
-The pipeline assembles a canonical `OCRResult`.
-
-Recommended structure:
+Input:
 
 ```text
-OCRResult
-├── Result ID
-├── Request ID
-├── Session ID
-├── Page ID
-├── Source Image Reference
-├── OCR Input Image Reference
-├── Pipeline Version
-├── Profile Revision
-├── Status
-├── Detected Languages
-├── Reading Direction
-├── Regions[]
-│   ├── Region ID
-│   ├── Geometry
-│   ├── Region Type
-│   ├── Orientation
-│   ├── Raw Recognition
-│   ├── Normalized Text
-│   ├── Confidence
-│   ├── Lines[]
-│   ├── Provider Metadata
-│   └── Warnings[]
-├── Reading Order
-├── Page Confidence
-├── Warnings[]
-├── Diagnostics Summary
-├── Cache Metadata
-└── Created Time
+Recognition Result
++
+Geometry
 ```
 
-The result must be self-consistent and reference the exact image versions used to produce it.
-
----
-
-# Stage 16: Cache Write
-
-Accepted results and useful intermediate artifacts may be cached according to policy.
-
-Cache writes must be:
-
-- Atomic
-- Versioned
-- Content-addressable where practical
-- Safe under concurrent requests
-- Associated with lineage
-- Subject to privacy and retention rules
-
-Cancelled, corrupted or schema-invalid results must not be written as successful cache entries.
-
-Low-confidence results may be cached with their quality status to avoid repeated expensive execution, but retry policy may intentionally bypass them.
-
----
-
-# Stage 17: Result Publication
-
-After successful assembly, the pipeline publishes the result through its public contract and event model.
-
-Typical outputs:
-
-- Return `OCRResult` to the caller
-- Attach result reference to the Page processing state
-- Publish completion or warning events
-- Record metrics and diagnostics
-- Notify Translation that recognized source text is available
-
-Events must carry identifiers and structured metadata, not raw image bytes.
-
----
-
-# Execution Granularity
-
-The pipeline supports three processing granularities.
-
-## Full Page
-
-Used when:
-
-- A page has not been processed
-- Layout and reading order are unknown
-- Region detection must run
-- The source image changed
-
-## Region
-
-Used when:
-
-- One detected region requires recognition
-- A region was manually added or modified
-- A low-confidence region is retried
-- A user requests correction for one bubble
-
-## Incremental Page
-
-Used when:
-
-- New regions become visible during scrolling
-- Screen observation detects a changed area
-- Cached regions remain valid
-- Only part of a long page requires OCR
-
-Granularity must be explicit in the request and result lineage.
-
----
-
-# Parallelism
-
-Safe parallelism may include:
-
-- Preparing independent regions concurrently
-- Recognizing independent regions concurrently
-- Running selected candidate preprocessors concurrently
-- Comparing primary and fallback OCR candidates concurrently when policy permits
-
-The pipeline must control parallelism using resource budgets.
+Output:
 
 ```text
-Page Job
-├── Region Worker 1
-├── Region Worker 2
-├── Region Worker 3
-└── Region Worker N
+Direction Result
 ```
 
-Unbounded region fan-out is prohibited.
+Direction có thể gồm:
 
-Reading-order resolution and final result assembly occur only after required region dependencies are available.
+* Writing Mode
+* Line Direction
+* Paragraph Direction
+* Character Flow
+* Rotation
+* Direction Confidence
 
----
-
-# Cancellation
-
-Every expensive or blocking stage must observe cancellation.
-
-Cancellation may originate from:
-
-- User action
-- Page replacement
-- Session closure
-- Newer OCR request superseding the current request
-- Timeout
-- Application shutdown
-- Resource-pressure policy
-
-On cancellation, the pipeline should:
-
-- Stop scheduling new work
-- Cancel provider calls when supported
-- Release image buffers
-- Preserve valid reusable intermediate cache entries only when policy allows
-- Mark the request as cancelled
-- Avoid publishing a successful result
-- Emit cancellation diagnostics
-
-A stale result must never replace a newer Page OCR revision.
-
----
-
-# Retry Strategy
-
-Retries should occur at the smallest useful scope.
-
-Preferred order:
+Chi tiết thuộc:
 
 ```text
-Retry Recognition for Region
-        ↓
-Retry Region with Alternate Preprocessing
-        ↓
-Retry Region with Alternate Provider
-        ↓
-Retry Region with Expanded Bounds
-        ↓
-Retry Page Detection
-        ↓
-Request User Review
+TEXT_DIRECTION.md
 ```
 
-Retry decisions may consider:
+---
 
-- Failure category
-- Region confidence
-- Provider health
-- Remaining latency budget
-- Remaining cost budget
-- Attempt count
-- Whether the request is interactive or background
+# 17. Stage 12 — Layout Analysis
 
-Retries must use bounded attempt counts and record attempt lineage.
+Layout trả lời:
+
+```text
+How are the visual regions organized?
+```
+
+Input:
+
+```text
+Detection Result
++
+Recognition Result
++
+Direction Result
+```
+
+Output:
+
+```text
+Layout Result
+```
+
+Layout Result có thể chứa:
+
+* Layout Tree
+* Panel
+* Container
+* Block
+* spatial relationships
+* Relationship Graph
+
+Layout không sở hữu final Reading Order.
+
+Chi tiết thuộc:
+
+```text
+LAYOUT.md
+```
 
 ---
 
-# Fallback Strategy
+# 18. Stage 13 — OCR Postprocessing
 
-Fallback may change:
+Postprocessing chuẩn hóa và hợp nhất toàn bộ kết quả OCR.
 
-- OCR provider
-- OCR model
-- Detection strategy
-- Preprocessing profile
-- Recognition granularity
-- Language hints
-- Region bounds
-- Online versus offline execution
-
-Fallback must not change the semantic request without recording the change.
-
-Example:
+Input:
 
 ```text
-Primary: Local Chinese OCR
-      │ low confidence
+Detection Result
++
+Recognition Result
++
+Direction Result
++
+Layout Result
+```
+
+Postprocessing chịu trách nhiệm:
+
+* validation
+* normalization
+* result merging
+* consistency checking
+* metadata completion
+
+Nó không được thay đổi:
+
+* recognized source meaning
+* Detection geometry
+* Layout decisions
+* Direction decisions
+
+Chi tiết thuộc:
+
+```text
+POSTPROCESS.md
+```
+
+---
+
+# 19. Stage 14 — OCR Document Assembly
+
+Output chính của OCR Pipeline là:
+
+```text
+OCR Document
+```
+
+Conceptual structure:
+
+```text
+OCR Document
+├── Metadata
+├── Page
+│   ├── Panels
+│   ├── Containers
+│   ├── Blocks
+│   └── Regions
+├── Recognition
+├── Layout
+├── Direction
+├── Statistics
+└── Diagnostics
+```
+
+`OCR Document` là provider-neutral.
+
+Authoritative definition hiện thuộc:
+
+```text
+POSTPROCESS.md
+```
+
+Các tài liệu downstream chỉ tham chiếu model này.
+
+---
+
+# 20. Stage 15 — Quality Assessment
+
+Quality Assessment trả lời:
+
+```text
+How trustworthy is the OCR Document?
+```
+
+Input:
+
+```text
+OCR Document
+```
+
+Output:
+
+```text
+Quality Report
+```
+
+Quality Report có thể chứa:
+
+* Quality Score
+* Quality Grade
+* Quality Issues
+* Confidence Summary
+* Recommendation
+* Diagnostics
+
+Quality chỉ đánh giá.
+
+Quality không tự:
+
+* retry
+* switch provider
+* cancel
+* continue pipeline
+
+Runtime mới sở hữu các quyết định execution này.
+
+Chi tiết thuộc:
+
+```text
+QUALITY.md
+```
+
+---
+
+# 21. Stage 16 — Reading Order
+
+Reading Order trả lời:
+
+```text
+In what order should the OCR entities be read?
+```
+
+Input chính:
+
+```text
+OCR Document
++
+Layout Tree
++
+Direction Metadata
++
+Reading Profile
+```
+
+Output:
+
+```text
+Reading Order Result
+```
+
+có thể chứa:
+
+* Reading Order Graph
+* Main Sequence
+* Auxiliary Sequence
+* Reading Confidence
+* Diagnostics
+
+Reading Order không thay đổi Recognition, Geometry, Layout hoặc Direction.
+
+Chi tiết thuộc:
+
+```text
+READING_ORDER.md
+```
+
+---
+
+# 22. Stage 17 — Result Publication
+
+Sau khi OCR output đạt boundary hợp lệ, Runtime có thể publish artifact tương ứng.
+
+Pipeline publication chỉ yêu cầu rằng:
+
+* artifact đã hoàn chỉnh theo contract
+* identity và revision hợp lệ
+* stale result không được commit
+* downstream consumer nhận reference tới artifact hợp lệ
+
+Artifact lifecycle, authority validation và publication semantics thuộc Runtime Architecture.
+
+OCR Pipeline không tự quyết định downstream execution.
+
+---
+
+# 23. Pipeline Output
+
+OCR Pipeline tạo hai output quan trọng.
+
+## OCR Document
+
+Canonical structured OCR artifact.
+
+Owner:
+
+```text
+POSTPROCESS.md
+```
+
+---
+
+## Reading Order Result
+
+Canonical ordering information cho OCR entities.
+
+Owner:
+
+```text
+READING_ORDER.md
+```
+
+Các bước sau có thể dùng hai artifact này để tạo structured source data cho Text Processing.
+
+---
+
+# 24. Quality as Evaluation
+
+Quality Assessment là một evaluation step, không phải transformation stage.
+
+Conceptually:
+
+```text
+OCR Document
+      │
+      ├──► Quality Assessment
+      │        ↓
+      │   Quality Report
+      │
+      └──► Reading Order
+```
+
+Quality Report hỗ trợ Runtime Decision nhưng không trực tiếp mutate OCR Document.
+
+---
+
+# 25. Provider Integration
+
+Pipeline không phụ thuộc provider cụ thể.
+
+```text
+OCR Pipeline
+      │
       ▼
-Fallback: Cloud OCR with vertical-text support
-      │ still uncertain
+Provider Contract
+      │
       ▼
-Result: AcceptedWithWarnings + User Review
+Provider Adapter
+      │
+      ▼
+OCR Engine
 ```
 
-Provider fallback remains subject to privacy policy. An image classified as local-only must never be sent to a cloud provider.
+Provider-specific SDK, request và response phải được giữ bên dưới Adapter boundary.
 
----
-
-# Provider Routing
-
-OCR provider selection is based on capability and policy rather than direct implementation references.
-
-Routing factors may include:
-
-- Required languages and scripts
-- Vertical-text support
-- Layout-detection support
-- Local or cloud requirement
-- Privacy classification
-- Provider health
-- Latency target
-- Cost budget
-- Image size
-- Offline availability
-- Model confidence history
-- User preference
-
-The pipeline requests an OCR capability. Provider Management selects a compatible implementation.
-
----
-
-# Resource Management
-
-OCR is CPU-, GPU-, memory- and network-intensive.
-
-The pipeline must operate under explicit budgets for:
-
-- Concurrent page jobs
-- Concurrent region jobs
-- In-memory image bytes
-- Maximum image dimensions
-- Provider calls
-- GPU execution slots
-- Request timeout
-- Retry count
-- Estimated monetary cost
-
-Large images should be tiled or downscaled only through a strategy that preserves coordinate mapping.
-
-Temporary buffers must be released as soon as downstream stages no longer need them.
-
----
-
-# Privacy and Security
-
-OCR inputs may contain private reading content, account information or captured screen data.
-
-The pipeline must:
-
-- Respect local-only processing policies
-- Avoid logging raw image content
-- Avoid logging full recognized text by default
-- Redact sensitive provider errors
-- Use encrypted transport for remote providers
-- Apply provider retention policy
-- Prevent unauthorized cross-session cache reuse
-- Validate imported image formats
-- Limit decompression and image dimensions
-- Isolate untrusted decoders where practical
-
-OCR cache scope must be compatible with the source privacy classification.
-
----
-
-# Observability
-
-Recommended metrics:
-
-- Total OCR duration
-- Time per stage
-- Time to first recognized region
-- Region count
-- Recognized character count
-- Empty-region rate
-- Page confidence
-- Low-confidence region count
-- Cache-hit rate
-- Retry count
-- Fallback count
-- Provider success rate
-- Provider latency
-- Preprocessing variant count
-- Peak memory usage
-- Cancellation rate
-- Estimated cost
-
-Recommended trace identifiers:
-
-- Request ID
-- Session ID
-- Page ID
-- Image ID
-- OCR Result ID
-- Region ID
-- Provider request ID
-
-Diagnostics must preserve stage and provider metadata without exposing raw private content in ordinary logs.
-
----
-
-# Error Categories
-
-Stable OCR error categories include:
-
-## Request Errors
-
-- Invalid OCR request
-- Unsupported OCR mode
-- Invalid target region
-- Incompatible profile
-
-## Image Errors
-
-- Image unavailable
-- Unsupported format
-- Decode failure
-- Invalid dimensions
-- Coordinate mismatch
-- Transform failure
-
-## Detection Errors
-
-- Detector unavailable
-- Detection timeout
-- Invalid region geometry
-- No text regions detected
-
-## Recognition Errors
-
-- Provider unavailable
-- Authentication failure
-- Rate limited
-- Recognition timeout
-- Invalid provider response
-- Unsupported language
-- Empty recognition result
-
-## Quality Errors
-
-- Confidence below threshold
-- Script mismatch
-- Reading order unresolved
-- Geometry inconsistent
-- Result validation failed
-
-## Runtime Errors
-
-- Cancelled
-- Resource budget exceeded
-- Memory pressure
-- Stale request
-- Internal pipeline failure
-
-Provider-specific errors must be translated into these stable categories before crossing the OCR boundary.
-
----
-
-# Event Model
-
-Typical events:
-
-- `OCRRequested`
-- `OCRStarted`
-- `OCRStageStarted`
-- `OCRRegionDetected`
-- `OCRRegionRecognized`
-- `OCRProgressChanged`
-- `OCRRetryScheduled`
-- `OCRFallbackSelected`
-- `OCRCompleted`
-- `OCRCompletedWithWarnings`
-- `OCRReviewRequired`
-- `OCRFailed`
-- `OCRCancelled`
-- `OCRCacheHit`
-- `OCRResultInvalidated`
-
-High-frequency progress events should be throttled or coalesced before reaching the UI.
-
-Events describe facts. They do not instruct other modules how to implement their reactions.
-
----
-
-# State Model
-
-A pipeline execution may use the following states:
+Chi tiết thuộc:
 
 ```text
-Created
-   │
-   ▼
-Validating
-   │
-   ▼
-Preparing
-   │
-   ▼
-Detecting
-   │
-   ▼
-Recognizing
-   │
-   ▼
-Reconstructing
-   │
-   ▼
-ValidatingResult
-   │
-   ├──► Retrying
-   │        │
-   │        └──────────────► Preparing / Recognizing
-   │
-   ├──► ReviewRequired
-   ├──► Failed
-   ├──► Cancelled
-   └──► Completed
+PROVIDERS.md
 ```
 
-The detailed execution state machine belongs in the OCR state document. This pipeline document defines only the expected stage progression.
+---
+
+# 26. Execution Granularity
+
+OCR Pipeline có thể hoạt động theo:
+
+* Full Page
+* Region
+* Incremental Scope
+
+Granularity phải explicit trong request và lineage.
+
+Architecture không yêu cầu mọi implementation phải chạy toàn bộ page.
 
 ---
 
-# Manual Review and Correction
+# 27. Parallelizable Work
 
-OCR must support human correction without destroying machine output.
+Một số stage có thể xử lý song song:
 
-A correction should record:
+* independent region preparation
+* independent region recognition
+* selected preprocessing candidates
+* provider requests khi policy cho phép
 
-- OCR Result ID
-- Region ID
-- Original normalized text
-- Corrected text
-- Correction source
-- Correction time
-- Base result revision
-- Optional reason
+Nhưng parallelism phải bounded.
 
-Manual correction creates a new revision or correction layer. It must not silently mutate historical provider output.
+Scheduling và concurrency authority thuộc Runtime.
 
-Corrected text may be consumed by Translation while raw OCR remains available for audit and comparison.
-
----
-
-# Result Invalidation
-
-An OCR result becomes invalid when a semantic dependency changes.
-
-Invalidation triggers may include:
-
-- Source image content changed
-- Image version changed
-- Target region changed
-- OCR Profile changed with OCR impact
-- Pipeline compatibility changed
-- Detection or recognition model became incompatible
-- User requested forced reprocessing
-- Coordinate lineage became invalid
-- Manual region structure changed
-
-Presentation-only changes do not invalidate OCR.
-
-Translation preference changes do not invalidate OCR unless they also alter source text correction policy.
-
----
-
-# Cache Invalidation Matrix
-
-| Change | Detection Cache | Recognition Cache | Reading Order | Final OCR Result |
-|---|---:|---:|---:|---:|
-| Source image pixels changed | Invalidate | Invalidate | Invalidate | Invalidate |
-| Image metadata only changed | Usually retain | Usually retain | Usually retain | Revalidate |
-| Region bounds changed | Affected region | Affected region | Recompute | Invalidate affected result |
-| Preprocessing profile changed | Retain detection when compatible | Invalidate | Usually retain | Reassemble |
-| Recognition provider changed | Retain | Invalidate | Usually retain | Reassemble |
-| Language hint changed | Usually retain | Invalidate | Revalidate | Reassemble |
-| Reading direction changed | Retain | Retain | Invalidate | Reassemble |
-| Confidence threshold changed | Retain | Retain | Retain | Revalidate |
-| Translation settings changed | Retain | Retain | Retain | Retain |
-| Presentation settings changed | Retain | Retain | Retain | Retain |
-
-The table describes default behavior. A versioned compatibility policy may override it when safety can be proven.
-
----
-
-# Performance Modes
-
-Recommended execution modes:
-
-## Interactive Fast
-
-Prioritizes low latency.
-
-- Reuse cache aggressively
-- Limit preprocessing candidates
-- Use low-latency provider
-- Return partial region results
-- Schedule uncertain regions for later refinement
-
-## Balanced
-
-Balances latency and quality.
-
-- Standard detection
-- Selected preprocessing retry
-- Normal confidence thresholds
-- Bounded provider fallback
-
-## Quality
-
-Prioritizes recognition accuracy.
-
-- More preprocessing candidates
-- Higher-resolution region preparation
-- Candidate comparison
-- Stronger fallback policy
-- More expensive reading-order analysis
-
-## Offline
-
-Restricts execution to local capabilities.
-
-- Local detector
-- Local OCR model
-- No cloud fallback
-- Local cache only
-
-Mode selection is a preference and routing concern. The public OCR result contract remains stable.
-
----
-
-# Incremental Results
-
-The pipeline may publish partial results to reduce perceived latency.
-
-Possible progression:
+Pipeline chỉ khai báo:
 
 ```text
-Regions Detected
-      ↓
-First Regions Recognized
-      ↓
-Partial Reading Order
-      ↓
-All Required Regions Recognized
-      ↓
-Validated Final OCR Result
+this work MAY be parallelizable
 ```
 
-Partial results must declare:
-
-- Result revision
-- Completion status
-- Available regions
-- Pending regions
-- Whether reading order is provisional
-- Whether translation may safely begin
-
-A partial result must never be presented as final without explicit completion status.
+không định nghĩa execution scheduler.
 
 ---
 
-# Idempotency and Concurrency
+# 28. Cancellation Integration
 
-Equivalent active requests for the same Page, image version, region and OCR profile may be deduplicated.
+OCR work phải quan sát Runtime cancellation.
 
-Concurrency rules:
+Các operation đắt tiền cần hỗ trợ cooperative cancellation khi implementation cho phép.
 
-1. Every execution has a unique Request ID.
-2. Every Page tracks the latest relevant OCR request revision.
-3. A completed stale request may be cached but must not replace a newer result.
-4. Result attachment uses compare-and-set or equivalent revision validation.
-5. Repeated requests may share work only when privacy, cancellation and lifecycle rules remain valid.
-6. Cancelling one consumer must not cancel shared work still required by another consumer unless the shared-work contract supports reference counting.
+OCR không sở hữu:
 
----
+* cancellation state machine
+* cancellation authority
+* propagation policy
 
-# Public Input Contract
-
-A conceptual `OCRRequest` contains:
-
-- Request ID
-- Session ID
-- Page ID
-- Image ID
-- Image version
-- Optional target region
-- Processing granularity
-- OCR mode
-- Language hints
-- Reading-direction hint
-- Effective OCR Profile reference
-- Priority
-- Deadline
-- Privacy classification
-- Cache policy
-- Cancellation context
-
-The detailed schema belongs in the OCR contract document.
-
----
-
-# Public Output Contract
-
-A conceptual `OCRResult` contains:
-
-- Result identity and revision
-- Request and Page references
-- Exact source and derived image references
-- Structured regions and lines
-- Canonical geometry
-- Raw and normalized recognized text
-- Reading order
-- Language and script metadata
-- Confidence
-- Warnings
-- Provider and pipeline version metadata
-- Cache and lineage metadata
-- Completion status
-
-Translation and Presentation must depend on this stable contract, not on provider-native OCR responses.
-
----
-
-# Architecture Invariants
-
-1. OCR never mutates the original source image.
-2. Every coordinate-bearing OCR artifact references the exact image version that produced it.
-3. Every derived OCR image preserves parent lineage and transform metadata.
-4. Provider-specific OCR formats never cross the OCR provider adapter boundary.
-5. OCR output remains source-language text; translation is a separate pipeline.
-6. Raw recognition and normalized recognition are distinguishable.
-7. Reading order is explicit, versioned and allowed to be uncertain.
-8. Low confidence is represented as quality metadata, not hidden.
-9. Retry and fallback are bounded by latency, cost, privacy and resource policy.
-10. Cache keys include every semantic dependency that can affect recognition.
-11. A stale execution never replaces a newer Page OCR revision.
-12. Cancellation is observed by every expensive stage.
-13. Events never contain raw image bytes.
-14. Ordinary logs do not contain full private images or recognized text.
-15. Manual corrections preserve original machine output and revision history.
-16. Translation and Presentation consume the canonical OCR contract, not provider responses.
-17. Region-level retry is preferred over full-page retry when valid.
-18. Identical inputs and profile versions produce structurally equivalent results, subject to provider nondeterminism explicitly recorded in metadata.
-
----
-
-# Recommended Initial MVP Path
-
-The first CRAI OCR implementation should prefer a narrow and testable pipeline:
+Chi tiết thuộc:
 
 ```text
-Normalized Page Image
+runtime/CANCELLATION.md
+```
+
+---
+
+# 29. Retry and Fallback Integration
+
+OCR stages có thể cung cấp:
+
+* failure category
+* quality information
+* provider capability information
+* retry recommendation
+* fallback recommendation
+
+Nhưng không tự schedule retry.
+
+Runtime quyết định:
+
+```text
+Retry
+Fallback
+Stop
+Continue
+```
+
+Chi tiết thuộc:
+
+```text
+runtime/RETRY_POLICY.md
+```
+
+---
+
+# 30. Resource Integration
+
+OCR là workload có thể tiêu thụ nhiều:
+
+* CPU
+* GPU
+* RAM
+* image buffers
+* provider capacity
+
+OCR Architecture có thể khai báo resource requirement.
+
+Resource lifecycle, lease và capacity management thuộc Runtime/Infrastructure.
+
+---
+
+# 31. Observability Integration
+
+OCR Architecture có thể định nghĩa các measurement có ý nghĩa như:
+
+* OCR latency
+* detection latency
+* recognition latency
+* region count
+* quality score
+* cache compatibility outcome
+* provider latency
+
+Telemetry lifecycle và logging transport thuộc:
+
+```text
+runtime/RUNTIME_OBSERVABILITY.md
+03-infrastructure/logging/
+03-infrastructure/telemetry/
+```
+
+---
+
+# 32. Privacy
+
+OCR input có thể chứa dữ liệu nhạy cảm.
+
+Pipeline phải giữ các nguyên tắc:
+
+* không log raw image mặc định
+* không log toàn bộ recognized text mặc định
+* provider call phải tuân theo privacy policy
+* local-only input không được gửi sang remote provider
+* artifact sharing phải giữ đúng session/privacy boundary
+
+Chi tiết implementation thuộc Infrastructure và Provider Integration.
+
+---
+
+# 33. Stale Result Protection
+
+Một OCR execution có thể hoàn thành sau khi source đã thay đổi.
+
+Do đó mọi output phải giữ identity đủ để Runtime kiểm tra:
+
+```text
+Session
+Revision
+Image Version
+Artifact Identity
+```
+
+OCR Pipeline không tự commit stale result.
+
+Runtime authority quyết định output còn hợp lệ hay không.
+
+---
+
+# 34. Determinism
+
+Trong cùng:
+
+```text
+input semantic identity
++
+profile version
++
+strategy version
+```
+
+pipeline phải tạo output có cấu trúc tương đương, ngoại trừ provider nondeterminism được ghi nhận rõ.
+
+Determinism đặc biệt quan trọng cho:
+
+* cache compatibility
+* debugging
+* quality regression
+* reproducibility
+
+---
+
+# 35. Immutable Source
+
+Original source image không được mutate.
+
+Derived image phải có:
+
+* identity riêng
+* parent reference
+* transform metadata
+* version/lineage rõ ràng
+
+---
+
+# 36. Provider Neutrality
+
+Mọi result vượt Provider Adapter boundary phải dùng CRAI contract.
+
+Không downstream component nào được phụ thuộc:
+
+* PaddleOCR response
+* Google Vision response
+* Azure Vision response
+* Tesseract-native structure
+* provider-specific SDK object
+
+---
+
+# 37. OCR Architecture Invariants
+
+1. Source image remains immutable.
+
+2. Every geometry-bearing artifact references the exact image version used.
+
+3. Derived images preserve lineage and transform metadata.
+
+4. Detection owns Region semantics.
+
+5. Recognition owns recognized text structure.
+
+6. Text Direction owns writing-direction semantics.
+
+7. Layout owns spatial organization semantics.
+
+8. Postprocessing owns canonical OCR Document assembly.
+
+9. Quality Assessment evaluates but does not mutate OCR Document.
+
+10. Reading Order owns precedence and sequence semantics.
+
+11. Provider-native data never crosses Provider Adapter boundary.
+
+12. OCR stages do not own Runtime scheduling.
+
+13. OCR stages do not own Runtime retry.
+
+14. OCR stages do not own Runtime cancellation authority.
+
+15. OCR stages do not redefine Event Bus semantics.
+
+16. OCR stages do not redefine global cache lifecycle.
+
+17. Stale OCR output cannot obtain presentation authority.
+
+18. Translation remains outside OCR Architecture.
+
+19. OCR output remains source-language information.
+
+20. Detailed concept semantics belong to their authoritative owner documents.
+
+---
+
+# 38. Recommended MVP Pipeline
+
+Phiên bản đầu tiên của CRAI nên giữ pipeline hẹp và dễ kiểm thử:
+
+```text
+Normalized Image
       ↓
-General Text Detection
+Text Detection
       ↓
-Region Crop + Padding
+Region Preparation
       ↓
-Chinese / English Recognition
+Recognition
       ↓
-Basic Geometry Mapping
+Basic Direction Analysis
+      ↓
+Basic Layout Analysis
+      ↓
+Postprocessing
+      ↓
+OCR Document
+      ↓
+Quality Assessment
       ↓
 Rule-Based Reading Order
-      ↓
-Unicode and Whitespace Normalization
-      ↓
-Confidence Threshold
-      ↓
-Structured OCR Result
 ```
 
-Initial MVP constraints:
+Initial scope:
 
-- Full-page and manual-region OCR
-- Simplified Chinese, Traditional Chinese and English hints
-- Horizontal and vertical text support where provider capability exists
-- One primary OCR provider
-- One fallback provider or local fallback
-- Region-level retry
-- Full-result and per-region cache
-- Side-panel review for low-confidence text
-- No automatic image inpainting inside the OCR boundary
-- No semantic rewriting inside normalization
+* full-page OCR
+* manual region OCR
+* Simplified Chinese
+* Traditional Chinese
+* English
+* horizontal text
+* vertical text where supported
+* one primary OCR provider
+* optional fallback provider
+* region-level processing
+* provider-neutral OCR Document
+* basic quality evaluation
+* basic reading-order resolution
 
-Advanced panel understanding, sound-effect extraction and multi-candidate OCR voting should remain optional until validated by real reading tests.
-
----
-
-# Open Decisions
-
-The following questions require prototypes or product validation:
-
-- Which OCR provider best handles Chinese vertical dialogue at acceptable latency and cost?
-- Should detection and recognition use one provider or separate specialized providers?
-- What confidence thresholds are useful for automatic translation versus manual review?
-- How much preprocessing improves accuracy before latency becomes unacceptable?
-- Should sound effects be detected by default or only on demand?
-- How should panel order influence dialogue reading order?
-- Which intermediate images should be retained for diagnostics?
-- Should OCR correction learn per series, globally or not at all in the MVP?
-- When should CRAI run dual-provider recognition?
-- How should long scrolling images be tiled without breaking reading order?
-
-These decisions must not be hidden inside provider adapters. They belong to explicit, versioned OCR policies.
+Advanced features remain optional until validated by real reading sessions.
 
 ---
 
-# Related Documents
+# 39. Detailed Ownership References
 
-- `README.md`
-- `CONTRACT.md`
-- `STAGES.md`
-- `PROVIDERS.md`
-- `PREPROCESSING.md`
-- `DETECTION.md`
-- `RECOGNITION.md`
-- `READING_ORDER.md`
-- `CONFIDENCE.md`
-- `RETRY.md`
-- `FALLBACK.md`
-- `CACHE.md`
-- `OBSERVABILITY.md`
-- `../../architecture/DATA_FLOW.md`
-- `../../architecture/STATE_MACHINE.md`
-- `../../architecture/EVENT_BUS.md`
-- `../../architecture/MODULE_DEPENDENCY.md`
-- `../../domain/IMAGE.md`
-- `../../domain/PAGE.md`
-- `../../domain/TEXT_BLOCK.md`
+| Concern                 | Authoritative Document             |
+| ----------------------- | ---------------------------------- |
+| OCR Pipeline            | `PIPELINE.md`                      |
+| Preprocessing           | `PREPROCESS.md`                    |
+| Region / Detection      | `DETECTION.md`                     |
+| Recognition             | `RECOGNITION.md`                   |
+| Text Direction          | `TEXT_DIRECTION.md`                |
+| Layout                  | `LAYOUT.md`                        |
+| OCR Document            | `POSTPROCESS.md`                   |
+| Quality                 | `QUALITY.md`                       |
+| Reading Order           | `READING_ORDER.md`                 |
+| OCR Provider Contract   | `PROVIDERS.md`                     |
+| Retry                   | `runtime/RETRY_POLICY.md`          |
+| Cancellation            | `runtime/CANCELLATION.md`          |
+| Scheduling              | `runtime/SCHEDULER.md`             |
+| Cache lifecycle         | `runtime/CACHE_POLICY.md`          |
+| Resource lifecycle      | `runtime/RESOURCE_LIFECYCLE.md`    |
+| Runtime Observability   | `runtime/RUNTIME_OBSERVABILITY.md` |
+| Architectural ownership | `architecture/OWNERSHIP_MAP.md`    |
+
+---
+
+# 40. Summary
+
+OCR Pipeline là bản đồ end-to-end của quá trình:
+
+```text
+Image
+   ↓
+Preprocessing
+   ↓
+Detection
+   ↓
+Recognition
+   ↓
+Text Direction
+   ↓
+Layout
+   ↓
+Postprocessing
+   ↓
+OCR Document
+   ↓
+Quality Assessment
+   ↓
+Reading Order
+   ↓
+Structured Source Data
+```
+
+`PIPELINE.md` chỉ sở hữu flow và stage boundary.
+
+Mỗi stage chuyên biệt được định nghĩa trong tài liệu owner của nó.
+
+Runtime và Infrastructure chịu trách nhiệm execution, resource, retry, cancellation, telemetry và technical services.
+
+Nguyên tắc quan trọng nhất:
+
+```text
+PIPELINE defines where data flows.
+
+Owner documents define what each stage means.
+
+Runtime defines how work executes.
+```

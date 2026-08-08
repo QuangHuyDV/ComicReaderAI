@@ -1,1809 +1,2355 @@
 # Presentation States
 
-* **Module:** Presentation
-* **Version:** 1.0.0
-* **Status:** Draft
-* **Owner:** CRAI Architecture
-* **Related documents:**
-
-  * `modules/presentation/MODULE.md`
-  * `modules/presentation/CONTRACT.md`
-  * `modules/presentation/EVENTS.md`
-  * `docs/architecture/STATE_MACHINE.md`
-  * `docs/architecture/EVENT_BUS.md`
+> **Project:** CRAI
+> **Module:** `presentation`
+> **Path:** `doc/02-modules/presentation/STATES.md`
+> **Version:** 2.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2 aligned
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-08
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-This document defines the lifecycle, states, transitions, guards, actions, and recovery behavior of the Presentation Module.
+This document defines the Presentation-owned lifecycle state model.
 
-The Presentation Module converts translated content, source geometry, viewport information, and presentation preferences into a stable `PresentationDocument` that can be rendered by a UI Adapter.
+It specifies:
 
-This document describes module-level state only.
+* Presentation lifecycle states;
+* state transitions;
+* Presentation-local guards;
+* Candidate Presentation lifecycle;
+* commit behavior;
+* supersession behavior;
+* clear behavior;
+* recovery behavior;
+* concurrency rules;
+* state/event relationships.
+
+Presentation converts accepted immutable upstream Artifact references and presentation context into:
+
+```text
+PresentationSnapshot
++
+RenderPlan
+```
+
+through:
+
+```text
+Presentation Operation
+    ↓
+Candidate Presentation State
+    ↓
+Validation
+    ↓
+Runtime Authority Revalidation
+    ↓
+Atomic Presentation Commit
+```
+
+This state model describes **Presentation state only**.
 
 It does not define:
 
-* application-level state;
-* reading session state;
-* translation state;
-* OCR state;
-* browser state;
-* desktop window state;
-* UI component state.
+* Runtime Revision lifecycle;
+* WorkItem lifecycle;
+* Attempt lifecycle;
+* Runtime cancellation authority;
+* Runtime retry lifecycle;
+* Reading Session lifecycle;
+* Artifact Store lifecycle;
+* Translation lifecycle;
+* Recognition lifecycle;
+* UI Adapter component lifecycle;
+* native window lifecycle;
+* browser DOM lifecycle.
 
 ---
 
-## 2. State Machine Scope
+# 2. State Ownership
 
-The Presentation state machine manages the lifecycle of one active presentation context.
-
-A presentation context is identified by:
-
-* `PresentationId`;
-* `SessionId`;
-* `ContentId`;
-* `ContentRevision`.
-
-The state machine controls:
-
-* initial presentation construction;
-* translated-content updates;
-* layout recomputation;
-* presentation mode changes;
-* clearing and replacement;
-* failure recovery;
-* stale-result rejection.
-
-The state machine does not control rendering.
-
-Rendering is the responsibility of the UI Adapter.
-
----
-
-## 3. State Model
-
-The Presentation Module uses the following primary states:
+Presentation owns:
 
 ```text
-Empty
-  │
-  │ BuildPresentation
-  ▼
-Preparing
-  │
-  ├── success ───────────────► Ready
-  │
-  ├── recoverable failure ───► Empty
-  │
-  └── internal failure ──────► Failed
+Presentation Context State
+Presentation Operation Phase
+Candidate Presentation State
+Committed Presentation State
+PresentationRevision
+Presentation-local degradation
+Presentation-local recovery
+```
 
-Ready
-  │
-  ├── content update ────────► Updating
-  ├── viewport/layout change ► Reflowing
-  ├── mode change ───────────► Reconfiguring
-  ├── clear/replace ─────────► Clearing
-  └── internal failure ──────► Failed
+Runtime Control owns:
 
-Updating
-  │
-  ├── success ───────────────► Ready
-  ├── stale update ──────────► Ready
-  ├── superseded ────────────► Updating
-  └── internal failure ──────► Failed
+```text
+Runtime Revision
+WorkItem
+Attempt
+Authority
+Cancellation authority
+Retry
+Completion acceptance
+```
 
-Reflowing
-  │
-  ├── success ───────────────► Ready
-  ├── stale result ──────────► Ready
-  ├── superseded ────────────► Reflowing
-  └── internal failure ──────► Failed
+Artifact Store owns:
 
-Reconfiguring
-  │
-  ├── success ───────────────► Ready
-  ├── unsupported mode ──────► Ready
-  └── internal failure ──────► Failed
+```text
+Accepted Artifact publication
+Artifact ownership
+Artifact retention / lease semantics
+```
 
-Clearing
-  │
-  ├── success ───────────────► Empty
-  └── internal failure ──────► Failed
+UI Adapter owns:
 
-Failed
-  │
-  ├── reset ─────────────────► Empty
-  ├── restore last snapshot ─► Ready
-  └── clear ─────────────────► Clearing
+```text
+Native surface state
+Widget / DOM lifecycle
+UI apply state
+Platform resource lifecycle
+```
+
+The core rule is:
+
+```text
+Runtime decides whether the work may still matter.
+
+Presentation decides whether its candidate is semantically valid.
+
+Presentation commits only its own state.
+
+UI Adapter decides whether committed state becomes actual visible UI.
 ```
 
 ---
 
-## 4. State Summary
+# 3. State Machine Scope
 
-| State           | Meaning                                                          |        Stable |
-| --------------- | ---------------------------------------------------------------- | ------------: |
-| `Empty`         | No active presentation exists                                    |           Yes |
-| `Preparing`     | A new presentation is being built                                |            No |
-| `Ready`         | A valid presentation is available                                |           Yes |
-| `Updating`      | Existing presentation content is being updated                   |            No |
-| `Reflowing`     | Layout is being recomputed                                       |            No |
-| `Reconfiguring` | Presentation mode or presentation-wide configuration is changing |            No |
-| `Clearing`      | Presentation resources are being removed                         |            No |
-| `Failed`        | The module cannot guarantee a valid active state                 | Yes, degraded |
+One Presentation state machine exists per:
 
-A stable state can safely wait for external input.
+```text
+PresentationContextId
+```
 
-A transitional state represents an operation currently being processed.
+The Presentation Context may additionally reference:
 
----
+```text
+PresentationId?
+SessionId
+ContentIdentity?
+CurrentPresentationRevision?
+CurrentPresentationRef?
+PreviousPresentationRef?
+```
 
-# 5. State Definitions
+`RuntimeRevisionId` may be associated with active work for diagnostics and authority revalidation.
 
-## 5.1 Empty
-
-### Meaning
-
-No active `PresentationDocument` exists.
-
-The module may still retain:
-
-* configuration defaults;
-* cached font metrics;
-* layout algorithms;
-* presentation strategy registry;
-* diagnostics history.
-
-It MUST NOT expose an active presentation.
-
-### Entry Conditions
-
-The module enters `Empty` when:
-
-* the application starts;
-* a presentation is cleared successfully;
-* preparation is rejected before a document is created;
-* the module is reset after failure.
-
-### Allowed Inputs
-
-* `BuildPresentation`
-* `TranslationCompleted`
-* `ReadingSessionChanged`
-* configuration events that do not require an active presentation
-* diagnostic queries
-
-### Rejected or Ignored Inputs
-
-* `UpdatePresentation`
-* `RecomputeLayout`
-* `ChangePresentationMode`
-* `ClearPresentation`
-* `TranslationUpdated`
-* `ViewportChanged` without a pending presentation request
-
-### Entry Actions
-
-The module MUST:
-
-* remove the active `PresentationDocument`;
-* clear active layout state;
-* clear active presentation identifiers;
-* cancel obsolete presentation operations;
-* retain only reusable non-content caches.
-
-### Exit Conditions
-
-The state exits when a valid build request begins.
-
-### Invariants
-
-While in `Empty`:
-
-* `ActivePresentationId` MUST be absent;
-* `PresentationDocument` MUST be absent;
-* no `PresentationPrepared` event may be emitted;
-* presentation-specific queries MUST return `NotReady` or an empty result;
-* stale asynchronous results MUST be discarded.
+It is not part of Presentation state ownership.
 
 ---
 
-## 5.2 Preparing
+# 4. Primary State Model
 
-### Meaning
+Presentation uses:
 
-The module is building a new `PresentationDocument`.
+```text
+EMPTY
+  │
+  │ BuildPresentation
+  ▼
+PREPARING
+  │
+  ├── committed ───────────────► READY
+  ├── rejected ────────────────► EMPTY
+  ├── superseded ──────────────► EMPTY or PREPARING
+  └── fatal internal failure ──► FAILED
 
-Preparation may include:
+READY
+  │
+  ├── content update ─────────► UPDATING
+  ├── layout change ──────────► REFLOWING
+  ├── mode/profile change ────► RECONFIGURING
+  ├── clear ──────────────────► CLEARING
+  └── invariant failure ──────► FAILED
 
-* validating input contracts;
-* validating revisions;
-* normalizing source geometry;
-* selecting a presentation strategy;
-* generating presentation items;
-* calculating initial layout;
-* resolving overflow;
-* generating diagnostics;
-* assigning a new presentation revision.
+UPDATING
+  │
+  ├── committed ──────────────► READY
+  ├── rejected ───────────────► READY
+  ├── superseded ─────────────► READY or UPDATING
+  └── active state corrupted ─► FAILED
 
-### Entry Conditions
+REFLOWING
+  │
+  ├── committed ──────────────► READY
+  ├── rejected/stale ─────────► READY
+  ├── newer reflow ───────────► REFLOWING
+  └── active state corrupted ─► FAILED
 
-The module enters `Preparing` from `Empty` when it accepts:
+RECONFIGURING
+  │
+  ├── committed ──────────────► READY
+  ├── fallback committed ─────► READY
+  ├── rejected ───────────────► READY
+  └── active state corrupted ─► FAILED
 
-* `BuildPresentation`; or
-* a valid `TranslationCompleted` event that triggers automatic preparation.
+CLEARING
+  │
+  ├── logical clear complete ─► EMPTY
+  └── state corruption ───────► FAILED
 
-### Required Context
+FAILED
+  │
+  ├── verified restore ───────► READY
+  ├── reset ──────────────────► EMPTY
+  └── clear ──────────────────► CLEARING
+```
 
-The preparation context MUST contain:
+---
 
-* `RequestId`;
-* `SessionId`;
-* `ContentId`;
-* `ContentRevision`;
-* `TranslationRevision`;
-* `PresentationMode`;
-* `TranslationSegments`;
-* `SourceRegions`;
-* `Viewport`;
-* presentation preferences.
+# 5. Stable and Transitional States
 
-### Allowed Inputs
+| State           | Meaning                                                            |       Stable |
+| --------------- | ------------------------------------------------------------------ | -----------: |
+| `EMPTY`         | No committed Presentation exists                                   |          Yes |
+| `PREPARING`     | Initial Candidate Presentation is being prepared                   |           No |
+| `READY`         | A valid committed Presentation exists                              |          Yes |
+| `UPDATING`      | Candidate semantic/content update is being prepared                |           No |
+| `REFLOWING`     | Candidate layout update is being prepared                          |           No |
+| `RECONFIGURING` | Candidate mode/profile-wide representation is being prepared       |           No |
+| `CLEARING`      | Current Presentation is being logically invalidated and cleaned up |           No |
+| `FAILED`        | Presentation cannot currently guarantee internal correctness       | Yes, faulted |
 
-* cancellation caused by a newer content revision;
-* a newer `BuildPresentation` request;
-* `ReadingSessionChanged`;
-* diagnostic queries;
-* `ClearPresentation`.
+A transitional state describes Presentation-local work.
 
-### Inputs Requiring Supersession
+It does not imply any particular Runtime WorkItem or Attempt state.
 
-A new build request MAY supersede the current preparation when:
+---
 
-* it belongs to the same session and content;
-* its `ContentRevision` is newer;
-* its request timestamp or sequence is newer.
+# 6. Candidate vs Committed State
 
-The older operation MUST be cancelled or allowed to finish without committing its result.
+Presentation distinguishes:
 
-### Entry Actions
+```text
+Candidate Presentation State
+```
 
-The module MUST:
+from:
 
-1. assign an operation identifier;
-2. capture the expected session and content revisions;
-3. validate required input;
-4. resolve the target presentation strategy;
-5. begin building a candidate document.
+```text
+Committed Presentation State
+```
 
-### Success Actions
+Candidate state is:
 
-On success, the module MUST:
+* immutable once prepared;
+* private to the operation/commit path;
+* not returned as current Presentation;
+* not render-authoritative;
+* not evidence of Runtime authority;
+* safe to discard.
 
-* validate the candidate document;
-* assign `PresentationId`;
-* assign the first `PresentationRevision`;
-* commit the document atomically;
-* publish `PresentationPrepared`;
-* transition to `Ready`.
+Committed state is:
 
-### Rejection Actions
+```text
+PresentationRevision
++
+PresentationSnapshot
++
+RenderPlan
+```
 
-For a deterministic contract rejection, the module MUST:
+and is the only Presentation state exposed as current.
 
-* avoid committing a partial document;
-* publish `PresentationRejected`;
-* return to `Empty`.
+---
+
+# 7. Atomic Commit Boundary
+
+Every successful mutation follows:
+
+```text
+Prepare Candidate
+    ↓
+Presentation Candidate Validation
+    ↓
+PresentationRevision Guard
+    ↓
+Target / Viewport Compatibility Guard
+    ↓
+Runtime Authority Revalidation where required
+    ↓
+Atomic Presentation Commit
+    ↓
+State transition
+    ↓
+Success event
+```
+
+No success event may be emitted before commit.
+
+---
+
+# 8. State: `EMPTY`
+
+## Meaning
+
+No committed Presentation exists for the Presentation Context.
+
+The module may retain reusable non-content resources such as:
+
+* configuration references;
+* strategy registry;
+* reusable typography metrics;
+* layout algorithm instances;
+* diagnostics metadata.
+
+It MUST NOT expose a current Presentation.
+
+## Entry
+
+`EMPTY` is entered when:
+
+* Presentation Context is created;
+* clear completes;
+* initial build is rejected;
+* initial candidate is superseded with no replacement pending;
+* reset after failure succeeds.
+
+## Allowed Commands
+
+```text
+BuildPresentation
+ClearPresentation
+GetCurrentPresentation
+GetPresentationDiagnostics
+```
+
+`ClearPresentation` is an idempotent no-op when already empty.
+
+## Invalid Commands
+
+Normally rejected or no-op:
+
+```text
+UpdatePresentationContent
+RecomputePresentationLayout
+ChangePresentationMode
+UpdatePresentationFocus
+ApplyPresentationProfile
+```
+
+because no committed Presentation exists.
+
+## Invariants
+
+While `EMPTY`:
+
+```text
+CurrentPresentationRef = absent
+CurrentPresentationRevision = absent
+CurrentPresentationId = absent
+```
+
+No `PresentationPrepared` event may be emitted without first leaving this state through a successful commit.
+
+Late candidates targeting an invalidated Presentation lineage cannot commit.
+
+---
+
+# 9. State: `PREPARING`
+
+## Meaning
+
+Presentation is preparing the first Candidate Presentation for a context.
+
+The committed state remains logically empty until commit succeeds.
+
+## Entry
+
+Entered from `EMPTY` after accepting:
+
+```text
+BuildPresentation
+```
+
+Business Pipeline Orchestration or Runtime/Application decides when this command occurs.
+
+Presentation MUST NOT require a `TranslationCompleted` event to autonomously start itself.
+
+## Required Context
+
+Typical operation input includes:
+
+```text
+PresentationRequestId
+PresentationOperationId
+PresentationContextId
+RuntimeExecutionIdentity?
+CancellationContextRef?
+PresentationInputArtifactSet
+ContentIdentity
+PresentationProfile
+PresentationTarget
+ViewportSnapshot?
+RequestedMode
+```
+
+## Entry Actions
+
+Presentation:
+
+1. validates Presentation-owned input semantics;
+2. resolves accepted Artifact references;
+3. acquires required leases according to Runtime resource policy;
+4. resolves Presentation mode;
+5. maps semantic Presentation items;
+6. prepares geometry/layout;
+7. builds `CandidatePresentationState`.
+
+## Candidate Validation
+
+Before commit:
+
+* item identities are valid;
+* mappings are valid;
+* coordinate spaces are explicit;
+* RenderPlan references valid items;
+* Snapshot and RenderPlan share candidate revision;
+* target capabilities are sufficient;
+* readability invariants are satisfied;
+* no mutable provider/native objects are present.
+
+## Commit
+
+If candidate validation succeeds:
+
+```text
+Candidate
+    ↓
+Runtime Authority Revalidation
+    ↓
+PresentationRevision validation
+    ↓
+Atomic commit
+```
+
+The first committed revision normally becomes:
+
+```text
+PresentationRevision = 1
+```
+
+unless an implementation uses another equivalent monotonic initial token.
+
+## Success
+
+After commit:
+
+```text
+PREPARING → READY
+```
+
+Then:
+
+```text
+PresentationPrepared
+```
+
+may be published.
+
+## Rejection
+
+If Presentation input is deterministically invalid:
+
+* candidate is discarded;
+* no PresentationRevision is created;
+* context remains logically empty;
+* `PresentationRejected` may be published.
 
 Examples:
 
-* unsupported mode;
-* missing translation segments;
-* invalid viewport;
-* invalid geometry;
-* stale content revision.
+* incompatible Artifact references;
+* invalid mapping;
+* invalid required geometry;
+* unsupported mode with no allowed fallback;
+* invalid target;
+* invalid profile.
 
-### Failure Actions
+## Runtime Authority Rejection
 
-For an unexpected internal failure, the module MUST:
+If Runtime rejects commit authority:
 
-* record diagnostics;
-* ensure no partial document becomes active;
-* publish `PresentationRejected`;
-* transition to `Failed`.
+* candidate is discarded;
+* Presentation does not label Runtime Revision itself stale;
+* no Presentation success event is emitted;
+* Presentation returns to `EMPTY` unless a replacement operation is already selected.
 
-### Invariants
+## Supersession
 
-While in `Preparing`:
+A newer build may supersede current preparation.
 
-* at most one candidate document may be eligible for commit;
-* a candidate document MUST NOT be visible through public queries;
-* stale operations MUST NOT overwrite newer operations;
-* `PresentationPrepared` MUST be emitted only after atomic commit;
-* the active state remains logically empty until commit succeeds.
+The older operation may:
 
----
+* cooperatively cancel;
+* finish physically but lose commit eligibility;
+* release all temporary resources;
+* produce diagnostics only.
 
-## 5.3 Ready
+## Invariants
 
-### Meaning
+While `PREPARING`:
 
-A valid `PresentationDocument` exists and is available to consumers.
-
-This is the normal operational state.
-
-### Entry Conditions
-
-The module enters `Ready` after:
-
-* successful preparation;
-* successful content update;
-* successful layout recomputation;
-* successful mode reconfiguration;
-* restoring a known-good snapshot after failure.
-
-### Allowed Inputs
-
-* `UpdatePresentation`
-* `RecomputeLayout`
-* `ChangePresentationMode`
-* `ClearPresentation`
-* `TranslationUpdated`
-* `ViewportChanged`
-* `ThemeChanged`
-* `PreferenceChanged`
-* `ReadingSessionChanged`
-* presentation queries
-* diagnostic queries
-
-### Entry Actions
-
-The module MUST:
-
-* expose the committed `PresentationDocument`;
-* expose the active presentation identifiers;
-* clear completed operation metadata;
-* retain the last known-good snapshot;
-* update diagnostics.
-
-### Exit Conditions
-
-The module leaves `Ready` when:
-
-* translated content changes;
-* viewport or layout inputs change;
-* presentation mode changes;
-* the active presentation is cleared or replaced;
-* an unrecoverable internal invariant is violated.
-
-### Invariants
-
-While in `Ready`:
-
-* exactly one active `PresentationDocument` exists;
-* the document is internally consistent;
-* every `PresentationItem` has stable identity;
-* the document revision matches the current committed revision;
-* queries MUST return a coherent snapshot;
-* no partial updates may be visible;
-* the active document MUST be renderable by a compatible UI Adapter.
+* no Candidate is exposed as current;
+* committed Presentation remains absent;
+* only a still-valid candidate may commit;
+* multiple calculations may exist physically, but commit must be serialized;
+* stale/superseded candidates cannot become current.
 
 ---
 
-## 5.4 Updating
+# 10. State: `READY`
 
-### Meaning
+## Meaning
 
-The translated content or item-level presentation data of an existing presentation is being updated.
+A valid committed Presentation exists.
 
-This state is used when the current presentation can be incrementally updated without rebuilding the entire document.
+Conceptually:
+
+```text
+CurrentPresentation
+├── PresentationId
+├── PresentationRevision
+├── PresentationSnapshot
+└── RenderPlan
+```
+
+This is the normal stable Presentation state.
+
+## Entry
+
+Entered after:
+
+* initial commit;
+* content-update commit;
+* reflow commit;
+* mode/profile reconfiguration commit;
+* verified restoration.
+
+## Allowed Commands
+
+```text
+UpdatePresentationContent
+RecomputePresentationLayout
+ChangePresentationMode
+UpdatePresentationFocus
+ApplyPresentationProfile
+ClearPresentation
+GetCurrentPresentation
+GetPresentationSnapshot
+GetRenderPlan
+GetPresentationItem
+GetPresentationDiagnostics
+```
+
+## Invariants
+
+While `READY`:
+
+1. exactly one current committed Presentation exists per context;
+2. Snapshot and RenderPlan belong to the same PresentationRevision;
+3. current Presentation is immutable;
+4. mappings are internally consistent;
+5. item IDs are stable;
+6. current RenderPlan references only current Presentation entities;
+7. no private Candidate is visible through current-state queries.
+
+---
+
+# 11. State: `UPDATING`
+
+## Meaning
+
+A new Candidate Presentation is being prepared because accepted semantic content used by Presentation changed.
 
 Examples:
 
-* one translated segment changed;
-* translation quality was improved;
-* a segment was manually corrected;
-* item visibility changed;
-* translated text metadata changed.
+* newer Translation Artifact;
+* accepted translation correction;
+* newer compatible SourceDocument Artifact;
+* partial Translation Artifact advances completeness;
+* Presentation visibility metadata changes.
 
-### Entry Conditions
+## Entry
 
-The module enters `Updating` from `Ready` after accepting:
+Entered from `READY` through:
 
-* `UpdatePresentation`; or
-* `TranslationUpdated`.
+```text
+UpdatePresentationContent
+```
 
-### Required Context
+Presentation does not autonomously enter this state solely because it observed a Translation event.
 
-The update context MUST include:
+## Required Context
 
-* `PresentationId`;
-* current `PresentationRevision`;
-* expected `ContentRevision`;
-* new `TranslationRevision`;
-* changed segment identifiers;
-* changed translated content.
+Typical input:
 
-### Entry Actions
+```text
+PresentationId
+PresentationContextId
+ExpectedPresentationRevision
+PresentationInputArtifactSet
+ContentIdentity
+UpdateCause
+RuntimeExecutionIdentity?
+CancellationContextRef?
+```
 
-The module MUST:
+## Entry Actions
 
-1. validate that the target presentation exists;
-2. validate presentation and content revisions;
-3. identify affected presentation items;
-4. create a candidate updated document;
-5. determine whether layout recomputation is required.
+Presentation:
 
-### Update Strategies
+1. confirms target Presentation exists;
+2. validates `ExpectedPresentationRevision`;
+3. validates Artifact semantic compatibility;
+4. calculates affected Presentation items;
+5. builds Candidate Snapshot;
+6. builds Candidate RenderPlan if required;
+7. preserves previous committed Presentation.
 
-The module MAY perform:
+## Previous State Availability
 
-#### Content-only update
+While `UPDATING`:
 
-Used when translated text changes without affecting layout.
+```text
+Current committed revision N
+```
 
-Result:
+remains publicly readable.
 
-* update item content;
-* increment `PresentationRevision`;
-* publish `PresentationUpdated`;
-* return to `Ready`.
+Candidate revision:
 
-#### Content and local layout update
+```text
+N + 1
+```
 
-Used when changed text affects only a small item set.
+is private until commit.
 
-Result:
+## Incremental Strategy
 
-* update affected items;
-* recompute local layout;
-* increment `PresentationRevision`;
-* publish `PresentationUpdated`;
-* optionally publish `PresentationLayoutChanged`;
-* return to `Ready`.
+Presentation MAY update only affected items.
 
-#### Full reflow
+It MAY internally rebuild more data when simpler or safer.
 
-Used when incremental layout is unsafe.
+Externally:
 
-The module MAY internally perform a full layout calculation before returning to `Ready`.
+* unchanged semantic item identities remain stable;
+* source traceability remains stable;
+* semantic order does not silently change.
 
-It does not need to expose an intermediate `Reflowing` state unless the architecture implementation requires it.
+## Correction Precedence
 
-### Supersession Rules
+Presentation follows accepted upstream lineage/version semantics.
 
-If another update arrives while the module is in `Updating`:
+It must not use local completion time alone to decide that an older automatic translation outranks an accepted correction.
 
-* an older update MUST NOT supersede a newer update;
-* compatible updates MAY be merged;
-* incompatible updates MUST be ordered by revision;
-* stale results MUST be discarded;
-* the newest valid translation revision wins.
+## Commit
 
-### Success Actions
+Before commit:
 
-The module MUST:
+```text
+ExpectedPresentationRevision
+==
+CurrentPresentationRevision
+```
 
-* commit the updated document atomically;
-* increment `PresentationRevision`;
-* preserve stable `PresentationItem` identifiers where source identity is unchanged;
-* publish `PresentationUpdated`;
-* return to `Ready`.
+must still hold unless the command explicitly supports merge.
 
-### Stale Update Behavior
+Runtime authority is revalidated where the operation is Runtime-authorized.
 
-A stale update MUST:
+## Success
 
-* not modify the active document;
-* not increment `PresentationRevision`;
-* not publish `PresentationUpdated`;
-* optionally emit diagnostics;
-* return to `Ready`.
+```text
+UPDATING
+    ↓
+Atomic Commit
+    ↓
+READY
+    ↓
+PresentationUpdated
+```
 
-### Failure Actions
+## Rejected Candidate
 
-If the update fails before commit:
+If candidate validation fails while current Presentation remains valid:
 
-* preserve the previous known-good document;
-* publish `PresentationRejected` when appropriate;
-* return to `Ready` for recoverable failures;
-* transition to `Failed` only if the active document can no longer be trusted.
+```text
+UPDATING → READY
+```
 
-### Invariants
+The existing revision remains unchanged.
 
-While in `Updating`:
+## Presentation Revision Conflict
 
-* the previous committed document remains readable;
-* partial item updates MUST NOT become visible;
-* unchanged items retain stable identity;
-* `PresentationRevision` increments only after successful commit;
-* stale translation revisions never overwrite newer content.
+If another operation committed first:
+
+```text
+expected = N
+current = N+1
+```
+
+the older candidate must not commit.
+
+It may:
+
+* be discarded;
+* be recomputed against the new Presentation revision when explicitly requested;
+* be superseded.
+
+## Runtime Authority Rejection
+
+Runtime rejection discards the candidate.
+
+It does not itself move Presentation into `FAILED`.
+
+## Fatal Failure
+
+`FAILED` is entered only if:
+
+* current committed Presentation becomes internally untrustworthy;
+* Presentation registry/identity is corrupted;
+* rollback/retention invariants cannot be guaranteed.
+
+## Invariants
+
+While `UPDATING`:
+
+* current committed Presentation remains readable;
+* Candidate state remains private;
+* PresentationRevision changes only after commit;
+* unchanged items preserve stable identity;
+* stale candidate cannot overwrite current state.
 
 ---
 
-## 5.5 Reflowing
+# 12. State: `REFLOWING`
 
-### Meaning
+## Meaning
 
-The module is recalculating presentation layout while preserving the semantic content of the active presentation.
+Presentation is preparing a layout-only or primarily layout-oriented Candidate.
 
-Typical triggers include:
+Semantic source/translation content remains compatible.
+
+Typical triggers:
 
 * viewport resize;
-* zoom change;
-* scroll container geometry change;
-* orientation change;
-* side panel width change;
-* typography change;
-* font metric change;
-* overlay surface change;
-* density or accessibility preference change.
+* zoom;
+* scroll-related geometry update;
+* target movement;
+* panel width;
+* typography measurement changes;
+* target capability change;
+* overlay geometry change.
 
-### Entry Conditions
+## Entry
 
-The module enters `Reflowing` from `Ready` after accepting:
+Entered from `READY` through:
 
-* `RecomputeLayout`;
-* `ViewportChanged`;
-* a preference change that affects layout;
-* a theme change that changes measurable typography.
+```text
+RecomputePresentationLayout
+```
 
-### Required Context
+## Required Context
 
-The reflow context MUST include:
+```text
+PresentationId
+PresentationContextId
+ExpectedPresentationRevision
+PresentationTarget
+ViewportSnapshot
+PresentationProfile?
+Reason
+CancellationContextRef?
+```
 
-* `PresentationId`;
-* expected `PresentationRevision`;
-* new viewport;
-* coordinate-space declaration;
-* layout-affecting preferences;
-* active presentation mode.
+## Entry Actions
 
-### Entry Actions
+Presentation:
 
-The module MUST:
+1. validates Presentation revision;
+2. validates target revision;
+3. validates viewport revision;
+4. validates coordinate spaces;
+5. calculates Candidate RenderPlan;
+6. resolves overflow;
+7. evaluates fallback if current mode becomes unsafe.
 
-1. validate viewport dimensions;
-2. validate coordinate space;
-3. capture the current presentation revision;
-4. calculate a candidate layout;
-5. resolve overlap and overflow;
-6. validate resulting geometry.
+## Coalescing
 
-### Coalescing Rules
-
-Viewport events MAY arrive rapidly.
-
-The module SHOULD:
-
-* coalesce intermediate viewport changes;
-* process the newest valid viewport;
-* avoid committing obsolete layouts;
-* cancel expensive obsolete calculations when possible.
+Viewport changes may arrive faster than layout work completes.
 
 Example:
 
 ```text
-Viewport revision 21
-Viewport revision 22
-Viewport revision 23
+ViewportRevision 20
+ViewportRevision 21
+ViewportRevision 22
 ```
 
-The module MAY skip revisions 21 and 22 and commit only revision 23.
+Presentation SHOULD prefer useful newest work:
 
-### Success Actions
+```text
+20 → obsolete
+21 → obsolete
+22 → calculate / commit
+```
 
-The module MUST:
+Intermediate obsolete computations do not require failure events.
 
-* commit the new layout atomically;
-* increment the relevant layout revision;
-* increment `PresentationRevision` if the public presentation document changes;
-* publish `PresentationLayoutChanged`;
-* return to `Ready`.
+## Previous Layout
 
-### Stale Result Behavior
+The previous committed RenderPlan remains current until replacement commit.
 
-If the layout result was calculated for an obsolete viewport or presentation revision, the module MUST:
+## Layout Commit
 
-* discard the result;
-* not publish `PresentationLayoutChanged`;
-* continue with the latest queued reflow or return to `Ready`.
+A Candidate layout may commit only if:
 
-### Failure Actions
+```text
+ExpectedPresentationRevision still matches
+TargetRevision still compatible
+ViewportRevision still acceptable
+Runtime authority valid where required
+Candidate geometry valid
+```
 
-For invalid external input:
+## Success
 
-* preserve the previous layout;
-* publish `PresentationRejected` when required;
-* return to `Ready`.
+```text
+REFLOWING → READY
+```
 
-For an internal geometry failure:
+Then:
 
-* preserve the previous known-good layout when possible;
-* record diagnostics;
-* return to `Ready` if safe;
-* otherwise transition to `Failed`.
+```text
+PresentationLayoutChanged
+```
 
-### Invariants
+is published.
 
-While in `Reflowing`:
+## Fallback
 
-* translated semantic content remains unchanged;
-* the previous committed layout remains available;
-* coordinate spaces MUST NOT be mixed;
-* geometry changes become visible only after successful commit;
-* obsolete layout operations MUST NOT overwrite newer results.
+If Overlay geometry becomes unsafe but Side Panel remains valid:
+
+```text
+REFLOWING
+    ↓
+Candidate effectiveMode = SidePanel
+    ↓
+Commit
+    ↓
+READY
+```
+
+This is degraded successful Presentation behavior, not automatically failure.
+
+## Stale Layout
+
+A stale viewport or target result:
+
+* is discarded;
+* does not increment PresentationRevision;
+* does not emit success;
+* may immediately be followed by the newest reflow.
+
+## Invariants
+
+While `REFLOWING`:
+
+* semantic content remains unchanged;
+* previous committed layout remains current;
+* coordinate spaces remain explicit;
+* no obsolete geometry is committed;
+* item semantic identity remains stable.
 
 ---
 
-## 5.6 Reconfiguring
+# 13. State: `RECONFIGURING`
 
-### Meaning
+## Meaning
 
-The active presentation strategy or presentation-wide configuration is changing.
+Presentation is preparing a candidate whose Presentation-wide representation changes.
 
 Examples:
 
-* `SidePanel` to `SimpleOverlay`;
-* `SimpleOverlay` to `TextReader`;
-* `TextReader` to `Hybrid`;
-* changing a layout profile;
-* changing a presentation strategy implementation;
-* applying a new accessibility profile that requires document restructuring.
-
-### Entry Conditions
-
-The module enters `Reconfiguring` from `Ready` after accepting:
-
-* `ChangePresentationMode`;
-* a preference event requiring presentation-wide reconstruction.
-
-### Required Context
-
-The reconfiguration context MUST include:
-
-* `PresentationId`;
-* current `PresentationRevision`;
-* current mode;
-* requested mode;
-* current content and geometry;
-* active viewport;
-* applicable preferences.
-
-### Entry Actions
-
-The module MUST:
-
-1. validate the requested mode;
-2. verify that the mode supports the current content type;
-3. preserve the current known-good document;
-4. build a candidate representation for the new mode;
-5. calculate the new layout;
-6. validate the candidate document.
-
-### Success Actions
-
-The module MUST:
-
-* commit the new mode and document atomically;
-* preserve source-to-item traceability;
-* preserve item identity where semantically valid;
-* increment `PresentationRevision`;
-* publish `PresentationModeChanged`;
-* publish `PresentationUpdated` or `PresentationLayoutChanged` when relevant;
-* return to `Ready`.
-
-### Unsupported Mode Behavior
-
-If the requested mode is unsupported:
-
-* preserve the current presentation;
-* publish `PresentationRejected`;
-* return to `Ready`.
-
-### Failure Actions
-
-If reconfiguration fails:
-
-* restore or retain the previous document;
-* not expose partial mode changes;
-* return to `Ready` when the previous document is valid;
-* transition to `Failed` only if rollback cannot be guaranteed.
-
-### Invariants
-
-While in `Reconfiguring`:
-
-* the current committed presentation remains available;
-* the active mode changes only after commit;
-* an unsupported mode never replaces a supported current mode;
-* presentation mode and layout MUST always be mutually compatible.
-
----
-
-## 5.7 Clearing
-
-### Meaning
-
-The active presentation is being removed.
-
-Clearing may occur because:
-
-* the user closes the presentation;
-* the reading session ends;
-* content changes completely;
-* a new presentation replaces the old one;
-* the application shuts down;
-* failure recovery requires cleanup.
-
-### Entry Conditions
-
-The module enters `Clearing` from:
-
-* `Ready`;
-* `Preparing`;
-* `Updating`;
-* `Reflowing`;
-* `Reconfiguring`;
-* `Failed`.
-
-### Entry Actions
-
-The module MUST:
-
-1. mark active operations as obsolete;
-2. stop accepting mutations for the old presentation;
-3. cancel or detach pending asynchronous work;
-4. release presentation-specific memory;
-5. clear active identifiers;
-6. clear transient geometry and layout state.
-
-### Success Actions
-
-The module MUST:
-
-* publish `PresentationCleared` when an active presentation previously existed;
-* transition to `Empty`.
-
-### Replacement Flow
-
-When clearing is caused by a new content target, the module MAY retain a pending build request.
-
-The flow becomes:
-
 ```text
-Ready
-  ↓
-Clearing
-  ↓
-Empty
-  ↓
-Preparing
-  ↓
-Ready
+SidePanel → Overlay
+Overlay → SidePanel
+SidePanel → TextReader
+TextReader → Hybrid
 ```
 
-A direct `Ready → Preparing` replacement MUST NOT expose two active presentations under the same presentation context unless the architecture explicitly supports parallel presentation contexts.
+or profile changes that require strategy-wide reconstruction.
 
-### Failure Actions
+## Entry
 
-If cleanup partially fails:
-
-* the module MUST prevent the old presentation from being treated as active;
-* resources that cannot be released MUST be recorded in diagnostics;
-* the module transitions to `Failed`.
-
-### Invariants
-
-While in `Clearing`:
-
-* no new update may commit to the presentation being cleared;
-* stale asynchronous work MUST be ignored;
-* the presentation MUST become logically unavailable before cleanup completion;
-* `PresentationCleared` MUST NOT be published more than once for the same clear operation.
-
----
-
-## 5.8 Failed
-
-### Meaning
-
-The module encountered an internal failure and cannot guarantee that the active presentation state is valid.
-
-`Failed` is not used for ordinary validation errors.
-
-Examples of failures that may lead to `Failed`:
-
-* committed document violates an invariant;
-* rollback fails;
-* corrupted internal geometry state;
-* impossible revision ordering;
-* unrecoverable layout engine error;
-* resource lifecycle corruption;
-* active document and active identifiers disagree.
-
-### Entry Conditions
-
-The module enters `Failed` when:
-
-* an internal invariant is violated;
-* a transitional operation cannot safely roll back;
-* the active document can no longer be trusted;
-* required internal state is corrupted.
-
-### Entry Actions
-
-The module MUST:
-
-* stop committing updates;
-* mark the current presentation as unavailable or degraded;
-* cancel pending operations;
-* capture diagnostics;
-* retain the last known-good snapshot when safe;
-* publish `PresentationRejected` or a system-level failure event according to the global event contract.
-
-### Allowed Inputs
-
-* `ResetPresentation`
-* `ClearPresentation`
-* `RestoreLastKnownGoodPresentation`
-* diagnostic queries
-* health queries
-* application shutdown
-
-### Recovery Strategy
-
-The module SHOULD attempt recovery in this order:
-
-1. preserve or recover a known-good committed document;
-2. discard transient candidate state;
-3. reset active operations;
-4. restore `Ready` when the document is trustworthy;
-5. otherwise clear all presentation state;
-6. transition to `Empty`.
-
-### Prohibited Behavior
-
-While in `Failed`, the module MUST NOT:
-
-* accept normal content updates;
-* commit new layouts;
-* publish `PresentationPrepared`;
-* expose an unverified document as valid;
-* silently return to `Ready`.
-
-### Invariants
-
-While in `Failed`:
-
-* failure diagnostics exist;
-* normal mutation operations are blocked;
-* recovery requires an explicit verified action;
-* stale asynchronous results remain invalid.
-
----
-
-# 6. Transition Table
-
-| Current State   | Trigger                    | Guard                                     | Action                                             | Next State             |
-| --------------- | -------------------------- | ----------------------------------------- | -------------------------------------------------- | ---------------------- |
-| `Empty`         | `BuildPresentation`        | Request valid                             | Start building candidate document                  | `Preparing`            |
-| `Empty`         | `TranslationCompleted`     | Auto-build enabled and revisions valid    | Start building candidate document                  | `Preparing`            |
-| `Empty`         | `ViewportChanged`          | No pending presentation                   | Ignore or record diagnostic                        | `Empty`                |
-| `Preparing`     | Build succeeds             | Candidate valid and current               | Commit document and publish `PresentationPrepared` | `Ready`                |
-| `Preparing`     | Validation rejected        | Deterministic input failure               | Publish `PresentationRejected`                     | `Empty`                |
-| `Preparing`     | Newer build request        | New revision supersedes current           | Cancel or obsolete current operation               | `Preparing`            |
-| `Preparing`     | `ClearPresentation`        | Always                                    | Cancel preparation and clean transient state       | `Clearing`             |
-| `Preparing`     | Internal failure           | Rollback cannot be guaranteed             | Record failure                                     | `Failed`               |
-| `Ready`         | `UpdatePresentation`       | Revisions valid                           | Start candidate content update                     | `Updating`             |
-| `Ready`         | `TranslationUpdated`       | Translation revision newer                | Start candidate content update                     | `Updating`             |
-| `Ready`         | `ViewportChanged`          | Viewport valid and changed                | Start layout calculation                           | `Reflowing`            |
-| `Ready`         | `RecomputeLayout`          | Request valid                             | Start layout calculation                           | `Reflowing`            |
-| `Ready`         | `ChangePresentationMode`   | Requested mode differs                    | Start mode reconstruction                          | `Reconfiguring`        |
-| `Ready`         | `ClearPresentation`        | Always                                    | Begin cleanup                                      | `Clearing`             |
-| `Ready`         | `ReadingSessionChanged`    | Content target changed                    | Begin replacement cleanup                          | `Clearing`             |
-| `Updating`      | Update succeeds            | Candidate current                         | Commit and publish `PresentationUpdated`           | `Ready`                |
-| `Updating`      | Update is stale            | Incoming revision not newer               | Discard candidate                                  | `Ready`                |
-| `Updating`      | Newer update arrives       | Newer revision available                  | Supersede or merge operation                       | `Updating`             |
-| `Updating`      | Recoverable update failure | Current document remains valid            | Preserve current document                          | `Ready`                |
-| `Updating`      | Internal corruption        | Current document untrusted                | Record failure                                     | `Failed`               |
-| `Reflowing`     | Layout succeeds            | Candidate matches latest viewport         | Commit and publish `PresentationLayoutChanged`     | `Ready`                |
-| `Reflowing`     | Result stale               | Viewport or presentation revision changed | Discard result                                     | `Ready` or `Reflowing` |
-| `Reflowing`     | Newer viewport arrives     | Newer viewport available                  | Coalesce and recompute                             | `Reflowing`            |
-| `Reflowing`     | Invalid viewport           | Current layout remains valid              | Publish rejection if required                      | `Ready`                |
-| `Reflowing`     | Internal geometry failure  | Current layout untrusted                  | Record failure                                     | `Failed`               |
-| `Reconfiguring` | Mode change succeeds       | Candidate valid                           | Commit and publish mode change                     | `Ready`                |
-| `Reconfiguring` | Mode unsupported           | Current document valid                    | Publish rejection                                  | `Ready`                |
-| `Reconfiguring` | Reconstruction fails       | Rollback succeeds                         | Preserve previous mode                             | `Ready`                |
-| `Reconfiguring` | Rollback fails             | Current document untrusted                | Record failure                                     | `Failed`               |
-| `Clearing`      | Cleanup succeeds           | Logical state cleared                     | Publish `PresentationCleared`                      | `Empty`                |
-| `Clearing`      | Cleanup fails              | Resources or state remain corrupted       | Record failure                                     | `Failed`               |
-| `Failed`        | Restore snapshot           | Snapshot verified                         | Restore known-good document                        | `Ready`                |
-| `Failed`        | Reset                      | Reset succeeds                            | Remove all active state                            | `Empty`                |
-| `Failed`        | `ClearPresentation`        | Always                                    | Attempt cleanup                                    | `Clearing`             |
-
----
-
-# 7. Transition Guards
-
-## 7.1 Session Guard
-
-An operation is valid only when its `SessionId` matches the active or expected presentation session.
-
-A mismatched session MUST result in:
-
-* rejection;
-* stale-event discard; or
-* presentation replacement flow.
-
-It MUST NOT mutate the current presentation.
-
----
-
-## 7.2 Content Revision Guard
-
-An operation carrying source-dependent data MUST include `ContentRevision`.
-
-The operation may proceed only when:
+Entered from `READY` through:
 
 ```text
-IncomingContentRevision == ExpectedContentRevision
+ChangePresentationMode
 ```
 
-A lower revision is stale.
-
-A higher revision indicates that the current presentation context is outdated and may require replacement rather than incremental update.
-
----
-
-## 7.3 Translation Revision Guard
-
-A translated-content update may proceed only when:
+or:
 
 ```text
-IncomingTranslationRevision > CurrentTranslationRevision
+ApplyPresentationProfile
 ```
 
-Duplicate revisions MUST be idempotent.
+when the profile requires Presentation-wide restructuring.
 
-Lower revisions MUST be ignored.
+## Entry Actions
 
----
+Presentation:
 
-## 7.4 Presentation Revision Guard
+1. preserves current committed Presentation;
+2. validates requested mode/profile;
+3. checks normalized target capabilities;
+4. maps current semantic content into target strategy;
+5. builds Candidate Snapshot;
+6. builds Candidate RenderPlan;
+7. validates readability and geometry.
 
-Commands targeting an existing presentation SHOULD include the expected `PresentationRevision`.
+## Requested vs Effective Mode
 
-The operation proceeds when:
+Presentation distinguishes:
 
 ```text
-ExpectedPresentationRevision == CurrentPresentationRevision
+RequestedMode
+EffectiveMode
 ```
 
-A mismatch prevents lost updates.
+A fallback may produce:
 
-The caller may:
+```text
+RequestedMode = Overlay
+EffectiveMode = SidePanel
+```
 
-* refresh the current presentation;
-* retry using the latest revision;
-* abandon the obsolete command.
+if policy allows.
+
+## Success
+
+After valid commit:
+
+```text
+RECONFIGURING → READY
+```
+
+and appropriate committed facts may be published.
+
+At minimum:
+
+```text
+PresentationModeChanged
+```
+
+when the active mode changed.
+
+## Unsupported Mode
+
+If no valid fallback exists:
+
+* preserve current committed Presentation;
+* candidate is rejected;
+* return to `READY`;
+* PresentationRevision does not increment.
+
+## Invariants
+
+While `RECONFIGURING`:
+
+* active committed mode remains unchanged until commit;
+* partial new strategy is not exposed;
+* current Presentation remains readable where safe;
+* item identity is preserved where semantics permit;
+* fallback must be explicit.
 
 ---
 
-## 7.5 Viewport Guard
+# 14. Focus Updates
 
-A viewport is valid only when:
+A focus-only update may be processed as a lightweight `UPDATING` operation or a specialized internal operation.
 
-* width is greater than zero;
-* height is greater than zero;
-* zoom is finite and greater than zero;
-* scroll values are finite;
-* coordinate space is declared;
-* transformation metadata is internally consistent.
+It does not require a separate top-level state in v2.
 
----
+Command:
 
-## 7.6 Geometry Guard
+```text
+UpdatePresentationFocus
+```
 
-Geometry is valid only when:
+Rules:
 
-* coordinates are finite;
-* dimensions are non-negative;
-* polygons satisfy the minimum point requirement;
-* declared coordinate space exists;
-* required transformations are available;
-* source-region identifiers are valid.
+* raw mouse/keyboard events do not enter Presentation;
+* target item must exist;
+* expected PresentationRevision must match;
+* change may produce a new PresentationRevision;
+* semantic source content does not change.
 
-Invalid geometry MUST NOT be committed.
+A future implementation may introduce a dedicated interaction state only if required by observable lifecycle semantics.
 
 ---
 
-## 7.7 Presentation Mode Guard
+# 15. State: `CLEARING`
 
-A mode change is valid only when:
+## Meaning
 
-* the mode is registered;
-* the mode supports the current content type;
+Current Presentation state is being logically invalidated and Presentation-owned resources are being detached or released.
+
+Logical invalidation takes priority over physical cleanup.
+
+## Entry
+
+May be entered from:
+
+```text
+READY
+PREPARING
+UPDATING
+REFLOWING
+RECONFIGURING
+FAILED
+```
+
+through:
+
+```text
+ClearPresentation
+```
+
+## Clear Reasons
+
+Typical reasons:
+
+```text
+SessionStopped
+SessionReplaced
+ContentReplaced
+TargetDestroyed
+PrivacyInvalidation
+ApplicationShutdown
+UserRequested
+```
+
+## Logical Clear
+
+The critical operation is:
+
+```text
+Current Presentation
+    ↓
+Revoke Presentation-local commit eligibility
+    ↓
+CurrentPresentationRef removed
+    ↓
+Old candidates cannot commit
+```
+
+Logical clear MUST occur before slow physical cleanup is allowed to delay state correctness.
+
+## Entry Actions
+
+Presentation should:
+
+1. invalidate current Presentation state;
+2. invalidate outstanding Presentation operations for that context;
+3. detach current Presentation references;
+4. release Presentation-owned temporary state;
+5. release Artifact leases according to Runtime resource policy;
+6. notify UI integration through committed clear semantics.
+
+Presentation does not directly destroy:
+
+* native windows;
+* widgets;
+* DOM nodes;
+* platform overlay resources.
+
+Those belong to UI Adapter/platform.
+
+## Success
+
+```text
+CLEARING → EMPTY
+```
+
+Then:
+
+```text
+PresentationCleared
+```
+
+is published according to event ordering rules.
+
+## Idempotency
+
+Repeated clear requests must safely converge on:
+
+```text
+EMPTY
+```
+
+One logical Presentation lifecycle must not emit duplicate committed clear facts for the same clear transition.
+
+## Physical Cleanup Failure
+
+Failure to dispose a non-authoritative temporary resource does not automatically restore the Presentation as active.
+
+The Presentation is already logically unavailable.
+
+Cleanup failures should be:
+
+* diagnosed;
+* reported to Resource Manager where appropriate;
+* escalated to `FAILED` only if Presentation internal correctness is compromised.
+
+## Invariants
+
+While `CLEARING`:
+
+* old Presentation is not eligible for new commit;
+* old Candidate cannot become current;
+* Presentation is logically unavailable;
+* native resource ownership remains outside Presentation.
+
+---
+
+# 16. Replacement Flow
+
+A content replacement generally follows:
+
+```text
+READY
+    ↓
+CLEARING
+    ↓
+EMPTY
+    ↓
+PREPARING
+    ↓
+READY
+```
+
+An implementation may optimize internal operations, but externally it must preserve:
+
+```text
+one current Presentation per PresentationContext
+```
+
+unless multiple concurrent Presentation contexts are explicitly supported.
+
+---
+
+# 17. State: `FAILED`
+
+## Meaning
+
+Presentation detected an internal condition where it cannot guarantee correctness of its owned Presentation state.
+
+`FAILED` is reserved for broken Presentation invariants.
+
+It is not used for:
+
+* stale Runtime Revision;
+* Runtime cancellation;
+* Presentation revision conflict;
+* unsupported mode;
+* invalid external viewport;
+* expected candidate supersession;
+* target temporarily unavailable;
+* fallback to Side Panel.
+
+## Examples
+
+Possible fatal causes:
+
+* committed Snapshot/RenderPlan mismatch;
+* corrupted Presentation registry;
+* impossible PresentationRevision ordering;
+* current `PresentationId` disagrees with current snapshot;
+* rollback state corrupt;
+* internal graph corruption;
+* current committed Presentation cannot be trusted.
+
+## Entry Actions
+
+Presentation MUST:
+
+1. prevent normal mutation commits;
+2. invalidate any untrusted current state;
+3. discard private Candidates where safe;
+4. preserve last known-good state only if verified;
+5. capture diagnostics;
+6. release temporary resources;
+7. publish `PresentationFailed` when externally relevant.
+
+## Allowed Commands
+
+```text
+ClearPresentation
+ResetPresentation
+RestoreLastKnownGoodPresentation
+GetPresentationDiagnostics
+GetPresentationState
+```
+
+## Prohibited Commands
+
+Normal mutation commands are rejected until recovery succeeds.
+
+## Recovery
+
+Preferred recovery:
+
+```text
+FAILED
+    ↓
+verify last known-good Presentation
+    ├── valid → READY
+    └── invalid
+          ↓
+        reset / clear
+          ↓
+        EMPTY
+```
+
+## Invariants
+
+While `FAILED`:
+
+* no unverified Presentation is reported as current;
+* new normal mutation commits are blocked;
+* recovery is explicit and verified;
+* stale candidates remain invalid.
+
+---
+
+# 18. `DEGRADED_READY`
+
+`DEGRADED_READY` is not a required top-level state in v2.
+
+A valid Presentation with reduced capability may remain:
+
+```text
+READY
+```
+
+with:
+
+```text
+fallback
+issues[]
+completeness = Degraded
+```
+
+Examples:
+
+* Overlay fallback to Side Panel;
+* unavailable preferred font;
+* marker suppression;
+* incomplete translation;
+* unavailable optional source text.
+
+A dedicated `DEGRADED_READY` state should only be added if consumers require different lifecycle behavior.
+
+---
+
+# 19. Presentation Operation Phases
+
+Presentation may expose diagnostic operation phases independent from state.
+
+Example:
+
+```text
+VALIDATING_INPUT
+RESOLVING_ARTIFACTS
+MAPPING_ITEMS
+RESOLVING_MODE
+PROJECTING_GEOMETRY
+BUILDING_LAYOUT
+VALIDATING_CANDIDATE
+WAITING_FOR_AUTHORITY_REVALIDATION
+COMMITTING
+CLEANING_UP
+```
+
+These are not:
+
+```text
+Runtime Attempt states
+```
+
+and must not become a competing Runtime lifecycle.
+
+---
+
+# 20. Transition Table
+
+| Current         | Trigger                           | Guard                                                                   | Action                           | Next                               |
+| --------------- | --------------------------------- | ----------------------------------------------------------------------- | -------------------------------- | ---------------------------------- |
+| `EMPTY`         | `BuildPresentation`               | Presentation input valid enough to start                                | Begin Candidate preparation      | `PREPARING`                        |
+| `EMPTY`         | `ClearPresentation`               | Always                                                                  | Idempotent no-op                 | `EMPTY`                            |
+| `PREPARING`     | Candidate committed               | candidate valid + Presentation revision valid + Runtime authority valid | Atomic commit                    | `READY`                            |
+| `PREPARING`     | Presentation validation rejection | deterministic invalid input                                             | Discard candidate                | `EMPTY`                            |
+| `PREPARING`     | Runtime authority rejected        | external authority invalid                                              | Discard candidate                | `EMPTY` or replacement preparation |
+| `PREPARING`     | New build supersedes              | newer selected operation                                                | Obsolete previous candidate      | `PREPARING`                        |
+| `PREPARING`     | Clear                             | Always                                                                  | Invalidate operation             | `CLEARING`                         |
+| `PREPARING`     | Fatal Presentation corruption     | internal correctness lost                                               | Record failure                   | `FAILED`                           |
+| `READY`         | `UpdatePresentationContent`       | expected Presentation revision valid                                    | Begin Candidate update           | `UPDATING`                         |
+| `READY`         | `RecomputePresentationLayout`     | request valid                                                           | Begin Candidate reflow           | `REFLOWING`                        |
+| `READY`         | `ChangePresentationMode`          | request differs or requires reconstruction                              | Begin Candidate reconfiguration  | `RECONFIGURING`                    |
+| `READY`         | `ApplyPresentationProfile`        | profile requires structural change                                      | Begin Candidate reconfiguration  | `RECONFIGURING`                    |
+| `READY`         | `ClearPresentation`               | Always                                                                  | Logically invalidate             | `CLEARING`                         |
+| `UPDATING`      | Candidate committed               | guards valid                                                            | Atomic commit                    | `READY`                            |
+| `UPDATING`      | Candidate rejected                | current Presentation remains valid                                      | Discard                          | `READY`                            |
+| `UPDATING`      | Revision conflict                 | newer Presentation already committed                                    | Discard or explicitly restart    | `READY` or `UPDATING`              |
+| `UPDATING`      | Fatal internal corruption         | current Presentation untrusted                                          | Record failure                   | `FAILED`                           |
+| `REFLOWING`     | Candidate committed               | newest compatible viewport/target                                       | Atomic commit                    | `READY`                            |
+| `REFLOWING`     | Candidate stale                   | newer viewport/Presentation revision                                    | Discard                          | `READY` or `REFLOWING`             |
+| `REFLOWING`     | Newer viewport                    | coalescing allowed                                                      | Replace pending layout work      | `REFLOWING`                        |
+| `REFLOWING`     | Recoverable layout failure        | previous plan remains valid                                             | Preserve current                 | `READY`                            |
+| `REFLOWING`     | Fatal internal corruption         | current Presentation untrusted                                          | Record failure                   | `FAILED`                           |
+| `RECONFIGURING` | Candidate committed               | valid/fallback valid                                                    | Atomic commit                    | `READY`                            |
+| `RECONFIGURING` | Unsupported mode                  | no fallback                                                             | Preserve current                 | `READY`                            |
+| `RECONFIGURING` | Candidate rejected                | previous state valid                                                    | Preserve current                 | `READY`                            |
+| `RECONFIGURING` | Fatal corruption                  | current state untrusted                                                 | Record failure                   | `FAILED`                           |
+| `CLEARING`      | Logical clear completes           | old Presentation invalidated                                            | Finish detach                    | `EMPTY`                            |
+| `FAILED`        | Verified restore                  | known-good state valid                                                  | Restore                          | `READY`                            |
+| `FAILED`        | Reset                             | reset succeeds                                                          | Remove active Presentation state | `EMPTY`                            |
+| `FAILED`        | Clear                             | Always                                                                  | Logical clear                    | `CLEARING`                         |
+
+---
+
+# 21. Presentation Revision Guard
+
+Commands targeting existing Presentation state should carry:
+
+```text
+ExpectedPresentationRevision
+```
+
+Normal guard:
+
+```text
+ExpectedPresentationRevision
+==
+CurrentPresentationRevision
+```
+
+If not equal:
+
+```text
+Presentation Revision Conflict
+```
+
+The candidate MUST NOT commit unless an explicitly supported deterministic merge exists.
+
+MVP does not require automatic concurrent merge.
+
+---
+
+# 22. Runtime Authority Guard
+
+Presentation does not maintain a competing current Runtime Revision registry.
+
+At commit:
+
+```text
+Candidate
+    ↓
+Runtime Authority Revalidation
+```
+
+Runtime may return:
+
+```text
+Accepted
+RejectedStale
+RejectedCanceled
+RejectedSessionInactive
+RejectedRuntimeRevision
+RejectedOther
+```
+
+If rejected:
+
+```text
+Candidate cannot commit
+```
+
+Presentation does not modify Runtime state in response.
+
+---
+
+# 23. Artifact Compatibility Guard
+
+Presentation validates semantic compatibility of supplied accepted Artifact references.
+
+It may check:
+
+* ContentIdentity;
+* required source mappings;
+* contract compatibility;
+* geometry availability;
+* translation/source relationship.
+
+It MUST NOT declare an Artifact current solely because:
+
+```text
+artifact.runtimeRevisionId == operation.runtimeRevisionId
+```
+
+Artifact semantic compatibility and Runtime authority are separate concerns.
+
+---
+
+# 24. Target Guard
+
+Candidate must target a compatible current Presentation target.
+
+Checks may include:
+
+```text
+TargetId
+TargetRevision
+Capabilities
+CoordinateSpace
+```
+
+If target changed incompatibly before commit:
+
+* candidate is rejected or superseded;
+* unsafe layout must not commit.
+
+---
+
+# 25. Viewport Guard
+
+Viewport validation requires:
+
+* finite dimensions;
+* valid scale;
+* valid coordinate space;
+* valid transforms;
+* compatible target;
+* valid viewport revision semantics.
+
+A zero-sized viewport may be invalid for a mode requiring geometry.
+
+A hidden/minimized target may instead be represented through a separate normalized capability/state contract if needed.
+
+---
+
+# 26. Geometry Guard
+
+Presentation validates only Presentation-facing geometry.
+
+Required properties include:
+
+* finite coordinates;
+* non-negative dimensions;
+* valid coordinate-space metadata;
+* valid source references;
+* compatible transforms;
+* valid target bounds where required.
+
+Presentation does not modify Recognition-owned source geometry.
+
+---
+
+# 27. Mode Guard
+
+A requested mode is valid when:
+
+* mode is recognized;
+* required semantic data exists;
+* target capabilities allow it;
 * required geometry is available;
-* required viewport capabilities are available;
-* the mode is compatible with active preferences.
+* readability constraints can be satisfied or a documented fallback exists.
 
----
-
-# 8. Concurrency Model
-
-## 8.1 Logical Serialization
-
-State transitions for one `PresentationId` MUST be logically serialized.
-
-This does not require all computation to run on one operating-system thread.
-
-It requires that commits occur in a deterministic order.
-
----
-
-## 8.2 Parallel Computation
-
-The implementation MAY perform in parallel:
-
-* text measurement;
-* geometry normalization;
-* item generation;
-* overflow analysis;
-* diagnostics collection.
-
-Parallel tasks MUST produce a single candidate result that is validated before commit.
-
----
-
-## 8.3 Atomic Commit
-
-The active presentation changes only through atomic commit.
-
-Consumers MUST observe either:
-
-* the previous complete document; or
-* the new complete document.
-
-Consumers MUST NOT observe partial candidate state.
-
----
-
-## 8.4 Last Known-Good Snapshot
-
-Before entering a transitional state from `Ready`, the module MUST retain access to the current committed document.
-
-This document serves as the rollback target.
-
----
-
-## 8.5 Operation Identity
-
-Every asynchronous mutation MUST have an `OperationId`.
-
-A result may commit only when:
-
-* its operation is still active;
-* its session is current;
-* its content revision is current;
-* its expected presentation revision is current;
-* it has not been superseded.
-
----
-
-# 9. State and Event Relationship
-
-State transitions and event publication are related but not identical.
-
-An event describes something that has happened.
-
-A state describes the module’s current lifecycle condition.
-
-## 9.1 Event Publication Rules
-
-| Transition              | Required Event                                        |
-| ----------------------- | ----------------------------------------------------- |
-| `Preparing → Ready`     | `PresentationPrepared`                                |
-| `Updating → Ready`      | `PresentationUpdated`                                 |
-| `Reflowing → Ready`     | `PresentationLayoutChanged`                           |
-| `Reconfiguring → Ready` | `PresentationModeChanged`                             |
-| `Clearing → Empty`      | `PresentationCleared`                                 |
-| Validation rejection    | `PresentationRejected` when externally relevant       |
-| Internal failure        | `PresentationRejected` and/or system diagnostic event |
-
-## 9.2 Publication Timing
-
-Events MUST be published after successful state commit.
-
-Incorrect:
+Failure may result in:
 
 ```text
-Publish PresentationPrepared
-Commit document
-Enter Ready
+Fallback
 ```
+
+or:
+
+```text
+PresentationRejected
+```
+
+depending on policy.
+
+---
+
+# 28. Concurrency Model
+
+State transitions for one `PresentationContextId` must be logically serialized.
+
+Physical computation may be parallel.
+
+Example:
+
+```text
+Candidate A layout task
+Candidate B text-measure task
+Candidate C diagnostics task
+```
+
+may execute concurrently.
+
+But committed state follows one deterministic order.
+
+---
+
+# 29. Commit Serialization
+
+Only one Candidate may win a commit for a given expected Presentation revision.
+
+Example:
+
+```text
+Current = 7
+
+Candidate A expected 7
+Candidate B expected 7
+
+B commits → 8
+
+A commit attempt:
+expected 7
+current 8
+→ reject
+```
+
+This prevents lost Presentation updates.
+
+---
+
+# 30. Supersession
+
+Supersession is normal behavior.
+
+Candidate may become obsolete because:
+
+* newer Presentation command;
+* newer Presentation revision;
+* newer target revision;
+* newer viewport revision;
+* Runtime authority revoked;
+* Presentation clear.
+
+Supersession does not imply `FAILED`.
+
+---
+
+# 31. Cooperative Cancellation
+
+Presentation may receive Runtime cancellation context.
+
+During expensive work it should check cancellation at bounded checkpoints.
+
+Cancellation MAY stop physical work early.
+
+If physical work still finishes:
+
+```text
+authority/commit guard
+```
+
+must prevent obsolete commit.
+
+Presentation cancellation observation does not mutate Runtime Attempt state.
+
+---
+
+# 32. Last Known-Good Presentation
+
+When leaving `READY` for:
+
+```text
+UPDATING
+REFLOWING
+RECONFIGURING
+```
+
+the current committed Presentation remains the known-good state.
+
+It is not a rollback copy necessarily.
+
+An immutable current reference may be retained.
+
+Its purpose is:
+
+* continued readability;
+* safe candidate rejection;
+* comparison;
+* recovery.
+
+---
+
+# 33. No Partial Visibility
+
+Consumers may observe:
+
+```text
+Committed Revision N
+```
+
+or:
+
+```text
+Committed Revision N+1
+```
+
+They must not observe partially mutated state between them.
+
+---
+
+# 34. State and Event Relationship
+
+State and event are distinct.
+
+State means:
+
+> What Presentation currently owns as lifecycle condition.
+
+Event means:
+
+> What committed Presentation fact occurred.
+
+Typical relationship:
+
+| Transition              | Event                                           |
+| ----------------------- | ----------------------------------------------- |
+| `PREPARING → READY`     | `PresentationPrepared`                          |
+| `UPDATING → READY`      | `PresentationUpdated`                           |
+| `REFLOWING → READY`     | `PresentationLayoutChanged`                     |
+| `RECONFIGURING → READY` | `PresentationModeChanged` when mode changed     |
+| `CLEARING → EMPTY`      | `PresentationCleared`                           |
+| Candidate rejection     | `PresentationRejected` when externally relevant |
+| Internal fatal failure  | `PresentationFailed`                            |
+
+---
+
+# 35. Event Timing
 
 Correct:
 
 ```text
-Commit document
-Enter Ready
-Publish PresentationPrepared
+Validate Candidate
+    ↓
+Authority Revalidate
+    ↓
+Commit
+    ↓
+Transition State
+    ↓
+Publish success fact
 ```
 
-The implementation MAY use an outbox or equivalent mechanism to prevent state-event inconsistency.
-
----
-
-# 10. Command Acceptance by State
-
-| Command                  |        Empty |              Preparing |                       Ready |                  Updating |                 Reflowing |                 Reconfiguring |             Clearing |                  Failed |
-| ------------------------ | -----------: | ---------------------: | --------------------------: | ------------------------: | ------------------------: | ----------------------------: | -------------------: | ----------------------: |
-| `BuildPresentation`      |       Accept |     Supersede or queue | Replace through clear/build |        Queue or supersede |        Queue or supersede |                         Queue |                Queue |   Reject or reset first |
-| `UpdatePresentation`     |       Reject |        Reject or queue |                      Accept |        Merge or supersede |                     Queue |                         Queue |               Reject |                  Reject |
-| `RecomputeLayout`        |       Reject |  Queue latest viewport |                      Accept |              Queue latest |                  Coalesce |                         Queue |               Reject |                  Reject |
-| `ChangePresentationMode` |       Reject |                  Queue |                      Accept |                     Queue |                     Queue | Supersede or reject duplicate |               Reject |                  Reject |
-| `ClearPresentation`      |        No-op |                 Accept |                      Accept |                    Accept |                    Accept |                        Accept |           Idempotent |                  Accept |
-| `GetPresentation`        | Empty result | Previous result absent |              Return current | Return previous committed | Return previous committed |     Return previous committed | Empty or unavailable | Degraded or unavailable |
-| `GetDiagnostics`         |       Accept |                 Accept |                      Accept |                    Accept |                    Accept |                        Accept |               Accept |                  Accept |
-
----
-
-# 11. Event Acceptance by State
-
-| Event                   |                  Empty |             Preparing |                     Ready |           Updating |     Reflowing | Reconfiguring |              Clearing |                      Failed |
-| ----------------------- | ---------------------: | --------------------: | ------------------------: | -----------------: | ------------: | ------------: | --------------------: | --------------------------: |
-| `TranslationCompleted`  |                  Build |    Supersede if newer |    Replace if new content | Queue or supersede |         Queue |         Queue |                 Queue | Ignore or recovery workflow |
-| `TranslationUpdated`    |                 Ignore |  Queue if same target |                    Update | Merge or supersede |         Queue |         Queue |                Ignore |                      Ignore |
-| `ViewportChanged`       | Cache latest if useful |          Cache latest |                    Reflow |       Cache latest |      Coalesce |  Cache latest |                Ignore |                      Ignore |
-| `ThemeChanged`          |        Update defaults | Update pending config |          Update or reflow |              Queue |      Coalesce |         Merge |       Update defaults |        Update defaults only |
-| `PreferenceChanged`     |        Update defaults | Update pending config | Update/reflow/reconfigure |              Queue |      Coalesce |         Merge |       Update defaults |        Update defaults only |
-| `ReadingSessionChanged` | Update expected target |    Supersede or clear |                   Replace |      Clear/replace | Clear/replace | Clear/replace | Update pending target |              Reset or clear |
-
----
-
-# 12. Idempotency Rules
-
-## 12.1 Clear Idempotency
-
-Calling `ClearPresentation` multiple times MUST produce the same final state:
+Incorrect:
 
 ```text
-Empty
+Publish success
+    ↓
+Commit later
 ```
 
-Only one `PresentationCleared` event may be emitted for one active presentation lifecycle.
+No success event is emitted for discarded Candidates.
 
 ---
 
-## 12.2 Duplicate Update Events
+# 36. Event Bus Boundary
 
-Duplicate `TranslationUpdated` events with the same:
+Presentation state transitions should originate through explicit Presentation contracts.
 
-* `EventId`;
-* `TranslationRevision`;
-* changed content;
+Presentation does not require:
 
-MUST NOT increment `PresentationRevision` more than once.
+```text
+TranslationCompleted
+    ↓
+Presentation starts itself
+```
 
----
+as an architectural mechanism.
 
-## 12.3 Duplicate Viewport Events
+Events may notify or inform Application/Runtime orchestration.
 
-Receiving the same viewport repeatedly MUST NOT create different layout results.
-
-Layout calculation MUST be deterministic for equivalent inputs.
-
----
-
-## 12.4 Duplicate Mode Change
-
-Changing to the already active mode MUST be treated as:
-
-* a no-op; or
-* a deterministic reconfiguration only when configuration also changed.
-
-It MUST NOT produce an unnecessary presentation revision.
+They do not replace Business Pipeline Orchestration.
 
 ---
 
-# 13. Timeout Rules
+# 37. Command Acceptance Matrix
 
-State transitions that perform asynchronous work SHOULD define implementation-specific timeouts.
-
-Suggested initial targets:
-
-| Operation                  |                                           Target | Timeout behavior                           |
-| -------------------------- | -----------------------------------------------: | ------------------------------------------ |
-| Initial preparation        |                  under 100 ms for normal content | Cancel or reject obsolete operation        |
-| Incremental content update |                                      under 50 ms | Preserve current document                  |
-| Viewport reflow            | under 16 ms target, may exceed for complex pages | Coalesce and skip obsolete frames          |
-| Mode reconfiguration       |                                     under 100 ms | Preserve previous mode                     |
-| Clearing                   |                                      under 50 ms | Mark logical clear before resource cleanup |
-
-These values are performance targets, not hard architectural guarantees.
-
-A timeout MUST NOT cause partial state commit.
+| Command                       |                                `EMPTY` |              `PREPARING` |                       `READY` |         `UPDATING` |               `REFLOWING` |    `RECONFIGURING` |          `CLEARING` |               `FAILED` |
+| ----------------------------- | -------------------------------------: | -----------------------: | ----------------------------: | -----------------: | ------------------------: | -----------------: | ------------------: | ---------------------: |
+| `BuildPresentation`           |                                 Accept |          Supersede/queue | Replace through orchestration |    Queue/supersede |           Queue/supersede |              Queue |               Queue |           Reject/reset |
+| `UpdatePresentationContent`   |                                 Reject |             Queue/reject |                        Accept |    Supersede/queue |                     Queue |              Queue |              Reject |                 Reject |
+| `RecomputePresentationLayout` |                                 Reject |         Coalesce pending |                        Accept |     Queue/coalesce |                  Coalesce |              Queue |              Reject |                 Reject |
+| `ChangePresentationMode`      |                                 Reject |                    Queue |                        Accept |              Queue |                     Queue |    Supersede/queue |              Reject |                 Reject |
+| `ApplyPresentationProfile`    | Store externally / no current mutation | Merge pending where safe |                        Accept |        Queue/merge | Coalesce where compatible |    Merge/supersede | No current mutation |        Reject mutation |
+| `UpdatePresentationFocus`     |                                 Reject |             Reject/queue |                        Accept |              Queue |                     Queue |              Queue |              Reject |                 Reject |
+| `ClearPresentation`           |                                  No-op |                   Accept |                        Accept |             Accept |                    Accept |             Accept |          Idempotent |                 Accept |
+| Queries                       |                           Empty result |           Current absent |                       Current | Previous committed |        Previous committed | Previous committed |   Empty/unavailable | Verified/degraded only |
 
 ---
 
-# 14. Recovery Rules
+# 38. Idempotency
 
-## 14.1 Recoverable Validation Failure
+## Clear
+
+Repeated:
+
+```text
+ClearPresentation
+```
+
+must converge to:
+
+```text
+EMPTY
+```
+
+## Duplicate Request
+
+A duplicate request that has already committed MUST NOT create another PresentationRevision.
+
+## Equivalent Viewport
+
+Equivalent layout input should not create a new revision unless some other committed Presentation value actually changes.
+
+## Same Mode
+
+Changing to already active effective mode with equivalent profile/target is:
+
+```text
+NO_OP
+```
+
+unless explicit recomputation is requested.
+
+---
+
+# 39. No-op Rule
+
+A successful command that changes no committed Presentation value SHOULD NOT increment PresentationRevision.
 
 Examples:
 
-* invalid viewport;
-* unsupported mode;
-* stale revision;
-* missing optional style profile.
+* same focus state;
+* same effective mode;
+* equivalent viewport;
+* equivalent profile;
+* duplicate accepted Artifact set.
+
+---
+
+# 40. Recovery Classes
+
+Presentation distinguishes:
+
+```text
+Expected Control Outcome
+Recoverable Presentation Rejection
+Recoverable Presentation Degradation
+Fatal Presentation Failure
+```
+
+---
+
+# 41. Expected Control Outcomes
+
+Examples:
+
+* superseded Candidate;
+* coalesced reflow;
+* Runtime authority rejection;
+* cancellation;
+* Presentation revision conflict;
+* duplicate command.
+
+These do not enter `FAILED`.
+
+---
+
+# 42. Recoverable Presentation Rejection
+
+Examples:
+
+* unsupported requested mode;
+* invalid optional layout request;
+* invalid target capability;
+* invalid viewport while previous layout remains usable;
+* incompatible incremental update.
 
 Behavior:
 
-* preserve the last known-good document;
-* publish a deterministic rejection when required;
-* return to the previous stable state.
+```text
+discard candidate
++
+preserve current committed state
+```
 
 ---
 
-## 14.2 Recoverable Processing Failure
+# 43. Recoverable Degradation
 
 Examples:
 
-* one layout strategy fails but a safe fallback exists;
-* local text measurement fails;
-* an optional font is unavailable.
+* Overlay unavailable → Side Panel;
+* preferred font unavailable → fallback font;
+* marker geometry unavailable → hide markers;
+* partial Translation → partial Presentation.
 
-Behavior MAY include:
+Result remains valid and usually returns to:
 
-* fallback strategy;
-* default font metrics;
-* side-panel fallback;
-* hiding only the affected item;
-* diagnostic annotation.
+```text
+READY
+```
 
-The resulting document MUST still satisfy all invariants.
+with fallback/issues metadata.
 
 ---
 
-## 14.3 Unrecoverable Internal Failure
+# 44. Fatal Presentation Failure
 
 Examples:
 
-* inconsistent committed revision;
-* invalid active identifier mapping;
-* rollback failure;
-* corrupted presentation graph.
+* current Snapshot/RenderPlan mismatch;
+* current revision registry corruption;
+* active Presentation references impossible;
+* internal immutable state mutated unexpectedly;
+* recovery source untrustworthy.
 
 Behavior:
 
-* transition to `Failed`;
-* stop normal mutations;
-* retain diagnostics;
-* require reset, clear, or verified restoration.
+```text
+→ FAILED
+```
 
 ---
 
-# 15. Fallback Behavior
+# 45. Fallback Policy
 
-Presentation SHOULD prefer graceful degradation over complete failure.
+Fallback order is strategy- and content-dependent.
 
-Recommended fallback order:
+There is no universal requirement that:
 
 ```text
 Hybrid
-  ↓
-Simple Overlay
-  ↓
-Side Panel
-  ↓
-Text Reader
-  ↓
-No Presentation
+→ Overlay
+→ SidePanel
+→ TextReader
 ```
 
-The actual order depends on content type and user preference.
+always applies.
 
-For comic image content, a safe fallback is usually:
+For image/comic reading, typical safe preference may be:
 
 ```text
-Simple Overlay
-  ↓
+Overlay
+    ↓
+Focused Overlay
+    ↓
 Side Panel
 ```
 
-For novel text content, a safe fallback is usually:
+For structured text:
 
 ```text
-Formatted Reader
-  ↓
-Plain Text Reader
+Styled Text Reader
+    ↓
+Simplified Text Reader
 ```
 
-Fallback MUST be observable through diagnostics.
+Presentation records:
 
-A fallback that changes the requested presentation mode SHOULD publish an appropriate mode or update event.
-
----
-
-# 16. State Invariants
-
-The following invariants apply to the entire state machine.
-
-## 16.1 Single Active Presentation
-
-Only one active presentation may exist per presentation context.
+```text
+requestedMode
+effectiveMode
+fallbackReason
+```
 
 ---
 
-## 16.2 Stable Identity
+# 46. Presentation State Snapshot
 
-A `PresentationItem` representing the same semantic source item SHOULD preserve its `ItemId` across:
-
-* content updates;
-* layout changes;
-* viewport changes.
-
-A mode change MAY replace item identity when the representation is structurally different, but source traceability MUST remain available.
-
----
-
-## 16.3 Monotonic Revision
-
-`PresentationRevision` MUST increase monotonically after each successful committed presentation mutation.
-
-It MUST NOT increase for:
-
-* rejected commands;
-* stale events;
-* no-op operations;
-* failed candidate calculations.
-
----
-
-## 16.4 Immutable Committed Document
-
-A committed `PresentationDocument` is immutable.
-
-Updates create a new document or a logically immutable revision.
-
----
-
-## 16.5 Deterministic Layout
-
-Equivalent inputs MUST produce equivalent layout output, excluding explicitly nondeterministic diagnostic metadata such as timestamps.
-
----
-
-## 16.6 No Stale Commit
-
-An asynchronous operation MUST NOT commit if any required revision changed after the operation started.
-
----
-
-## 16.7 Previous State Availability
-
-During `Updating`, `Reflowing`, and `Reconfiguring`, the previous committed document remains the public readable snapshot.
-
----
-
-## 16.8 No Rendering Ownership
-
-No state transition may directly manipulate:
-
-* browser DOM;
-* native windows;
-* UI widgets;
-* canvas rendering state;
-* input focus;
-* mouse or keyboard listeners.
-
-The state machine produces presentation data only.
-
----
-
-# 17. State Query Contract
-
-The module SHOULD expose a lightweight state query.
-
-Example conceptual result:
+Presentation may expose a diagnostic state snapshot:
 
 ```text
 PresentationStateSnapshot
-- state
-- presentationId
-- sessionId
-- contentId
-- contentRevision
-- translationRevision
-- presentationRevision
-- activeOperationId
-- activeOperationType
-- enteredAt
-- lastStableState
-- degraded
-- lastErrorCode
+├── state
+├── presentationContextId
+├── presentationId?
+├── presentationRevision?
+├── runtimeRevisionId?
+├── activeOperationId?
+├── activeOperationType?
+├── operationPhase?
+├── targetId?
+├── targetRevision?
+├── viewportRevision?
+├── lastStableState?
+├── fallbackActive
+├── lastIssueCode?
+└── enteredAt
 ```
 
-This snapshot is intended for:
+It MUST NOT expose:
 
-* diagnostics;
-* developer tools;
-* health checks;
-* tests;
-* UI loading indicators.
-
-It MUST NOT expose mutable internal objects.
+* mutable Candidate object;
+* native UI object;
+* provider DTO;
+* complete user content by default.
 
 ---
 
-# 18. Loading and UI Interpretation
+# 47. UI Interpretation
 
-Presentation state does not directly control UI, but a UI Adapter may interpret states as follows:
+Presentation states may guide UI, but UI Adapter owns actual behavior.
 
-| State           | Suggested UI behavior                                                      |
-| --------------- | -------------------------------------------------------------------------- |
-| `Empty`         | Hide presentation surface                                                  |
-| `Preparing`     | Show non-blocking loading indicator                                        |
-| `Ready`         | Render current document                                                    |
-| `Updating`      | Continue showing previous document, optionally show subtle updating status |
-| `Reflowing`     | Continue showing previous layout until new layout commits                  |
-| `Reconfiguring` | Continue showing previous mode until new mode commits                      |
-| `Clearing`      | Remove presentation surface                                                |
-| `Failed`        | Show safe error state or fallback presentation                             |
+Suggested semantics:
 
-The UI Adapter MUST NOT infer business state only from animation or component lifecycle.
+| Presentation State | Possible UI interpretation                  |
+| ------------------ | ------------------------------------------- |
+| `EMPTY`            | No Presentation binding                     |
+| `PREPARING`        | Optional non-blocking preparation indicator |
+| `READY`            | Apply current committed Presentation        |
+| `UPDATING`         | Keep current revision visible               |
+| `REFLOWING`        | Keep previous RenderPlan visible            |
+| `RECONFIGURING`    | Keep previous effective mode visible        |
+| `CLEARING`         | Remove binding for invalidated Presentation |
+| `FAILED`           | Safe Presentation failure indication        |
 
-It SHOULD rely on explicit state or presentation events.
+UI Adapter must not derive Presentation business state only from widget lifecycle.
 
 ---
 
-# 19. Example Flows
+# 48. Presentation Commit vs UI Apply
 
-## 19.1 Initial Comic Presentation
+`READY` means:
 
 ```text
-State: Empty
-
-TranslationCompleted
-  │
-  ▼
-Validate content and geometry
-  │
-  ▼
-State: Preparing
-  │
-  ├── Select SidePanel strategy
-  ├── Build numbered source markers
-  ├── Build translated items
-  ├── Calculate panel layout
-  └── Commit PresentationDocument
-  │
-  ▼
-State: Ready
-  │
-  ▼
-Publish PresentationPrepared
+Presentation logical commit exists
 ```
 
----
-
-## 19.2 Viewport Resize
+It does not guarantee:
 
 ```text
-State: Ready
-
-ViewportChanged
-  │
-  ▼
-Validate viewport
-  │
-  ▼
-State: Reflowing
-  │
-  ├── Keep old layout readable
-  ├── Recalculate item positions
-  ├── Resolve overflow
-  └── Commit new layout
-  │
-  ▼
-State: Ready
-  │
-  ▼
-Publish PresentationLayoutChanged
+UI Adapter successfully applied that revision
 ```
 
----
-
-## 19.3 Translation Correction
+UI apply may independently report:
 
 ```text
-State: Ready
-
-TranslationUpdated
-  │
-  ▼
-Validate translation revision
-  │
-  ▼
-State: Updating
-  │
-  ├── Locate affected item
-  ├── Replace translated content
-  ├── Measure changed text
-  ├── Reflow affected layout
-  └── Commit new document
-  │
-  ▼
-State: Ready
-  │
-  ▼
-Publish PresentationUpdated
+Applied
+RejectedStale
+RejectedTargetMismatch
+TargetUnavailable
+Failed
 ```
+
+A UI apply failure does not automatically move Presentation from `READY` to `FAILED`.
+
+Recovery belongs to Presentation/Application/UI integration policy.
 
 ---
 
-## 19.4 Rapid Viewport Changes
+# 49. Example — Initial Comic Presentation
 
 ```text
-State: Ready
-
-ViewportChanged revision 10
-  │
-  ▼
-State: Reflowing
-
-ViewportChanged revision 11
-ViewportChanged revision 12
-ViewportChanged revision 13
-  │
-  ▼
-Discard or cancel calculations for 10–12
-  │
-  ▼
-Calculate revision 13
-  │
-  ▼
-Commit latest layout
-  │
-  ▼
-State: Ready
+State: EMPTY
+    ↓
+BuildPresentation
+    ↓
+State: PREPARING
+    ↓
+Resolve accepted Artifacts
+    ↓
+Map PresentationItems
+    ↓
+Resolve SidePanel
+    ↓
+Build Candidate Snapshot
+    ↓
+Build Candidate RenderPlan
+    ↓
+Validate Candidate
+    ↓
+Runtime Authority Revalidation
+    ↓
+Atomic Commit Revision 1
+    ↓
+State: READY
+    ↓
+PresentationPrepared
 ```
 
 ---
 
-## 19.5 Change Presentation Mode
+# 50. Example — Translation Update
 
 ```text
-State: Ready
-Mode: SidePanel
-
-ChangePresentationMode(SimpleOverlay)
-  │
-  ▼
-State: Reconfiguring
-  │
-  ├── Validate overlay support
-  ├── Transform source geometry
-  ├── Build overlay items
-  ├── Resolve overlap
-  └── Commit new mode
-  │
-  ▼
-State: Ready
-Mode: SimpleOverlay
-  │
-  ▼
-Publish PresentationModeChanged
+State: READY
+PresentationRevision = 4
+    ↓
+UpdatePresentationContent
+with newer accepted TranslationArtifactRef
+    ↓
+State: UPDATING
+    ↓
+Map affected items
+    ↓
+Candidate Revision 5
+    ↓
+ExpectedPresentationRevision = 4
+CurrentPresentationRevision = 4
+    ↓
+Runtime Authority Revalidation
+    ↓
+Commit
+    ↓
+State: READY
+PresentationRevision = 5
+    ↓
+PresentationUpdated
 ```
 
 ---
 
-## 19.6 Unsupported Mode
+# 51. Example — Concurrent Presentation Revision Conflict
 
 ```text
-State: Ready
-Mode: SidePanel
+State: READY
+Revision = 7
 
-ChangePresentationMode(AdvancedImageRewrite)
-  │
-  ▼
-State: Reconfiguring
-  │
-  ▼
-Mode not supported in v1
-  │
-  ▼
-Preserve SidePanel document
-  │
-  ▼
-State: Ready
-  │
-  ▼
-Publish PresentationRejected
+Operation A expected 7
+Operation B expected 7
+
+Operation B commits
+    ↓
+Revision = 8
+
+Operation A reaches commit
+    ↓
+expected 7 != current 8
+    ↓
+Candidate discarded
+    ↓
+State remains READY
+Revision remains 8
 ```
+
+No Runtime Revision change is required.
 
 ---
 
-## 19.7 Reading Content Changed
+# 52. Example — Runtime Supersession
 
 ```text
-State: Ready
-ContentId: Chapter-10
-
-ReadingSessionChanged
-ContentId: Chapter-11
-  │
-  ▼
-State: Clearing
-  │
-  ▼
-Publish PresentationCleared
-  │
-  ▼
-State: Empty
-  │
-  ▼
-TranslationCompleted for Chapter-11
-  │
-  ▼
-State: Preparing
-  │
-  ▼
-State: Ready
+Runtime Revision 14
+    ↓
+Presentation preparation starts
+    ↓
+Runtime Revision 15 becomes current
+    ↓
+old Candidate physically completes
+    ↓
+Runtime Authority Revalidation
+    ↓
+RejectedStale
+    ↓
+Candidate discarded
 ```
+
+Presentation does not transition Runtime Revision state.
 
 ---
 
-## 19.8 Internal Failure and Recovery
+# 53. Example — Rapid Viewport Changes
 
 ```text
-State: Reflowing
+State: READY
 
-Committed layout invariant violated
-  │
-  ▼
-Discard candidate
-  │
-  ├── previous document valid
-  │       ▼
-  │     State: Ready
-  │
-  └── previous document untrusted
-          ▼
-        State: Failed
-          │
-          ▼
-        ResetPresentation
-          │
-          ▼
-        State: Empty
+ViewportRevision 20
+    ↓
+State: REFLOWING
+
+ViewportRevision 21
+ViewportRevision 22
+ViewportRevision 23
+    ↓
+20, 21, 22 superseded/coalesced
+    ↓
+Candidate using 23
+    ↓
+commit
+    ↓
+State: READY
+    ↓
+PresentationLayoutChanged
+```
+
+No successful events are emitted for the discarded layouts.
+
+---
+
+# 54. Example — Overlay Fallback
+
+```text
+State: READY
+Mode = SidePanel
+    ↓
+ChangePresentationMode(Overlay)
+    ↓
+State: RECONFIGURING
+    ↓
+Overlay geometry readable? NO
+    ↓
+Fallback allowed? YES
+    ↓
+Candidate EffectiveMode = SidePanel
+    ↓
+Commit only if committed state meaningfully changes
+    ↓
+State: READY
+```
+
+If no visible state changed, this may instead resolve as a rejection/no-op without incrementing PresentationRevision.
+
+---
+
+# 55. Example — Clear During Preparation
+
+```text
+State: PREPARING
+    ↓
+ClearPresentation
+    ↓
+Candidate loses Presentation-local commit eligibility
+    ↓
+State: CLEARING
+    ↓
+Current Presentation already absent
+    ↓
+temporary resources released
+    ↓
+State: EMPTY
+```
+
+A late preparation result is discarded.
+
+---
+
+# 56. Example — Clear Current Presentation
+
+```text
+State: READY
+Revision = 12
+    ↓
+ClearPresentation
+    ↓
+State: CLEARING
+    ↓
+Current Presentation logically invalidated
+    ↓
+Old Candidates invalidated
+    ↓
+PresentationCleared
+    ↓
+State: EMPTY
+```
+
+UI Adapter independently removes actual surface representation.
+
+---
+
+# 57. Example — UI Apply Failure
+
+```text
+Presentation commit Revision 18
+    ↓
+State: READY
+    ↓
+UI Adapter apply Revision 18
+    ↓
+TargetUnavailable
+```
+
+Presentation remains logically committed unless Application/Presentation policy explicitly clears or replaces it.
+
+This is not automatically Presentation internal failure.
+
+---
+
+# 58. Example — Fatal Internal Corruption
+
+```text
+State: READY
+    ↓
+Invariant check detects:
+Snapshot revision != RenderPlan revision
+    ↓
+Current state cannot be trusted
+    ↓
+State: FAILED
+    ↓
+PresentationFailed
+    ↓
+verified restore?
+    ├── yes → READY
+    └── no  → reset → EMPTY
 ```
 
 ---
 
-# 20. Testing Requirements
+# 59. Testing — State Transitions
 
-## 20.1 State Transition Tests
+Tests MUST cover:
 
-Tests MUST verify every valid transition.
-
-Examples:
-
-* `Empty → Preparing`;
-* `Preparing → Ready`;
-* `Ready → Updating → Ready`;
-* `Ready → Reflowing → Ready`;
-* `Ready → Reconfiguring → Ready`;
-* `Ready → Clearing → Empty`;
-* transitional state to `Failed`;
-* `Failed → Empty`;
-* `Failed → Ready` through verified restoration.
+```text
+EMPTY → PREPARING
+PREPARING → READY
+PREPARING → EMPTY on rejection
+READY → UPDATING → READY
+READY → REFLOWING → READY
+READY → RECONFIGURING → READY
+READY → CLEARING → EMPTY
+FAILED → READY via verified restore
+FAILED → EMPTY via reset
+```
 
 ---
 
-## 20.2 Invalid Transition Tests
-
-Tests MUST verify invalid commands do not mutate state.
-
-Examples:
-
-* update while `Empty`;
-* reflow while `Empty`;
-* normal update while `Failed`;
-* mode change while `Clearing`;
-* stale update after presentation replacement.
-
----
-
-## 20.3 Revision Tests
+# 60. Testing — Ownership
 
 Tests MUST verify:
 
-* stale `ContentRevision` is rejected;
-* duplicate `TranslationRevision` is idempotent;
-* newer updates supersede older updates;
-* stale asynchronous layout cannot commit;
-* `PresentationRevision` increments only after successful commit.
+* Presentation never mutates Runtime Revision state;
+* Presentation never mutates WorkItem state;
+* Presentation never mutates Attempt state;
+* Presentation never grants cancellation authority;
+* Presentation never performs Runtime retry;
+* Presentation never publishes accepted upstream Artifacts;
+* UI Adapter lifecycle state does not mutate Presentation lifecycle implicitly.
 
 ---
 
-## 20.4 Concurrency Tests
-
-Tests SHOULD cover:
-
-* update arriving during reflow;
-* viewport changes arriving during update;
-* clear arriving during preparation;
-* session change during mode reconfiguration;
-* multiple rapid viewport events;
-* delayed obsolete operation completion.
-
----
-
-## 20.5 Rollback Tests
-
-Tests MUST verify the previous committed document remains valid when:
-
-* update fails;
-* reflow fails;
-* mode reconfiguration is rejected;
-* candidate validation fails.
-
----
-
-## 20.6 Event Tests
+# 61. Testing — Commit Authority
 
 Tests MUST verify:
 
-* success events publish only after commit;
-* rejection events contain the correct identifiers;
-* duplicate events do not create duplicate mutations;
-* `PresentationCleared` publishes once;
-* stale operations do not emit successful update events.
+* Runtime authority rejection prevents commit;
+* Presentation revision conflict prevents commit;
+* target revision mismatch prevents unsafe commit;
+* stale viewport cannot commit;
+* clear invalidates old candidate commit eligibility;
+* candidate validation occurs before commit;
+* success event occurs only after commit.
 
 ---
 
-## 20.7 Determinism Tests
+# 62. Testing — Concurrency
 
-Equivalent inputs MUST produce:
+Tests SHOULD include:
 
-* equivalent presentation items;
-* equivalent reading order;
-* equivalent layout;
-* equivalent overflow decisions;
-* equivalent revision behavior.
-
----
-
-# 21. Observability
-
-Every transition SHOULD generate structured diagnostics containing:
-
-* previous state;
-* next state;
-* trigger;
-* `OperationId`;
-* `PresentationId`;
-* `SessionId`;
-* `ContentId`;
-* content revision;
-* translation revision;
-* presentation revision;
-* operation duration;
-* result;
-* rejection or failure code.
-
-Translated text SHOULD NOT be included in normal logs.
-
-Geometry details SHOULD be summarized rather than fully logged unless diagnostic mode is explicitly enabled.
+* content update during reflow;
+* reflow during content update;
+* clear during preparation;
+* clear during update;
+* target replacement during reconfiguration;
+* Runtime Revision superseded during Candidate build;
+* multiple rapid viewport revisions;
+* two operations expecting the same PresentationRevision.
 
 ---
 
-# 22. Metrics
+# 63. Testing — Previous State Preservation
 
-Recommended module metrics:
+Tests MUST verify current committed Presentation remains intact when:
+
+* update Candidate rejected;
+* reflow Candidate stale;
+* mode change rejected;
+* profile application rejected;
+* Runtime authority rejects candidate;
+* Candidate validation fails.
+
+---
+
+# 64. Testing — Clear
+
+Tests MUST verify:
+
+* logical clear occurs before slow physical cleanup;
+* repeated clear is idempotent;
+* late Candidates cannot commit;
+* current queries return empty after logical clear;
+* Artifact leases are released;
+* native UI resource cleanup remains outside Presentation.
+
+---
+
+# 65. Testing — Failure
+
+Tests MUST distinguish:
+
+```text
+Expected supersession
+Runtime authority rejection
+Presentation validation rejection
+Recoverable fallback
+Fatal Presentation corruption
+```
+
+Only the last category should normally produce `FAILED`.
+
+---
+
+# 66. Observability
+
+State transitions should expose bounded diagnostics such as:
+
+```text
+previousState
+nextState
+presentationContextId
+presentationId?
+presentationRevision?
+runtimeRevisionId?
+workItemId?
+attemptId?
+operationId
+operationType
+operationPhase
+targetRevision?
+viewportRevision?
+fallbackReason?
+durationMs
+result
+issueCode?
+```
+
+Normal state diagnostics must not include full reading content.
+
+---
+
+# 67. Metrics
+
+Recommended metrics include:
 
 ```text
 presentation_state_transition_total
@@ -1811,194 +2357,363 @@ presentation_prepare_duration_ms
 presentation_update_duration_ms
 presentation_reflow_duration_ms
 presentation_reconfigure_duration_ms
+presentation_commit_duration_ms
 presentation_clear_duration_ms
-presentation_rejected_total
-presentation_failed_total
-presentation_stale_operation_total
-presentation_rollback_total
+presentation_candidate_rejected_total
+presentation_candidate_superseded_total
+presentation_authority_rejected_total
+presentation_revision_conflict_total
 presentation_fallback_total
-presentation_active_count
+presentation_failed_total
+presentation_active_context_count
 ```
 
-Metrics SHOULD support labels such as:
+Useful labels:
 
-* presentation mode;
-* content type;
+* operation type;
+* mode;
 * result;
-* rejection category;
+* fallback category;
+* rejection source;
 * previous state;
 * next state.
 
-Metrics MUST avoid user content.
+Metrics MUST NOT contain user content.
 
 ---
 
-# 23. Persistence
+# 68. Resource Lifetime
 
-The state machine itself does not require persistent storage for MVP.
+Presentation state may retain:
 
-The module MAY persist through the Storage Module:
+```text
+current committed Presentation
+previous committed Presentation reference where required
+in-flight Candidate
+temporary layout resources
+Artifact leases
+diagnostic metadata
+```
 
-* presentation preferences;
-* last selected mode;
-* reusable layout profiles;
-* optional presentation snapshots;
-* diagnostics metadata.
+Temporary Candidate resources are operation-scoped.
 
-The Presentation Module MUST NOT directly access persistent storage.
+Committed Presentation state is Presentation-owned for display lifetime.
 
-A restored presentation snapshot MUST be validated before entering `Ready`.
+Accepted Artifact payload ownership stays with Artifact Store.
 
----
-
-# 24. Multiple Presentation Contexts
-
-Version 1 assumes one active presentation context per reading surface.
-
-Future implementations MAY support multiple concurrent presentation contexts.
-
-Examples:
-
-* multiple browser tabs;
-* multiple desktop capture regions;
-* dual-page comic view;
-* side-by-side source and translation.
-
-Each context MUST have an independent state machine identified by a stable context identifier.
-
-Global state MUST NOT replace per-context lifecycle state.
+Native UI resource ownership stays with UI Adapter/platform.
 
 ---
 
-# 25. Future States
+# 69. Persistence
 
-The following states are reserved for future consideration and are not part of version 1:
+Presentation state machine requires no durable persistence for MVP.
 
-## Suspended
+Presentation MUST NOT directly access persistent storage.
 
-Presentation remains available but processing is temporarily paused.
+Storage may optionally persist selected Presentation-related information through explicit Storage contracts.
 
-Possible use:
+Restored Presentation state must be validated before becoming `READY`.
 
-* application background mode;
-* hidden browser tab;
-* resource-saving mode.
-
-## Restoring
-
-A persisted presentation snapshot is being loaded and validated.
-
-## Exporting
-
-A presentation is being converted into an export format.
-
-This SHOULD probably remain a separate Export Module operation rather than a core Presentation state.
-
-## Degraded
-
-A valid but partially reduced presentation exists.
-
-Version 1 represents degradation through diagnostics and fallback mode while remaining in `Ready`.
-
-A dedicated `Degraded` state should be added only if consumers require different lifecycle behavior.
+A persisted snapshot is not authoritative merely because it exists.
 
 ---
 
-# 26. Architectural Decisions
+# 70. Multiple Presentation Contexts
 
-## 26.1 `Ready` Remains Readable During Mutation
+Each logical Presentation Context owns an independent state machine.
 
-During `Updating`, `Reflowing`, and `Reconfiguring`, the previously committed presentation remains available.
+Example:
 
-Reason:
+```text
+Context A: comic-side-panel
+Context B: focused-overlay
+Context C: text-reader
+```
 
-* avoids visual flicker;
-* prevents empty UI between revisions;
-* enables atomic replacement;
-* supports rollback.
+Multiple contexts may exist only when Application architecture explicitly supports them.
 
----
-
-## 26.2 Reflow Is Separate from Content Update
-
-`Updating` changes semantic or presentation content.
-
-`Reflowing` changes geometry and layout only.
-
-Reason:
-
-* clearer diagnostics;
-* better performance measurement;
-* easier testing;
-* avoids unnecessary content reconstruction.
+Global Presentation state MUST NOT replace per-context lifecycle state.
 
 ---
 
-## 26.3 Mode Change Has a Dedicated State
+# 71. Future States
 
-`Reconfiguring` is separate because presentation mode changes may rebuild:
+Potential future states include:
 
-* item structure;
-* geometry;
-* reading order;
-* overflow policy;
-* accessibility representation.
+## `SUSPENDED`
 
----
+A committed Presentation exists but active Presentation mutations are intentionally paused.
 
-## 26.4 Validation Errors Do Not Imply Failure
+## `RESTORING`
 
-Invalid commands and stale revisions are normal operational outcomes.
+A persisted Presentation candidate is being validated.
 
-They produce rejection or no-op behavior.
+It must remain Candidate state until all current authority/compatibility requirements pass.
 
-They do not transition the module to `Failed`.
+## `DEGRADED_READY`
 
----
+May become a distinct state if consumers require lifecycle-specific degraded handling.
 
-## 26.5 `Failed` Is Reserved for Broken Invariants
+## `EXPORTING`
 
-`Failed` indicates that internal correctness cannot be guaranteed.
-
-It is not a general-purpose error state.
+Should remain outside Presentation unless Export becomes an explicitly Presentation-owned capability.
 
 ---
 
-# 27. Architecture Invariants
+# 72. Architecture Decisions
 
-The Presentation state machine MUST always preserve the following rules:
+## 72.1 Transitional State Does Not Replace Current Presentation
 
-1. A committed presentation is immutable.
-2. Only a valid committed document may be exposed as active.
-3. Candidate state is never visible to external consumers.
-4. Successful events are emitted only after commit.
-5. Stale operations never overwrite newer revisions.
-6. The previous committed document remains available during safe mutations.
-7. Presentation item identity remains stable where semantic identity is unchanged.
-8. Coordinate spaces are explicitly declared.
-9. Layout calculations are deterministic for equivalent inputs.
-10. `PresentationRevision` increases only after successful mutation.
-11. Clearing invalidates all outstanding operations for the cleared presentation.
-12. Ordinary validation errors do not place the module in `Failed`.
-13. Rendering technology remains outside the Presentation state machine.
-14. User content is not written to diagnostics by default.
-15. Recovery never exposes an unverified snapshot as `Ready`.
+While:
+
+```text
+UPDATING
+REFLOWING
+RECONFIGURING
+```
+
+current committed Presentation remains readable.
+
+## 72.2 Reflow Is Separate from Semantic Update
+
+`UPDATING`:
+
+```text
+Presentation semantic/content mapping changes
+```
+
+`REFLOWING`:
+
+```text
+layout/geometry changes while semantic content remains compatible
+```
+
+## 72.3 Reconfiguration Is Separate
+
+Mode/profile-wide changes may rebuild:
+
+* strategy;
+* item representation;
+* marker plan;
+* overlay plan;
+* layout.
+
+## 72.4 Runtime Authority Is External
+
+Presentation never uses its state machine as the authoritative current Runtime Revision registry.
+
+## 72.5 Validation Rejection Is Not Failure
+
+Invalid candidate or stale operation usually returns to stable state.
+
+## 72.6 `FAILED` Means Owned Invariant Failure
+
+`FAILED` is reserved for state Presentation itself can no longer trust.
+
+## 72.7 Commit and UI Apply Are Separate
+
+`READY` describes Presentation commit state.
+
+It does not guarantee actual surface application.
 
 ---
 
-# 28. Completion Criteria
+# 73. Architecture Invariants
 
-This state specification is considered implemented when:
+1. Presentation state machine owns Presentation lifecycle only.
 
-* every state has an explicit runtime representation;
-* every transition is guarded;
-* operations use revision checks;
-* commits are atomic;
-* stale asynchronous results are rejected;
-* the previous document is retained during safe mutations;
-* published events match committed transitions;
-* invalid transitions are deterministic;
-* failure recovery is implemented;
-* transition tests cover valid and invalid paths;
-* diagnostics expose state and operation identity;
-* UI Adapters do not own or duplicate Presentation lifecycle logic.
+2. Runtime Revision lifecycle is external.
+
+3. WorkItem lifecycle is external.
+
+4. Attempt lifecycle is external.
+
+5. Runtime cancellation authority is external.
+
+6. Candidate state is never current state.
+
+7. Prepared does not mean committed.
+
+8. Committed does not mean UI applied.
+
+9. Runtime authority must be revalidated at commit where required.
+
+10. Presentation cannot override Runtime authority rejection.
+
+11. PresentationRevision is separate from Runtime RevisionId.
+
+12. PresentationRevision changes only after committed Presentation mutation.
+
+13. PresentationRevision never decreases.
+
+14. Current Snapshot and RenderPlan share the same PresentationRevision.
+
+15. Current Presentation is immutable.
+
+16. Candidate Presentation is immutable once prepared.
+
+17. Previous committed Presentation remains available during safe mutations.
+
+18. Stale Candidate never overwrites newer committed Presentation.
+
+19. Presentation revision conflict never causes lost update.
+
+20. Target and viewport revisions protect layout commit.
+
+21. Semantic item identity survives non-semantic layout changes.
+
+22. Semantic reading order is not silently changed by reflow.
+
+23. Coordinate spaces are explicit.
+
+24. Readability fallback is preferred over unsafe overlay placement.
+
+25. Expected supersession is not failure.
+
+26. Runtime authority rejection is not Presentation internal failure.
+
+27. Ordinary validation rejection does not enter `FAILED`.
+
+28. `FAILED` is reserved for broken Presentation-owned invariants.
+
+29. Logical clear invalidates Presentation before physical cleanup completes.
+
+30. Clearing does not make Presentation the owner of native UI resources.
+
+31. Artifact leases follow Runtime resource policy.
+
+32. Presentation does not persist state directly.
+
+33. Presentation does not autonomously orchestrate itself from Translation events.
+
+34. Success events describe already committed Presentation state.
+
+35. Normal diagnostics contain no full user reading content.
+
+---
+
+# 74. Related Documents
+
+```text
+doc/02-modules/presentation/MODULE.md
+doc/02-modules/presentation/CONTRACT.md
+doc/02-modules/presentation/EVENTS.md
+doc/02-modules/presentation/ERRORS.md
+doc/02-modules/presentation/README.md
+
+doc/01-architecture/core/STATE_MACHINE.md
+doc/01-architecture/core/EVENT_BUS.md
+doc/01-architecture/core/EVENT_CONVENTION.md
+
+doc/01-architecture/modules/OWNERSHIP_MAP.md
+doc/01-architecture/modules/MODULE_DEPENDENCY.md
+
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RETRY_POLICY.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+doc/01-architecture/runtime/MEMORY_MODEL.md
+doc/01-architecture/runtime/RUNTIME_OBSERVABILITY.md
+
+doc/02-modules/translation/CONTRACT.md
+doc/02-modules/ui-adapter/CONTRACT.md
+doc/02-modules/reading-session/CONTRACT.md
+```
+
+---
+
+# 75. Completion Criteria
+
+This state specification is synchronized when:
+
+* every state represents Presentation-owned lifecycle only;
+* Runtime authority is not duplicated;
+* WorkItem/Attempt state is absent from Presentation ownership;
+* Candidate state is distinct from committed state;
+* `PresentationRevision` is distinct from Runtime Revision;
+* commit is atomic;
+* Runtime authority rejection blocks commit;
+* Presentation revision conflict blocks obsolete commit;
+* target and viewport supersession are deterministic;
+* previous committed Presentation survives recoverable mutations;
+* clear logically invalidates old Presentation before cleanup completion;
+* `FAILED` is used only for Presentation invariant failure;
+* events publish only after committed transitions;
+* expected supersession does not appear as module failure;
+* UI apply remains outside the Presentation state machine;
+* tests cover ownership, concurrency, authority, commit, clear, recovery, and event timing.
+
+---
+
+# 76. Summary
+
+Presentation lifecycle is:
+
+```text
+EMPTY
+  ↓
+PREPARING
+  ↓
+READY
+  ↔ UPDATING
+  ↔ REFLOWING
+  ↔ RECONFIGURING
+  ↓
+CLEARING
+  ↓
+EMPTY
+```
+
+with:
+
+```text
+FAILED
+```
+
+reserved for internal Presentation correctness failure.
+
+Every mutation follows:
+
+```text
+Current Committed Presentation
+        +
+Presentation Operation
+        ↓
+Candidate Presentation State
+        ↓
+Presentation Validation
+        ↓
+Runtime Authority Revalidation
+        ↓
+PresentationRevision Guard
+        ↓
+Atomic Commit
+        ↓
+New Committed Presentation
+```
+
+The critical ownership boundary is:
+
+```text
+Runtime
+    owns whether work may still commit
+
+Presentation
+    owns what Presentation state is committed
+
+UI Adapter
+    owns whether that committed state becomes actual visible UI
+```
+
+And the central state invariant is:
+
+```text
+Candidate state is disposable.
+
+Committed Presentation state is authoritative only inside Presentation.
+
+Runtime authority remains external.
+
+UI rendering remains external.
+```

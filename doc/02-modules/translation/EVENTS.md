@@ -1,2863 +1,3203 @@
-# Translation Events
+# Translation Module Events
 
 > **Project:** CRAI
 > **Module:** Translation
-> **Document:** Integration Events
-> **Path:** `modules/translation/EVENTS.md`
-> **Version:** 0.2
+> **Path:** `02-modules/translation/EVENTS.md`
+> **Version:** 1.0
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-08-03
-> **Source of Truth:**
->
-> * `modules/translation/MODULE.md`
-> * `modules/translation/CONTRACT.md`
-> * `modules/translation/STATES.md`
+> **Related:** `MODULE.md`, `CONTRACT.md`, `STATES.md`
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-This document defines the integration events published by the Translation module.
+Tài liệu này định nghĩa event boundary của Translation Module.
 
-These events communicate facts that have already occurred, including:
+Translation events mô tả các fact/observation mà Translation thực sự sở hữu:
 
-* translation job creation;
-* job scheduling and execution;
-* translation attempts;
-* batch execution;
-* progressive translation output;
-* completed translation results;
-* failures;
-* cancellation;
-* supersession;
-* invalidation;
-* translation variant changes;
-* user corrections.
+* module availability
+* Translation Plan creation
+* Translation Unit planning
+* Translation Batch planning
+* provider execution observations
+* provider output observations
+* translated-unit validation
+* partial semantic progress
+* Candidate validation
+* Candidate submission
+* immutable Translation Variant creation
+* correction-derived Candidate creation
+* Translation warnings/errors
+* diagnostics and telemetry integration
 
-Events allow other modules to react without directly coupling themselves to Translation internals.
+Translation events không định nghĩa canonical lifecycle của:
 
-This document does not define:
+* Runtime WorkItem
+* Runtime Attempt
+* Queue
+* Scheduler
+* retry
+* cancellation
+* supersession
+* deadline
+* terminal execution outcome
+* Artifact publication
+* Artifact retention
+* active Reading Session variant
 
-* commands;
-* query contracts;
-* provider-specific callbacks;
-* internal method calls;
-* complete state transition tables;
-* error implementation details;
-* database records.
+Core rule:
+
+```text
+Translation events describe
+what Translation planned,
+observed,
+validated,
+or produced.
+
+They do not decide
+whether the Runtime Attempt succeeded,
+whether the work is still authoritative,
+or whether a Translation Artifact is published.
+```
 
 ---
 
-## 2. Event Principles
+# 2. Event Ownership
 
-Translation events must follow these principles.
+Translation may publish facts about:
 
-### 2.1 Events represent facts
+```text
+Module Availability
 
-Event names use past-tense semantics.
+Translation Plan
+
+Translation Units
+
+Translation Batches
+
+Provider Execution Observations
+
+Provider Output Validation
+
+Translated Units
+
+Translation Completeness
+
+Candidate Translation Artifacts
+
+Translation Variant Creation
+
+Translation Corrections
+
+Translation Warnings
+
+Translation Module Errors
+```
+
+Translation must not publish canonical lifecycle events declaring:
+
+```text
+WorkItem queued
+
+Attempt started
+
+Attempt completed
+
+Attempt failed
+
+Attempt canceled
+
+Attempt superseded
+
+Retry scheduled
+
+Runtime deadline expired
+
+Artifact published
+
+Variant activated for Reading Session
+```
+
+---
+
+# 3. Removed Legacy Event Families
+
+The following legacy families are removed from Translation ownership:
+
+```text
+Translation Job Events
+
+Translation Attempt Events
+
+Translation Result Lifecycle Events
+
+Retry Lifecycle Events
+
+Cancellation Lifecycle Events
+
+Supersession Events
+
+Publication Lifecycle Events
+
+Active Variant Lifecycle Events
+```
+
+Legacy examples removed:
+
+```text
+translation.job.created
+
+translation.job.queued
+
+translation.job.started
+
+translation.attempt.started
+
+translation.attempt.completed
+
+translation.attempt.failed
+
+translation.completed
+
+translation.completed-with-warnings
+
+translation.failed
+
+translation.retry.scheduled
+
+translation.cancellation.requested
+
+translation.cancelled
+
+translation.superseded
+
+translation.invalidated
+
+translation.variant.activated
+```
+
+These represented Runtime/application authority rather than Translation semantics.
+
+---
+
+# 4. Event Principles
+
+## 4.1 Events Represent Facts
+
+Event names describe observations/facts that already occurred.
 
 Correct:
 
 ```text
-TranslationJobCreated
-TranslationAttemptStarted
-TranslationCompleted
-TranslationCancelled
+translation.plan.created
+
+translation.batch.planned
+
+translation.provider.output-received
+
+translation.candidate.validated
+
+translation.candidate.submitted
 ```
 
-Incorrect:
+Not commands:
 
 ```text
-StartTranslation
-TranslateDocument
-CancelTranslation
-RetryTranslation
+start_translation
+
+retry_translation
+
+cancel_translation
+
+translate_document
 ```
 
-The incorrect examples express commands, not events.
+---
+
+# 5. Events Are Immutable
+
+Published event instances are immutable.
+
+Redelivery:
+
+```text
+same semantic event
+    → same EventId
+```
+
+New fact:
+
+```text
+new EventId
+```
 
 ---
 
-### 2.2 Events are immutable
-
-After publication, an event must never be modified.
-
-Corrections or later changes require new events.
-
----
-
-### 2.3 Events are provider-neutral
+# 6. Provider Neutrality
 
 Public events must not expose:
 
-* provider-native request bodies;
-* provider-native response bodies;
-* raw prompts;
-* SDK models;
-* API keys;
-* access tokens;
-* authorization headers.
+* provider-native request
+* provider-native response
+* SDK objects
+* raw prompt
+* API key
+* access token
+* Authorization header
+* secret model configuration
 
-Normalized provider identifiers and execution metadata may be included when operationally necessary.
+Normalized provider metadata may be included when useful.
 
 ---
 
-### 2.4 Events preserve traceability
+# 7. Source and Translation Content Minimization
 
-Every job-related event must contain enough identity information to associate it with:
+Normal events should not contain:
+
+```text
+full source text
+
+full translated text
+
+full SourceDocument
+
+full TranslationArtifact
+
+provider prompt
+
+provider raw response
+
+Knowledge database content
+```
+
+Prefer:
+
+* IDs
+* references
+* counts
+* warning codes
+* error codes
+* completeness
+* durations
+* usage summaries
+
+---
+
+# 8. Events Are Not Full Snapshots
+
+Events should reference large semantic objects.
+
+Examples:
+
+```text
+SourceDocumentArtifactRef
+
+CandidateArtifactId
+
+TranslationArtifactRef
+
+KnowledgeSnapshotRef
+
+ContextSnapshotRef
+```
+
+---
+
+# 9. At-Least-Once Delivery
+
+Consumers should assume:
+
+```text
+AtLeastOnce
+```
+
+unless Event Bus guarantees stronger semantics.
+
+Consumers must tolerate:
+
+* duplicates
+* delayed delivery
+* out-of-order delivery
+* missing optional diagnostics
+
+---
+
+# 10. Event Ordering
+
+Global ordering is not required.
+
+Ordering may be meaningful within:
+
+```text
+AttemptId
+```
+
+or:
+
+```text
+TranslationPlanId
+```
+
+or:
+
+```text
+CandidateArtifactId
+```
+
+Semantic Translation Unit order must never derive from event arrival order.
+
+---
+
+# 11. Event Envelope
+
+Translation uses shared CRAI Event Envelope.
+
+Conceptually:
+
+```text
+EventEnvelope
+├── EventId
+├── EventName
+├── EventVersion
+├── OccurredAt
+├── PublishedAt?
+├── Producer
+├── Subject
+├── Correlation
+├── Causation?
+├── Sequence?
+├── Privacy
+├── Payload
+└── Extensions?
+```
+
+Event Bus architecture remains authoritative for transport semantics.
+
+---
+
+# 12. Producer
+
+Translation-produced events use:
+
+```text
+Producer.Module = translation
+```
+
+Optional:
+
+```text
+InstanceId
+
+ModuleVersion
+```
+
+---
+
+# 13. Event Subject
+
+Possible subjects:
+
+```text
+TranslationModule
+
+TranslationPlan
+
+TranslationBatch
+
+TranslationUnit
+
+ProviderExecution
+
+CandidateTranslationArtifact
+
+TranslationVariant
+```
+
+Do not use:
 
 ```text
 TranslationJob
-PreparedDocument
-ContentRevision
 ```
 
-Attempt and batch events must additionally include their parent identities.
+as core domain subject.
 
 ---
 
-### 2.5 Events are not full entity snapshots by default
+# 14. Correlation Identity
 
-Events should contain:
-
-* stable identifiers;
-* the state change;
-* compact state information;
-* references to larger results;
-* information needed by expected consumers.
-
-Large documents and full result bodies should not be copied into every event.
-
----
-
-### 2.6 Events may be delivered more than once
-
-Consumers must assume at-least-once delivery unless the Event Bus contract states otherwise.
-
-Every consumer must be idempotent.
-
----
-
-### 2.7 Event order cannot be globally assumed
-
-Consumers may rely only on explicit stream ordering guarantees.
-
-They must not assume that events from unrelated jobs arrive in chronological order.
-
----
-
-### 2.8 Stale events must not reactivate stale work
-
-A consumer must verify revision and authority information before displaying or activating translation results.
-
----
-
-## 3. Event Categories
-
-Translation publishes five primary event categories:
+Attempt-local events should carry:
 
 ```text
-Job Events
-Batch Events
-Attempt Events
-Result Events
-Variant and Correction Events
+RevisionId
+
+WorkItemId
+
+AttemptId
 ```
 
-The execution hierarchy is:
+and when relevant:
 
 ```text
-TranslationJob
-    └── TranslationBatch[]
-            └── TranslationAttempt[]
-```
+TraceId
 
-Additional operational events may be kept internal.
+SourceDocumentArtifactId
 
-## 3.1 Event Ownership Matrix
+TranslationIntentId
 
-| Event or event family | Owner | Notes |
-|---|---|---|
-| Translation job events | Translation | Domain lifecycle facts only |
-| Translation batch events | Translation | Batch planning and accepted-output facts |
-| Translation attempt events | Translation | One execution attempt for one batch |
-| Translation result events | Translation | Revisioned result and publication-eligibility facts |
-| Translation variant events | Translation | Variant creation, activation and invalidation |
-| Prepared-document events | Text Processing | Translation may consume but must not redefine them |
-| Reading-session events | Reading Session | Own source authority and reading-context changes |
-| Provider availability events | Provider Management | Own provider health and availability facts |
-| Queue, worker and retry-timer events | Runtime | Operational execution facts, not Translation domain ownership |
+TranslationPlanId
 
-Translation must not publish events for entities owned by another module. It may only react to those events through validated commands or internal policies.
+TranslationBatchId
 
----
+TranslationUnitId
 
-## 4. Public Event Set
-
-The initial public event set is:
-
-```text
-TranslationJobCreated
-TranslationJobQueued
-TranslationJobStarted
-TranslationProgressUpdated
-
-TranslationBatchStarted
-TranslationBatchCompleted
-TranslationBatchFailed
-
-TranslationAttemptStarted
-TranslationAttemptFailed
-TranslationAttemptCompleted
-
-TranslationPartialResultAvailable
-TranslationSegmentCompleted
-TranslationCompleted
-TranslationCompletedWithWarnings
-TranslationFailed
-
-TranslationCancellationRequested
-TranslationCancelled
-TranslationSuperseded
-TranslationInvalidated
-
-TranslationRetryScheduled
-TranslationProviderFallbackSelected
-
-TranslationVariantCreated
-TranslationVariantActivated
-TranslationVariantInvalidated
-
-TranslationCorrectionSubmitted
-TranslationCorrectionApplied
-```
-
-Not every consumer should subscribe to every event.
-
----
-
-# Part I — Event Envelope
-
-## 5. TranslationEventEnvelope
-
-Every public Translation event must use the common event envelope defined by the CRAI Event Bus architecture.
-
-Conceptual shape:
-
-```text
-TranslationEventEnvelope<TPayload> {
-    eventId
-    eventType
-    eventVersion
-
-    occurredAt
-    publishedAt
-
-    producer
-    subject
-
-    correlationId
-    causationId
-    traceContext
-
-    partitionKey
-    sequence
-
-    payload
-}
+CandidateArtifactId
 ```
 
 ---
 
-## 6. eventId
+# 15. No TranslationAttemptId
 
-Uniquely identifies one event instance.
+Translation event contracts do not introduce:
 
 ```text
-eventId
+TranslationAttemptId
 ```
 
-Consumers use it for:
+Runtime:
 
-* deduplication;
-* audit tracing;
-* replay safety;
-* diagnostic correlation.
+```text
+AttemptId
+```
 
-An event retry must reuse the same `eventId`.
-
-A new domain fact must use a new `eventId`.
+is canonical.
 
 ---
 
-## 7. eventType
+# 16. Source Correlation
 
-Uses the canonical event name.
-
-Example:
+Events affecting translated semantics should preserve:
 
 ```text
-translation.job.created
+SourceDocumentArtifactId
+
+SourceDocumentContentIdentity
+
+TranslationIntentId
+
+TargetLanguage
 ```
 
-Recommended naming convention:
+when needed.
 
-```text
-<module>.<entity>.<fact>
-```
-
-Examples:
-
-```text
-translation.job.created
-translation.attempt.started
-translation.batch.completed
-translation.result.partial-available
-translation.variant.activated
-```
+This supports traceability without recreating a Job lifecycle.
 
 ---
 
-## 8. eventVersion
+# 17. Candidate Correlation
 
-Identifies the payload schema version.
-
-Example:
+Candidate events include:
 
 ```text
-1
+RevisionId
+
+WorkItemId
+
+AttemptId
+
+SourceDocumentArtifactId
+
+TranslationIntentId
+
+CandidateArtifactId
 ```
 
-Schema versioning must not depend on provider versions.
-
-A backward-incompatible payload change requires a new event version.
-
----
-
-## 9. occurredAt
-
-The time when the domain fact occurred.
-
-This is not necessarily the same as publication time.
-
----
-
-## 10. publishedAt
-
-The time when the event was submitted to the Event Bus.
-
----
-
-## 11. producer
-
-Identifies the publishing module.
+Optional:
 
 ```text
-producer {
-    module = "translation"
-    instanceId
-}
-```
+TranslationVariantId
 
-The instance identifier is optional outside operational environments.
-
----
-
-## 12. subject
-
-Identifies the primary domain entity represented by the event.
-
-Example:
-
-```text
-subject {
-    type = "translation-job"
-    id = TranslationJobId
-}
-```
-
-For batch events:
-
-```text
-subject {
-    type = "translation-batch"
-    id = TranslationBatchId
-}
+TraceId
 ```
 
 ---
 
-## 13. correlationId
+# 18. Sequence
 
-Connects events and commands belonging to one larger application flow.
+Optional event sequencing may use:
 
-Examples:
+```text
+translation:<AttemptId>
+```
 
-* translating one visible comic page;
-* translating one novel viewport;
-* retranslating after a glossary update;
-* cancelling work after navigation.
+or another Event Bus-approved stream.
+
+Sequence is diagnostic.
+
+It is not source of Runtime authority.
 
 ---
 
-## 14. causationId
+# 19. Optional Event Principle
 
-Identifies the command or event that directly caused this event.
+Most Translation internal events are optional observations.
 
-Examples:
+Consumer correctness must not require reception of every:
 
 ```text
-StartTranslationCommand.commandId
-RetryTranslationCommand.commandId
-TranslationAttemptFailed.eventId
+unit planned
+
+batch planned
+
+provider started
+
+provider output received
+```
+
+event.
+
+The synchronous/local execution contract remains primary.
+
+---
+
+# 20. Event Categories
+
+Recommended categories:
+
+```text
+1. Module Availability Events
+
+2. Planning Events
+
+3. Batch and Provider Observation Events
+
+4. Translation Output Observation Events
+
+5. Candidate Events
+
+6. Variant / Correction Facts
+
+7. Error / Warning Observations
 ```
 
 ---
 
-## 15. traceContext
+# 21. Module Availability Events
 
-Carries distributed tracing information.
+Recommended:
 
-It must not contain business secrets or provider credentials.
+```text
+translation.module.available
+
+translation.module.degraded
+
+translation.module.unavailable
+
+translation.module.draining
+
+translation.module.stopped
+```
+
+These describe module availability only.
 
 ---
 
-## 16. partitionKey
-
-Translation events should normally be partitioned by:
-
-```text
-TranslationJobId
-```
-
-This enables ordering within one job stream.
-
-Batch and attempt events should use their parent `TranslationJobId` as the partition key.
-
----
-
-## 17. sequence
-
-Monotonically increasing sequence within the event stream of one translation job.
-
-```text
-sequence = 1, 2, 3, ...
-```
-
-The sequence supports:
-
-* out-of-order detection;
-* replay;
-* read-model reconstruction;
-* duplicate handling.
-
-Sequence numbering is per job, not global.
-
----
-
-# Part II — Common Payload Identity
-
-## 18. TranslationEventIdentity
-
-Most Translation event payloads include:
-
-```text
-TranslationEventIdentity {
-    translationIntentId
-    translationJobId
-
-    readingSessionId
-
-    preparedDocumentId
-    contentRevision
-
-    targetLanguage
-
-    translationRevision
-    activeVariantId
-}
-```
-
-Only fields relevant to the event are required.
-
----
-
-## 19. Revision Requirements
-
-Events that may affect displayed content must include:
-
-```text
-preparedDocumentId
-contentRevision
-translationJobId
-```
-
-Where applicable, they must also include:
-
-```text
-translationIntentId
-translationResultId
-translationRevision
-translationVariantId
-targetLanguage
-```
-
-This protects consumers from stale event application.
-
----
-
-## 20. Compact Progress Contract
-
-Events may use:
-
-```text
-TranslationProgressSummary {
-    totalSegmentCount
-    completedSegmentCount
-    failedSegmentCount
-    pendingSegmentCount
-
-    totalBatchCount
-    completedBatchCount
-    failedBatchCount
-}
-```
-
-Progress events should not carry complete translated text.
-
----
-
-## 21. Compact Failure Contract
-
-Failure-bearing events may include:
-
-```text
-TranslationFailureSummary {
-    code
-    category
-    retryable
-
-    scope
-
-    affectedBatchIds[]
-    affectedPreparedSegmentIds[]
-}
-```
-
-Human-readable details are optional.
-
-The complete failure contract belongs in `ERRORS.md`.
-
----
-
-## 22. Compact Warning Contract
-
-Warning-bearing events may include:
-
-```text
-TranslationWarningSummary {
-    code
-    category
-    severity
-
-    affectedPreparedSegmentIds[]
-}
-```
-
-Warnings should avoid copying full source or translated text.
-
----
-
-# Part III — Job Events
-
-## 23. TranslationJobCreated
-
-Published after a new logical translation job has been accepted and persisted.
-
-Event type:
-
-```text
-translation.job.created
-```
+# 22. `translation.module.available`
 
 Payload:
 
 ```text
-TranslationJobCreatedPayload {
-    translationJobId
-
-    readingSessionId
-
-    preparedDocumentId
-    contentRevision
-    selectedPreparedSegmentIds[]
-
-    sourceLanguage
-    targetLanguage
-    translationProfileId
-
-    priority
-    publicationMode
-
-    createdAt
-}
+TranslationModuleAvailable
+├── SupportedContractVersions[]
+├── SupportedProfiles[]
+├── SupportedLanguages?
+├── ConfigurationSnapshotId?
+├── AvailableCapabilities[]
+└── AvailableAt
 ```
-
-### Meaning
-
-The job exists but may not yet have started execution.
-
-### Expected consumers
-
-* Reading Session;
-* translation progress UI;
-* observability;
-* job scheduler;
-* audit components.
-
-### Must not include
-
-* full source document;
-* provider request;
-* provider credentials;
-* raw glossary content.
 
 ---
 
-## 24. TranslationJobQueued
-
-Published when a created job enters an execution queue.
-
-Event type:
-
-```text
-translation.job.queued
-```
+# 23. `translation.module.degraded`
 
 Payload:
 
 ```text
-TranslationJobQueuedPayload {
-    translationJobId
-
-    priority
-    queueClass
-
-    queuedAt
-}
-```
-
-Possible queue classes:
-
-```text
-INTERACTIVE
-VISIBLE
-PREFETCH
-BACKGROUND
-```
-
-This is an optional operational event. Runtime owns the actual queue and scheduler state. Translation may expose a reflected job-level fact when a concrete consumer needs it, but this event must not be required by the public domain contract.
-
----
-
-## 25. TranslationJobStarted
-
-Published when the job begins active execution.
-
-Event type:
-
-```text
-translation.job.started
-```
-
-Payload:
-
-```text
-TranslationJobStartedPayload {
-    translationIntentId
-    translationJobId
-
-    startedAt
-
-    totalSegmentCount
-    plannedBatchCount
-}
-```
-
-### Meaning
-
-Logical execution for the job has begun. At least one batch is eligible for execution or preparation.
-
-It does not mean that a provider request has already been sent, and it does not bind the job lifecycle to one specific attempt.
-
----
-
-## 26. TranslationProgressUpdated
-
-Published when meaningful job progress changes.
-
-Event type:
-
-```text
-translation.job.progress-updated
-```
-
-Payload:
-
-```text
-TranslationProgressUpdatedPayload {
-    translationJobId
-
-    activeAttemptIds[]
-
-    progress
-
-    partialResultAvailable
-
-    updatedAt
-}
-```
-
-### Publication rules
-
-Do not publish one event for every provider token.
-
-Publish only when:
-
-* a batch completes;
-* one or more aligned segments become available;
-* a batch fails;
-* progress changes meaningfully;
-* a configured progress interval is reached.
-
-### Coalescing
-
-Implementations may coalesce rapid progress updates. `activeAttemptIds` is optional operational detail and must not be required to reconstruct authoritative progress.
-
----
-
-# Part IV — Attempt Events
-
-## 27. TranslationAttemptStarted
-
-Published when an execution attempt begins.
-
-Event type:
-
-```text
-translation.attempt.started
-```
-
-Payload:
-
-```text
-TranslationAttemptStartedPayload {
-    translationJobId
-    translationAttemptId
-
-    attemptNumber
-    reason
-
-    providerId
-    modelIdentifier
-
-    plannedBatchCount
-
-    startedAt
-}
+TranslationModuleDegraded
+├── ReasonCodes[]
+├── AvailableCapabilities[]
+├── UnavailableCapabilities[]
+├── EligibleProviderClasses?
+├── ConfigurationSnapshotId?
+└── DegradedAt
 ```
 
 Possible reasons:
 
 ```text
-INITIAL
-AUTOMATIC_RETRY
-PROVIDER_FALLBACK
-BATCH_RETRY
-VALIDATION_RETRY
-MANUAL_RETRY
-```
+OPTIONAL_CONTEXT_UNAVAILABLE
 
-Provider information is normalized and optional when selection has not yet completed.
+KNOWLEDGE_UNAVAILABLE
+
+STREAMING_UNAVAILABLE
+
+PREFERRED_PROVIDER_UNAVAILABLE
+
+REMOTE_PROVIDER_UNAVAILABLE
+
+LOCAL_PROVIDER_UNAVAILABLE
+
+OPTIONAL_GLOSSARY_UNAVAILABLE
+```
 
 ---
 
-## 28. TranslationAttemptCompleted
+# 24. `translation.module.unavailable`
 
-Published when an attempt reaches successful completion for its assigned work.
-
-Event type:
+Payload:
 
 ```text
-translation.attempt.completed
+TranslationModuleUnavailable
+├── ReasonCodes[]
+├── RetryHint?
+└── UnavailableAt
+```
+
+Runtime decides retry.
+
+---
+
+# 25. `translation.module.draining`
+
+Payload:
+
+```text
+TranslationModuleDraining
+├── ActiveAttemptCount?
+├── ActiveProviderRequestCount?
+├── Reason?
+└── StartedAt
+```
+
+Does not cancel Runtime Attempts.
+
+---
+
+# 26. `translation.module.stopped`
+
+Payload:
+
+```text
+TranslationModuleStopped
+└── StoppedAt
+```
+
+---
+
+# 27. Planning Events
+
+Recommended optional planning events:
+
+```text
+translation.plan.created
+
+translation.units.planned
+
+translation.context.resolved
+
+translation.terminology.resolved
+
+translation.batch.planned
+```
+
+For MVP only some are necessary.
+
+---
+
+# 28. `translation.plan.created`
+
+Published when:
+
+```text
+TranslationPlanState = READY
 ```
 
 Payload:
 
 ```text
-TranslationAttemptCompletedPayload {
-    translationJobId
-    translationAttemptId
-
-    completedBatchCount
-    translatedSegmentCount
-
-    usageSummary
-
-    completedAt
-}
+TranslationPlanCreated
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationPlanId
+├── TranslationIntentId
+├── SourceDocumentArtifactId
+├── TargetLanguage
+├── TranslationProfileId
+├── TranslationProfileVersion
+├── KnowledgeSnapshotId?
+├── ContextSnapshotId?
+├── ConfigurationSnapshotId
+├── PartialResultMode
+├── PlannedUnitCount?
+├── PlannedBatchCount?
+└── CreatedAt
 ```
-
-An attempt may complete without the whole job completing when:
-
-* the attempt processed only failed batches;
-* another attempt already contributed successful batches;
-* result assembly remains pending.
 
 ---
 
-## 29. TranslationAttemptFailed
+# 29. Plan Event Restrictions
 
-Published when an attempt cannot continue.
+Do not include:
 
-Event type:
+* complete Translation Plan
+* source text
+* translated text
+* provider credentials
+* Runtime priority state
+* retry budget
+* cancellation state
+
+---
+
+# 30. `translation.units.planned`
+
+Optional observation after Translation Unit planning succeeds.
+
+Payload:
 
 ```text
-translation.attempt.failed
+TranslationUnitsPlanned
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationPlanId
+├── SourceDocumentArtifactId
+├── TranslationUnitCount
+├── SelectedSourceBlockCount
+├── MergeCount?
+├── SplitCount?
+├── WarningCodes[]
+└── PlannedAt
+```
+
+---
+
+# 31. Translation Unit Event Granularity
+
+Do not emit one public event per TranslationUnit by default.
+
+Avoid:
+
+```text
+translation.unit.created
+```
+
+for thousands of Units unless a concrete consumer requires it.
+
+Aggregate event preferred.
+
+---
+
+# 32. `translation.context.resolved`
+
+Optional.
+
+Payload:
+
+```text
+TranslationContextResolved
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationPlanId
+├── ContextSnapshotId?
+├── ContextEntryCount
+├── MissingOptionalContextCount
+├── WarningCodes[]
+└── ResolvedAt
+```
+
+No context content.
+
+---
+
+# 33. `translation.terminology.resolved`
+
+Optional.
+
+Payload:
+
+```text
+TranslationTerminologyResolved
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationPlanId
+├── KnowledgeSnapshotId?
+├── ConstraintCount
+├── LockedConstraintCount
+├── ConflictCount
+├── WarningCodes[]
+└── ResolvedAt
+```
+
+No source/target term values in normal events.
+
+---
+
+# 34. `translation.batch.planned`
+
+Optional.
+
+Payload:
+
+```text
+TranslationBatchPlanned
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationPlanId
+├── TranslationBatchId
+├── BatchSequence
+├── TranslationUnitCount
+├── EstimatedCharacters?
+├── EstimatedTokens?
+├── ProviderRequirementsSummary
+└── PlannedAt
+```
+
+---
+
+# 35. Batch Planned Semantics
+
+This means:
+
+```text
+TranslationBatchState = READY
+```
+
+It does not mean:
+
+```text
+Runtime scheduled it
+
+provider accepted it
+
+provider is running
+```
+
+---
+
+# 36. Provider Observation Events
+
+Possible optional events:
+
+```text
+translation.provider.execution-requested
+
+translation.provider.execution-observed
+
+translation.provider.output-received
+
+translation.provider.error-observed
+```
+
+They are observational.
+
+---
+
+# 37. `translation.provider.execution-requested`
+
+Payload:
+
+```text
+TranslationProviderExecutionRequested
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationPlanId
+├── TranslationBatchId
+├── ProviderId?
+├── ProviderClass?
+├── LocalExecution?
+├── StreamingRequested?
+└── RequestedAt
+```
+
+---
+
+# 38. Execution Requested Is Not Started
+
+```text
+execution-requested
+    ≠
+provider running
+```
+
+Some providers offer no reliable running-state observation.
+
+---
+
+# 39. `translation.provider.execution-observed`
+
+Optional diagnostic event.
+
+Payload:
+
+```text
+TranslationProviderExecutionObserved
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationBatchId
+├── ProviderId?
+├── Observation
+├── ProviderRequestId?
+├── LocalExecution?
+└── ObservedAt
+```
+
+Observation:
+
+```text
+ACCEPTED
+
+RUNNING
+
+STREAMING
+
+CANCEL_REQUESTED
+
+PHYSICALLY_FINISHED
+
+UNKNOWN
+```
+
+---
+
+# 40. Provider Observation Is Best Effort
+
+Correctness must tolerate:
+
+```text
+execution-requested
+    ↓
+output-received
+```
+
+without a `RUNNING` event.
+
+---
+
+# 41. `translation.provider.output-received`
+
+Published optionally after Adapter creates provider-neutral output.
+
+Payload:
+
+```text
+TranslationProviderOutputReceived
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationBatchId
+├── ProviderId?
+├── ReturnedUnitCount
+├── ProviderWarningCount?
+├── UsageSummary?
+├── LatencyMs?
+└── ReceivedAt
+```
+
+---
+
+# 42. Output Received Is Not Valid
+
+Critical:
+
+```text
+provider.output-received
+    ≠
+TranslationBatch VALID
+```
+
+Output still requires validation.
+
+---
+
+# 43. `translation.provider.error-observed`
+
+Optional diagnostic event.
+
+Payload:
+
+```text
+TranslationProviderErrorObserved
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationBatchId
+├── ProviderId?
+├── ErrorCode
+├── ErrorCategory
+├── Retryability?
+├── ProviderRequestId?
+└── OccurredAt
+```
+
+No raw provider response.
+
+---
+
+# 44. No `TranslationAttemptFailed`
+
+Provider/batch failure does not create a Translation Attempt lifecycle event.
+
+Runtime Attempt remains authoritative.
+
+---
+
+# 45. Batch Validation Events
+
+Recommended:
+
+```text
+translation.batch.validated
+
+translation.batch.invalid
+```
+
+The second is optional diagnostic.
+
+---
+
+# 46. `translation.batch.validated`
+
+Published after provider output has passed required Translation validation.
+
+Payload:
+
+```text
+TranslationBatchValidated
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationPlanId
+├── TranslationBatchId
+├── TranslationUnitCount
+├── ValidatedUnitCount
+├── WarningCount
+├── ProviderId?
+├── UsageSummary?
+└── ValidatedAt
+```
+
+---
+
+# 47. Batch Validation Requirement
+
+`translation.batch.validated` must never be emitted merely because:
+
+```text
+HTTP 200
+
+provider request completed
+
+structured JSON parsed
+```
+
+Alignment/contract validation must pass.
+
+This preserves one of the strongest principles from the previous model.
+
+---
+
+# 48. `translation.batch.invalid`
+
+Optional diagnostic event.
+
+Payload:
+
+```text
+TranslationBatchInvalid
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationBatchId
+├── ValidationCode
+├── AffectedTranslationUnitIds[]
+├── RetryHint?
+└── InvalidatedAt
+```
+
+Keep Unit list bounded or use a reference/count when large.
+
+---
+
+# 49. Translated Unit Observation
+
+For low-latency progressive processing, Translation may expose:
+
+```text
+translation.units.validated
+```
+
+This replaces legacy `TranslationSegmentCompleted`.
+
+---
+
+# 50. `translation.units.validated`
+
+Payload:
+
+```text
+TranslationUnitsValidated
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationPlanId
+├── TranslationBatchId?
+├── CandidateArtifactId?
+├── UnitSummaries[]
+├── CompletenessObservation?
+└── ValidatedAt
+```
+
+---
+
+# 51. Unit Summary
+
+```text
+TranslationUnitValidationSummary
+├── TranslationUnitId
+├── TranslatedUnitId
+├── SourceBlockRefs[]
+├── SourceSequence
+├── Completion
+└── WarningCodes[]
+```
+
+Do not embed translated text by default.
+
+---
+
+# 52. Why `TranslationSegmentCompleted` Is Removed
+
+Legacy:
+
+```text
+PreparedSegment
+    ↓
+TranslatedSegment
+```
+
+no longer exists.
+
+Current:
+
+```text
+SourceBlock[]
+    ↓
+TranslationUnit
+    ↓
+TranslatedUnit
+```
+
+Therefore event naming follows Translation Unit semantics.
+
+---
+
+# 53. Progressive Translation Events
+
+Progressive processing may emit:
+
+```text
+translation.partial-candidate.validated
+```
+
+instead of publishing revisioned Translation Results directly.
+
+---
+
+# 54. `translation.partial-candidate.validated`
+
+Optional.
+
+Published when:
+
+```text
+CandidateValidationState = VALID
+and
+Completeness = PARTIAL
 ```
 
 Payload:
 
 ```text
-TranslationAttemptFailedPayload {
-    translationJobId
-    translationAttemptId
-
-    failure
-
-    completedBatchIds[]
-    failedBatchIds[]
-
-    partialOutputAvailable
-
-    failedAt
-}
+TranslationPartialCandidateValidated
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── CandidateArtifactId
+├── TranslationIntentId
+├── SourceDocumentArtifactId
+├── TargetLanguage
+├── CompletedTranslationUnitCount
+├── MissingTranslationUnitCount
+├── FailedTranslationUnitCount
+├── MissingTranslationUnitIds?
+├── FailedTranslationUnitIds?
+├── WarningSummary
+└── ValidatedAt
 ```
-
-### Meaning
-
-The attempt failed.
-
-The job may still:
-
-* retry;
-* select fallback;
-* complete partially;
-* fail finally.
-
-Consumers must not treat this event alone as final job failure.
 
 ---
 
-# Part V — Batch Events
-
-## 30. TranslationBatchStarted
-
-Published when one translation batch starts provider execution.
-
-Event type:
+# 55. Partial Candidate Is Not Published
 
 ```text
-translation.batch.started
+partial-candidate.validated
+    ≠
+Presentation may display
+```
+
+Runtime/application policy decides acceptance.
+
+---
+
+# 56. Partial Event Granularity
+
+For large documents:
+
+prefer:
+
+```text
+counts
++
+bounded Unit ID subsets
++
+Candidate reference
+```
+
+instead of complete lists.
+
+---
+
+# 57. Translation Candidate Events
+
+Core events:
+
+```text
+translation.candidate.validated
+
+translation.candidate.invalid
+
+translation.candidate.submitted
+```
+
+---
+
+# 58. `translation.candidate.validated`
+
+Published when:
+
+```text
+TranslationCandidateValidationState = VALID
 ```
 
 Payload:
 
 ```text
-TranslationBatchStartedPayload {
-    translationJobId
-    translationAttemptId
-    translationBatchId
-
-    batchSequence
-
-    preparedSegmentIds[]
-
-    providerId
-    modelIdentifier
-
-    startedAt
-}
+TranslationCandidateValidated
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── CandidateArtifactId
+├── SourceDocumentArtifactId
+├── TranslationIntentId
+├── TranslationVariantId?
+├── TargetLanguage
+├── TranslationProfileId
+├── Completeness
+├── TranslationUnitCount
+├── TranslatedUnitCount
+├── MissingUnitCount
+├── FailedUnitCount
+├── WarningSummary
+├── ProviderProvenanceSummary
+├── CompatibilitySummary
+└── ValidatedAt
 ```
-
-### Visibility
-
-This event may be public for:
-
-* detailed progress;
-* observability;
-* debugging;
-* distributed workers.
-
-For the MVP and simple deployments, it should remain internal by default. Publish it only when detailed observability, debugging or distributed execution has a concrete consumer.
 
 ---
 
-## 31. TranslationBatchCompleted
+# 59. Candidate Validated Meaning
 
-Published after a batch response has been received, structurally validated, and accepted.
-
-Event type:
+Means:
 
 ```text
-translation.batch.completed
+Candidate satisfies
+Translation-owned semantic contract.
 ```
+
+Does not mean:
+
+```text
+Runtime Attempt succeeded
+
+Candidate is current
+
+Candidate is authoritative
+
+Translation Artifact published
+
+Reading Session selected this variant
+```
+
+---
+
+# 60. `translation.candidate.invalid`
+
+Optional diagnostic event.
 
 Payload:
 
 ```text
-TranslationBatchCompletedPayload {
-    translationJobId
-    translationAttemptId
-    translationBatchId
-
-    batchSequence
-
-    completedPreparedSegmentIds[]
-    translatedSegmentIds[]
-
-    warnings[]
-
-    providerExecutionSummary
-    usageSummary
-
-    completedAt
-}
+TranslationCandidateInvalid
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── CandidateArtifactId?
+├── ValidationCode
+├── ValidationCategory
+├── OperationPhase
+├── RetryHint?
+└── InvalidatedAt
 ```
-
-### Important rule
-
-This event must not be published immediately after receiving an unvalidated provider response.
-
-It is published only after:
-
-* response parsing;
-* identifier validation;
-* alignment validation;
-* minimum output validation.
 
 ---
 
-## 32. TranslationBatchFailed
-
-Published when one batch cannot produce an accepted result in the current attempt.
-
-Event type:
+# 61. Invalid Candidate Rule
 
 ```text
-translation.batch.failed
+Candidate INVALID
+    ↛
+candidate.submitted
 ```
+
+---
+
+# 62. `translation.candidate.submitted`
+
+Published when a VALID Candidate crosses Translation → Runtime boundary.
 
 Payload:
 
 ```text
-TranslationBatchFailedPayload {
-    translationJobId
-    translationAttemptId
-    translationBatchId
-
-    preparedSegmentIds[]
-
-    failure
-    retryable
-
-    partialOutputAccepted
-
-    failedAt
-}
-```
-
-### Meaning
-
-The batch failed in this attempt.
-
-The job may retry the batch later.
-
----
-
-# Part VI — Segment and Partial Result Events
-
-## 33. TranslationSegmentCompleted
-
-Published when one validated translated segment becomes available for progressive consumption.
-
-Event type:
-
-```text
-translation.segment.completed
-```
-
-Payload:
-
-```text
-TranslationSegmentCompletedPayload {
-    translationIntentId
-    translationJobId
-    translationAttemptId
-    translationBatchId
-
-    translationResultId
-    translationRevision
-
-    translationVariantId
-
-    preparedDocumentId
-    contentRevision
-
-    preparedSegmentId
-    translatedSegmentId
-    sourceSequence
-
-    targetLanguage
-
-    completion
-    warnings[]
-
-    translatedTextReference
-
-    completedAt
-}
+TranslationCandidateSubmitted
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── CandidateArtifactId
+├── SourceDocumentArtifactId
+├── TranslationIntentId
+├── TranslationVariantId?
+├── TargetLanguage
+├── Completeness
+└── SubmittedAt
 ```
 
 ---
 
-## 34. translatedTextReference
-
-The event should prefer a result reference:
+# 63. Submission Is Not Acceptance
 
 ```text
-translatedTextReference {
-    translationResultId
-    translationRevision
-    translatedSegmentId
-}
+candidate.submitted
+    ≠
+Candidate accepted
 ```
 
-Embedding `translatedText` directly may be allowed for low-latency local delivery when:
+Runtime may classify:
 
-* payload size is bounded;
-* privacy policy permits it;
-* Event Bus transport is trusted;
-* consumers require immediate display.
+```text
+ACCEPTED
 
-The architecture should not require text embedding.
+REJECTED_STALE
+
+REJECTED_CANCELED
+
+REJECTED_DUPLICATE
+
+REJECTED_INVALID
+
+REJECTED_AUTHORITY
+
+REJECTED_RUNTIME_FAILURE
+```
+
+These events, if exposed, belong to Runtime.
 
 ---
 
-## 35. Segment Event Granularity
+# 64. No `translation.completed`
 
-`TranslationSegmentCompleted` is useful for:
-
-* progressive comic bubble overlays;
-* progressive novel rendering;
-* low-latency interactive reading.
-
-However, publishing one event per segment may be excessive for large documents.
-
-Implementations may instead publish grouped segment events.
-
----
-
-## 36. TranslationSegmentsCompleted
-
-Optional grouped event:
-
-```text
-translation.segments.completed
-```
-
-Payload:
-
-```text
-TranslationSegmentsCompletedPayload {
-    translationIntentId
-    translationJobId
-    translationAttemptId
-    translationBatchId
-
-    translationResultId
-    translationRevision
-    translationVariantId
-
-    preparedDocumentId
-    contentRevision
-
-    segments[] {
-        preparedSegmentId
-        translatedSegmentId
-        sourceSequence
-        completion
-        warningCodes[]
-    }
-
-    completedAt
-}
-```
-
-The grouped event is preferred when many segments complete together.
-
-A deployment should avoid publishing both individual and grouped events for the same facts unless consumers explicitly require both.
-
----
-
-## 37. TranslationPartialResultAvailable
-
-Published when a validated partial result becomes available.
-
-Event type:
-
-```text
-translation.result.partial-available
-```
-
-Payload:
-
-```text
-TranslationPartialResultAvailablePayload {
-    translationIntentId
-    translationJobId
-
-    translationResultId
-    translationRevision
-    translationVariantId
-
-    preparedDocumentId
-    contentRevision
-
-    progress
-
-    completedPreparedSegmentIds[]
-    missingPreparedSegmentIds[]
-    failedPreparedSegmentIds[]
-
-    warnings[]
-
-    eligibleForAcceptance
-    acceptedSegmentSubset
-    publicationAllowed
-
-    availableAt
-}
-```
-
-### authoritative
-
-Normally `eligibleForAcceptance` is false until Translation validation and publication policy permit Reading Session evaluation.
-
-For progressive mode, Reading Session may accept only the completed segment subset. Translation does not unilaterally make that subset current.
-
----
-
-## 38. Partial Result Consumer Rule
-
-Consumers must not assume:
-
-```text
-partial result = final result
-```
-
-Consumers must preserve:
-
-* result revision;
-* segment identity;
-* completion state;
-* job identity.
-
-Later result revisions may add or replace non-authoritative partial information.
-
----
-
-# Part VII — Final Result Events
-
-## 39. TranslationCompleted
-
-Published when the selected source set has been translated successfully and the final result is available.
-
-Event type:
+The old terminal event:
 
 ```text
 translation.completed
 ```
 
-Payload:
+is removed as a Translation-owned lifecycle event.
+
+Reason:
 
 ```text
-TranslationCompletedPayload {
-    translationIntentId
-    translationJobId
-
-    translationResultId
-    translationRevision
-    translationVariantId
-
-    preparedDocumentId
-    contentRevision
-
-    sourceLanguage
-    targetLanguage
-
-    translatedSegmentCount
-
-    resultReference
-
-    statistics
-
-    eligibleForAcceptance
-    acceptedByReadingSession
-    activated
-
-    completedAt
-}
+Translation local completion
+    ≠
+Runtime Attempt success
+    ≠
+Artifact publication
 ```
-
-### Publication condition
-
-This event is published only after:
-
-* result assembly;
-* alignment validation;
-* stale-result verification;
-* cancellation check;
-* supersession check;
-* final publication decision.
-
-`TranslationCompleted` means Translation finished and produced a retrievable final result that is eligible for Reading Session evaluation. It does not by itself prove that the result became current visible content. Reading Session remains the final authority for the active content revision and reading context.
 
 ---
 
-## 40. TranslationCompletedWithWarnings
+# 65. No `translation.completed-with-warnings`
 
-Published when translation completes but contains warnings significant enough for consumers.
+Warnings belong to Candidate/Artifact metadata.
 
-Event type:
+Use:
 
 ```text
-translation.completed-with-warnings
+candidate.validated
+    Completeness = COMPLETE
+    WarningCount > 0
 ```
+
+rather than creating a second terminal lifecycle.
+
+---
+
+# 66. No `translation.failed`
+
+Translation returns:
+
+```text
+TranslationModuleError
+```
+
+Runtime decides whether Attempt/WorkItem failed.
+
+---
+
+# 67. No `translation.cancelled`
+
+Cancellation belongs to Runtime.
+
+Translation may emit optional diagnostic:
+
+```text
+translation.cancellation.observed
+```
+
+---
+
+# 68. `translation.cancellation.observed`
 
 Payload:
 
 ```text
-TranslationCompletedWithWarningsPayload {
-    translationIntentId
-    translationJobId
-
-    translationResultId
-    translationRevision
-    translationVariantId
-
-    preparedDocumentId
-    contentRevision
-
-    translatedSegmentCount
-
-    warnings[]
-
-    resultReference
-
-    eligibleForAcceptance
-    acceptedByReadingSession
-    activated
-
-    completedAt
-}
+TranslationCancellationObserved
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── OperationPhase
+├── ActiveProviderRequestCount?
+└── ObservedAt
 ```
 
-### Relationship with TranslationCompleted
-
-A single completion should normally publish either:
-
-```text
-TranslationCompleted
-```
-
-or:
-
-```text
-TranslationCompletedWithWarnings
-```
-
-It should not publish both for the same completion transition.
+Does not mean Runtime committed `CANCELED`.
 
 ---
 
-## 41. TranslationFailed
+# 69. Provider Cancellation Event
 
-Published when a job reaches final failure and no further automatic execution is planned.
-
-Event type:
+Optional:
 
 ```text
-translation.failed
+translation.provider.cancellation-requested
 ```
 
 Payload:
 
 ```text
-TranslationFailedPayload {
-    translationJobId
-
-    preparedDocumentId
-    contentRevision
-
-    finalAttemptId
-
-    failure
-
-    completedPreparedSegmentIds[]
-    missingPreparedSegmentIds[]
-    failedPreparedSegmentIds[]
-
-    partialResultId
-    partialResultRevision
-
-    retryAllowed
-
-    failedAt
-}
+TranslationProviderCancellationRequested
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── TranslationBatchId
+├── ProviderId?
+└── RequestedAt
 ```
 
-### Important distinction
-
-`TranslationAttemptFailed` means one attempt failed.
-
-`TranslationFailed` means the logical job reached final failure.
+Physical outcome remains best effort.
 
 ---
 
-# Part VIII — Retry and Fallback Events
+# 70. No `translation.retry.scheduled`
 
-## 42. TranslationRetryScheduled
-
-Published when Translation has determined that another execution attempt is required for the same logical job. Runtime owns when that attempt is admitted and actually begins.
-
-Event type:
+Translation emits:
 
 ```text
-translation.retry.scheduled
+RetryHint
 ```
+
+Runtime owns scheduling.
+
+Optional diagnostic fact may describe recommendation:
+
+```text
+translation.retry-hint.produced
+```
+
+but this should usually stay in logs/telemetry.
+
+---
+
+# 71. Provider Fallback Semantics
+
+Old:
+
+```text
+TranslationProviderFallbackSelected
+```
+
+implied Translation selected the next Attempt/provider.
+
+New architecture should distinguish:
+
+```text
+Translation recommends fallback
+        ↓
+Runtime / Provider resolution
+        ↓
+new Attempt
+```
+
+If a provider was actually used after fallback, provenance records it.
+
+---
+
+# 72. Optional Fallback Observation
+
+Possible:
+
+```text
+translation.provider.fallback-observed
+```
+
+when an Attempt executes using a fallback provider.
 
 Payload:
 
 ```text
-TranslationRetryScheduledPayload {
-    translationJobId
-
-    failedAttemptId
-    nextAttemptNumber
-
-    retryScope
-    retryReason
-
-    affectedBatchIds[]
-
-    scheduledAt
-    notBefore
-}
+TranslationProviderFallbackObserved
+├── AttemptId
+├── PreviousProviderId?
+├── CurrentProviderId
+├── ReasonCode
+└── ObservedAt
 ```
 
-Possible scopes:
-
-```text
-FAILED_BATCHES
-ACTIVE_ATTEMPT
-ENTIRE_JOB
-```
+Not required for correctness.
 
 ---
 
-## 43. TranslationProviderFallbackSelected
+# 73. Supersession
 
-Published when the module selects another provider after a failure or policy decision.
-
-Event type:
-
-```text
-translation.provider.fallback-selected
-```
-
-Payload:
-
-```text
-TranslationProviderFallbackSelectedPayload {
-    translationJobId
-
-    previousAttemptId
-    previousProviderId
-
-    nextProviderId
-
-    fallbackIndex
-    reason
-
-    selectedAt
-}
-```
-
-This event must not expose:
-
-* credentials;
-* raw provider errors;
-* provider request bodies.
-
----
-
-# Part IX — Cancellation Events
-
-## 44. TranslationCancellationRequested
-
-Published after a valid cancellation request has been accepted.
-
-Event type:
-
-```text
-translation.cancellation.requested
-```
-
-Payload:
-
-```text
-TranslationCancellationRequestedPayload {
-    translationJobId
-
-    scope
-    reason
-
-    requestedBy
-    requestedAt
-}
-```
-
-### Meaning
-
-Logical cancellation has been requested.
-
-Physical provider execution may still be stopping.
-
----
-
-## 45. TranslationCancelled
-
-Published when the Translation job has entered its terminal cancelled state.
-
-Event type:
-
-```text
-translation.cancelled
-```
-
-Payload:
-
-```text
-TranslationCancelledPayload {
-    translationJobId
-
-    activeAttemptId
-
-    reason
-
-    completedPreparedSegmentIds[]
-    discardedPreparedSegmentIds[]
-
-    partialResultId
-    partialResultRetained
-
-    cancelledAt
-}
-```
-
-### Authority rule
-
-Any result arriving after this event must remain non-authoritative.
-
----
-
-# Part X — Supersession and Invalidation Events
-
-## 46. TranslationSuperseded
-
-Published when newer work replaces the authority of an existing job.
-
-Event type:
+Translation publishes no:
 
 ```text
 translation.superseded
 ```
 
-Payload:
+Runtime owns stale/revision authority.
+
+Example:
 
 ```text
-TranslationSupersededPayload {
-    translationJobId
-
-    supersededByTranslationJobId
-
-    preparedDocumentId
-    contentRevision
-
-    reason
-
-    supersededAt
-}
+Candidate VALID
+    ↓
+Runtime sees newer Revision
+    ↓
+REJECTED_STALE
 ```
 
-Possible reasons:
-
-```text
-NEW_SOURCE_REVISION
-NEW_TRANSLATION_JOB
-TARGET_LANGUAGE_CHANGED
-PROFILE_CHANGED
-READING_CONTEXT_CHANGED
-MANUAL_RETRANSLATION
-```
-
-A superseded result may be retained historically.
-
-It must not become active later without an explicit new decision.
+No Translation state mutation required.
 
 ---
 
-## 47. TranslationInvalidated
+# 74. Invalidation
 
-Published when previously usable translation data is marked invalid.
-
-Event type:
+Translation core does not own mutable:
 
 ```text
 translation.invalidated
 ```
 
-Payload:
+for published Artifacts.
+
+Artifact/application policy may publish invalidation events if that architecture supports them.
+
+Translation may publish:
 
 ```text
-TranslationInvalidatedPayload {
-    translationJobId
-
-    translationVariantId
-    translationResultId
-
-    scope
-
-    invalidatedPreparedSegmentIds[]
-
-    reason
-
-    historicalDataRetained
-    cacheEntryInvalidated
-
-    invalidatedAt
-}
+candidate.invalid
 ```
 
-Possible scopes:
-
-```text
-JOB
-RESULT
-VARIANT
-SEGMENTS
-CACHE_ENTRY
-```
+only during Candidate validation.
 
 ---
 
-## 48. Supersession Versus Invalidation
+# 75. Variant Events
 
-Supersession means:
+Translation owns immutable variant creation semantics.
 
-```text
-newer work replaced older work
-```
-
-Invalidation means:
-
-```text
-existing work is no longer considered valid
-```
-
-Examples:
-
-```text
-New translation for revision 8 replaces revision 7
-    → supersession
-
-Alignment bug found in revision 7 result
-    → invalidation
-```
-
----
-
-# Part XI — Variant Events
-
-## 49. TranslationVariantCreated
-
-Published after a new immutable translation variant has been created.
-
-Event type:
+Recommended:
 
 ```text
 translation.variant.created
 ```
 
+It does not own:
+
+```text
+translation.variant.activated
+
+translation.variant.deactivated
+```
+
+for Reading Session selection.
+
+---
+
+# 76. `translation.variant.created`
+
+Published when a valid immutable translation variant is represented by a Candidate/Artifact identity.
+
 Payload:
 
 ```text
-TranslationVariantCreatedPayload {
-    translationIntentId
-    translationJobId
-    translationVariantId
-
-    parentVariantId
-    variantType
-
-    targetLanguage
-    translationProfileId
-
-    translatedSegmentCount
-
-    createdBy
-    createdAt
-}
+TranslationVariantCreated
+├── TranslationVariantId
+├── CandidateArtifactId?
+├── TranslationArtifactRef?
+├── SourceDocumentArtifactId
+├── TranslationIntentId
+├── ParentVariantId?
+├── VariantType
+├── TargetLanguage
+├── TranslationProfileId
+├── CreatedBy
+└── CreatedAt
 ```
 
-Possible variant types:
+---
+
+# 77. Variant Types
+
+Examples:
 
 ```text
 PROVIDER_GENERATED
+
 RETRANSLATED
+
 LITERAL
+
 NATURAL
+
 USER_CORRECTED
+
 SYSTEM_CORRECTED
+
 IMPORTED
 ```
 
 ---
 
-## 50. TranslationVariantActivated
-
-Published when a variant becomes active for a reading context.
-
-Event type:
+# 78. Variant Created Does Not Mean Active
 
 ```text
-translation.variant.activated
+variant.created
+    ≠
+active for Reading Session
 ```
+
+Selection belongs externally.
+
+---
+
+# 79. Translation Corrections
+
+Corrections may create immutable variant facts.
+
+Possible events:
+
+```text
+translation.correction.recorded
+
+translation.correction.variant-created
+```
+
+Avoid command-like:
+
+```text
+correction.submitted
+```
+
+as a required domain event if submission ownership belongs to application/API layer.
+
+---
+
+# 80. `translation.correction.recorded`
+
+Optional.
 
 Payload:
 
 ```text
-TranslationVariantActivatedPayload {
-    translationIntentId
-    translationJobId
-    translationVariantId
-
-    readingSessionId
-
-    preparedDocumentId
-    contentRevision
-
-    targetLanguage
-
-    previousActiveVariantId
-
-    activatedBy
-    activatedAt
-}
+TranslationCorrectionRecorded
+├── BaseTranslationArtifactId
+├── BaseVariantId
+├── AffectedTranslationUnitIds[]
+├── AffectedSourceBlockRefs[]
+├── CorrectedBy
+├── KnowledgeProposalRequested
+└── RecordedAt
 ```
 
-Reading Session owns whether this activation is current for the reading context. Presentation may use the event only after validating the referenced session, source revision, target language, intent and translation revision.
+No corrected text by default.
 
 ---
 
-## 51. TranslationVariantInvalidated
+# 81. `translation.correction.variant-created`
 
-Published when one immutable variant is no longer eligible for activation.
-
-Event type:
-
-```text
-translation.variant.invalidated
-```
+Published after a new immutable corrected Candidate/Artifact variant exists.
 
 Payload:
 
 ```text
-TranslationVariantInvalidatedPayload {
-    translationJobId
-    translationVariantId
-
-    reason
-
-    wasActive
-    replacementVariantId
-
-    invalidatedAt
-}
+TranslationCorrectionVariantCreated
+├── BaseVariantId
+├── CorrectedVariantId
+├── CandidateArtifactId?
+├── TranslationArtifactRef?
+├── AffectedTranslationUnitCount
+├── KnowledgeProposalRef?
+└── CreatedAt
 ```
-
-Invalidation does not delete the variant unless retention policy separately requires deletion.
 
 ---
 
-# Part XII — Correction Events
+# 82. Knowledge Boundary
 
-## 52. TranslationCorrectionSubmitted
-
-Published after a correction request has been accepted.
-
-Event type:
+Correction events do not imply:
 
 ```text
-translation.correction.submitted
+global Knowledge updated
 ```
 
-Payload:
-
-```text
-TranslationCorrectionSubmittedPayload {
-    translationJobId
-
-    baseVariantId
-
-    correctedPreparedSegmentIds[]
-
-    submittedBy
-    submittedAt
-
-    knowledgeProposalRequested
-}
-```
-
-Corrected text should generally not be embedded in the event.
+Knowledge owns terminology persistence/review.
 
 ---
 
-## 53. TranslationCorrectionApplied
+# 83. Cache Events
 
-Published after a corrected immutable variant has been created.
-
-Event type:
-
-```text
-translation.correction.applied
-```
-
-Payload:
-
-```text
-TranslationCorrectionAppliedPayload {
-    translationJobId
-
-    baseVariantId
-    correctedVariantId
-
-    correctedPreparedSegmentIds[]
-
-    activated
-
-    knowledgeProposalId
-
-    appliedAt
-}
-```
-
-Translation does not imply that the correction has updated the global Knowledge module.
-
----
-
-# Part XIII — Cache Events
-
-## 54. Public Cache Events
-
-Cache details are primarily internal.
-
-The following event may be exposed for observability when needed:
-
-```text
-TranslationCacheResultReused
-```
-
-Event type:
+Translation should not publish core:
 
 ```text
 translation.cache.result-reused
 ```
 
+because Runtime Cache Policy owns reuse decisions.
+
+Runtime/cache telemetry may expose reuse.
+
+Translation only defines semantic compatibility.
+
+---
+
+# 84. Configuration Observation
+
+Optional:
+
+```text
+translation.configuration.observed
+```
+
 Payload:
 
 ```text
-TranslationCacheResultReusedPayload {
-    translationJobId
-
-    translationResultId
-    translationVariantId
-
-    cacheScope
-
-    sourceContentHash
-    targetLanguage
-    translationProfileId
-
-    reusedAt
-}
+TranslationConfigurationObserved
+├── ConfigurationSnapshotId
+├── PreviousSnapshotId?
+├── Supported
+├── RequiresRestart?
+└── ObservedAt
 ```
 
-Possible cache scopes:
+An active Attempt continues using its immutable snapshot.
+
+---
+
+# 85. Events Consumed by Translation
+
+Translation may observe external events from:
 
 ```text
-SAME_SESSION
-CROSS_SESSION
-PROVIDER_SPECIFIC
-PROVIDER_INDEPENDENT
+Runtime
+
+Artifact Store
+
+Reading Session
+
+Knowledge
+
+Provider Management
+
+Text Processing
 ```
 
-This event should not expose the cache key if it contains sensitive or implementation-specific data.
+Exact names belong to owning modules.
 
 ---
 
-# Part XIV — Events Consumed by Translation
+# 86. SourceDocument Availability
 
-## 55. Upstream Events
-
-Translation may consume events from other modules.
-
-Expected upstream events include:
+Translation may react when an accepted:
 
 ```text
-PreparedDocumentCompleted
-PreparedDocumentRevised
-PreparedDocumentInvalidated
-
-ReadingSessionNavigated
-ReadingSessionClosed
-VisibleContentChanged
-
-KnowledgeSnapshotUpdated
-GlossaryRevisionCreated
-
-ProviderAvailabilityChanged
-ProviderRateLimitChanged
+SourceDocumentArtifact
 ```
 
-Exact event names depend on the owning modules.
+becomes available.
 
-Translation must not redefine those events.
+But automatic translation initiation belongs to orchestration/Runtime.
 
----
-
-## 56. Prepared Document Completed
-
-Translation may react to an upstream prepared-document completion event when:
-
-* automatic translation is enabled;
-* visible content requires translation;
-* prefetch policy allows it.
-
-Automatic reaction must still create a valid `StartTranslation` command internally.
-
-An upstream event must not bypass command validation.
+Translation must not turn upstream event directly into bypassed execution.
 
 ---
 
-## 57. Prepared Document Revised
+# 87. SourceDocument Revision Change
 
-When source content revision changes, Translation may:
-
-* cancel active work for older revisions;
-* mark older jobs superseded;
-* invalidate incompatible cache entries;
-* start new translation when policy permits.
-
-The older job must not publish authoritative output after supersession.
-
----
-
-## 58. Reading Session Navigation
-
-When the user navigates away, Translation may:
-
-* lower job priority;
-* cancel visible-only work;
-* retain useful prefetch work;
-* mark a job superseded;
-* discard non-authoritative partial output.
-
-The chosen behavior depends on reading and cache policy.
-
----
-
-## 59. Reading Session Closed
-
-Closing a reading session may trigger cancellation of session-bound jobs.
-
-Cross-session cached results may be retained when privacy and cache policies permit.
-
----
-
-## 60. Knowledge Snapshot Updated
-
-A Knowledge update does not automatically mutate existing translations.
-
-Depending on policy, Translation may:
-
-* leave completed translations unchanged;
-* invalidate affected variants;
-* offer retranslation;
-* schedule background retranslation;
-* invalidate cache entries.
-
-A new translation must reference the new Knowledge revision.
-
----
-
-## 61. Provider Availability Changed
-
-Provider availability events may affect:
-
-* provider selection;
-* queued attempts;
-* fallback decisions;
-* retry timing.
-
-They must not change the semantic translation configuration of an existing job.
-
----
-
-# Part XV — Event Ordering
-
-## 62. Job Stream Ordering
-
-Events for one Translation job should be published using:
+If source changes:
 
 ```text
-partitionKey = TranslationJobId
+Runtime
+    → creates/revises WorkItem authority
 ```
 
-Within that stream, the `sequence` must increase monotonically.
-
-Example:
+Translation does not:
 
 ```text
-1  TranslationJobCreated
-2  TranslationJobQueued
-3  TranslationAttemptStarted
-4  TranslationBatchStarted
-5  TranslationBatchCompleted
-6  TranslationPartialResultAvailable
-7  TranslationCompleted
-8  TranslationVariantActivated
+mark old TranslationJob SUPERSEDED
+```
+
+Late Candidates are rejected by Runtime.
+
+---
+
+# 88. Reading Session Navigation
+
+Reading Session navigation may affect:
+
+* Runtime priority
+* cancellation
+* prefetch
+* visible-content authority
+
+Translation only observes resulting execution context.
+
+It does not own Reading Session state transitions.
+
+---
+
+# 89. Knowledge Changes
+
+Knowledge update does not mutate existing TranslationArtifacts.
+
+New Translation Intent may reference new Knowledge Snapshot.
+
+Existing variants remain immutable.
+
+---
+
+# 90. Provider Availability Changes
+
+Provider Management owns provider availability events.
+
+Translation may use updated availability when constructing future Plan/provider requirements.
+
+Active immutable Plan must not silently change semantic policy mid-Attempt.
+
+---
+
+# 91. Event Ordering Within Concurrent Batches
+
+Valid:
+
+```text
+Batch A request
+Batch B request
+
+Batch B output
+Batch A output
+
+Batch B validated
+Batch A validated
+```
+
+Final ordering uses:
+
+```text
+TranslationUnit.SourceSequence
+```
+
+not event arrival.
+
+---
+
+# 92. No Terminal Event Ordering Rule
+
+Legacy rule:
+
+```text
+exactly one:
+Completed
+Failed
+Cancelled
+Superseded
+```
+
+is removed from Translation events.
+
+Runtime owns terminal events.
+
+---
+
+# 93. Late Provider Response
+
+If provider output arrives after Runtime authority loss:
+
+Translation may:
+
+* record bounded diagnostic
+* record usage
+* cleanup provider resources
+
+Translation must not assume authority is restored.
+
+---
+
+# 94. Event Delivery and Deduplication
+
+Primary deduplication:
+
+```text
+EventId
+```
+
+Semantic keys when needed:
+
+```text
+AttemptId
++
+EventName
++
+TranslationBatchId?
++
+CandidateArtifactId?
 ```
 
 ---
 
-## 63. Concurrent Batch Ordering
+# 95. Candidate Submission Idempotency
 
-Multiple batches may run concurrently.
-
-Therefore, valid arrival order may be:
+For one Candidate:
 
 ```text
-Batch 1 started
-Batch 2 started
-Batch 2 completed
-Batch 1 completed
+semantic submission count <= 1
 ```
 
-Consumers must reconstruct segment order using:
+Event redelivery may occur.
 
-```text
-sourceSequence
-preparedSegmentId
-```
-
-not event arrival order.
+Duplicate event consumption must not create duplicate Artifact publication.
 
 ---
 
-## 64. Final Event Ordering Rule
+# 96. Event Loss
 
-Terminal events for one job include:
+Loss of optional events must not change:
 
 ```text
+Translation semantic output
+
+Candidate validity
+
+Runtime Attempt outcome
+```
+
+Core execution contract remains authoritative.
+
+---
+
+# 97. Event Publication Failure
+
+Failure to publish optional:
+
+```text
+batch.planned
+
+provider.output-received
+
+units.validated
+```
+
+must not invalidate an otherwise valid Candidate.
+
+---
+
+# 98. Candidate Submission vs Candidate Event
+
+Important:
+
+```text
+Submit Candidate to Runtime
+```
+
+is the correctness boundary.
+
+```text
+translation.candidate.submitted event
+```
+
+is observational.
+
+Event publication failure must not trigger duplicate Candidate submission.
+
+---
+
+# 99. Event vs Telemetry
+
+Use Event Bus when another module has a legitimate semantic reason to observe a fact.
+
+Use Telemetry for:
+
+* latency measurements
+* provider token rate
+* memory
+* detailed retry diagnostics
+* per-rule timings
+* high-frequency streaming progress
+
+---
+
+# 100. Event vs Log
+
+Good event:
+
+```text
+Candidate validated
+```
+
+Telemetry/log:
+
+```text
+provider emitted token 312
+```
+
+---
+
+# 101. Progress Events
+
+A generic:
+
+```text
+translation.progress.updated
+```
+
+should not be part of required Translation domain contract.
+
+Runtime/UX progress can derive from:
+
+* operation phase
+* validated Unit counts
+* Batch counts
+* telemetry
+
+If a progress projection is needed, it belongs to a read model/observability concern.
+
+---
+
+# 102. High-Frequency Event Rule
+
+Do not emit:
+
+* one event per provider token
+* one event per character
+* one event per prompt chunk
+* one event per glossary lookup
+
+Prefer phase/batch aggregate observations.
+
+---
+
+# 103. Privacy Metadata
+
+Normal Translation events should indicate:
+
+```text
+contains_source_text = false
+
+contains_translated_text = false
+
+contains_provider_prompt = false
+
+contains_credentials = false
+```
+
+according to shared privacy envelope.
+
+---
+
+# 104. Sensitive IDs
+
+IDs may still be sensitive:
+
+```text
+SessionId
+
+SourceDocumentArtifactId
+
+TranslationArtifactId
+
+KnowledgeSnapshotId
+```
+
+Use CRAI privacy classification.
+
+---
+
+# 105. Translated Text in Events
+
+Default:
+
+```text
+do not embed translated text
+```
+
+For ultra-low-latency in-process delivery, a future private/non-persistent channel may carry bounded text if explicitly designed.
+
+The public Event Bus contract must not depend on it.
+
+---
+
+# 106. Prompt Injection Safety
+
+Provider/source output cannot control:
+
+* EventName
+* routing
+* topic
+* partition
+* correlation IDs
+* Provider ID metadata
+* Runtime IDs
+* Privacy classification
+
+Trusted Translation code constructs metadata.
+
+---
+
+# 107. Error Observation Event
+
+Optional:
+
+```text
+translation.operation-error.observed
+```
+
+Payload:
+
+```text
+TranslationOperationErrorObserved
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── OperationPhase
+├── ErrorCode
+├── ErrorCategory
+├── TranslationBatchId?
+├── ProviderId?
+├── Retryability?
+└── OccurredAt
+```
+
+Diagnostic only.
+
+---
+
+# 108. Error Observation Is Not Failure Lifecycle
+
+```text
+operation-error.observed
+    ≠
+Runtime Attempt FAILED
+```
+
+Runtime evaluates the module result.
+
+---
+
+# 109. Warning Observation Event
+
+Optional:
+
+```text
+translation.warning.recorded
+```
+
+Payload:
+
+```text
+TranslationWarningRecorded
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── WarningCode
+├── OperationPhase
+├── TranslationUnitCount?
+├── TranslationBatchId?
+├── ProviderId?
+└── RecordedAt
+```
+
+---
+
+# 110. Warning Privacy
+
+Do not include source/translated fragments in normal warning events.
+
+Use:
+
+```text
+WarningCode
+
+TranslationUnitId
+
+SourceBlockRef
+```
+
+when necessary.
+
+---
+
+# 111. Event Versioning
+
+Each event has independent:
+
+```text
+EventVersion
+```
+
+from:
+
+```text
+TranslationContractVersion
+
+ModuleVersion
+
+TranslationProfileVersion
+
+ProviderVersion
+```
+
+---
+
+# 112. Backward-Compatible Event Changes
+
+May include:
+
+* optional fields
+* optional metrics
+* new warning code
+* new optional capability metadata
+* additive provenance
+
+---
+
+# 113. Breaking Event Changes
+
+Require major event version when:
+
+* identifier ownership changes
+* event semantic meaning changes
+* required identity removed
+* Candidate authority semantics change
+* privacy guarantee weakens
+* provider-native data becomes public
+
+---
+
+# 114. Unknown Fields
+
+Consumers should:
+
+* ignore unknown optional fields
+* preserve when forwarding if appropriate
+* handle unknown enums safely
+* reject unsupported major version when required
+
+---
+
+# 115. Event Retention
+
+Retention should be conservative for Translation events.
+
+Consider:
+
+* reading-history sensitivity
+* provider usage metadata
+* Session identifiers
+* correction history
+* Knowledge references
+* privacy mode
+
+Normal events should remain metadata-only.
+
+---
+
+# 116. MVP Required Events
+
+Recommended minimum:
+
+```text
+translation.module.available
+
+translation.module.degraded
+
+translation.module.unavailable
+
+translation.candidate.validated
+
+translation.candidate.submitted
+```
+
+---
+
+# 117. MVP Recommended Events
+
+Useful:
+
+```text
+translation.plan.created
+
+translation.batch.validated
+
+translation.provider.error-observed
+
+translation.partial-candidate.validated
+
+translation.variant.created
+
+translation.operation-error.observed
+```
+
+---
+
+# 118. MVP Optional Events
+
+Can defer:
+
+```text
+translation.units.planned
+
+translation.context.resolved
+
+translation.terminology.resolved
+
+translation.batch.planned
+
+translation.provider.execution-requested
+
+translation.provider.execution-observed
+
+translation.provider.output-received
+
+translation.units.validated
+
+translation.cancellation.observed
+
+translation.provider.cancellation-requested
+
+translation.correction.recorded
+
+translation.correction.variant-created
+
+translation.configuration.observed
+
+translation.warning.recorded
+```
+
+---
+
+# 119. Removed Legacy Events
+
+Explicitly removed/re-owned:
+
+```text
+TranslationJobCreated
+    → Runtime WorkItem creation
+
+TranslationJobQueued
+    → Runtime Queue
+
+TranslationJobStarted
+    → Runtime Attempt
+
+TranslationProgressUpdated
+    → Telemetry / progress projection
+
+TranslationAttemptStarted
+    → Runtime Attempt
+
+TranslationAttemptCompleted
+    → Runtime Attempt
+
+TranslationAttemptFailed
+    → Runtime Attempt
+
+TranslationBatchStarted
+    → Provider execution observation
+
+TranslationBatchCompleted
+    → translation.batch.validated
+
+TranslationBatchFailed
+    → provider/batch error observation
+
+TranslationSegmentCompleted
+    → translation.units.validated
+
+TranslationSegmentsCompleted
+    → translation.units.validated
+
+TranslationPartialResultAvailable
+    → translation.partial-candidate.validated
+
 TranslationCompleted
+    → Candidate + Runtime + Artifact Store
+
 TranslationCompletedWithWarnings
+    → Candidate warnings/completeness
+
 TranslationFailed
+    → Runtime terminal outcome
+
+TranslationRetryScheduled
+    → Runtime retry
+
+TranslationCancellationRequested
+    → Runtime cancellation
+
 TranslationCancelled
+    → Runtime terminal outcome
+
 TranslationSuperseded
+    → Runtime authority/stale handling
+
+TranslationInvalidated
+    → Artifact/application policy
+
+TranslationVariantActivated
+    → Reading Session/application state
+
+TranslationVariantInvalidated
+    → Artifact/application validity policy
+
+TranslationCacheResultReused
+    → Runtime Cache Policy
 ```
 
-A job must not transition into more than one incompatible terminal outcome.
-
-Later administrative invalidation remains possible after completion.
-
 ---
 
-## 65. Late Provider Response
+# 120. Canonical Event Flow
 
-A provider response may arrive after:
-
-* cancellation;
-* supersession;
-* timeout;
-* a newer attempt;
-* final job failure.
-
-In that case:
-
-* the response may be logged internally;
-* usage may be recorded;
-* diagnostic metadata may be retained;
-* authoritative result events must not be emitted.
-
-An optional internal event may record discarded output, but it should not normally be public.
-
----
-
-# Part XVI — Event Delivery and Idempotency
-
-## 66. At-Least-Once Delivery
-
-Consumers must handle duplicate delivery.
-
-Recommended deduplication key:
+Successful semantic processing:
 
 ```text
-eventId
+Runtime Attempt
+      ↓
+Translation
+      │
+      ├── plan.created             [optional]
+      │
+      ├── units.planned            [optional]
+      │
+      ├── batch.planned            [optional]
+      │
+      ├── provider observations    [optional]
+      │
+      ├── batch.validated          [optional]
+      │
+      └── units.validated          [optional]
+              ↓
+      Assemble Candidate
+              ↓
+      candidate.validated
+              ↓
+      Submit Candidate to Runtime
+              ↓
+      candidate.submitted
+              ↓
+            Runtime
+         ┌────┴────┐
+         │         │
+      ACCEPT     REJECT
+         │
+         ▼
+    Artifact Store
+         │
+         ▼
+ TranslationArtifact
 ```
 
-Where a consumer writes aggregate state, it should also track:
+---
+
+# 121. Partial Candidate Flow
 
 ```text
-TranslationJobId
-sequence
+Translation Units
+    ├── VALID
+    ├── VALID
+    ├── FAILED
+    └── MISSING
+        ↓
+Completeness = PARTIAL
+        ↓
+Candidate VALID
+        ↓
+partial-candidate.validated
+        ↓
+candidate.submitted
+        ↓
+Runtime policy
 ```
 
 ---
 
-## 67. Duplicate Event Handling
-
-Receiving the same event twice must not:
-
-* render duplicate overlays;
-* increment progress twice;
-* create duplicate translation variants;
-* repeat notifications;
-* reactivate already active variants;
-* trigger duplicate retries.
-
----
-
-## 68. Out-of-Order Handling
-
-When an event arrives with a lower sequence than already processed:
-
-* ignore it if already applied;
-* retain it for audit if required;
-* do not roll back newer aggregate state.
-
-When a sequence gap is detected, consumers may:
-
-* wait briefly for missing events;
-* query Translation for current state;
-* rebuild from the authoritative query model.
-
----
-
-## 69. Consumer Recovery
-
-Events provide notification and integration.
-
-They are not necessarily the sole source for UI reconstruction.
-
-A consumer recovering after downtime should be able to call:
+# 122. Provider Failure Flow
 
 ```text
-GetTranslationJob
-GetTranslationResult
-GetActiveTranslation
+Batch
+    ↓
+Provider request
+    ↓
+provider error
+    ↓
+provider.error-observed [optional]
+    ↓
+TranslationModuleError
+    +
+RetryHint
+    ↓
+Runtime
+    ↓
+Retry / Fail / Cancel
 ```
 
-to retrieve authoritative current state.
+No Translation retry lifecycle event.
 
 ---
 
-# Part XVII — Event Payload Size
-
-## 70. Payload Size Principle
-
-Translation events should remain compact.
-
-Large data should be referenced using:
+# 123. Cancellation Flow
 
 ```text
-translationResultId
-translationRevision
-translationVariantId
-translatedSegmentId
+Runtime CancellationContext
+        ↓
+Translation observes
+        ↓
+cancellation.observed [optional]
+        ↓
+provider cancellation request [optional]
+        ↓
+cleanup
+        ↓
+return Runtime
 ```
 
-rather than embedded repeatedly.
-
----
-
-## 71. When Text May Be Embedded
-
-Translated text may be embedded only when all of these are satisfied:
-
-* event purpose requires immediate low-latency consumption;
-* text size is bounded;
-* privacy policy allows transport;
-* the Event Bus supports the payload size;
-* consumers are trusted;
-* retention behavior is understood.
-
-For large chapters or documents, use references.
-
----
-
-## 72. Prohibited Payload Content
-
-Events must not contain:
-
-* raw provider prompts;
-* full raw provider responses;
-* provider credentials;
-* authentication headers;
-* unrelated page content;
-* arbitrary browser state;
-* entire Knowledge databases;
-* large source images;
-* raw OCR image data.
-
----
-
-# Part XVIII — Privacy and Security
-
-## 73. Content Minimization
-
-Events should avoid source and translated text unless necessary.
-
-Preferred event information:
+No:
 
 ```text
-identifiers
-revisions
-counts
-statuses
-warning codes
-failure codes
-durations
-usage summaries
+translation.cancelled
 ```
 
----
-
-## 74. Sensitive Reading Content
-
-Reading content may be private.
-
-Event retention policy must consider:
-
-* whether translated text is stored in events;
-* whether events are persisted;
-* who may consume them;
-* whether remote telemetry receives them;
-* whether deletion requests must affect event projections.
+terminal event.
 
 ---
 
-## 75. Credential Safety
-
-No event may contain:
+# 124. Stale Candidate Flow
 
 ```text
-API keys
-access tokens
-refresh tokens
-authorization headers
-credential file paths
-secret environment values
+Candidate VALID
+        ↓
+candidate.submitted
+        ↓
+Runtime detects newer Revision
+        ↓
+REJECTED_STALE
 ```
 
----
-
-## 76. Prompt Injection Safety
-
-Provider-produced text must not control event routing, event type, or metadata.
-
-All event metadata must be created by trusted Translation code.
-
-Provider output is always treated as data.
+Translation does not publish `superseded`.
 
 ---
 
-# Part XIX — Event Versioning
+# 125. Variant Flow
 
-## 77. Backward-Compatible Changes
+```text
+Candidate / Accepted Artifact
+        ↓
+Immutable Variant Identity
+        ↓
+translation.variant.created
+```
 
-Examples:
+Later:
 
-* adding an optional field;
-* adding an optional warning code;
-* adding a new enum value when consumers tolerate unknown values;
-* adding optional metadata.
+```text
+Reading Session
+    ↓
+selects variant
+```
 
-These changes may retain the current event version when governance permits.
-
----
-
-## 78. Breaking Changes
-
-Examples:
-
-* removing a required field;
-* changing field meaning;
-* changing identifier ownership;
-* changing one event into another semantic fact;
-* changing required ordering guarantees;
-* replacing a reference with incompatible embedded data.
-
-These require a new event version.
+Translation does not publish activation as owner.
 
 ---
 
-## 79. Unknown Fields and Enum Values
+# 126. Correction Flow
 
-Consumers should ignore unknown optional fields.
+```text
+Existing TranslationArtifact
+        ↓
+Correction request
+        ↓
+Translation processing
+        ↓
+New corrected Candidate
+        ↓
+Runtime
+        ↓
+New TranslationArtifact Variant
+        ↓
+translation.correction.variant-created
+```
 
-Consumers must handle unknown enum values safely by:
-
-* preserving them where possible;
-* mapping them to `UNKNOWN`;
-* not failing the whole event stream.
+Original remains immutable.
 
 ---
 
-# Part XX — Event Subscription Guidance
+# 127. Consumer Guidance — Runtime
 
-## 80. Presentation Module
+Runtime primarily consumes direct execution result, not Translation events.
+
+Events may aid:
+
+* observability
+* distributed coordination
+* diagnostics
+
+Runtime authority must never rely solely on event arrival.
+
+---
+
+# 128. Consumer Guidance — Presentation
 
 Presentation should primarily consume:
 
 ```text
-TranslationPartialResultAvailable
-TranslationSegmentsCompleted
-TranslationCompleted
-TranslationCompletedWithWarnings
-TranslationVariantActivated
-TranslationCancelled
-TranslationSuperseded
-TranslationInvalidated
+accepted TranslationArtifact
 ```
 
-Presentation should query the authoritative result when necessary.
+through Reading Session/application authority.
+
+It should not render directly because:
+
+```text
+translation.candidate.validated
+```
+
+was received.
 
 ---
 
-## 81. Reading Session Module
+# 129. Consumer Guidance — Reading Session
 
-Reading Session may consume:
+Reading Session should operate on accepted/published Translation Artifact references.
+
+It may observe:
 
 ```text
-TranslationJobCreated
-TranslationProgressUpdated
-TranslationCompleted
-TranslationFailed
-TranslationCancelled
-TranslationSuperseded
-TranslationVariantActivated
+translation.variant.created
 ```
 
-Reading Session must not use Translation events to change source revision ownership.
+but must independently validate compatibility/current source revision.
 
 ---
 
-## 82. Knowledge Module
+# 130. Consumer Guidance — Knowledge
 
-Knowledge may consume:
+Knowledge may observe correction-derived facts.
 
-```text
-TranslationCorrectionSubmitted
-TranslationCorrectionApplied
-```
-
-It may use them to initiate a separate review or terminology proposal workflow.
-
-It must not automatically accept every correction as global truth.
+It must not automatically treat every user correction as global terminology truth.
 
 ---
 
-## 83. Observability
+# 131. Consumer Guidance — Provider Management
 
-Observability may consume:
+Provider Management should not infer provider health from one Translation module error.
 
-```text
-TranslationJobCreated
-TranslationAttemptStarted
-TranslationAttemptFailed
-TranslationBatchCompleted
-TranslationBatchFailed
-TranslationCompleted
-TranslationFailed
-TranslationCancelled
-TranslationProviderFallbackSelected
-TranslationCacheResultReused
-```
+It owns its own provider health/availability signals.
 
-Observability should prefer identifiers and metrics over content.
+Translation may report normalized execution observations through approved telemetry.
 
 ---
 
-## 84. Provider Management
+# 132. Consumer Guidance — Observability
 
-Provider Management may consume normalized operational events such as:
+Observability may use:
 
 ```text
-TranslationAttemptFailed
-TranslationProviderFallbackSelected
+plan.created
+
+batch.planned
+
+provider.output-received
+
+batch.validated
+
+candidate.validated
+
+candidate.submitted
+
+operation-error.observed
 ```
 
-It must not infer permanent provider health from one job failure alone.
+Prefer metrics and IDs over content.
 
 ---
 
-# Part XXI — Event Publication Matrix
+# 133. Testing — Event Envelope
 
-## 85. Required Events
+Test:
 
-The following events are required for the initial Translation implementation:
-
-```text
-TranslationJobCreated
-TranslationJobStarted
-
-TranslationAttemptStarted
-TranslationAttemptFailed
-
-TranslationPartialResultAvailable
-
-TranslationCompleted
-TranslationCompletedWithWarnings
-TranslationFailed
-
-TranslationCancelled
-TranslationSuperseded
-TranslationInvalidated
-
-TranslationVariantCreated
-TranslationVariantActivated
-```
+* EventId unique
+* same EventId on redelivery
+* valid EventVersion
+* producer = translation
+* Attempt correlation present
+* no credentials
+* no full source/translated content
+* optional fields forward-compatible
 
 ---
 
-## 86. Recommended Events
+# 134. Testing — Planning Events
 
-```text
-TranslationProgressUpdated
-TranslationBatchCompleted
-TranslationBatchFailed
-TranslationRetryScheduled
-TranslationProviderFallbackSelected
-TranslationCorrectionApplied
-```
+Test:
 
----
-
-## 87. Optional Operational Events
-
-```text
-TranslationJobQueued
-TranslationBatchStarted
-TranslationAttemptCompleted
-TranslationSegmentCompleted
-TranslationSegmentsCompleted
-TranslationCacheResultReused
-TranslationCancellationRequested
-TranslationCorrectionSubmitted
-```
-
-A deployment should not publish high-volume optional events without a concrete consumer.
+* plan.created only after READY
+* Unit count accurate
+* Batch count accurate
+* context content absent
+* terminology values absent
+* source Artifact identity preserved
 
 ---
 
-# Part XXII — Event Flow Examples
+# 135. Testing — Provider Events
 
-## 88. Successful Comic Translation
+Test:
 
 ```text
-TranslationJobCreated
-        ↓
-TranslationJobQueued
-        ↓
-TranslationJobStarted
-        ↓
-TranslationBatchStarted
-        ↓
-TranslationAttemptStarted
-        ↓
-TranslationBatchCompleted
-        ↓
-TranslationPartialResultAvailable
-        ↓
-TranslationBatchCompleted
-        ↓
-TranslationCompleted
-        ↓
-TranslationVariantCreated
-        ↓
-TranslationVariantActivated
+execution-requested
+    → output-received
 ```
 
-Depending on implementation, variant creation may occur before the final completion event.
+without RUNNING.
 
-The chosen order must remain consistent.
-
-Recommended order:
+Test:
 
 ```text
-Result assembled
-      ↓
-Variant created
-      ↓
-Job completed
-      ↓
-Variant activated
+output-received
+    ↛ batch.validated
+```
+
+until validation passes.
+
+Test provider error sanitization.
+
+---
+
+# 136. Testing — Batch Validation
+
+Test:
+
+* valid provider response
+* malformed response
+* missing Unit
+* duplicate Unit
+* wrong Unit ID
+* target-language mismatch
+* terminology violation
+* provider-control leakage
+* source alignment failure
+
+Only valid output produces:
+
+```text
+batch.validated
 ```
 
 ---
 
-## 89. Retry After Timeout
+# 137. Testing — Candidate Events
+
+Test:
 
 ```text
-TranslationJobCreated
-        ↓
-TranslationAttemptStarted
-        ↓
-TranslationAttemptFailed
-        ↓
-TranslationRetryScheduled
-        ↓
-TranslationAttemptStarted
-        ↓
-TranslationCompleted
+Candidate VALID
+    → candidate.validated
 ```
 
-The same `TranslationJobId` is preserved.
+```text
+Candidate VALID
+    → candidate.submitted
+```
 
-A new `TranslationAttemptId` is created.
+```text
+Candidate INVALID
+    ↛ candidate.submitted
+```
+
+```text
+candidate.submitted
+    ↛ Artifact publication assumption
+```
 
 ---
 
-## 90. Provider Fallback
+# 138. Testing — Partial Candidate
+
+Test:
 
 ```text
-TranslationAttemptStarted
-        ↓
-TranslationAttemptFailed
-        ↓
-TranslationProviderFallbackSelected
-        ↓
-TranslationRetryScheduled
-        ↓
-TranslationAttemptStarted
-        ↓
-TranslationCompletedWithWarnings
+7 valid
+2 failed
+1 missing
 ```
 
-The completion warning may indicate that fallback was used.
+produces:
+
+```text
+Completeness = PARTIAL
+```
+
+with explicit counts/references.
+
+No final Translation completion event required.
 
 ---
 
-## 91. Partial Success Then Final Failure
+# 139. Testing — Runtime Boundary
+
+Test:
 
 ```text
-TranslationBatchCompleted
-        ↓
-TranslationPartialResultAvailable
-        ↓
-TranslationBatchFailed
-        ↓
-TranslationAttemptFailed
-        ↓
-TranslationFailed
-```
-
-The final failure event references the retained partial result when policy permits.
-
----
-
-## 92. User Navigates Away
-
-```text
-TranslationJobStarted
-        ↓
-ReadingSessionNavigated
-        ↓
-TranslationCancellationRequested
-        ↓
-TranslationCancelled
-```
-
-A later provider response must not produce `TranslationCompleted`.
-
----
-
-## 93. Source Revision Changes
-
-```text
-TranslationJob A
-    source revision = 7
-        ↓
-PreparedDocumentRevised
-    source revision = 8
-        ↓
-TranslationJob A superseded
-        ↓
-TranslationJob B created
-```
-
-If Job A completes late, its result remains non-authoritative.
-
----
-
-## 94. User Correction
-
-```text
-TranslationCorrectionSubmitted
-        ↓
-Corrected variant created
-        ↓
-TranslationCorrectionApplied
-        ↓
-TranslationVariantActivated
-```
-
-A separate Knowledge proposal may be created.
-
----
-
-# Part XXIII — State Consistency Rules
-
-## 95. Event and State Relationship
-
-An event is published only after the associated state change has been committed or made durable enough for the architecture’s consistency model.
-
-Avoid:
-
-```text
-publish event
+Candidate VALID
     ↓
-state update fails
+Runtime rejects stale
 ```
 
-Preferred patterns include:
-
-* transactional outbox;
-* durable event log;
-* atomic state-and-event persistence;
-* equivalent reliable publication mechanism.
-
----
-
-## 96. No Phantom Completion
-
-`TranslationCompleted` must not be published unless the result can subsequently be retrieved through the Translation query contract.
-
----
-
-## 97. No Phantom Variant
-
-`TranslationVariantCreated` must not be published unless the referenced variant exists and is retrievable.
-
----
-
-## 98. No Premature Batch Completion
-
-`TranslationBatchCompleted` requires accepted validated output.
-
-Receiving an HTTP success response is not sufficient.
-
----
-
-## 99. No Premature Cancellation Completion
-
-`TranslationCancelled` should indicate the logical terminal state has been recorded.
-
-Physical provider cancellation may still be pending, but no authoritative result may be published.
-
----
-
-# Part XXIV — Core Event Invariants
-
-## 100. Invariant 1 — Facts only
-
-Events describe completed domain facts, never requested actions.
-
-## 101. Invariant 2 — Immutable events
-
-Published events are never edited.
-
-## 102. Invariant 3 — Stable job identity
-
-Retry events preserve `TranslationJobId`.
-
-## 103. Invariant 4 — New attempt identity
-
-Each retry execution receives a new `TranslationAttemptId`.
-
-## 104. Invariant 5 — Stable source traceability
-
-Display-affecting events include prepared document and revision identity.
-
-## 105. Invariant 6 — Batch completion follows validation
-
-Unvalidated provider output never produces a completed batch event.
-
-## 106. Invariant 7 — No stale authority
-
-Cancelled or superseded work never produces an authoritative completion event.
-
-## 107. Invariant 8 — Missing content is explicit
-
-Partial and failed events identify missing or failed segment identities.
-
-## 108. Invariant 9 — Provider isolation
-
-Provider-native payloads never appear in public events.
-
-## 109. Invariant 10 — Credential isolation
-
-Credentials never appear in any event.
-
-## 110. Invariant 11 — Event consumers are idempotent
-
-Duplicate event delivery must not duplicate business effects.
-
-## 111. Invariant 12 — Arrival order is not segment order
-
-Consumers use source sequence and identifiers, not event arrival order.
-
-## 112. Invariant 13 — Result references remain retrievable
-
-Published result and variant references resolve through query contracts.
-
-## 113. Invariant 14 — Terminal outcomes are consistent
-
-One job cannot simultaneously be completed, failed, and cancelled.
-
-Administrative invalidation may occur after a completed state.
-
-## 114. Invariant 15 — Reading Session owns visible authority
-
-Translation completion and eligibility events do not by themselves change the active Reading Session content. Consumers must validate reading-session authority before updating visible state.
-
----
-
-# Part XXV — Open Decisions
-
-## 115. Event Granularity
-
-The project must later decide whether the default progressive event is:
+Translation emits no:
 
 ```text
-TranslationSegmentCompleted
+completed
+
+failed
+
+superseded
 ```
 
-or:
-
-```text
-TranslationSegmentsCompleted
-```
-
-Recommended default:
-
-```text
-TranslationSegmentsCompleted
-```
-
-because batch-level grouping reduces Event Bus traffic while retaining progressive presentation.
+terminal event.
 
 ---
 
-## 116. Embedded Text
+# 140. Testing — Cancellation
 
-The project must decide whether translated text is embedded in progressive events.
+Test:
 
-Recommended approach:
+* cancellation before provider request
+* during provider execution
+* after output received
+* during Candidate validation
+* before Candidate submission
+* after Candidate submission
+
+No Translation-owned `CANCELLED` terminal fact.
+
+---
+
+# 141. Testing — Duplicate Delivery
+
+Duplicate:
 
 ```text
-local in-process event
-    → may embed bounded translated text
+candidate.submitted event
+```
 
-persistent or distributed event
-    → use result references
+must not:
+
+* submit Candidate again
+* publish duplicate Artifact
+* duplicate UI overlay
+* create duplicate variant
+
+---
+
+# 142. Testing — Ordering
+
+Concurrent batches may deliver events out of order.
+
+Final semantic ordering must use:
+
+```text
+TranslationUnit SourceSequence
+```
+
+not event sequence.
+
+---
+
+# 143. Testing — Privacy
+
+Verify no event contains:
+
+* source text by default
+* translated text by default
+* raw provider prompt
+* raw provider response
+* API key
+* auth token
+* Knowledge database
+* source image
+
+---
+
+# 144. Property Tests
+
+```text
+candidate_submitted
+implies Candidate was VALID
+```
+
+```text
+candidate_validated
+does not imply Runtime acceptance
+```
+
+```text
+provider_output_received
+does not imply batch_validated
+```
+
+```text
+batch_validated
+requires Translation output validation
+```
+
+```text
+no Translation event
+changes Runtime Attempt state
+```
+
+```text
+no Translation event
+grants publication authority
+```
+
+```text
+no Translation event
+selects Reading Session active variant
+```
+
+```text
+duplicate event delivery
+does not duplicate semantic output
+```
+
+```text
+optional event loss
+does not change Candidate semantics
 ```
 
 ---
 
-## 117. Batch Event Visibility
+# 145. Core Event Invariants
 
-Batch events may remain internal for the MVP unless:
-
-* distributed workers are introduced;
-* detailed progress is required;
-* provider diagnostics require them.
+1. Events represent facts, not commands.
+2. Events are immutable.
+3. Events are provider-neutral.
+4. Credentials never appear in events.
+5. Source text is excluded by default.
+6. Translated text is excluded by default.
+7. Runtime Attempt identity is canonical.
+8. TranslationJob identity does not exist.
+9. TranslationAttempt identity does not exist.
+10. Translation events do not define queue state.
+11. Translation events do not define retry state.
+12. Translation events do not define cancellation state.
+13. Translation events do not define supersession state.
+14. Translation events do not define terminal Runtime outcome.
+15. Translation events do not publish Artifacts.
+16. Candidate validation precedes Candidate submission.
+17. Invalid Candidate cannot be validly submitted.
+18. Candidate submission is not Runtime acceptance.
+19. Provider output receipt is not Batch validation.
+20. Batch validation requires Translation validation.
+21. TranslationUnit order is independent of event arrival.
+22. Partial completeness is explicit.
+23. Missing Units are explicit.
+24. Failed Units are explicit.
+25. Variant creation is immutable.
+26. Variant activation belongs outside Translation.
+27. Knowledge updates are external.
+28. Cache reuse belongs to Runtime policy.
+29. Events tolerate duplicate delivery.
+30. Optional event loss does not alter correctness.
+31. Event history is not Translation state persistence.
+32. Source content cannot control event metadata.
+33. Provider output cannot control event routing.
+34. Privacy classification is explicit.
+35. Runtime authority always wins over late provider output.
 
 ---
 
-## 118. Progress Throttling
-
-The exact throttling policy remains open.
-
-Recommended baseline:
-
-* publish when a batch completes;
-* publish when completion status changes materially;
-* do not publish provider-token progress.
-
----
-
-## 119. Completion and Variant Event Order
-
-Recommended order:
+# 146. Related Documents
 
 ```text
-TranslationVariantCreated
+02-modules/translation/README.md
+02-modules/translation/MODULE.md
+02-modules/translation/CONTRACT.md
+02-modules/translation/STATES.md
+02-modules/translation/ERRORS.md
+
+02-modules/text-processing/EVENTS.md
+02-modules/text-processing/CONTRACT.md
+
+02-modules/provider-management/
+02-modules/knowledge/
+02-modules/reading-session/
+02-modules/presentation/
+
+01-architecture/runtime/CANCELLATION.md
+01-architecture/runtime/RETRY_POLICY.md
+01-architecture/runtime/CACHE_POLICY.md
+01-architecture/runtime/RESOURCE_LIFECYCLE.md
+
+03-infrastructure/event-bus/
+03-infrastructure/artifact-store/
+03-infrastructure/resource-manager/
+```
+
+---
+
+# 147. Summary
+
+Translation event model is intentionally narrow:
+
+```text
+Module Availability
+
+Translation Planning
+
+Batch / Provider Observations
+
+Validated Translation Units
+
+Candidate Validation
+
+Candidate Submission
+
+Immutable Variant / Correction Facts
+```
+
+It does not create:
+
+```text
+Translation Job lifecycle
+
+Translation Attempt lifecycle
+
+Retry lifecycle
+
+Cancellation lifecycle
+
+Supersession lifecycle
+
+Publication lifecycle
+
+Active Variant lifecycle
+```
+
+Canonical semantic flow:
+
+```text
+SourceDocumentArtifact
         ↓
-TranslationCompleted
+Translation Plan
         ↓
-TranslationVariantActivated
+TranslationUnit[]
+        ↓
+TranslationBatch[]
+        ↓
+Provider Execution
+        ↓
+TranslatedUnit[]
+        ↓
+CandidateTranslationArtifact
+        ↓
+Runtime
+        ↓
+Artifact Store
+        ↓
+TranslationArtifact
 ```
 
-This ensures completion events reference an existing variant.
-
-The exact transactional implementation must preserve retrievability.
-
----
-
-## 120. Event Retention
-
-Retention remains to be defined for:
-
-* job lifecycle events;
-* events containing text;
-* correction events;
-* provider usage metadata;
-* privacy-sensitive reading history.
-
----
-
-# Part XXVI — Related Documents
+Core rule:
 
 ```text
-modules/translation/MODULE.md
-modules/translation/CONTRACT.md
-modules/translation/ERRORS.md
-modules/translation/STATES.md
-modules/translation/README.md
+Translation events may announce
+what Translation planned,
+observed,
+validated,
+and produced.
+
+Runtime decides
+whether that execution still matters.
+
+Artifact Store decides
+what becomes a published Translation Artifact.
+
+Reading Session decides
+which compatible translation the reader is using.
 ```
-
-Architecture references:
-
-```text
-docs/architecture/EVENT_BUS.md
-docs/architecture/STATE_MACHINE.md
-docs/architecture/MODULE_DEPENDENCY.md
-docs/architecture/DATA_FLOW.md
-docs/architecture/runtime/PIPELINE_RUNTIME.md
-docs/architecture/runtime/WORK_QUEUE.md
-docs/architecture/runtime/RETRY_POLICY.md
-docs/architecture/runtime/CANCELLATION.md
-```
-
-Upstream module references:
-
-```text
-modules/text-processing/MODULE.md
-modules/text-processing/CONTRACT.md
-modules/text-processing/EVENTS.md
-```
-
-Future integration references:
-
-```text
-modules/reading-session/EVENTS.md
-modules/presentation/EVENTS.md
-modules/knowledge/EVENTS.md
-modules/provider-management/EVENTS.md
-```
-
----
-
-# 121. Summary
-
-The Translation module publishes events for five main concerns:
-
-```text
-Translation job lifecycle
-Translation execution attempts
-Translation batches
-Translation results
-Translation variants and corrections
-```
-
-The core event flow is:
-
-```text
-TranslationJobCreated
-        ↓
-TranslationJobStarted
-        ↓
-TranslationBatchStarted
-        ↓
-TranslationAttemptStarted
-        ↓
-TranslationBatchCompleted
-        ↓
-TranslationPartialResultAvailable
-        ↓
-TranslationVariantCreated
-        ↓
-TranslationCompleted
-        ↓
-TranslationVariantActivated
-```
-
-Failure and replacement flows include:
-
-```text
-TranslationAttemptFailed
-TranslationRetryScheduled
-TranslationProviderFallbackSelected
-TranslationFailed
-TranslationCancelled
-TranslationSuperseded
-TranslationInvalidated
-```
-
-Every public event must remain:
-
-* immutable;
-* provider-neutral;
-* revision-aware;
-* idempotently consumable;
-* safe for duplicate delivery;
-* compact by default;
-* free from credentials;
-* traceable to its translation job and prepared source revision.
-
-Events notify consumers that translation state changed.
-
-Queries remain the authoritative way to retrieve current Translation state and complete result data.

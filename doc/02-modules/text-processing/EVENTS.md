@@ -1,2338 +1,2635 @@
-# Text Processing Events
+# Text Processing Module Events
 
 > **Project:** CRAI
 > **Module:** Text Processing
-> **Path:** `modules/text-processing/EVENTS.md`
-> **Version:** 0.1
+> **Path:** `02-modules/text-processing/EVENTS.md`
+> **Version:** 1.0
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-07-22
+> **Related:** `MODULE.md`, `CONTRACT.md`, `STATES.md`
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-This document defines the events produced and consumed by the Text Processing module.
+Tài liệu này định nghĩa event boundary của Text Processing Module.
 
-It specifies:
+Text Processing events được dùng để mô tả:
 
-* event names;
-* event envelopes;
-* lifecycle events;
-* request events;
-* cancellation events;
-* progress events;
-* configuration events;
-* result references;
-* correlation rules;
-* ordering rules;
-* duplicate handling;
-* stale-result handling;
-* retry behavior;
-* cancellation races;
-* privacy requirements;
-* compatibility rules.
+* module availability
+* module configuration observations
+* Attempt-local processing milestones
+* SourceDocument construction observations
+* Candidate validation
+* Candidate submission
+* diagnostics and telemetry
 
-The Text Processing event flow is:
+Text Processing events không định nghĩa canonical lifecycle của:
+
+* WorkItem
+* Attempt
+* Queue
+* Scheduler
+* Retry
+* Cancellation
+* Supersession
+* Artifact publication
+* Translation
+* Reading Session
+
+Core rule:
 
 ```text
-Recognition completed
-        ↓
-Text Processing requested
-        ↓
-Text Processing started
-        ↓
-Text Processing completed
-        ↓
+Text Processing events describe
+what Text Processing observed or produced.
+
+They do not decide
+whether the Attempt succeeded,
+whether the work is still authoritative,
+or whether an Artifact is published.
+```
+
+---
+
+# 2. Event Ownership
+
+Text Processing may produce events about:
+
+```text
+Module Availability
+
+Processing Plan
+
+Attempt-Local Operation Phase
+
+SourceDocument Construction
+
+Traceability Validation
+
+Candidate Validation
+
+Candidate Submission
+```
+
+Text Processing does not own events declaring:
+
+```text
+WorkItem queued
+
+Attempt started
+
+Attempt succeeded
+
+Attempt failed
+
+Attempt canceled
+
+Attempt superseded
+
+Retry scheduled
+
+Artifact published
+
 Translation requested
 ```
 
-Alternative terminal outcomes are:
-
-```text
-Text Processing failed
-Text Processing cancelled
-```
+Those belong to their owning modules.
 
 ---
 
-## 2. Event Boundary
+# 3. Event Boundary
 
-Text Processing events coordinate processing lifecycle.
-
-They must not be used to transport large document payloads directly.
+Events must remain lightweight.
 
 Events should carry:
 
-* identifiers;
-* lifecycle status;
-* result references;
-* warning summaries;
-* error summaries;
-* processing metadata;
-* correlation information.
+* identifiers
+* state observations
+* Candidate identifiers
+* Artifact references
+* warning summaries
+* error summaries
+* metrics
+* correlation metadata
+* compatibility metadata
+* privacy metadata
 
 Events should not carry:
 
-* complete Recognition results;
-* complete `SourceDocument`;
-* complete raw OCR text;
-* complete normalized text;
-* image bytes;
-* translation units;
-* translated text;
-* provider credentials.
+* complete Recognition Artifact
+* complete OCRDocument
+* complete SourceDocument
+* RawText
+* NormalizedText
+* image bytes
+* Translation Units
+* translated text
+* provider credentials
+
+Large semantic objects must be referenced rather than embedded.
 
 ---
 
-## 3. Event Naming
+# 4. Event Categories
 
-Text Processing events use:
+Text Processing events are divided into:
+
+```text
+Module Availability Events
+
+Configuration Observation Events
+
+Attempt-Local Observation Events
+
+Candidate Events
+```
+
+Optional diagnostic events may exist within these categories.
+
+---
+
+# 5. Event Naming
+
+Recommended namespace:
 
 ```text
 text_processing.<event_name>
 ```
 
-Required lifecycle events:
+Core module availability events:
 
 ```text
-text_processing.requested
-text_processing.started
-text_processing.completed
-text_processing.failed
-text_processing.cancellation_requested
-text_processing.cancelled
-```
+text_processing.module_available
 
-Optional progress events:
-
-```text
-text_processing.input_adapted
-text_processing.order_resolved
-text_processing.normalization_completed
-text_processing.lines_reconstructed
-text_processing.regions_grouped
-text_processing.blocks_classified
-text_processing.document_built
-text_processing.traceability_validated
-```
-
-Configuration and lifecycle events:
-
-```text
-text_processing.configuration_changed
-text_processing.module_ready
 text_processing.module_degraded
+
 text_processing.module_unavailable
-text_processing.module_stopping
+
+text_processing.module_draining
+
 text_processing.module_stopped
 ```
 
----
-
-## 4. Event Categories
-
-Events are divided into:
+Core Attempt-local observations:
 
 ```text
-Command Events
-Lifecycle Events
-Progress Events
-Configuration Events
-Module Health Events
+text_processing.plan_created
+
+text_processing.input_adapted
+
+text_processing.normalization_completed
+
+text_processing.reconstruction_completed
+
+text_processing.grouping_completed
+
+text_processing.classification_completed
+
+text_processing.document_built
+
+text_processing.traceability_validated
 ```
 
-### Command events
+Core Candidate events:
 
-Request work or state change.
+```text
+text_processing.candidate_validated
 
-Examples:
+text_processing.candidate_invalid
+
+text_processing.candidate_submitted
+```
+
+Optional configuration observation:
+
+```text
+text_processing.configuration_observed
+```
+
+---
+
+# 6. Removed Lifecycle Events
+
+The following legacy lifecycle events are no longer canonical Text Processing events:
 
 ```text
 text_processing.requested
-text_processing.cancellation_requested
-```
 
-### Lifecycle events
-
-Describe request-level lifecycle.
-
-Examples:
-
-```text
 text_processing.started
+
 text_processing.completed
+
 text_processing.failed
+
+text_processing.cancellation_requested
+
 text_processing.cancelled
 ```
 
-### Progress events
-
-Describe optional internal milestones.
-
-Examples:
+Reason:
 
 ```text
-text_processing.order_resolved
-text_processing.document_built
+WorkItem / Attempt lifecycle
+belongs to Runtime.
 ```
 
-### Configuration events
-
-Notify that effective processing configuration changed.
-
-### Module health events
-
-Describe module availability.
+Text Processing must not maintain a parallel execution lifecycle through events.
 
 ---
 
-# Event Envelope
+# 7. No Terminal Event Ownership
 
-## 5. Standard Event Envelope
+Text Processing does not guarantee:
 
-All Text Processing events must use the shared CRAI event envelope.
+```text
+exactly one of:
+
+completed
+
+failed
+
+cancelled
+```
+
+for each execution.
+
+Instead:
+
+```text
+Runtime Attempt
+    ↓
+invokes Text Processing
+    ↓
+Text Processing performs local work
+    ↓
+returns Candidate or Module Error
+    ↓
+Runtime decides Attempt outcome
+```
+
+Therefore:
+
+```text
+Text Processing FINISHED
+    ≠
+Attempt SUCCEEDED
+```
+
+and:
+
+```text
+Candidate submitted
+    ≠
+Artifact published
+```
+
+---
+
+# 8. Standard Event Envelope
+
+All Text Processing events should use the shared CRAI Event Envelope.
 
 Conceptual structure:
 
 ```text
 EventEnvelope
-├── event_id
-├── event_name
-├── event_version
-├── occurred_at
-├── producer
-├── correlation
-├── causation
-├── subject
-├── sequence?
-├── partition_key?
-├── delivery
-├── privacy
-├── payload
-└── extensions?
+├── EventId
+├── EventName
+├── EventVersion
+├── OccurredAt
+├── Producer
+├── Subject
+├── Correlation
+├── Causation?
+├── Sequence?
+├── Delivery?
+├── Privacy
+├── Payload
+└── Extensions?
 ```
+
+The shared Event Bus specification remains authoritative for transport semantics.
 
 ---
 
-## 6. Envelope Example
-
-```json
-{
-  "event_id": "evt_01J8N2QPKM8N54TWR7GMDM4W0Z",
-  "event_name": "text_processing.completed",
-  "event_version": "1.0.0",
-  "occurred_at": "2026-07-22T03:10:00.025Z",
-  "producer": {
-    "module": "text-processing",
-    "instance_id": "text-processing-local-1",
-    "version": "0.1.0"
-  },
-  "correlation": {
-    "trace_id": "trc_01J8N2MP9EY82NX5W9TH6D2MZG",
-    "session_id": "ses_01J8N2JVPP0R4RYCPQKZT2CHFV",
-    "request_id": "tpr_01J8N2N9CZ0QJ7TPMQKM5E0VZM",
-    "recognition_id": "rec_01J8N2KQVCM4RMX71K27Z51H4S",
-    "processing_id": "tps_01J8N2P8PM6W5S4J9SK57J8GPE",
-    "source_id": "src_01J8N2J4NFRNT2VKJKH7S3H9ME",
-    "content_id": "cnt_01J8N2JD0NEMVNJEN7D5YNE6QJ",
-    "frame_id": "frm_01J8N2K6N7BQG6CY1WMNMKZFKX"
-  },
-  "causation": {
-    "causation_event_id": "evt_01J8N2N7R9BGMVFMM70DFYMBHD",
-    "root_event_id": "evt_01J8N2KZ8Z8QDWCRDV7KV4NBQG"
-  },
-  "subject": {
-    "subject_type": "TextProcessingRequest",
-    "subject_id": "tpr_01J8N2N9CZ0QJ7TPMQKM5E0VZM"
-  },
-  "sequence": {
-    "stream_id": "text-processing:tpr_01J8N2N9CZ0QJ7TPMQKM5E0VZM",
-    "number": 3
-  },
-  "partition_key": "ses_01J8N2JVPP0R4RYCPQKZT2CHFV",
-  "delivery": {
-    "delivery_mode": "AtLeastOnce",
-    "durability": "Transient"
-  },
-  "privacy": {
-    "classification": "SensitiveMetadata",
-    "contains_source_text": false,
-    "contains_image_data": false
-  },
-  "payload": {}
-}
-```
-
----
-
-## 7. Event ID
+# 9. Event ID
 
 ```text
-event_id
+EventId
 ```
 
 must:
 
-* identify one event publication;
-* be unique enough for deduplication;
-* remain unchanged during redelivery;
-* not be reused for another semantic event.
+* identify one semantic event publication
+* support deduplication
+* remain stable during redelivery
+* not be reused for unrelated events
 
-A retry that republishes the same event must preserve the same `event_id`.
+Redelivery:
 
-A newly generated compensating or replacement event must use a new `event_id`.
+```text
+same semantic event
+    → same EventId
+```
+
+New semantic observation:
+
+```text
+new EventId
+```
 
 ---
 
-## 8. Event Version
+# 10. Event Version
 
 ```text
-event_version
+EventVersion
 ```
 
-versions the payload schema for one event name.
+versions the schema of one event type.
 
-Recommended format:
+Recommended:
 
 ```text
 MAJOR.MINOR.PATCH
 ```
 
-Event schema versioning is independent from:
+Independent from:
 
 ```text
-Text Processing contract version
-module implementation version
-processing profile version
+ModuleVersion
+
+ContractVersion
+
+ProcessingProfileVersion
+
+ProcessingStrategyVersion
+
+ConfigurationSnapshotVersion
 ```
 
 ---
 
-## 9. Producer
+# 11. Producer
+
+Text Processing-produced events use:
 
 ```text
-producer
+Producer.Module = text-processing
 ```
 
-identifies the module and instance publishing the event.
+Conceptually:
 
 ```text
 EventProducer
-├── module
-├── instance_id?
-└── version?
-```
-
-Required module value:
-
-```text
-text-processing
-```
-
-Commands may be produced by other modules.
-
----
-
-## 10. Event Subject
-
-The event subject identifies the primary entity described by the event.
-
-For request lifecycle events:
-
-```text
-subject_type = TextProcessingRequest
-subject_id = request_id
-```
-
-For module health events:
-
-```text
-subject_type = TextProcessingModule
-subject_id = module instance or logical module ID
-```
-
-For configuration events:
-
-```text
-subject_type = TextProcessingConfiguration
-subject_id = configuration snapshot ID
+├── Module
+├── InstanceId?
+└── Version?
 ```
 
 ---
 
-# Correlation
+# 12. Event Subject
 
-## 11. Correlation Fields
+Subjects should identify the entity being observed.
 
-Relevant correlation fields include:
+Examples:
 
 ```text
-trace_id
-session_id
-request_id
-recognition_id
-processing_id
-source_id
-content_id
-frame_id
-page_id
-chapter_id
+ProcessingPlan
+
+TextProcessingAttemptExecution
+
+CandidateSourceDocumentArtifact
+
+TextProcessingModule
+
+TextProcessingConfiguration
 ```
 
-Not every event requires every field.
+Avoid introducing:
+
+```text
+TextProcessingJob
+```
+
+as a new domain entity.
 
 ---
 
-## 12. Required Correlation by Event
+# 13. Correlation Model
 
-### `text_processing.requested`
-
-Required:
+Relevant identifiers:
 
 ```text
-request_id
-recognition_id
-source_id
-content_id
+TraceId
+
+RevisionId
+
+WorkItemId
+
+AttemptId
+
+RecognitionArtifactId
+
+CandidateArtifactId?
+
+SourceId?
+
+SessionId?
 ```
+
+Not every event requires every identifier.
+
+---
+
+# 14. Required Attempt Correlation
+
+Attempt-local events should contain:
+
+```text
+RevisionId
+
+WorkItemId
+
+AttemptId
+```
+
+and when available:
+
+```text
+TraceId
+
+RecognitionArtifactId
+```
+
+This allows events to correlate with Runtime without creating module-owned lifecycle identity.
+
+---
+
+# 15. Candidate Correlation
+
+Candidate events should additionally include:
+
+```text
+CandidateArtifactId
+```
+
+and lineage:
+
+```text
+RecognitionArtifactId
+```
+
+Example:
+
+```text
+RevisionId
+    ↓
+WorkItemId
+    ↓
+AttemptId
+    ↓
+RecognitionArtifactId
+    ↓
+CandidateArtifactId
+```
+
+---
+
+# 16. Causation
+
+When supported by the shared Event Bus:
+
+```text
+CausationEventId
+```
+
+may identify the event that triggered the current observation.
+
+However, Text Processing correctness must not depend on every internal phase being represented as an event.
+
+---
+
+# 17. Event Ordering
+
+Global ordering is not required.
+
+Ordering may be meaningful within:
+
+```text
+AttemptId
+```
+
+or:
+
+```text
+CandidateArtifactId
+```
+
+Consumers must tolerate:
+
+* duplicate delivery
+* delayed delivery
+* missing optional observations
+* out-of-order diagnostic events
+
+---
+
+# 18. Event Sequence
+
+Optional:
+
+```text
+Sequence
+├── StreamId
+└── Number
+```
+
+Recommended stream:
+
+```text
+text-processing:<AttemptId>
+```
+
+Sequence is primarily diagnostic.
+
+It must not become the source of Runtime authority.
+
+---
+
+# 19. Optional Event Principle
+
+Most Text Processing events are observational.
+
+Therefore:
+
+```text
+No consumer may require
+all internal Text Processing events
+for correctness.
+```
+
+A valid execution may emit only:
+
+```text
+Candidate submitted
+```
+
+plus shared Runtime telemetry.
+
+---
+
+# 20. Module Availability Events
+
+Module availability events describe the module-owned availability state from `STATES.md`.
+
+They do not describe Attempt state.
+
+---
+
+# 21. `text_processing.module_available`
+
+Published when Text Processing can execute supported Plans.
+
+Payload:
+
+```text
+TextProcessingModuleAvailable
+├── ModuleInstanceId?
+├── SupportedContractVersions[]
+├── SupportedProfiles[]
+├── ConfigurationSnapshotId?
+├── AvailableAt
+└── Capabilities?
+```
+
+---
+
+# 22. `text_processing.module_degraded`
+
+Published when Text Processing remains usable but some optional capabilities are unavailable.
+
+Payload:
+
+```text
+TextProcessingModuleDegraded
+├── ModuleInstanceId?
+├── ReasonCodes[]
+├── AvailableProfiles[]
+├── UnavailableCapabilities[]
+├── ConfigurationSnapshotId?
+└── DegradedAt
+```
+
+Examples:
+
+```text
+OPTIONAL_CLASSIFIER_UNAVAILABLE
+
+ADVANCED_GROUPING_DISABLED
+
+DIAGNOSTICS_REDUCED
+
+RESOURCE_PRESSURE
+```
+
+---
+
+# 23. `text_processing.module_unavailable`
+
+Published when Text Processing cannot satisfy its required contract.
+
+Payload:
+
+```text
+TextProcessingModuleUnavailable
+├── ModuleInstanceId?
+├── ReasonCodes[]
+├── RetryHint?
+└── UnavailableAt
+```
+
+`RetryHint` is advisory only.
+
+Runtime decides retry behavior.
+
+---
+
+# 24. `text_processing.module_draining`
+
+Published when module enters DRAINING.
+
+Payload:
+
+```text
+TextProcessingModuleDraining
+├── ModuleInstanceId?
+├── ActiveAttemptCount?
+├── Reason?
+└── StartedAt
+```
+
+The event does not cancel Runtime Attempts.
+
+Runtime/shutdown coordination owns cancellation authority.
+
+---
+
+# 25. `text_processing.module_stopped`
+
+Published after module-owned active resources have been released.
+
+Payload:
+
+```text
+TextProcessingModuleStopped
+├── ModuleInstanceId?
+└── StoppedAt
+```
+
+Avoid request-level completion statistics as canonical state.
+
+---
+
+# 26. Configuration Observation
+
+Text Processing may observe shared configuration changes.
+
+Recommended event:
+
+```text
+text_processing.configuration_observed
+```
+
+This means:
+
+```text
+Text Processing has observed
+a configuration snapshot
+```
+
+not:
+
+```text
+all active Attempts were mutated
+```
+
+---
+
+# 27. Configuration Snapshot Rule
+
+An active Attempt uses one immutable effective Configuration Snapshot.
+
+Therefore:
+
+```text
+Attempt N
+    → Configuration Snapshot A
+
+configuration changes
+    ↓
+
+Attempt N remains on A
+
+future Attempt
+    → may use Snapshot B
+```
+
+---
+
+# 28. Configuration Observation Payload
+
+```text
+TextProcessingConfigurationObserved
+├── ConfigurationSnapshotId
+├── PreviousSnapshotId?
+├── Supported
+├── Compatibility?
+├── RequiresRestart?
+└── ObservedAt
+```
+
+---
+
+# 29. Processing Plan Event
+
+Optional:
+
+```text
+text_processing.plan_created
+```
+
+Published after:
+
+```text
+ProcessingPlanState = READY
+```
+
+Payload:
+
+```text
+TextProcessingPlanCreated
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── RecognitionArtifactId
+├── ProcessingProfileId
+├── ProcessingProfileVersion
+├── ConfigurationSnapshotId
+├── StrategyVersion?
+├── EnabledOperations[]
+└── CreatedAt
+```
+
+---
+
+# 30. Plan Event Restrictions
+
+Do not include:
+
+* full Processing Plan
+* source text
+* credentials
+* Runtime priority mutations
+* Runtime retry state
+* Runtime cancellation state
+
+---
+
+# 31. `text_processing.input_adapted`
+
+Optional observation after Recognition Artifact input is converted to the internal processing representation.
+
+Payload:
+
+```text
+TextProcessingInputAdapted
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── RecognitionArtifactId
+├── InputRegionCount?
+├── InputLineCount?
+├── CoordinateSpace?
+├── UpstreamWarningCount?
+├── DurationMs?
+└── OccurredAt
+```
+
+No OCR text is included.
+
+---
+
+# 32. No `order_resolved` Event
+
+Legacy:
+
+```text
+text_processing.order_resolved
+```
+
+is removed.
+
+Reason:
+
+```text
+Canonical OCR Reading Order
+belongs to Recognition / OCR architecture.
+```
+
+Text Processing may reconstruct source structure using reading-order evidence, but does not declare a replacement canonical OCR Reading Order.
+
+---
+
+# 33. `text_processing.normalization_completed`
+
+Optional observation.
+
+Payload:
+
+```text
+TextProcessingNormalizationCompleted
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── NodeCount
+├── ChangedNodeCount
+├── ChangeCount?
+├── WarningCodes[]
+├── DurationMs?
+└── OccurredAt
+```
+
+No RawText or NormalizedText values.
+
+---
+
+# 34. `text_processing.reconstruction_completed`
+
+Published optionally after structural reconstruction.
+
+Replaces legacy:
+
+```text
+lines_reconstructed
+```
+
+because reconstruction may operate above line level.
+
+Payload:
+
+```text
+TextProcessingReconstructionCompleted
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── InputNodeCount?
+├── OutputStructureCount?
+├── JoinCount?
+├── PreservedSeparateCount?
+├── AmbiguousDecisionCount?
+├── WarningCodes[]
+├── DurationMs?
+└── OccurredAt
+```
+
+---
+
+# 35. Reconstruction Event Semantics
+
+The event means:
+
+```text
+local reconstruction phase completed
+```
+
+It does not mean:
+
+```text
+SourceDocument valid
+```
+
+or:
+
+```text
+Attempt succeeded
+```
+
+---
+
+# 36. `text_processing.grouping_completed`
+
+Optional observation after logical source grouping.
+
+Payload:
+
+```text
+TextProcessingGroupingCompleted
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── InputStructureCount?
+├── OutputGroupCount?
+├── MergeCount?
+├── PreservedSeparateCount?
+├── AmbiguousGroupCount?
+├── DurationMs?
+└── OccurredAt
+```
+
+---
+
+# 37. Grouping Uncertainty
+
+Grouping uncertainty should be represented through metadata:
+
+```text
+AmbiguousGroupCount
+
+WarningCodes
+```
+
+not through failure lifecycle events.
+
+---
+
+# 38. `text_processing.classification_completed`
+
+Optional observation after source block classification.
+
+Payload:
+
+```text
+TextProcessingClassificationCompleted
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── BlockCount
+├── ClassifiedCount
+├── UnknownCount
+├── LowConfidenceCount?
+├── TypeCounts?
+├── DurationMs?
+└── OccurredAt
+```
+
+`TypeCounts` contains only type names and counts.
+
+---
+
+# 39. Unknown Classification
+
+```text
+BlockType = UNKNOWN
+```
+
+is valid.
+
+Therefore:
+
+```text
+UnknownCount > 0
+```
+
+does not imply failure.
+
+---
+
+# 40. `text_processing.document_built`
+
+Published optionally when a SourceDocument Candidate has been constructed.
+
+Payload:
+
+```text
+TextProcessingDocumentBuilt
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── CandidateArtifactId?
+├── DocumentId
+├── DocumentType?
+├── BlockCount
+├── RootBlockCount
+├── ExcludedBlockCount?
+├── Completeness
+├── WarningCodes[]
+├── DurationMs?
+└── OccurredAt
+```
+
+---
+
+# 41. Document Built Is Not Publication
+
+```text
+text_processing.document_built
+```
+
+means only:
+
+```text
+SourceDocument object assembled
+```
+
+It does not mean:
+
+```text
+Candidate valid
+
+Runtime accepted
+
+Artifact published
+
+Translation may begin
+```
+
+---
+
+# 42. `text_processing.traceability_validated`
+
+Published optionally after SourceDocument traceability validation succeeds.
+
+Payload:
+
+```text
+TextProcessingTraceabilityValidated
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── CandidateArtifactId?
+├── DocumentId
+├── SourceNodeCount?
+├── ReferencedSourceNodeCount?
+├── UnresolvedSourceNodeCount?
+├── CoverageRatio?
+├── DurationMs?
+└── OccurredAt
+```
+
+---
+
+# 43. Traceability Failure
+
+If traceability validation fails:
+
+```text
+no traceability_validated event
+```
+
+Text Processing returns:
+
+```text
+TextProcessingModuleError
+```
+
+to Runtime.
+
+Runtime determines Attempt outcome.
+
+Text Processing does not publish:
+
+```text
+text_processing.failed
+```
+
+as canonical terminal state.
+
+---
+
+# 44. Candidate Events
+
+Candidate events are the most important Text Processing-owned event family.
+
+They describe:
+
+```text
+Candidate SourceDocument Artifact
+```
+
+before Runtime/Artifact Store publication.
+
+---
+
+# 45. Candidate Event Flow
+
+Conceptually:
+
+```text
+SourceDocument built
+        ↓
+Candidate assembled
+        ↓
+Candidate validated
+        ↓
+candidate_validated
+        ↓
+Candidate submitted to Runtime
+        ↓
+candidate_submitted
+        ↓
+Runtime decides disposition
+```
+
+---
+
+# 46. `text_processing.candidate_validated`
+
+Published when:
+
+```text
+CandidateValidationState = VALID
+```
+
+Payload:
+
+```text
+TextProcessingCandidateValidated
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── RecognitionArtifactId
+├── CandidateArtifactId
+├── DocumentId
+├── ArtifactType
+├── ContractVersion
+├── Completeness
+├── WarningSummary
+├── CompatibilitySummary
+├── IntegrityMetadata?
+├── ValidatedAt
+└── TraceId?
+```
+
+---
+
+# 47. Candidate Validated Semantics
+
+This event means:
+
+```text
+Candidate satisfies
+Text Processing-owned contract validation.
+```
+
+It does not mean:
+
+```text
+Attempt succeeded
+
+Candidate is authoritative
+
+Candidate is current
+
+Artifact is published
+
+Artifact is durable
+
+Translation should start
+```
+
+---
+
+# 48. Candidate Warning Summary
 
 Recommended:
 
 ```text
-trace_id
-session_id
-frame_id
-```
-
-### `text_processing.started`
-
-Required:
-
-```text
-request_id
-recognition_id
-```
-
-### Terminal events
-
-Required:
-
-```text
-request_id
-recognition_id
-```
-
-Completed should also contain:
-
-```text
-processing_id
-```
-
----
-
-## 13. Trace Correlation
-
-All events in one processing lifecycle should share:
-
-```text
-trace_id
-request_id
-recognition_id
-```
-
-The Text Processing span should become a child of the event or operation that initiated processing.
-
----
-
-## 14. Causation
-
-```text
-causation_event_id
-```
-
-points to the event that directly caused the current event.
-
-Example:
-
-```text
-recognition.completed
-        ↓ causes
-text_processing.requested
-        ↓ causes
-text_processing.started
-        ↓ causes
-text_processing.completed
-```
-
-The exact publisher of `text_processing.requested` may be:
-
-* Session;
-* Orchestration;
-* Workflow;
-* Application Core.
-
-Recognition should not necessarily command Text Processing directly.
-
----
-
-## 15. Root Event
-
-```text
-root_event_id
-```
-
-identifies the initial event that started the workflow.
-
-Possible root events:
-
-```text
-capture.completed
-observation.stable_frame_ready
-user.translation_requested
-session.source_changed
-```
-
-This field supports end-to-end tracing.
-
----
-
-# Event Streams and Ordering
-
-## 16. Request Event Stream
-
-Every request has a logical event stream:
-
-```text
-text-processing:<request_id>
-```
-
-Request events should include a monotonic sequence number.
-
-Example:
-
-```text
-1 text_processing.requested
-2 text_processing.started
-3 text_processing.completed
-```
-
-or:
-
-```text
-1 text_processing.requested
-2 text_processing.started
-3 text_processing.cancellation_requested
-4 text_processing.cancelled
-```
-
----
-
-## 17. Terminal Event Rule
-
-Each accepted processing request must produce exactly one terminal lifecycle event:
-
-```text
-text_processing.completed
-```
-
-or:
-
-```text
-text_processing.failed
-```
-
-or:
-
-```text
-text_processing.cancelled
-```
-
-No request may validly produce more than one different terminal outcome.
-
----
-
-## 18. Started Event Rule
-
-An accepted request should produce:
-
-```text
-text_processing.started
-```
-
-before its terminal event.
-
-A request rejected before acceptance may produce:
-
-```text
-text_processing.failed
-```
-
-without `started`, depending on the selected rejection policy.
-
-Recommended policy:
-
-```text
-invalid command before acceptance
-→ rejected by command handler
-→ text_processing.failed with stage = Validation
-```
-
-This still creates a terminal event for observability.
-
----
-
-## 19. Event Ordering Scope
-
-Ordering is required per:
-
-```text
-request_id
-```
-
-Global ordering across all Text Processing requests is not required.
-
-Ordering across different sessions is not required.
-
----
-
-## 20. Out-of-Order Delivery
-
-Consumers must tolerate out-of-order delivery.
-
-They should use:
-
-* request ID;
-* sequence number;
-* terminal-state precedence;
-* event timestamp;
-* state version.
-
-A progress event received after a terminal event must not reopen the request.
-
----
-
-## 21. Terminal State Precedence
-
-Once a terminal event has been accepted:
-
-```text
-Completed
-Failed
-Cancelled
-```
-
-all later non-terminal events for the same request must be ignored or recorded as invalid late events.
-
-A later conflicting terminal event must be treated as a consistency violation.
-
----
-
-# Consumed Command Events
-
-## 22. `text_processing.requested`
-
-Requests processing of one Recognition result into a `SourceDocument`.
-
-Producer may be:
-
-```text
-session
-orchestration
-workflow
-application-core
-```
-
-Consumer:
-
-```text
-text-processing
-```
-
----
-
-## 23. Requested Event Payload
-
-```text
-TextProcessingRequestedPayload
-├── request
-├── recognition_result_reference?
-├── configuration_snapshot_id?
-├── supersession?
-└── dispatch_metadata?
-```
-
-The `request` field follows `TextProcessingRequest`.
-
-When the request already contains the result reference, the separate event-level reference may be omitted.
-
----
-
-## 24. Requested Event Example
-
-```json
-{
-  "event_name": "text_processing.requested",
-  "event_version": "1.0.0",
-  "payload": {
-    "request": {
-      "contract_version": "1.0.0",
-      "request_id": "tpr_01J8N4BESD9DDB25RYDR1QSV8Y",
-      "recognition": {
-        "recognition_id": "rec_01J8N49EJZAMKMJ61P2H1XB0ZK",
-        "result_reference": {
-          "reference_id": "result_ref_01J8N49KYZTSP0G5AGZJZ07M7F",
-          "reference_type": "RecognitionResult",
-          "access_scope": "Session",
-          "expires_at": "2026-07-22T04:00:00Z"
-        }
-      },
-      "profile": {
-        "profile_id": "ComicPage",
-        "profile_version": "1.0.0"
-      },
-      "options": {
-        "normalization_level": "Conservative",
-        "enable_order_refinement": true,
-        "enable_line_reconstruction": true,
-        "enable_region_grouping": true,
-        "enable_block_classification": true,
-        "enable_noise_filtering": true,
-        "preserve_excluded_blocks": true,
-        "allow_partial_result": true
-      },
-      "context": {
-        "session_id": "ses_01J8N46M7EX6T0FS3R0B5TSZ3W",
-        "source_id": "src_01J8N45K41DNTQR6GJP1A9GJR4",
-        "content_id": "cnt_01J8N45ZWGCNA7RG9NMTG6F4NE",
-        "frame_id": "frm_01J8N4842QSPNFHB9Y8SBCYVY2",
-        "expected_language": "zh-Hans",
-        "document_type_hint": "ComicPage",
-        "reading_direction_hint": "RightToLeft",
-        "privacy_policy": {
-          "processing_location": "LocalOnly",
-          "diagnostic_text_allowed": false
-        }
-      },
-      "timeout_ms": 5000,
-      "priority": "Interactive",
-      "requested_at": "2026-07-22T03:20:00Z",
-      "trace_context": {
-        "trace_id": "trc_01J8N4BNN1RG0NDW48WD7AQW7P",
-        "parent_span_id": "spn_01J8N49ZAK9B57B9M53P0E4YWV"
-      }
-    },
-    "configuration_snapshot_id": "cfg-tp-20260722-001",
-    "supersession": {
-      "supersedes_request_id": null,
-      "supersession_key": "session:ses_01J8N46M7EX6T0FS3R0B5TSZ3W:frame"
-    }
-  }
-}
-```
-
----
-
-## 25. Request Acceptance Rules
-
-Text Processing should accept the command only when:
-
-* the event version is supported;
-* request contract version is supported;
-* request ID is valid;
-* request ID is not already bound to conflicting input;
-* Recognition result is available or retrievable;
-* source identity is consistent;
-* requested profile is supported or fallback is allowed;
-* privacy policy is satisfiable;
-* the module is available;
-* the request is not already superseded.
-
----
-
-## 26. Duplicate Request Events
-
-A duplicate `text_processing.requested` event may occur due to at-least-once delivery.
-
-If the same `request_id` and equivalent request fingerprint are received:
-
-```text
-do not create new processing work
-```
-
-The handler should:
-
-* acknowledge the duplicate;
-* return the existing request status;
-* optionally republish the known terminal event if recovery policy requires it.
-
-If the same `request_id` carries different semantic input:
-
-```text
-reject as DuplicateRequestIdConflict
-```
-
----
-
-## 27. Request Fingerprint
-
-The command handler should derive a request fingerprint from:
-
-```text
-recognition_id
-recognition result fingerprint
-profile reference
-processing options
-source identity
-relevant context
-```
-
-Runtime fields such as timestamp should not change semantic equivalence.
-
----
-
-## 28. `text_processing.cancellation_requested`
-
-Requests cancellation of an active Text Processing request.
-
-Producer may be:
-
-```text
-session
-orchestration
-application-core
-user-interface
-shutdown-coordinator
-```
-
-Consumer:
-
-```text
-text-processing
-```
-
----
-
-## 29. Cancellation Requested Payload
-
-```text
-TextProcessingCancellationRequestedPayload
-├── request_id
-├── recognition_id?
-├── reason
-├── requested_at
-├── requested_by
-├── superseding_request_id?
-├── superseding_frame_id?
-└── trace_context?
-```
-
----
-
-## 30. Cancellation Request Example
-
-```json
-{
-  "event_name": "text_processing.cancellation_requested",
-  "event_version": "1.0.0",
-  "payload": {
-    "request_id": "tpr_01J8N4BESD9DDB25RYDR1QSV8Y",
-    "recognition_id": "rec_01J8N49EJZAMKMJ61P2H1XB0ZK",
-    "reason": "NewerFrameAvailable",
-    "requested_at": "2026-07-22T03:20:00.012Z",
-    "requested_by": {
-      "module": "session"
-    },
-    "superseding_request_id": "tpr_01J8N4C6SKB0EWVWJGSF7XNM4K",
-    "superseding_frame_id": "frm_01J8N4BXX1DQKWMSSDNZ53WW6M"
-  }
-}
-```
-
----
-
-## 31. Cancellation Acceptance
-
-Cancellation may be accepted while the request is in any non-terminal state.
-
-Example states:
-
-```text
-Received
-Validating
-AdaptingInput
-ResolvingOrder
-Normalizing
-ReconstructingLines
-GroupingRegions
-ClassifyingBlocks
-BuildingDocument
-ValidatingTraceability
-AssemblingResult
-PublishingResult
-```
-
-Cancellation after a terminal outcome is a no-op.
-
----
-
-## 32. Duplicate Cancellation
-
-Cancellation requests are idempotent.
-
-Repeated cancellation commands must not create repeated terminal events.
-
-At most one:
-
-```text
-text_processing.cancelled
-```
-
-may be produced.
-
----
-
-# Produced Lifecycle Events
-
-## 33. `text_processing.started`
-
-Published when a request has been accepted and processing execution begins.
-
-This event means:
-
-* the request passed command-level acceptance;
-* the request has an active execution context;
-* an effective configuration snapshot has been selected;
-* terminal-event ownership belongs to Text Processing.
-
----
-
-## 34. Started Payload
-
-```text
-TextProcessingStartedPayload
-├── request_id
-├── recognition_id
-├── effective_profile
-├── configuration_snapshot_id
-├── processing_mode
-├── started_at
-├── timeout_at?
-├── queue_duration_ms?
-└── supersession_key?
-```
-
----
-
-## 35. Started Event Example
-
-```json
-{
-  "event_name": "text_processing.started",
-  "event_version": "1.0.0",
-  "payload": {
-    "request_id": "tpr_01J8N4BESD9DDB25RYDR1QSV8Y",
-    "recognition_id": "rec_01J8N49EJZAMKMJ61P2H1XB0ZK",
-    "effective_profile": {
-      "profile_id": "ComicPage",
-      "profile_version": "1.0.0",
-      "resolution_source": "ExplicitRequest"
-    },
-    "configuration_snapshot_id": "cfg-tp-20260722-001",
-    "processing_mode": "Asynchronous",
-    "started_at": "2026-07-22T03:20:00.003Z",
-    "timeout_at": "2026-07-22T03:20:05.003Z",
-    "queue_duration_ms": 3,
-    "supersession_key": "session:ses_01J8N46M7EX6T0FS3R0B5TSZ3W:frame"
-  }
-}
-```
-
----
-
-## 36. Started Event Invariants
-
-A request must produce no more than one semantic `started` event.
-
-Redelivery of the same event is allowed.
-
-`started` must not contain:
-
-* Recognition payload;
-* source text;
-* source image;
-* output document.
-
----
-
-## 37. `text_processing.completed`
-
-Published when Text Processing has successfully created, validated, stored, and committed a `TextProcessingResult`.
-
-Completion means:
-
-* `SourceDocument` is contract-valid;
-* traceability validation succeeded;
-* result storage succeeded when references are used;
-* cancellation did not win the terminal race;
-* exactly one terminal outcome was committed.
-
----
-
-## 38. Completed Payload
-
-```text
-TextProcessingCompletedPayload
-├── request_id
-├── processing_id
-├── recognition_id
-├── result_reference
-├── document_summary
-├── effective_profile
-├── warning_summary
-├── metrics_summary
-├── processing_fingerprint?
-├── completed_at
-└── supersession?
-```
-
----
-
-## 39. Document Summary
-
-```text
-SourceDocumentSummary
-├── document_id
-├── document_type
-├── root_block_count
-├── included_block_count
-├── excluded_block_count
-├── textual_block_count
-├── synthetic_block_count
-├── language_hints[]
-├── reading_direction
-├── partial
-└── empty
-```
-
-The summary must not contain source text.
-
----
-
-## 40. Warning Summary
-
-```text
 WarningSummary
-├── total
-├── info_count
-├── warning_count
-├── error_count
-└── codes[]
+├── Total
+├── Codes[]
+└── HighestSeverity?
 ```
 
-Only warning codes and counts should be present.
+Do not include warning messages containing source text.
 
 ---
 
-## 41. Metrics Summary
+# 49. Candidate Compatibility Summary
 
-Recommended completion metrics:
+Conceptual:
 
 ```text
-total_duration_ms
-input_region_count
-input_line_count
-output_block_count
-excluded_block_count
-order_change_count
-line_join_count
-region_group_count
-```
-
-Detailed stage metrics may remain in the result.
-
----
-
-## 42. Completed Event Example
-
-```json
-{
-  "event_name": "text_processing.completed",
-  "event_version": "1.0.0",
-  "payload": {
-    "request_id": "tpr_01J8N4BESD9DDB25RYDR1QSV8Y",
-    "processing_id": "tps_01J8N4CDWTKQBH4HWCZ2ZN3WCA",
-    "recognition_id": "rec_01J8N49EJZAMKMJ61P2H1XB0ZK",
-    "result_reference": {
-      "reference_id": "result_ref_01J8N4CJWA19FCR63WTG70Y1EF",
-      "reference_type": "TextProcessingResult",
-      "processing_id": "tps_01J8N4CDWTKQBH4HWCZ2ZN3WCA",
-      "content_hash": "sha256:56d31f6ff6495f8d502c8a6d8627439a...",
-      "access_scope": "Session",
-      "created_at": "2026-07-22T03:20:00.021Z",
-      "expires_at": "2026-07-22T04:00:00Z"
-    },
-    "document_summary": {
-      "document_id": "doc_01J8N4C9R0XEN7BXQDJ5GCQYS7",
-      "document_type": "ComicPage",
-      "root_block_count": 4,
-      "included_block_count": 9,
-      "excluded_block_count": 1,
-      "textual_block_count": 9,
-      "synthetic_block_count": 0,
-      "language_hints": [
-        "zh-Hans"
-      ],
-      "reading_direction": "RightToLeft",
-      "partial": false,
-      "empty": false
-    },
-    "effective_profile": {
-      "profile_id": "ComicPage",
-      "profile_version": "1.0.0",
-      "resolution_source": "ExplicitRequest"
-    },
-    "warning_summary": {
-      "total": 2,
-      "info_count": 1,
-      "warning_count": 1,
-      "error_count": 0,
-      "codes": [
-        "ReadingOrderChanged",
-        "LowClassificationConfidence"
-      ]
-    },
-    "metrics_summary": {
-      "total_duration_ms": 18,
-      "input_region_count": 10,
-      "input_line_count": 14,
-      "output_block_count": 9,
-      "excluded_block_count": 1,
-      "order_change_count": 2,
-      "line_join_count": 4,
-      "region_group_count": 3
-    },
-    "processing_fingerprint": "sha256:4c53b8ce480acf12a87b72084682bbd4...",
-    "completed_at": "2026-07-22T03:20:00.021Z",
-    "supersession": {
-      "supersession_key": "session:ses_01J8N46M7EX6T0FS3R0B5TSZ3W:frame",
-      "is_current_at_publication": true
-    }
-  }
-}
+CompatibilitySummary
+├── ArtifactSchemaVersion
+├── TextProcessingContractVersion
+├── ProcessingProfileVersion
+├── ProcessingStrategyVersion?
+└── ConfigurationSnapshotId
 ```
 
 ---
 
-## 43. Completed Result Visibility
+# 50. `text_processing.candidate_invalid`
 
-A completion event should be published only after the result reference is usable.
+Optional diagnostic event.
 
-The invalid sequence is:
+Published when Candidate assembly reaches:
 
 ```text
-publish completed
-        ↓
-store result
-```
-
-The correct sequence is:
-
-```text
-assemble result
-        ↓
-validate result
-        ↓
-store result
-        ↓
-commit terminal state
-        ↓
-publish completed
-```
-
-If publication fails after terminal commit, the outbox or recovery mechanism should republish the same event.
-
----
-
-## 44. `text_processing.failed`
-
-Published when a request reaches a non-recoverable failure.
-
-A failure means no valid completed `SourceDocument` was committed.
-
----
-
-## 45. Failed Payload
-
-```text
-TextProcessingFailedPayload
-├── request_id
-├── recognition_id?
-├── processing_id?
-├── error
-├── warning_summary?
-├── metrics_summary?
-├── failed_at
-├── retry_guidance?
-└── supersession?
-```
-
----
-
-## 46. Event Error Summary
-
-```text
-EventErrorSummary
-├── code
-├── category
-├── retryable
-├── stage?
-├── target_id?
-├── message?
-└── cause_reference?
-```
-
-Sensitive internal stack traces must not appear.
-
----
-
-## 47. Failed Event Example
-
-```json
-{
-  "event_name": "text_processing.failed",
-  "event_version": "1.0.0",
-  "payload": {
-    "request_id": "tpr_01J8N5T5ED0EY6C8A7PSZYJN7S",
-    "recognition_id": "rec_01J8N5SFA1ZNF29Z9BQH3KDWW2",
-    "error": {
-      "code": "InvalidRegionReference",
-      "category": "Input",
-      "retryable": false,
-      "stage": "AdaptingInput",
-      "target_id": "rgn_missing",
-      "message": "A reading-order entry references an unavailable Recognition region."
-    },
-    "warning_summary": {
-      "total": 0,
-      "info_count": 0,
-      "warning_count": 0,
-      "error_count": 0,
-      "codes": []
-    },
-    "metrics_summary": {
-      "total_duration_ms": 3,
-      "input_region_count": 8,
-      "input_line_count": 11
-    },
-    "failed_at": "2026-07-22T03:30:00.006Z",
-    "retry_guidance": {
-      "retry_allowed": false,
-      "requires_new_request_id": true,
-      "requires_input_change": true
-    }
-  }
-}
-```
-
----
-
-## 48. Failure Publication Rules
-
-A failed event must:
-
-* use a stable error code;
-* identify whether retry may help;
-* identify the failing stage when safe;
-* avoid exposing source text;
-* avoid exposing internal exception details;
-* become the only terminal event.
-
----
-
-## 49. Retry after Failure
-
-A retry must use:
-
-```text
-new request_id
-```
-
-It may retain:
-
-```text
-recognition_id
-source identity
-trace lineage
-previous request reference
-```
-
-A retry should not replay the same request ID as new work.
-
----
-
-## 50. `text_processing.cancelled`
-
-Published when cancellation commits before completion or failure.
-
----
-
-## 51. Cancelled Payload
-
-```text
-TextProcessingCancelledPayload
-├── request_id
-├── recognition_id?
-├── reason
-├── requested_at?
-├── cancellation_accepted_at?
-├── cancelled_at
-├── stage_at_cancellation?
-├── superseding_request_id?
-├── superseding_frame_id?
-└── discarded_result?
-```
-
----
-
-## 52. Cancelled Event Example
-
-```json
-{
-  "event_name": "text_processing.cancelled",
-  "event_version": "1.0.0",
-  "payload": {
-    "request_id": "tpr_01J8N6EPJ5F5KVT4YBHQJVG4K2",
-    "recognition_id": "rec_01J8N6DXTWQN3JW74AH3G23FGS",
-    "reason": "NewerFrameAvailable",
-    "requested_at": "2026-07-22T03:40:00.008Z",
-    "cancellation_accepted_at": "2026-07-22T03:40:00.009Z",
-    "cancelled_at": "2026-07-22T03:40:00.011Z",
-    "stage_at_cancellation": "GroupingRegions",
-    "superseding_request_id": "tpr_01J8N6F95BB9P01HDJ3TBM2RH1",
-    "superseding_frame_id": "frm_01J8N6F3BTY1S0BP96P1TJHX7C",
-    "discarded_result": false
-  }
-}
-```
-
----
-
-## 53. Discarded Late Result
-
-If internal processing finishes after cancellation committed:
-
-```text
-discarded_result = true
-```
-
-may be used.
-
-The late result must not:
-
-* be stored as a completed result;
-* be published as completed;
-* trigger Translation;
-* replace the current SourceDocument.
-
----
-
-# Optional Progress Events
-
-## 54. Progress Event Principles
-
-Progress events are optional and observational.
-
-Other modules must not require them for correctness.
-
-They may support:
-
-* diagnostics;
-* development tooling;
-* performance monitoring;
-* detailed UI progress;
-* profiling.
-
-Consumers must remain correct when no progress events are emitted.
-
----
-
-## 55. Progress Event Common Payload
-
-```text
-TextProcessingProgressPayload
-├── request_id
-├── recognition_id
-├── stage
-├── progress?
-├── counts?
-├── duration_ms?
-├── warning_summary?
-└── occurred_at
-```
-
-No full text payload should be included.
-
----
-
-## 56. Progress Value
-
-Optional `progress` may use:
-
-```text
-0.0 ≤ progress ≤ 1.0
-```
-
-Progress is approximate unless stage weights are fixed.
-
-For fast local processing, emitting granular percentages may create more overhead than value.
-
----
-
-## 57. `text_processing.input_adapted`
-
-Published after Recognition input has been validated and converted into the internal processing model.
-
-Payload may include:
-
-```text
-input_region_count
-input_line_count
-coordinate_space
-source_dimensions_present
-upstream_warning_count
-duration_ms
-```
-
----
-
-## 58. `text_processing.order_resolved`
-
-Published after effective reading order has been produced.
-
-Payload may include:
-
-```text
-original_entry_count
-resolved_entry_count
-order_change_count
-reading_direction
-confidence
-warning_codes[]
-duration_ms
-```
-
-No ordered text or block payload should be included.
-
----
-
-## 59. `text_processing.normalization_completed`
-
-Published after raw text nodes have been normalized.
-
-Payload may include:
-
-```text
-node_count
-changed_node_count
-normalization_change_count
-normalization_level
-warning_codes[]
-duration_ms
-```
-
----
-
-## 60. `text_processing.lines_reconstructed`
-
-Published after line groups have been created.
-
-Payload may include:
-
-```text
-input_line_count
-output_line_group_count
-line_join_count
-ambiguous_join_count
-duration_ms
-```
-
----
-
-## 61. `text_processing.regions_grouped`
-
-Published after source groups have been created.
-
-Payload may include:
-
-```text
-input_region_count
-output_group_count
-region_group_count
-preserved_region_count
-ambiguous_group_count
-duration_ms
-```
-
----
-
-## 62. `text_processing.blocks_classified`
-
-Published after source groups have received structural classifications.
-
-Payload may include:
-
-```text
-block_count
-classified_count
-unknown_count
-low_confidence_count
-type_counts
-duration_ms
-```
-
-`type_counts` may contain block-type names and counts only.
-
----
-
-## 63. `text_processing.document_built`
-
-Published after `SourceDocument` assembly but before final traceability validation and terminal commit.
-
-Payload may include:
-
-```text
-document_id
-document_type
-block_count
-root_block_count
-excluded_block_count
-synthetic_block_count
-partial_candidate
-empty_candidate
-duration_ms
-```
-
-The event does not mean the result is safe for downstream consumption.
-
----
-
-## 64. `text_processing.traceability_validated`
-
-Published after traceability validation succeeds.
-
-Payload may include:
-
-```text
-document_id
-total_input_regions
-included_region_count
-excluded_region_count
-unresolved_region_count
-coverage_ratio
-duration_ms
-```
-
-This event still does not replace `text_processing.completed`.
-
----
-
-## 65. Progress Event Frequency
-
-Text Processing is expected to be low latency.
-
-Recommended policy:
-
-* progress events disabled by default in production;
-* stage events enabled for diagnostics;
-* no per-block events in normal mode;
-* no per-character events;
-* no event for every normalization rule;
-* aggregate counts instead.
-
----
-
-# Module Health Events
-
-## 66. `text_processing.module_ready`
-
-Published when the module can accept requests.
-
-Payload:
-
-```text
-module_instance_id
-supported_contract_versions[]
-supported_profiles[]
-active_configuration_snapshot_id
-ready_at
-```
-
----
-
-## 67. `text_processing.module_degraded`
-
-Published when the module can accept only a reduced set of requests or features.
-
-Possible reasons:
-
-```text
-profile unavailable
-rule-set load failure
-result registry degraded
-resource pressure
-diagnostics unavailable
-configuration fallback
+CandidateValidationState = INVALID
 ```
 
 Payload:
 
 ```text
-module_instance_id
-reason_codes[]
-available_profiles[]
-unavailable_profiles[]
-degraded_at
+TextProcessingCandidateInvalid
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── CandidateArtifactId?
+├── ValidationCode
+├── ValidationCategory
+├── Stage
+├── RetryHint?
+├── InvalidatedAt
+└── TraceId?
 ```
+
+This event is diagnostic.
+
+Runtime outcome remains authoritative.
 
 ---
 
-## 68. `text_processing.module_unavailable`
+# 51. Candidate Invalid Privacy
 
-Published when the module cannot accept new processing requests.
+Do not include:
+
+* SourceDocument
+* RawText
+* NormalizedText
+* stack trace
+* credentials
+* sensitive source fragments
+
+Use stable validation codes.
+
+---
+
+# 52. `text_processing.candidate_submitted`
+
+Published when a VALID Candidate crosses the Text Processing → Runtime boundary.
 
 Payload:
 
 ```text
-module_instance_id
-reason_code
-retryable
-unavailable_at
-expected_recovery?
-```
-
-The module should reject new requests with:
-
-```text
-ModuleUnavailable
-```
-
----
-
-## 69. `text_processing.module_stopping`
-
-Published when shutdown begins.
-
-New requests should no longer be accepted unless graceful-shutdown policy explicitly permits them.
-
-Payload may include:
-
-```text
-active_request_count
-shutdown_reason
-shutdown_started_at
-grace_period_ms?
+TextProcessingCandidateSubmitted
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── RecognitionArtifactId
+├── CandidateArtifactId
+├── ArtifactType
+├── ContractVersion
+├── Completeness
+├── SubmittedAt
+└── TraceId?
 ```
 
 ---
 
-## 70. `text_processing.module_stopped`
+# 53. Candidate Submission Rule
 
-Published after module shutdown completes.
-
-Payload may include:
+Only:
 
 ```text
-completed_request_count
-cancelled_request_count
-failed_request_count
-stopped_at
+CandidateValidationState = VALID
+```
+
+may produce:
+
+```text
+candidate_submitted
+```
+
+Forbidden:
+
+```text
+INVALID
+    → candidate_submitted
 ```
 
 ---
 
-# Configuration Events
+# 54. Submission Is Not Acceptance
 
-## 71. `text_processing.configuration_changed`
-
-Indicates that a new Text Processing configuration snapshot is available.
-
-Producer:
+Critical distinction:
 
 ```text
-configuration
-application-core
+candidate_submitted
+    ≠
+candidate accepted
 ```
 
-Consumer:
+After submission Runtime may decide:
 
 ```text
-text-processing
+ACCEPTED
+
+REJECTED_STALE
+
+REJECTED_CANCELED
+
+REJECTED_DUPLICATE
+
+REJECTED_INVALID
+
+REJECTED_RUNTIME_FAILURE
 ```
+
+These are Runtime dispositions.
 
 ---
 
-## 72. Configuration Changed Payload
+# 55. Artifact Publication Boundary
+
+Text Processing must not publish:
 
 ```text
-TextProcessingConfigurationChangedPayload
-├── configuration_snapshot_id
-├── previous_snapshot_id?
-├── changed_categories[]
-├── effective_at
-├── requires_restart
-└── compatibility
+text_processing.artifact_published
 ```
 
----
+unless architecture later explicitly transfers publication ownership.
 
-## 73. Configuration Categories
-
-Possible values:
+Current boundary:
 
 ```text
-DefaultProfile
-ProfileDefinitions
-NormalizationRules
-OrderRules
-GroupingRules
-ClassificationRules
-NoiseRules
-ConfidenceThresholds
-PerformanceLimits
-Diagnostics
-ResultRetention
-Privacy
-```
-
----
-
-## 74. Configuration Snapshot Rule
-
-An active request must use one immutable configuration snapshot.
-
-A configuration event must not modify an in-flight request.
-
-New configuration applies to requests accepted after:
-
-```text
-effective_at
-```
-
-or after atomic activation.
-
----
-
-## 75. Configuration Compatibility
-
-Payload may describe:
-
-```text
-BackwardCompatible
-ResultChanging
-RestartRequired
-Unsupported
-```
-
-A result-changing configuration must update at least one of:
-
-```text
-profile version
-rule-set version
-configuration snapshot ID
-processing fingerprint inputs
+Text Processing
+    ↓
+Candidate
+    ↓
+Runtime
+    ↓
+Artifact Store
+    ↓
+Published SourceDocument Artifact
 ```
 
 ---
 
-# Upstream Events
+# 56. Translation Trigger Boundary
 
-## 76. `recognition.completed`
-
-Text Processing may observe `recognition.completed`, but should not necessarily begin processing automatically.
-
-Recommended architecture:
+Text Processing must not directly declare:
 
 ```text
-recognition.completed
-        ↓
-Session / Orchestration decides
-        ↓
-text_processing.requested
-```
-
-This avoids coupling Recognition directly to Text Processing policy.
-
----
-
-## 77. Recognition Completion Requirements
-
-When used to create a Text Processing request, the Recognition completion event should provide:
-
-```text
-recognition_id
-result_reference
-source identity
-warning summary
-completed_at
-```
-
-Text Processing must retrieve and validate the actual Recognition result.
-
----
-
-## 78. Recognition Failure
-
-`recognition.failed` normally prevents creation of a Text Processing request.
-
-Text Processing should not receive an invalid placeholder Recognition result.
-
-If a command still references a failed or unavailable result, Text Processing must fail with a normalized input/reference error.
-
----
-
-## 79. Recognition Cancellation
-
-A cancelled Recognition request should not lead to Text Processing.
-
-If an already-created Text Processing request references a result later invalidated by upstream cleanup, the module should:
-
-* cancel when active;
-* fail when retrieval becomes impossible;
-* never fabricate a document.
-
----
-
-# Session and Source Events
-
-## 80. `session.stopped`
-
-Text Processing consumes or is indirectly notified of session shutdown.
-
-Active requests associated with the session should be cancelled using:
-
-```text
-SessionStopped
-```
-
-Completed session-scoped result references may be invalidated during cleanup.
-
----
-
-## 81. `source.closed`
-
-When a source is closed:
-
-* active requests for the source may be cancelled;
-* stale results must not be presented;
-* session-scoped result retention may be shortened;
-* downstream Translation should not start for invalidated source scopes.
-
----
-
-## 82. `application.shutdown_requested`
-
-Text Processing should:
-
-1. stop accepting new work;
-2. cancel or drain active work according to policy;
-3. publish valid terminal outcomes;
-4. release result references and resources;
-5. publish module stopped state.
-
----
-
-# Supersession and Stale Results
-
-## 83. Supersession Purpose
-
-Live screen reading may create multiple rapidly changing frames.
-
-A newer frame may make older Text Processing work irrelevant.
-
-Supersession prevents stale documents from reaching Translation or Presentation.
-
----
-
-## 84. Supersession Key
-
-A request may include:
-
-```text
-supersession_key
-```
-
-Example:
-
-```text
-session:<session_id>:frame
+translation requested
 ```
 
 or:
 
 ```text
-source:<source_id>:selected-region
+SourceDocument ready for translation
 ```
 
-Only one request may be current for a key, depending on policy.
+based solely on Candidate validation.
+
+Translation may begin only from an accepted/published Artifact according to Runtime orchestration.
 
 ---
 
-## 85. Superseding Request
+# 57. Runtime Events Observed by Text Processing
 
-A newer request may declare:
+Text Processing may observe external Runtime facts such as:
+
+```text
+Attempt cancellation requested
+
+Attempt deadline changed/exceeded
+
+Attempt authority revoked
+
+Candidate accepted
+
+Candidate rejected
+
+Runtime shutdown
+```
+
+Exact event names belong to Runtime documentation.
+
+This file does not redefine them.
+
+---
+
+# 58. Cancellation
+
+Text Processing does not consume:
+
+```text
+text_processing.cancellation_requested
+```
+
+as its own canonical command.
+
+Instead cancellation is provided through Runtime-owned:
+
+```text
+CancellationContext
+```
+
+or equivalent Runtime mechanism.
+
+---
+
+# 59. Cancellation Observations
+
+Text Processing may emit diagnostics such as:
+
+```text
+text_processing.cancellation_observed
+```
+
+if useful.
+
+This is optional.
+
+Payload:
+
+```text
+TextProcessingCancellationObserved
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── OperationPhase
+├── ObservedAt
+└── TraceId?
+```
+
+It does not mean Runtime has committed `CANCELED`.
+
+---
+
+# 60. No `text_processing.cancelled`
+
+Text Processing does not emit a canonical:
+
+```text
+text_processing.cancelled
+```
+
+terminal event.
+
+Local behavior:
+
+```text
+CancellationContext requested
+        ↓
+Text Processing stops new expensive work
+        ↓
+cleanup
+        ↓
+return control to Runtime
+        ↓
+Runtime decides terminal disposition
+```
+
+---
+
+# 61. Deadline
+
+Deadline belongs to Runtime.
+
+Text Processing may observe:
+
+```text
+RemainingBudget
+
+DeadlineExceeded
+```
+
+but must not create a separate module-owned timeout lifecycle.
+
+Optional diagnostic:
+
+```text
+text_processing.deadline_observed
+```
+
+should be used only if telemetry requires it.
+
+---
+
+# 62. Supersession
+
+Text Processing does not own supersession.
+
+Therefore legacy fields such as:
 
 ```text
 supersedes_request_id
-```
 
-The orchestration layer should request cancellation of the older request.
+supersession_key
 
-Text Processing may also use a request registry to mark the older request stale.
-
----
-
-## 86. Stale Completion Prevention
-
-Before terminal completion, Text Processing should check:
-
-* whether the request is still current;
-* whether cancellation is committed;
-* whether source/frame identity remains active;
-* whether the result reference scope remains valid.
-
-If stale:
-
-```text
-cancel or discard
-```
-
-according to supersession policy.
-
----
-
-## 87. Completed but No Longer Current
-
-A completion event may be valid but become stale before a consumer receives it.
-
-Consumers such as Translation and Presentation must validate:
-
-```text
-session ID
-source ID
-frame ID
-supersession key
-current request ID
-```
-
-before acting.
-
----
-
-## 88. Current-at-Publication Flag
-
-A completion payload may include:
-
-```text
 is_current_at_publication
 ```
 
-This is informative.
+do not belong to Text Processing-owned lifecycle logic.
 
-It does not replace consumer-side stale-result validation.
+Runtime owns:
+
+```text
+Revision relevance
+
+Attempt authority
+
+staleness
+
+supersession
+```
 
 ---
 
-## 89. Historical Processing
+# 63. Stale Candidate
 
-Supersession policy differs for historical or batch processing.
-
-For history/import/batch flows:
+Possible flow:
 
 ```text
-older result
+Candidate VALID
+    ↓
+candidate_submitted
+    ↓
+Runtime detects stale Revision
+    ↓
+REJECTED_STALE
 ```
 
-does not necessarily mean:
+Text Processing does not rewrite Candidate state to:
 
 ```text
-stale result
+SUPERSEDED
 ```
-
-Supersession must be explicitly scoped, not globally assumed.
 
 ---
 
-# Duplicate Delivery and Idempotency
+# 64. Retry
 
-## 90. Delivery Semantics
+Text Processing does not publish:
 
-The event system should assume:
+```text
+retry_requested
+
+retry_started
+
+retry_scheduled
+```
+
+as canonical module lifecycle events.
+
+Text Processing may return:
+
+```text
+RetryHint
+```
+
+inside a normalized Module Error.
+
+Runtime owns retry policy.
+
+---
+
+# 65. Retry Creates New Attempt
+
+When Runtime retries:
+
+```text
+Attempt N
+    ↓ failure
+Runtime retry policy
+    ↓
+Attempt N+1
+```
+
+Text Processing event correlation therefore uses the new:
+
+```text
+AttemptId
+```
+
+No Text Processing event stream is reopened.
+
+---
+
+# 66. Duplicate Delivery
+
+Event transport should assume:
 
 ```text
 AtLeastOnce
 ```
 
-unless stronger guarantees are proven.
+unless the Event Bus guarantees otherwise.
 
-Therefore:
+Consumers must tolerate:
 
-* events may be duplicated;
-* events may arrive late;
-* events may arrive out of order;
-* publication may be retried.
-
----
-
-## 91. Consumer Deduplication
-
-Consumers should deduplicate using:
-
-```text
-event_id
-```
-
-and, when necessary:
-
-```text
-request_id + event_name + terminal state
-```
-
-A deduplication record should live at least as long as the relevant result reference or workflow.
+* duplicate events
+* late events
+* out-of-order observations
 
 ---
 
-## 92. Command Idempotency
+# 67. Consumer Deduplication
 
-Command idempotency is based on:
+Primary key:
 
 ```text
-request_id
-semantic request fingerprint
+EventId
 ```
 
-Same ID and same fingerprint:
+When semantic deduplication is needed:
 
 ```text
-duplicate
+AttemptId
++
+EventName
++
+CandidateArtifactId?
 ```
 
-Same ID and different fingerprint:
+may be used.
+
+---
+
+# 68. Candidate Submission Idempotency
+
+For one Candidate:
 
 ```text
-conflict
+semantic candidate submission count <= 1
+```
+
+Redelivery of the same event is allowed.
+
+Duplicate delivery must not cause duplicate Artifact publication.
+
+---
+
+# 69. Runtime Deduplication
+
+Runtime should use:
+
+```text
+CandidateArtifactId
+
+AttemptId
+
+RevisionId
+```
+
+when evaluating Candidate submission.
+
+Exact Runtime idempotency rules belong to Runtime documentation.
+
+---
+
+# 70. Event Privacy
+
+Default Text Processing events should be metadata-only.
+
+Recommended:
+
+```text
+contains_source_text = false
+
+contains_image_data = false
+
+contains_translated_text = false
 ```
 
 ---
 
-## 93. Terminal Event Idempotency
+# 71. Sensitive Identifiers
 
-Republishing the same terminal event after a broker or process failure must use the same:
-
-```text
-event_id
-request_id
-processing_id, for completion
-terminal outcome
-```
-
----
-
-## 94. Duplicate Completion Consumption
-
-Translation may receive the same `text_processing.completed` event more than once.
-
-It must not create duplicate translation work.
-
-Translation should derive its request idempotency key from:
-
-```text
-processing_id
-translation policy
-target language
-translation request identity
-```
-
----
-
-# Retries
-
-## 95. Internal Retry
-
-Text Processing may internally retry transient operations such as:
-
-* result retrieval;
-* result-registry write;
-* event publication through outbox;
-* temporary resource acquisition.
-
-Internal retry does not create a new `request_id`.
-
----
-
-## 96. Processing Rule Retry
-
-Deterministic local processing stages normally should not be retried blindly.
+Even metadata may be sensitive.
 
 Examples:
 
 ```text
-NormalizationFailed
-RegionGroupingFailed
-TraceabilityValidationFailed
+SessionId
+
+SourceId
+
+RevisionId
+
+ArtifactId
 ```
 
-These usually indicate:
-
-* invalid input;
-* implementation defect;
-* unsupported data;
-* broken configuration.
-
-A retry with unchanged input is unlikely to help.
+Therefore events should use the shared CRAI privacy classification.
 
 ---
 
-## 97. External Retry
+# 72. Source Text Prohibition
 
-After a terminal failure, orchestration may submit a new request.
-
-It must use:
+Normal events must not contain:
 
 ```text
-new request_id
+RawText
+
+NormalizedText
+
+OCR text snippets
+
+SourceBlock text
+
+Translation text
 ```
 
-and may include:
-
-```text
-previous_request_id
-retry_reason
-retry_attempt
-```
+Even error and warning events should use codes instead of source fragments.
 
 ---
 
-## 98. Retry Event Metadata
+# 73. Error Event Principle
 
-Optional metadata:
+Text Processing errors are primarily returned through the module execution contract.
+
+Events may mirror errors for diagnostics.
+
+They must not become the authoritative failure lifecycle.
+
+Optional:
 
 ```text
-RetryMetadata
-├── attempt
-├── previous_request_id?
-├── retry_reason?
-├── original_request_id
-└── maximum_attempts?
+text_processing.operation_error_observed
 ```
 
-Retry policy should remain outside the core SourceDocument contract.
-
----
-
-## 99. Retry Limits
-
-Retries must be bounded.
-
-Suggested policies:
+Payload:
 
 ```text
-result retrieval: small bounded retry
-result storage: bounded retry with backoff
-event publication: durable outbox retry
-invalid input: no automatic retry
-traceability failure: no automatic retry
+TextProcessingOperationErrorObserved
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── OperationPhase
+├── ErrorCode
+├── ErrorCategory
+├── RetryHint?
+├── OccurredAt
+└── TraceId?
 ```
 
 ---
 
-# Cancellation Races
+# 74. No Stack Traces in Events
 
-## 100. Completion vs Cancellation Race
+Events must not contain:
 
-Completion and cancellation may occur concurrently.
+* stack traces
+* arbitrary exception serialization
+* credentials
+* filesystem secrets
+* full provider responses
+* source content
 
-The module must atomically commit exactly one terminal state.
+Detailed diagnostics belong to Logging/Telemetry according to privacy policy.
 
-Conceptual rule:
+---
+
+# 75. Progress Events
+
+Progress events are optional.
+
+Consumers must remain correct if none are emitted.
+
+Recommended production policy:
 
 ```text
-compare-and-set:
-NonTerminal → Completed
+No per-character events
+
+No per-block events
+
+No per-rule events
+
+No high-frequency percentage events
+
+Prefer phase-level aggregate observations
 ```
 
-or:
+---
+
+# 76. Progress Percentage
+
+A generic:
 
 ```text
-compare-and-set:
-NonTerminal → Cancelled
+0.0 → 1.0
 ```
 
-Only one may succeed.
+percentage is not required.
+
+Text Processing operations may vary significantly by:
+
+* page structure
+* OCR node count
+* Processing Profile
+* optional operations
+
+Phase observations are usually more meaningful.
 
 ---
 
-## 101. Cancellation Before Result Storage
+# 77. Metrics
 
-If cancellation commits before result storage begins:
-
-* discard assembled document;
-* do not store completed result;
-* publish cancelled.
-
----
-
-## 102. Cancellation During Result Storage
-
-The module should define a commit boundary.
-
-Recommended boundary:
+Events may carry bounded aggregate metrics:
 
 ```text
-result stored but not terminally committed
+DurationMs
+
+InputNodeCount
+
+OutputBlockCount
+
+JoinCount
+
+GroupCount
+
+UnknownClassificationCount
+
+WarningCount
 ```
 
-does not yet mean completed.
-
-If cancellation wins, the stored temporary result must be:
-
-* deleted;
-* marked orphaned;
-* made inaccessible;
-* or allowed to expire without publication.
+Metrics must not expose source content.
 
 ---
 
-## 103. Cancellation During Publication
+# 78. Event vs Telemetry
 
-If completion already committed and publication fails:
-
-* cancellation cannot replace completion;
-* the same completion event must be republished.
-
-If cancellation committed first:
-
-* no completion event may be published.
-
----
-
-## 104. Failure vs Cancellation Race
-
-Recommended rule:
-
-* cancellation wins if accepted before non-recoverable failure commit;
-* failure wins if terminal failure committed first;
-* later command/event is a no-op;
-* exactly one terminal event remains visible.
-
-The chosen policy must be implemented atomically.
-
----
-
-# Result Reference Events
-
-## 105. Result Reference Requirement
-
-`text_processing.completed` should contain a secure reference to:
+Use Event Bus when:
 
 ```text
-TextProcessingResult
+another component may reasonably observe
+a semantic module fact
 ```
 
-The reference may indirectly provide access to:
+Use Telemetry when:
 
 ```text
+the information exists only
+for monitoring/performance/debugging
+```
+
+Avoid turning every metric into a domain event.
+
+---
+
+# 79. Event vs Log
+
+Example:
+
+```text
+Candidate validated
+```
+
+may justify an event.
+
+Example:
+
+```text
+normalization rule #17 took 0.4 ms
+```
+
+belongs to telemetry/logging.
+
+---
+
+# 80. Event vs Contract Return
+
+The execution contract remains the primary synchronous/local communication boundary.
+
+Example:
+
+```text
+Text Processing returns Candidate
+```
+
+does not require another module to wait for:
+
+```text
+candidate_validated event
+```
+
+Events are not a replacement for direct Runtime execution semantics.
+
+---
+
+# 81. Module Availability Transition Events
+
+Recommended mapping:
+
+```text
+AVAILABLE
+    → module_available
+
+DEGRADED
+    → module_degraded
+
+UNAVAILABLE
+    → module_unavailable
+
+DRAINING
+    → module_draining
+
+STOPPED
+    → module_stopped
+```
+
+No event is required for every internal transition if no observer needs it.
+
+---
+
+# 82. Processing Phase Mapping
+
+Recommended optional mapping:
+
+```text
+ADAPTING_INPUT
+    → input_adapted
+
+NORMALIZING
+    → normalization_completed
+
+RECONSTRUCTING
+    → reconstruction_completed
+
+GROUPING
+    → grouping_completed
+
+CLASSIFYING
+    → classification_completed
+
+BUILDING_DOCUMENT
+    → document_built
+
+VALIDATING_TRACEABILITY
+    → traceability_validated
+```
+
+No event for:
+
+```text
+FINISHED
+```
+
+is required.
+
+Runtime already owns Attempt completion.
+
+---
+
+# 83. Candidate State Mapping
+
+```text
+VALID
+    → candidate_validated
+
+INVALID
+    → candidate_invalid [optional]
+
+SUBMITTED_TO_RUNTIME
+    → candidate_submitted
+```
+
+Candidate acceptance is external.
+
+---
+
+# 84. Empty-Valid Candidate
+
+Example:
+
+```text
+Completeness = EMPTY_VALID
+```
+
+may still produce:
+
+```text
+candidate_validated
+
+candidate_submitted
+```
+
+Empty semantic output is not automatically failure.
+
+---
+
+# 85. Partial Candidate
+
+Example:
+
+```text
+Completeness = PARTIAL
+```
+
+may produce:
+
+```text
+candidate_validated
+```
+
+when the Text Processing Contract permits partial output.
+
+Runtime still decides whether the Candidate is acceptable for the WorkItem.
+
+---
+
+# 86. Event Compatibility
+
+Consumers must evaluate:
+
+```text
+EventName
+
+EventVersion
+```
+
+Unknown optional fields should normally be ignored.
+
+Unknown major versions may be rejected or routed according to shared Event Bus policy.
+
+---
+
+# 87. Candidate Compatibility
+
+Candidate events may include compatibility summaries but do not replace Artifact-level compatibility metadata.
+
+Artifact metadata remains authoritative.
+
+---
+
+# 88. Event Schema Evolution
+
+Backward-compatible changes may include:
+
+* optional metadata fields
+* optional metrics
+* new warning codes
+* new extension fields
+
+Breaking changes include:
+
+* changing semantic meaning
+* removing required identity fields
+* changing identifier ownership
+* changing Candidate event semantics
+
+Breaking changes require major version update.
+
+---
+
+# 89. Event Delivery Failure
+
+Failure to publish an optional diagnostic event must not invalidate an otherwise valid Candidate.
+
+Example:
+
+```text
+normalization_completed publication failed
+    ↓
+Candidate processing may continue
+```
+
+depending on Event Bus policy.
+
+---
+
+# 90. Candidate Submission Event Failure
+
+Important distinction:
+
+```text
+Candidate submission to Runtime
+```
+
+and:
+
+```text
+candidate_submitted event publication
+```
+
+are not the same operation.
+
+Runtime submission is the correctness boundary.
+
+The event is observational.
+
+Therefore event publication failure must not cause duplicate Candidate submission.
+
+---
+
+# 91. Outbox
+
+If reliable event publication is required, use shared Event Bus/outbox infrastructure.
+
+Text Processing should not implement a private event durability subsystem.
+
+---
+
+# 92. Recovery
+
+After Text Processing process crash:
+
+* Attempt-local phase events do not reconstruct the Attempt
+* Processing Plan is not restored from event history
+* Candidate assembly is not resumed from event history
+* Runtime determines whether a new Attempt is created
+
+Events are not Text Processing event sourcing.
+
+---
+
+# 93. Event Sourcing Boundary
+
+Text Processing is not event-sourced by default.
+
+Do not reconstruct:
+
+```text
+ProcessingPlan
+
+OperationPhase
+
+WorkingNodes
+
+CandidateAssembly
+```
+
+by replaying Text Processing events.
+
+---
+
+# 94. Testing — Availability Events
+
+Test:
+
+* AVAILABLE emits correct observation
+* DEGRADED carries bounded reasons
+* UNAVAILABLE exposes no source content
+* DRAINING does not imply Attempt cancellation
+* STOPPED does not claim Runtime terminal outcomes
+
+---
+
+# 95. Testing — Processing Events
+
+Test:
+
+* plan_created contains Attempt correlation
+* input_adapted contains no OCR text
+* normalization event contains counts only
+* reconstruction event does not redefine Reading Order
+* grouping uncertainty remains metadata
+* UNKNOWN classification remains valid
+* document_built does not imply Candidate validity
+* traceability_validated emitted only after validation success
+
+---
+
+# 96. Testing — Candidate Events
+
+Test:
+
+```text
+VALID
+    → candidate_validated
+```
+
+```text
+VALID
+    → candidate_submitted
+```
+
+```text
+INVALID
+    ↛ candidate_submitted
+```
+
+```text
+candidate_submitted
+    ↛ artifact published
+```
+
+```text
+candidate_submitted
+    ↛ attempt succeeded
+```
+
+---
+
+# 97. Testing — Runtime Boundary
+
+Test:
+
+```text
+Candidate VALID
+    ↓
+Runtime rejects stale
+```
+
+Text Processing must not emit `completed`.
+
+Test:
+
+```text
+Cancellation observed
+    ↓
+local cleanup
+    ↓
+Runtime decides CANCELED
+```
+
+Text Processing must not own terminal cancellation.
+
+Test:
+
+```text
+Candidate submitted
+    ↓
+Runtime rejects duplicate
+```
+
+Candidate remains immutable.
+
+---
+
+# 98. Testing — Event Delivery
+
+Test:
+
+* duplicate delivery
+* late delivery
+* out-of-order phase events
+* missing optional progress events
+* event publication failure
+* Candidate submission event redelivery
+* unsupported event version
+* unknown optional fields
+
+---
+
+# 99. Property Tests
+
+```text
+candidate_submitted
+implies Candidate was VALID
+```
+
+```text
+candidate_submitted
+does not imply Runtime acceptance
+```
+
+```text
+no Text Processing event
+changes Runtime Attempt state
+```
+
+```text
+no normal Text Processing event
+contains source text
+```
+
+```text
+optional event loss
+does not change semantic Candidate
+```
+
+```text
+duplicate event delivery
+does not create duplicate Candidate
+```
+
+```text
+Text Processing events
+never grant publication authority
+```
+
+---
+
+# 100. Recommended MVP Events
+
+For MVP, keep the event surface small.
+
+Recommended:
+
+```text
+text_processing.module_available
+
+text_processing.module_degraded
+
+text_processing.module_unavailable
+
+text_processing.candidate_validated
+
+text_processing.candidate_submitted
+```
+
+Optional diagnostics:
+
+```text
+text_processing.document_built
+
+text_processing.traceability_validated
+
+text_processing.operation_error_observed
+```
+
+Everything else can initially remain Telemetry.
+
+---
+
+# 101. Events Deferred Beyond MVP
+
+Do not require initially:
+
+```text
+plan_created
+
+input_adapted
+
+normalization_completed
+
+reconstruction_completed
+
+grouping_completed
+
+classification_completed
+
+cancellation_observed
+
+deadline_observed
+
+configuration_observed
+```
+
+Add only when a real consumer or operational requirement exists.
+
+---
+
+# 102. Removed Legacy Concepts
+
+The following concepts from the previous event model are intentionally removed:
+
+```text
+TextProcessingRequest lifecycle
+
+request_id as Text Processing lifecycle identity
+
+processing_id as terminal processing identity
+
+text_processing.requested
+
+text_processing.started
+
+text_processing.completed
+
+text_processing.failed
+
+text_processing.cancelled
+
+text_processing.cancellation_requested
+
+terminal-event ownership
+
+module-owned terminal race
+
+module-owned supersession
+
+module-owned retry scheduling
+
+result registry ownership
+
+result publication ownership
+
+translation trigger ownership
+
+order_resolved as canonical Reading Order
+```
+
+---
+
+# 103. Ownership Summary
+
+```text
+Runtime owns:
+
+WorkItem lifecycle
+
+Attempt lifecycle
+
+Authority
+
+Cancellation
+
+Deadline
+
+Supersession
+
+Retry
+
+Terminal outcome
+```
+
+```text
+Recognition owns:
+
+Recognition Artifact
+
+OCRDocument
+
+Canonical OCR Reading Order
+```
+
+```text
+Text Processing owns:
+
+Processing Plan
+
+Source reconstruction
+
+SourceDocument construction
+
+Candidate validation
+
+Candidate submission
+```
+
+```text
+Artifact Store owns:
+
+Accepted Artifact publication
+
+Artifact identity after acceptance
+
+Artifact lifecycle
+```
+
+```text
+Translation owns:
+
+Translation Plan
+
+Translation Units
+
+Translation Context
+
+Translated Content
+```
+
+---
+
+# 104. Canonical Event Flow
+
+```text
+Runtime Attempt
+      │
+      ▼
+Text Processing
+      │
+      ├── [optional observations]
+      │
+      ▼
+Build SourceDocument
+      │
+      ▼
+Validate Traceability
+      │
+      ▼
+Build Candidate
+      │
+      ▼
+Validate Candidate
+      │
+      ├── candidate_validated
+      │
+      ▼
+Submit Candidate to Runtime
+      │
+      └── candidate_submitted
+              │
+              ▼
+            Runtime
+              │
+      ┌───────┴────────┐
+      │                │
+   ACCEPT           REJECT
+      │
+      ▼
+Artifact Store
+      │
+      ▼
+Published SourceDocument Artifact
+```
+
+---
+
+# 105. Core Invariants
+
+1. Text Processing events never grant Runtime authority.
+2. Text Processing events never publish Artifacts.
+3. Text Processing events never define Attempt terminal state.
+4. Candidate submission is not Candidate acceptance.
+5. Candidate validation is not Artifact publication.
+6. Cancellation belongs to Runtime.
+7. Supersession belongs to Runtime.
+8. Retry belongs to Runtime.
+9. Canonical OCR Reading Order belongs upstream.
+10. Translation does not start from an unaccepted Candidate.
+11. Normal events contain no source text.
+12. Optional events are not required for correctness.
+13. Duplicate events are safe.
+14. Event loss must not mutate semantic processing output.
+15. Event history is not Text Processing state persistence.
+
+---
+
+# 106. Related Documents
+
+```text
+02-modules/text-processing/README.md
+02-modules/text-processing/MODULE.md
+02-modules/text-processing/CONTRACT.md
+02-modules/text-processing/STATES.md
+02-modules/text-processing/ERRORS.md
+
+02-modules/recognition/CONTRACT.md
+02-modules/recognition/STATES.md
+02-modules/recognition/EVENTS.md
+
+01-architecture/ocr/READING_ORDER.md
+01-architecture/ocr/POSTPROCESS.md
+01-architecture/ocr/QUALITY.md
+
+01-architecture/runtime/CANCELLATION.md
+01-architecture/runtime/RETRY_POLICY.md
+01-architecture/runtime/RESOURCE_LIFECYCLE.md
+
+03-infrastructure/event-bus/
+03-infrastructure/artifact-store/
+03-infrastructure/resource-manager/
+
+02-modules/translation/
+```
+
+---
+
+# 107. Summary
+
+Text Processing event model is intentionally narrow:
+
+```text
+Module Availability
+
+Attempt-Local Observations
+
+Candidate Validation
+
+Candidate Submission
+```
+
+It does not create:
+
+```text
+TextProcessingJob lifecycle
+
+Request terminal lifecycle
+
+Cancellation lifecycle
+
+Retry lifecycle
+
+Supersession lifecycle
+
+Publication lifecycle
+```
+
+Canonical boundary:
+
+```text
+Recognition Artifact
+        ↓
+Text Processing
+        ↓
 SourceDocument
+        ↓
+Candidate
+        ↓
+Runtime
+        ↓
+Artifact Store
 ```
 
----
-
-## 106. Reference Validity
-
-At publication time, the reference must be:
-
-* stored;
-* accessible within its scope;
-* unexpired;
-* integrity-checkable;
-* linked to the same processing ID;
-* linked to the same source identity.
-
----
-
-## 107. Reference Expiry
-
-If a completion event is consumed after reference expiry, the consumer should not treat it as a successful usable result.
-
-Possible recovery:
-
-* request reprocessing;
-* retrieve persistent copy when available;
-* ignore as stale;
-* report result unavailable.
-
----
-
-## 108. Reference Revocation
-
-A reference may be revoked when:
-
-* session ends;
-* source is closed;
-* privacy cleanup runs;
-* result is superseded and policy removes old results;
-* application shuts down;
-* integrity validation fails.
-
-Revocation should not rewrite historical event records.
-
----
-
-## 109. Result Integrity
-
-The completion payload may include:
+Core rule:
 
 ```text
-content_hash
+Text Processing may announce
+what it observed and what it produced.
+
+Runtime decides
+whether that work still matters.
+
+Artifact Store decides
+what becomes a published Artifact.
+
+Translation operates
+only after the appropriate accepted Artifact exists.
 ```
-
-The consumer should verify it when transport and registry support integrity checking.
-
----
-
-# Event Privacy
-
-## 110. Privacy Classification
-
-Recommended classifications:
-
-```text
-PublicMetadata
-InternalMetadata
-SensitiveMetadata
-SensitiveContent
-```
-
-Text Processing lifecycle events should normally use:
-
-```text
-SensitiveMetadata
-```
-
-because source and session identifiers may still be sensitive.
-
----
-
-## 111. Source Text Prohibition
-
-Normal events must use:
-
-```text
-contains_source_text = false
-```
-
-Raw or normalized text must not appear in:
-
-* completion summaries;
-* warning messages;
-* error messages;
-* progress

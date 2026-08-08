@@ -1,62 +1,60 @@
 # Recognition Module Contract
 
-> Project: CRAI  
-> Module: Recognition  
-> Path: `modules/recognition/CONTRACT.md`  
-> Version: 1.0  
-> Status: Architecture Draft
+> **Project:** CRAI
+> **Module:** Recognition
+> **Path:** `02-modules/recognition/CONTRACT.md`
+> **Version:** 1.1.0
+> **Status:** Architecture Draft
+> **Architecture Reference:** `01-architecture/ocr/`
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
 Tài liệu này định nghĩa public contract của Recognition Module.
 
 Nó đặc tả:
 
-- Runtime-facing Attempt input;
-- Runtime-facing Attempt output;
-- Candidate Recognition Artifact;
-- published Recognition Artifact;
-- domain identifiers;
-- image and coordinate contracts;
-- region and line contracts;
-- reading-order contract;
-- confidence and quality contracts;
-- provider capability contract;
-- provider-adapter contract;
-- warnings;
-- module errors;
-- retry hints;
-- cancellation checkpoints;
-- compatibility metadata;
-- privacy rules;
-- validation rules;
-- producer, consumer và Runtime obligations;
-- contract evolution.
+* Runtime-facing Attempt Input
+* Runtime-facing Attempt Output
+* Recognition Operation
+* Recognition Profile
+* Candidate Recognition Artifact
+* Published Recognition Artifact
+* module warnings
+* module errors
+* retry hints
+* completeness semantics
+* compatibility metadata
+* privacy requirements
+* validation rules
+* producer obligations
+* consumer obligations
+* Runtime obligations
+* contract evolution
 
-Tài liệu này không định nghĩa:
+Tài liệu này **không định nghĩa lại OCR semantic contracts**.
 
-- OCR algorithms;
-- provider SDK integration details;
-- image-processing library;
-- Runtime scheduling policy;
-- Runtime retry decision;
-- Runtime cancellation authority;
-- Artifact Store implementation;
-- persistence technology;
-- UI behavior;
-- source capture;
-- Text Processing behavior;
-- Translation behavior.
+Các semantics sau thuộc `01-architecture/ocr/`:
 
-Contract phải ổn định ngay cả khi internal detector, recognizer, provider hoặc image library thay đổi.
+| Concern                             | Owner               |
+| ----------------------------------- | ------------------- |
+| Geometry / Region                   | `DETECTION.md`      |
+| Character / Word / Line / Paragraph | `RECOGNITION.md`    |
+| Writing Direction                   | `TEXT_DIRECTION.md` |
+| Layout                              | `LAYOUT.md`         |
+| OCR Document                        | `POSTPROCESS.md`    |
+| Quality Report                      | `QUALITY.md`        |
+| Reading Order                       | `READING_ORDER.md`  |
+| Provider Contract / Capability      | `PROVIDERS.md`      |
+
+Recognition Contract chỉ reference các contract đó.
 
 ---
 
-## 2. Contract Boundary
+# 2. Contract Boundary
 
-Recognition nhận image-based Artifact input và tạo structured source-content Candidate Artifact.
+Recognition nhận image-based Artifact input và tạo Candidate Recognition Artifact.
 
 ```text
 RecognitionAttemptInput
@@ -82,67 +80,101 @@ Artifact Store Ownership Transfer
 RecognitionArtifact
 ```
 
-Recognition không expose application-level commands:
+Recognition không expose application-level commands như:
 
 ```text
 RetryRecognition
 CancelRecognition
-GetRecognitionResult
+PublishRecognitionResult
 ```
 
-Các hành vi đó thuộc Runtime, Artifact Store hoặc orchestration.
+Các action đó thuộc Runtime hoặc Artifact Store.
 
 ---
 
-## 3. Contract Principles
+# 3. Contract Principles
 
-### 3.1 Provider Independence
+## 3.1 Provider Independence
 
-Consumers không phụ thuộc provider SDK model.
-
-Mọi provider output phải normalize thành CRAI contract.
-
-### 3.2 Stable Source Mapping
-
-Mọi public geometry phải map về source coordinate space.
-
-### 3.3 Immutable Artifact
-
-Published Recognition Artifact không được mutate.
-
-Corrections hoặc downstream transformations tạo object/Artifact mới.
-
-### 3.4 Explicit Runtime Identity
-
-Attempt input phải chứa explicit Runtime identity.
-
-### 3.5 Explicit Reading Order
-
-Consumer không suy luận reading order chỉ từ array position.
-
-### 3.6 Explicit Uncertainty
-
-Unknown confidence, language, script và uncertain order phải giữ explicit.
-
-### 3.7 Authority Separation
-
-Recognition không quyết định Candidate còn current hay có publication authority.
-
-### 3.8 Candidate Separation
-
-Candidate Artifact không phải published Artifact.
-
-### 3.9 Privacy Preservation
-
-Raw image và full recognized text không xuất hiện trong normal event/log.
-
-### 3.10 Backward Compatibility
-
-Contract evolution phải giữ existing meaning trong cùng major version.
+Public Recognition contract không chứa Provider SDK object.
 
 ---
 
-## 4. Contract Version
+## 3.2 OCR Semantic Reuse
+
+Recognition Contract tham chiếu OCR Architecture contract thay vì định nghĩa lại:
+
+```text
+Region
+Recognition Result
+Direction Result
+Layout Result
+OCR Document
+Quality Report
+Reading Order Result
+```
+
+---
+
+## 3.3 Immutable Artifact
+
+Candidate immutable sau assembly.
+
+Published Recognition Artifact immutable sau publication.
+
+---
+
+## 3.4 Explicit Runtime Identity
+
+Mọi Attempt Input phải mang Runtime identity rõ ràng.
+
+---
+
+## 3.5 Explicit Uncertainty
+
+Unknown:
+
+* confidence
+* language
+* script
+* completeness
+* quality
+
+phải được giữ explicit.
+
+Không tự chuyển unknown thành giá trị mặc định giả tạo.
+
+---
+
+## 3.6 Authority Separation
+
+Recognition không quyết định:
+
+* current Revision
+* accepted Attempt
+* publication authority
+
+---
+
+## 3.7 Candidate Separation
+
+Candidate Artifact khác Published Artifact.
+
+---
+
+## 3.8 Privacy Preservation
+
+Raw image và full recognized content không xuất hiện trong normal event/log.
+
+---
+
+## 3.9 Backward Compatibility
+
+Contract evolution giữ semantic meaning trong cùng major version.
+
+---
+
+# 4. Contract Version
 
 ```text
 RecognitionContractVersion
@@ -154,118 +186,87 @@ RecognitionContractVersion
 Initial:
 
 ```text
-1.0.0
+1.1.0
 ```
 
-Meaning:
+Semantics:
 
-- `Major`: incompatible contract change;
-- `Minor`: backward-compatible field/capability addition;
-- `Patch`: clarification hoặc non-semantic correction.
+* Major = incompatible semantic change
+* Minor = backward-compatible addition
+* Patch = clarification/non-semantic fix
 
-Cross-process contract phải mang version.
+Cross-process form phải mang version.
 
 ---
 
-## 5. Common Identifier Types
+# 5. Shared Types
+
+Recognition Contract sử dụng shared types từ shared/runtime/artifact contracts.
+
+Ví dụ:
 
 ```text
-ApplicationInstanceId = opaque string
-SessionId             = opaque string
-RevisionId            = opaque string
-WorkItemId            = opaque string
-AttemptId             = opaque string
-ArtifactId            = opaque string
-CandidateArtifactId   = opaque string
-ResourceId            = opaque string
-ProviderId            = opaque string
-ProviderRequestId     = opaque string
-ConfigurationSnapshotId = opaque string
-RegionId              = opaque string
-LineId                = opaque string
-TraceId               = opaque string
+SessionId
+RevisionId
+WorkItemId
+AttemptId
+ArtifactId
+CandidateArtifactId
+ConfigurationSnapshotId
+TraceId
 ```
 
-Consumers không suy luận timestamp, provider hoặc ordering từ identifier content.
+Recognition không redefine identifier semantics.
+
+Identifiers là opaque.
+
+Consumer không suy luận:
+
+* timestamp
+* ordering
+* provider identity
+* revision relationship
+
+từ nội dung ID.
 
 ---
 
-## 6. Common Scalar Types
+# 6. Shared Scalar Types
 
-### 6.1 Timestamp
+Recognition dùng shared scalar contracts cho:
 
 ```text
-Timestamp = ISO-8601 UTC datetime
+Timestamp
+Duration
+LanguageCode
+ScriptCode
+Metadata
 ```
 
-### 6.2 Duration
+Recommended standards:
 
 ```text
-DurationMilliseconds = non-negative integer
-```
+Timestamp
+    → ISO-8601 UTC
 
-### 6.3 Language Code
+LanguageCode
+    → BCP-47 compatible
 
-```text
-LanguageCode = BCP-47-compatible string
-```
-
-Examples:
-
-```text
-zh-Hans
-zh-Hant
-zh
-en
-vi
-ja
-ko
-```
-
-### 6.4 Script Code
-
-```text
-ScriptCode = ISO-15924-compatible string
-```
-
-Examples:
-
-```text
-Hans
-Hant
-Latn
-Jpan
-Kore
-```
-
-### 6.5 Metadata
-
-```text
-Metadata = map<string, scalar | scalar[]>
-```
-
-Allowed scalar:
-
-```text
-string
-integer
-decimal
-boolean
-null
+ScriptCode
+    → ISO-15924 compatible
 ```
 
 Metadata không chứa:
 
-- raw image bytes;
-- arbitrary provider objects;
-- executable value;
-- credential;
-- unrestricted nested graphs;
-- full recognized content mặc định.
+* raw image
+* Provider SDK object
+* secret
+* executable data
+* full recognized content mặc định
 
 ---
 
-## 7. Runtime Identity Context
+# 7. Runtime Context
 
 ```text
 RecognitionRuntimeContext
@@ -280,35 +281,20 @@ RecognitionRuntimeContext
 └── CreatedAt
 ```
 
-### Rules
+Rules:
 
-1. `RevisionId`, `WorkItemId`, `AttemptId` bắt buộc.
-2. SessionId có thể absent cho standalone imported image.
-3. Priority không thuộc Recognition contract.
-4. Queue class không thuộc Recognition contract.
-5. Retry count không thuộc Recognition contract.
-6. Timeout/deadline được tham chiếu qua ExecutionContextRef.
-7. Runtime identity chỉ dùng traceability, không cấp authority cho module.
-
----
-
-## 8. Trace Context
-
-```text
-TraceContext
-├── TraceId
-├── ParentSpanId?
-├── CorrelationId?
-└── Baggage?
-```
-
-Baggage không chứa source text, image content hoặc secret.
+1. `RevisionId`, `WorkItemId`, `AttemptId` required.
+2. `SessionId` optional cho standalone imports.
+3. Retry count không thuộc contract.
+4. Priority không thuộc contract.
+5. Queue class không thuộc contract.
+6. Runtime identity không cấp authority cho Recognition.
 
 ---
 
-## 9. Artifact Reference Contract
+# 8. Artifact Reference
 
-Recognition nhận Artifact reference thay vì embedded image payload.
+Recognition nhận Artifact reference, không nhận embedded raw image.
 
 ```text
 ArtifactRef
@@ -317,28 +303,26 @@ ArtifactRef
 ├── ContractVersion
 ├── ResourceId
 ├── ContentIdentity
-├── CoordinateSpace?
 └── Metadata?
 ```
 
-Input expected type:
+Required input type:
 
 ```text
 IMAGE_ARTIFACT
 ```
 
-### Artifact Reference Rules
+Rules:
 
-1. Input Artifact phải immutable.
-2. Resource phải tồn tại trong Attempt lifetime.
-3. Recognition truy cập qua Resource Lease.
-4. Recognition không giữ reference sau lifecycle cho phép.
-5. Recognition không dispose shared input Artifact.
-6. Input content gửi remote chỉ khi privacy policy cho phép.
+1. Input immutable.
+2. Resource valid trong Attempt lifetime.
+3. Shared access thông qua Resource Lease.
+4. Recognition không dispose shared input.
+5. Remote access phải tuân Privacy Context.
 
 ---
 
-## 10. Content Identity
+# 9. Content Identity
 
 ```text
 ContentIdentity
@@ -348,116 +332,16 @@ ContentIdentity
 └── SourceScope?
 ```
 
-Rules:
+Content Identity:
 
-- không đồng nghĩa ArtifactId;
-- không đồng nghĩa RevisionId;
-- không export raw preimage;
-- dùng cho semantic compatibility và reuse query;
-- algorithm/version phải explicit.
-
----
-
-## 11. Coordinate Space Contract
-
-```text
-CoordinateSpace
-├── SpaceId
-├── Width
-├── Height
-├── Origin
-├── Unit
-└── RotationDegrees
-```
-
-### Coordinate Origin
-
-```text
-TOP_LEFT
-TOP_RIGHT
-BOTTOM_LEFT
-BOTTOM_RIGHT
-```
-
-MVP dùng:
-
-```text
-TOP_LEFT
-```
-
-### Coordinate Unit
-
-```text
-PIXEL
-NORMALIZED
-```
-
-Normalized:
-
-```text
-x, y, width, height ∈ [0, 1]
-```
-
-Recognition public output ưu tiên pixel coordinates trong source space.
+* không đồng nghĩa ArtifactId
+* không đồng nghĩa RevisionId
+* dùng cho semantic compatibility
+* không expose raw preimage
 
 ---
 
-## 12. Geometry Contract
-
-### Rectangle
-
-```text
-RectangleGeometry
-├── GeometryType = RECTANGLE
-├── X
-├── Y
-├── Width
-└── Height
-```
-
-Validation:
-
-```text
-Width > 0
-Height > 0
-X >= 0
-Y >= 0
-X + Width <= CoordinateSpace.Width
-Y + Height <= CoordinateSpace.Height
-```
-
-Floating-point tolerance nhỏ được cho phép khi transform.
-
-### Polygon
-
-```text
-PolygonGeometry
-├── GeometryType = POLYGON
-├── Points[]
-└── BoundingRectangle
-```
-
-```text
-Point
-├── X
-└── Y
-```
-
-Polygon optional cho MVP.
-
-### Geometry Union
-
-```text
-Geometry =
-    RectangleGeometry
-    | PolygonGeometry
-```
-
-Consumer phải đọc `GeometryType`.
-
----
-
-## 13. Recognition Operation
+# 10. Recognition Operation
 
 ```text
 RecognitionOperation
@@ -466,21 +350,27 @@ RecognitionOperation
 └── EVALUATE_IMAGE
 ```
 
-### RECOGNIZE_IMAGE
+## RECOGNIZE_IMAGE
 
-Process toàn image.
-
-### RECOGNIZE_REGION
-
-Process một source-space region.
-
-### EVALUATE_IMAGE
-
-Diagnostic/benchmark execution; không mặc định tạo user-facing publication.
+Process toàn image artifact.
 
 ---
 
-## 14. Recognition Profile
+## RECOGNIZE_REGION
+
+Process một selected source-space region.
+
+---
+
+## EVALUATE_IMAGE
+
+Diagnostic/evaluation execution.
+
+Không mặc định tạo published user-facing artifact.
+
+---
+
+# 11. Recognition Profile
 
 ```text
 RecognitionProfile
@@ -491,42 +381,13 @@ RecognitionProfile
 └── STRUCTURED_PAGE
 ```
 
-Profile ảnh hưởng Recognition Plan nhưng không thay output contract.
+Profile ảnh hưởng Recognition Plan.
+
+Profile không thay đổi public Artifact contract.
 
 ---
 
-## 15. Text Orientation
-
-```text
-TextOrientation
-├── UNKNOWN
-├── HORIZONTAL
-├── VERTICAL
-├── ROTATED_90_CLOCKWISE
-├── ROTATED_90_COUNTER_CLOCKWISE
-├── UPSIDE_DOWN
-└── MIXED
-```
-
----
-
-## 16. Reading Direction
-
-```text
-ReadingDirection
-├── UNKNOWN
-├── LEFT_TO_RIGHT
-├── RIGHT_TO_LEFT
-├── TOP_TO_BOTTOM
-├── BOTTOM_TO_TOP
-├── VERTICAL_COLUMNS_RIGHT_TO_LEFT
-├── VERTICAL_COLUMNS_LEFT_TO_RIGHT
-└── MIXED
-```
-
----
-
-## 17. Recognition Options
+# 12. Recognition Options
 
 ```text
 RecognitionOptions
@@ -534,21 +395,24 @@ RecognitionOptions
 ├── LanguageHints[]
 ├── ScriptHints[]
 ├── OrientationHint?
-├── ReadingDirectionHint?
-├── ReturnLineGeometry
-├── ReturnProviderAlternatives
+├── RegionSelection?
 ├── AllowPartialCandidate
 ├── DiagnosticLevel
-└── QualityPolicyRef?
+└── OCRProfileRef?
 ```
 
-Provider selection policy không embedded toàn bộ trong Recognition options.
+Các OCR-specific semantics như:
 
-Recognition chỉ định nghĩa capability requirements.
+* direction model
+* geometry type
+* reading-order strategy
+* quality thresholds
+
+được reference qua OCR Architecture/Profile thay vì redefine ở đây.
 
 ---
 
-## 18. Diagnostic Level
+# 13. Diagnostic Level
 
 ```text
 DiagnosticLevel
@@ -558,45 +422,42 @@ DiagnosticLevel
 └── PROTECTED_CONTENT
 ```
 
-`PROTECTED_CONTENT` cần explicit privacy authorization.
+`PROTECTED_CONTENT` yêu cầu explicit privacy authorization.
 
 ---
 
-## 19. Recognition Capability Requirements
+# 14. Capability Requirements
+
+Recognition khai báo **requirements**, không define provider capability model.
 
 ```text
 RecognitionCapabilityRequirements
-├── SupportedLanguages[]
-├── SupportedScripts[]
-├── SupportedOrientations[]
-├── SupportedProfiles[]
-├── RegionDetectionRequired
-├── TextRecognitionRequired
-├── CombinedRecognitionAllowed
-├── ConfidenceRequired
-├── LineGeometryRequired
-├── CharacterGeometryRequired
-├── PartialOutputAllowed
-├── CancellationPreference
+├── RequiredCapabilities[]
+├── RequiredLanguages[]
+├── RequiredScripts[]
 ├── LocalOnly
 ├── RemoteAllowed
-├── ExecutionClasses[]
-├── MaximumImageSize?
+├── PartialOutputAllowed
 └── HardwarePreference?
 ```
 
-Provider Selection Policy chọn provider dựa trên contract này.
+Capability semantics thuộc:
+
+```text
+01-architecture/ocr/PROVIDERS.md
+```
+
+Provider Selection Policy consume requirements này.
 
 ---
 
-## 20. Recognition Attempt Input
+# 15. Recognition Attempt Input
 
 ```text
 RecognitionAttemptInput
 ├── RuntimeContext
 ├── InputArtifactRef
 ├── Operation
-├── SourceCoordinateSpace
 ├── RegionSelection?
 ├── Options
 ├── CapabilityRequirements
@@ -606,29 +467,40 @@ RecognitionAttemptInput
 └── DiagnosticsContextRef?
 ```
 
-### Preconditions
+---
 
-1. Input Artifact resolvable.
-2. Artifact type supported.
-3. Coordinate space valid.
-4. RegionSelection nằm trong source space.
-5. Recognition Profile supported.
-6. Capability Requirements internally consistent.
-7. Contract major version supported.
-8. Privacy context permits selected execution path.
-9. Runtime owns valid Attempt identity.
-10. Recognition không tự validate current Revision authority.
+# 16. Attempt Input Preconditions
+
+Attempt Input hợp lệ khi:
+
+1. Runtime Context hợp lệ.
+2. InputArtifactRef resolvable.
+3. Artifact type được hỗ trợ.
+4. Operation được hỗ trợ.
+5. RegionSelection hợp lệ nếu có.
+6. Recognition Profile hợp lệ.
+7. Capability Requirements internally consistent.
+8. Privacy Context cho phép execution path.
+9. Contract major version được hỗ trợ.
+
+Recognition không tự kiểm tra:
+
+```text
+is this Revision still current?
+```
+
+Runtime Control sở hữu authority validation.
 
 ---
 
-## 21. Region Selection
+# 17. Region Selection
 
 ```text
 RegionSelection
-├── Geometry
-├── CoordinateSpaceId
+├── GeometryRef
+├── CoordinateSpaceRef
 ├── SelectionSource
-└── SelectionMetadata?
+└── Metadata?
 ```
 
 ```text
@@ -639,16 +511,13 @@ SelectionSource
 └── DIAGNOSTIC
 ```
 
-Rules:
+Geometry semantics thuộc OCR Detection/shared geometry contracts.
 
-- region area > 0;
-- must fit source space;
-- public output geometry vẫn map về source space;
-- internal subdivision không làm mất mapping.
+Recognition không redefine Rectangle/Polygon.
 
 ---
 
-## 22. Execution Context Reference
+# 18. Execution Context Reference
 
 ```text
 ExecutionContextRef
@@ -659,21 +528,13 @@ ExecutionContextRef
 └── RuntimePolicyRef?
 ```
 
-```text
-ExecutionClass
-├── CPU
-├── GPU
-├── REMOTE_IO
-├── NATIVE_SERIAL
-├── PROCESS
-└── HYBRID
-```
+Recognition chỉ consume context.
 
-Recognition đọc context; không thay đổi Runtime policy.
+Nó không thay đổi Runtime policy.
 
 ---
 
-## 23. Cancellation Context Reference
+# 19. Cancellation Context
 
 ```text
 CancellationContextRef
@@ -684,18 +545,18 @@ CancellationContextRef
 └── CheckpointPolicyRef?
 ```
 
-Recognition chỉ cooperative check.
+Recognition cooperative-check cancellation.
 
-Nó không:
+Recognition không:
 
-- create global cancellation registry;
-- revoke authority;
-- cancel WorkItem lineage;
-- decide terminal outcome.
+* revoke authority
+* cancel WorkItem lineage
+* create global cancellation registry
+* decide terminal outcome
 
 ---
 
-## 24. Privacy Context
+# 20. Privacy Context
 
 ```text
 PrivacyContextRef
@@ -716,7 +577,7 @@ PrivacyMode
 
 ---
 
-## 25. Recognition Attempt Output
+# 21. Recognition Attempt Output
 
 ```text
 RecognitionAttemptOutput
@@ -725,11 +586,11 @@ RecognitionAttemptOutput
 ├── ModuleError?
 ├── RetryHint?
 ├── DiagnosticsRef?
-├── QualitySummary?
+├── QualitySummaryRef?
 └── CompletionMetadata
 ```
 
-Exactly one primary execution disposition:
+Primary execution disposition:
 
 ```text
 CandidateArtifact present
@@ -739,11 +600,11 @@ or
 Cancellation observed
 ```
 
-Runtime quyết định accepted terminal outcome.
+Runtime mới quyết định accepted terminal outcome.
 
 ---
 
-## 26. Completion Metadata
+# 22. Completion Metadata
 
 ```text
 RecognitionCompletionMetadata
@@ -751,15 +612,17 @@ RecognitionCompletionMetadata
 ├── CompletedAt
 ├── OperationPhase
 ├── ProviderRequestIds[]
-├── ExecutionMetrics
+├── ExecutionMetricsRef?
 └── CancellationObserved
 ```
 
-Metadata này thuộc Attempt output, không thuộc published Artifact.
+Completion metadata thuộc Attempt.
+
+Không được copy vào Published Artifact nếu không có semantic reason.
 
 ---
 
-## 27. Candidate Recognition Artifact
+# 23. Candidate Recognition Artifact
 
 ```text
 CandidateRecognitionArtifact
@@ -769,38 +632,35 @@ CandidateRecognitionArtifact
 ├── ContractVersion
 ├── InputArtifactRef
 ├── ContentIdentity
-├── SourceCoordinateSpace
-├── ProcessedImageMetadata
-├── CoordinateTransform
+├── OCRDocumentRef
+├── ReadingOrderResultRef?
+├── QualityReportRef?
 ├── ProviderProvenance
 ├── LanguageHypotheses[]
 ├── ScriptHypotheses[]
-├── Regions[]
-├── ReadingOrder[]
 ├── Warnings[]
-├── QualityMetadata
 ├── Completeness
 ├── CompatibilityMetadata
 ├── TraceabilityMetadata
 └── IntegrityMetadata
 ```
 
-### Candidate Rules
+Candidate Rules:
 
-1. Candidate không authoritative.
-2. Candidate không published.
-3. Candidate không cache eligible mặc định.
-4. Candidate private cho producer/Runtime validation path.
-5. Candidate phải immutable sau assembly.
-6. Candidate rejected phải cleanup.
-7. Candidate không chứa WorkItem status.
-8. Candidate không chứa retry count.
-9. Candidate không chứa queue timing.
-10. Candidate không chứa credential.
+1. non-authoritative
+2. non-published
+3. immutable after assembly
+4. private to Runtime validation path
+5. not cache eligible by default
+6. cleanup required after rejection
+7. no WorkItem status
+8. no retry count
+9. no queue timing
+10. no credentials
 
 ---
 
-## 28. Published Recognition Artifact
+# 24. Published Recognition Artifact
 
 ```text
 RecognitionArtifact
@@ -809,113 +669,58 @@ RecognitionArtifact
 ├── ContractVersion
 ├── InputArtifactRef
 ├── ContentIdentity
-├── SourceCoordinateSpace
-├── ProcessedImageMetadata
-├── CoordinateTransform
+├── OCRDocumentRef
+├── ReadingOrderResultRef?
+├── QualityReportRef?
 ├── ProviderProvenance
 ├── LanguageHypotheses[]
 ├── ScriptHypotheses[]
-├── Regions[]
-├── ReadingOrder[]
 ├── Warnings[]
-├── QualityMetadata
 ├── Completeness
 ├── CompatibilityMetadata
 ├── TraceabilityMetadata
 └── IntegrityMetadata
 ```
 
-Published Recognition Artifact:
+Published Artifact:
 
-- immutable;
-- accepted bởi Runtime;
-- owned bởi Artifact Store;
-- provider-independent;
-- source-traceable;
-- reusable khi compatibility và Cache Policy cho phép.
-
----
-
-## 29. Artifact Type
-
-```text
-ArtifactType = RECOGNITION_ARTIFACT
-```
-
-Future subtype không được thay contract core nếu chỉ là metadata/profile difference.
+* immutable
+* Runtime-accepted
+* Artifact Store-owned
+* provider-independent
+* source-traceable
+* reusable only when compatibility and Cache Policy allow
 
 ---
 
-## 30. Processed Image Metadata
+# 25. Recognition Artifact vs OCR Document
+
+Recognition Artifact là **module-level publication object**.
+
+OCR Document là **OCR semantic artifact**.
 
 ```text
-ProcessedImageMetadata
-├── SourceWidth
-├── SourceHeight
-├── ProcessedWidth
-├── ProcessedHeight
-├── PreparationProfileId?
-├── Operations[]
-├── SourceChecksumRef?
-└── ProcessedChecksumRef?
+RecognitionArtifact
+    ↓ references
+OCRDocument
 ```
 
-### Preparation Operation Summary
+Recognition Artifact không redefine:
 
-```text
-PreparationOperationSummary
-├── Operation
-├── ChangedGeometry
-└── ParametersSummary?
-```
+* Region
+* Character
+* Word
+* Line
+* Paragraph
+* Direction
+* Layout
+* Reading Graph
 
-Operations:
-
-```text
-CROP
-RESIZE
-UPSCALE
-GRAYSCALE
-CONTRAST
-BRIGHTNESS
-THRESHOLD
-DENOISE
-SHARPEN
-DESKEW
-ROTATE
-INVERT
-PAD
-COLOR_CHANNEL_SELECTION
-```
-
-Sensitive provider config không xuất hiện trong summary.
+Những semantics đó thuộc OCR Architecture.
 
 ---
 
-## 31. Coordinate Transform
-
-```text
-CoordinateTransform
-├── SourceSpaceId
-├── ProcessedSpaceId
-├── CropOffsetX
-├── CropOffsetY
-├── ScaleX
-├── ScaleY
-├── RotationDegrees
-├── PaddingLeft
-├── PaddingTop
-├── PaddingRight
-├── PaddingBottom
-├── TransformChain[]
-└── InverseTransformAvailable
-```
-
-Consumers thường không cần tự transform vì public geometry đã ở source space.
-
----
-
-## 32. Provider Provenance
+# 26. Provider Provenance
 
 ```text
 ProviderProvenance
@@ -926,359 +731,77 @@ ProviderProvenance
 ├── ExecutionClass
 ├── ModelId?
 ├── ModelVersion?
-├── FallbackIndex
-├── DetectionProvider?
-├── RecognitionProvider?
 └── SanitizedMetadata?
 ```
 
-```text
-ExecutionLocation
-├── LOCAL_PROCESS
-├── LOCAL_SIDECAR
-├── LOCAL_SERVICE
-└── REMOTE_SERVICE
-```
+No:
 
-Credential, endpoint secret và SDK internals không được expose.
+* credentials
+* secret endpoint
+* SDK internals
+
+Provider provenance dùng cho:
+
+* traceability
+* compatibility
+* diagnostics
+* evaluation
+
+Không dùng làm core semantic dependency.
 
 ---
 
-## 33. Language Hypothesis
+# 27. Language Hypotheses
 
 ```text
 LanguageHypothesis
 ├── LanguageCode
-├── Confidence
+├── ConfidenceRef?
 ├── Source
-└── RegionIds[]
+└── ScopeRefs[]
 ```
 
-## 34. Script Hypothesis
+Request hint không được biểu diễn như detected fact.
+
+---
+
+# 28. Script Hypotheses
 
 ```text
 ScriptHypothesis
 ├── ScriptCode
-├── Confidence
+├── ConfidenceRef?
 ├── Source
-└── RegionIds[]
-```
-
-```text
-HypothesisSource
-├── REQUEST_HINT
-├── PROVIDER_DETECTION
-├── SCRIPT_CLASSIFIER
-├── RECOGNITION_OUTPUT
-└── COMBINED_INFERENCE
-```
-
-Request hint không được represent như detected fact.
-
----
-
-## 35. Recognized Region Contract
-
-```text
-RecognizedRegion
-├── RegionId
-├── Geometry
-├── RawText
-├── SurfaceText
-├── Lines[]
-├── DetectionConfidence
-├── RecognitionConfidence
-├── Orientation
-├── ReadingDirection
-├── LanguageHypothesisRef?
-├── ScriptHypothesisRef?
-├── RegionType
-├── GeometrySource
-├── Alternatives[]
-├── Warnings[]
-└── ProviderMetadata?
-```
-
-### Region Type
-
-```text
-UNKNOWN
-TEXT_BLOCK
-TEXT_LINE
-VERTICAL_COLUMN
-SPEECH_BUBBLE_TEXT
-CAPTION
-PAGE_TITLE
-INTERFACE_TEXT
-SOUND_EFFECT_CANDIDATE
-DECORATIVE_TEXT
-```
-
-Region type là Recognition hint, không phải semantic truth.
-
----
-
-## 36. Geometry Source
-
-```text
-GeometrySource
-├── PROVIDER_DETECTED
-├── DETECTOR_DETECTED
-├── REQUEST_REGION
-├── DERIVED_FROM_LINES
-├── INFERRED
-└── USER_SELECTED
+└── ScopeRefs[]
 ```
 
 ---
 
-## 37. Surface Text Rules
+# 29. OCR Semantic References
 
-`RawText` giữ normalized provider output gần nhất có thể.
+Recognition Contract **không embed duplicate OCR structures**.
 
-`SurfaceText` cho phép deterministic non-semantic cleanup.
+Candidate/Artifact có thể reference:
 
-Allowed:
+```text
+OCRDocumentRef
+ReadingOrderResultRef
+QualityReportRef
+```
 
-- normalize line separator;
-- remove null/control characters;
-- trim outer whitespace;
-- normalize invalid Unicode sequence;
-- remove documented provider formatting artifact.
+Nếu implementation cần in-process expanded object:
 
-Forbidden:
+```text
+OCRDocument
+ReadingOrderResult
+QualityReport
+```
 
-- contextual character correction;
-- name correction;
-- punctuation interpretation;
-- sentence reconstruction;
-- translation;
-- glossary substitution;
-- inferred missing-word insertion.
+phải tuân authoritative OCR Architecture contract.
 
 ---
 
-## 38. Recognized Line Contract
-
-```text
-RecognizedLine
-├── LineId
-├── RegionId
-├── Geometry
-├── RawText
-├── SurfaceText
-├── Confidence
-├── Orientation
-├── RegionOrderIndex?
-├── GeometrySource
-└── ProviderMetadata?
-```
-
-Rules:
-
-1. LineId unique trong Artifact.
-2. RegionId reference existing Region.
-3. Geometry intersect/inside parent region.
-4. Inferred geometry marked `INFERRED`.
-5. Missing line output represented by empty array.
-6. Consumers không assume provider luôn có line geometry.
-
----
-
-## 39. Recognition Alternative
-
-```text
-RecognitionAlternative
-├── Text
-├── Confidence
-├── Rank
-├── Source
-└── ProviderMetadata?
-```
-
-```text
-AlternativeSource
-├── PROVIDER_CANDIDATE
-├── ALTERNATIVE_PREPARATION
-├── SECONDARY_PROVIDER
-└── DIAGNOSTIC_COMPARISON
-```
-
-Alternatives optional và thường omitted.
-
----
-
-## 40. Confidence Contract
-
-```text
-Confidence
-├── Level
-├── NormalizedValue?
-├── RawValue?
-├── RawScale?
-├── Source
-└── NormalizationMethod?
-```
-
-### Confidence Level
-
-```text
-UNKNOWN
-LOW
-MEDIUM
-HIGH
-```
-
-### Raw Scale
-
-```text
-ZERO_TO_ONE
-ZERO_TO_HUNDRED
-LOG_PROBABILITY
-PROVIDER_SPECIFIC
-UNKNOWN
-```
-
-### Confidence Source
-
-```text
-PROVIDER
-DETECTOR
-RECOGNIZER
-HEURISTIC
-AGGREGATED
-UNAVAILABLE
-```
-
-Rules:
-
-1. NormalizedValue ∈ [0,1].
-2. RawValue chỉ interpret cùng RawScale.
-3. Missing confidence = UNKNOWN.
-4. Missing confidence không convert thành zero.
-5. Aggregated confidence ghi Source=AGGREGATED.
-6. Threshold có thể provider-specific.
-7. Consumer ưu tiên Level.
-8. Confidence không tự discard text.
-
----
-
-## 41. Reading Order Contract
-
-```text
-ReadingOrderEntry
-├── OrderIndex
-├── RegionId
-├── OrderSource
-├── Confidence
-├── GroupId?
-├── ParentGroupId?
-├── ManuallyOverridden
-└── RuleId?
-```
-
-```text
-ReadingOrderSource
-├── PROVIDER
-├── SPATIAL_HEURISTIC
-├── ORIENTATION_HEURISTIC
-├── COMBINED_HEURISTIC
-├── REQUEST_HINT
-├── USER_OVERRIDE
-└── UNKNOWN
-```
-
-Rules:
-
-1. OrderIndex bắt đầu từ 0.
-2. OrderIndex unique.
-3. Readable region nên có one entry.
-4. Decorative region có thể omitted.
-5. RegionId phải tồn tại.
-6. Consumer dùng explicit OrderIndex.
-7. Mixed layout có thể dùng groups.
-8. Uncertainty qua Confidence hoặc Warning.
-9. User correction không mutate original Artifact.
-
----
-
-## 42. Warning Contract
-
-```text
-RecognitionWarning
-├── WarningCode
-├── OperationPhase
-├── Severity
-├── MessageKey
-├── RegionId?
-├── LineId?
-├── ProviderId?
-└── Metadata?
-```
-
-### Severity
-
-```text
-INFORMATION
-DEGRADED
-ATTENTION_REQUIRED
-```
-
-Warning không có fatal severity.
-
-### Warning Codes
-
-```text
-NO_READABLE_TEXT_DETECTED
-LOW_DETECTION_CONFIDENCE
-LOW_RECOGNITION_CONFIDENCE
-READING_ORDER_UNCERTAIN
-UNSUPPORTED_LANGUAGE_FALLBACK
-UNSUPPORTED_SCRIPT_FALLBACK
-UNSUPPORTED_ORIENTATION_FALLBACK
-PROVIDER_CONFIDENCE_UNAVAILABLE
-LINE_GEOMETRY_UNAVAILABLE
-REGION_GEOMETRY_INFERRED
-OVERLAPPING_REGIONS_SUPPRESSED
-DUPLICATE_REGION_SUPPRESSED
-PARTIAL_RECOGNITION
-PREPARATION_FALLBACK_USED
-IMAGE_UPSCALED
-IMAGE_DOWNSCALED
-IMAGE_ROTATED
-REMOTE_PROVIDER_USED
-FALLBACK_PROVIDER_USED
-PROVIDER_ALTERNATIVES_UNAVAILABLE
-MIXED_ORIENTATION_DETECTED
-MIXED_LANGUAGE_DETECTED
-OUTPUT_TRUNCATED
-DIAGNOSTIC_DATA_LIMITED
-```
-
----
-
-## 43. Recognition Operation Phase
-
-```text
-RecognitionOperationPhase
-├── VALIDATING
-├── PLANNING
-├── ACQUIRING_INPUT
-├── PREPARING
-├── DETECTING
-├── RECOGNIZING
-├── NORMALIZING
-├── MAPPING_COORDINATES
-├── ORDERING
-├── ASSEMBLING_CANDIDATE
-└── FINALIZING
-```
-
-Đây là diagnostic phase, không phải Runtime Attempt state.
-
----
-
-## 44. Completeness Contract
+# 30. Completeness
 
 ```text
 RecognitionCompleteness
@@ -1288,88 +811,97 @@ RecognitionCompleteness
 └── UNKNOWN
 ```
 
-### Empty Valid
+## EMPTY_VALID
+
+Không có readable text nhưng execution thành công.
 
 ```text
 Completeness = EMPTY_VALID
-Regions = []
-ReadingOrder = []
-Warnings includes NO_READABLE_TEXT_DETECTED
+OCRDocument contains no readable text entity
 ```
 
-Không tương đương failure.
-
-### Partial
-
-```text
-Completeness = PARTIAL
-Warnings includes PARTIAL_RECOGNITION
-```
-
-Partial Candidate phải explicit và policy cho phép.
+Không phải failure.
 
 ---
 
-## 45. Quality Contract
+## PARTIAL
 
-```text
-RecognitionQualityMetadata
-├── RegionCoverage
-├── TextCompleteness
-├── GeometryQuality
-├── ReadingOrderQuality
-├── ConfidenceAvailability
-├── LanguageSupportQuality
-├── WarningCount
-└── QualityLevel
-```
+Một phần OCR result usable.
 
-```text
-QualityLevel
-├── UNKNOWN
-├── LOW
-├── MEDIUM
-└── HIGH
-```
+Partial phải explicit.
 
-Quality không khẳng định semantic correctness ngoài Recognition scope.
+Runtime/consumer quyết định có publish/use hay không.
 
 ---
 
-## 46. Execution Metrics Contract
+# 31. Warning Contract
 
 ```text
-RecognitionExecutionMetrics
-├── ValidationDurationMs
-├── PlanningDurationMs
-├── InputLeaseWaitMs?
-├── PreparationDurationMs
-├── DetectionDurationMs
-├── RecognitionDurationMs
-├── NormalizationDurationMs
-├── CoordinateMappingDurationMs
-├── ReadingOrderDurationMs
-├── CandidateAssemblyDurationMs
-├── TotalExecutionDurationMs
-├── TimeToFirstRegionMs?
-├── SourcePixelCount
-├── ProcessedPixelCount
-├── DetectedRegionCount
-├── RecognizedRegionCount
-├── RecognizedLineCount
-├── RecognizedCharacterCount
-├── ProviderRequestCount
-├── ExecutionClass
-└── PeakMemoryBytes?
+RecognitionWarning
+├── WarningCode
+├── OperationPhase
+├── Severity
+├── MessageKey
+├── ScopeRef?
+├── ProviderId?
+└── Metadata?
 ```
 
-Không chứa queue time, retry count hoặc authority/publication latency.
+Severity:
 
-Metrics không expose content.
+```text
+INFORMATION
+DEGRADED
+ATTENTION_REQUIRED
+```
+
+Warning không phải fatal terminal state.
 
 ---
 
-## 47. Recognition Module Error
+# 32. Warning Codes
+
+Module-level warning examples:
+
+```text
+NO_READABLE_TEXT_DETECTED
+PARTIAL_RECOGNITION
+REMOTE_PROVIDER_USED
+FALLBACK_PROVIDER_USED
+PROVIDER_CONFIDENCE_UNAVAILABLE
+OUTPUT_TRUNCATED
+DIAGNOSTIC_DATA_LIMITED
+```
+
+Stage-specific warnings như:
+
+```text
+LOW_DETECTION_CONFIDENCE
+READING_ORDER_UNCERTAIN
+```
+
+có thể được surfaced, nhưng semantic definition thuộc OCR owner tương ứng.
+
+---
+
+# 33. Recognition Operation Phase
+
+Diagnostic-only phases:
+
+```text
+VALIDATING
+PLANNING
+ACQUIRING_INPUT
+EXECUTING_OCR
+ASSEMBLING_CANDIDATE
+FINALIZING
+```
+
+Không phải Runtime Attempt state machine.
+
+---
+
+# 34. Module Error Contract
 
 ```text
 RecognitionModuleError
@@ -1378,62 +910,63 @@ RecognitionModuleError
 ├── OperationPhase
 ├── MessageKey
 ├── RetryHint?
-├── AffectedRegionId?
+├── AffectedScopeRef?
 ├── ProviderErrorRef?
 ├── DiagnosticsRef?
 ├── Metadata?
 └── OccurredAt
 ```
 
-### Error Codes
+---
+
+# 35. Module Error Codes
+
+Module-level errors:
 
 ```text
 RECOGNITION_INPUT_INVALID
 RECOGNITION_ARTIFACT_UNAVAILABLE
-RECOGNITION_IMAGE_INVALID
-RECOGNITION_IMAGE_FORMAT_UNSUPPORTED
-RECOGNITION_COORDINATE_SPACE_INVALID
-RECOGNITION_REGION_INVALID
-RECOGNITION_LANGUAGE_UNSUPPORTED
-RECOGNITION_SCRIPT_UNSUPPORTED
-RECOGNITION_ORIENTATION_UNSUPPORTED
-RECOGNITION_IMAGE_TOO_LARGE
+RECOGNITION_OPERATION_UNSUPPORTED
 RECOGNITION_CAPABILITY_UNAVAILABLE
-RECOGNITION_PREPARATION_FAILED
-RECOGNITION_DETECTION_FAILED
-RECOGNITION_TEXT_FAILED
-RECOGNITION_COORDINATE_MAPPING_FAILED
-RECOGNITION_READING_ORDER_FAILED
+RECOGNITION_OCR_EXECUTION_FAILED
 RECOGNITION_CANDIDATE_INVALID
 RECOGNITION_RESOURCE_EXHAUSTED
 RECOGNITION_INTERNAL_ERROR
 ```
 
-Provider failure codes thuộc normalized ProviderError contract và được reference.
+Detailed OCR-stage errors remain owned by:
+
+* `DETECTION.md`
+* `RECOGNITION.md`
+* `TEXT_DIRECTION.md`
+* `LAYOUT.md`
+* `POSTPROCESS.md`
+* `QUALITY.md`
+* `READING_ORDER.md`
+
+Recognition may wrap/reference them.
 
 ---
 
-## 48. Error Message Rules
+# 36. Error Message Rules
 
-Messages phải:
+Error message:
 
-- safe for logs;
-- không chứa raw OCR text;
-- không chứa sensitive path;
-- không chứa credential;
-- không chứa full provider response;
-- identify operation phase;
-- understandable without provider SDK knowledge.
+* safe for logs
+* no raw OCR text
+* no secret path
+* no credential
+* no full provider response
+* no SDK-dependent vocabulary required for understanding
 
 ---
 
-## 49. Retry Hint Contract
+# 37. Retry Hint
 
 ```text
 RetryHint
 ├── Retryability
 ├── SuggestedStrategies[]
-├── SuggestedDelayMs?
 ├── AlternativeProviderAllowed
 ├── AlternativePreparationAllowed
 └── ReasonCode
@@ -1446,388 +979,213 @@ Retryability
 └── NON_RETRYABLE
 ```
 
+Possible hints:
+
 ```text
-RetryStrategy
-├── SAME_PROVIDER
-├── ALTERNATIVE_PROVIDER
-├── ALTERNATIVE_PREPARATION
-├── REGION_ONLY
-├── RESOURCE_WAIT
-└── NO_RETRY
+SAME_PROVIDER
+ALTERNATIVE_PROVIDER
+ALTERNATIVE_PREPARATION
+REGION_ONLY
+RESOURCE_WAIT
+NO_RETRY
 ```
 
 RetryHint là advisory.
 
-Runtime Retry Policy mới là authority cho retry.
+Runtime Retry Policy là authority.
 
 ---
 
-## 50. Provider Capability Contract
+# 38. Diagnostic Facts
 
-```text
-RecognitionProviderCapabilities
-├── ContractVersion
-├── ProviderIdentity
-├── SupportedMediaTypes[]
-├── SupportedLanguages[]
-├── SupportedScripts[]
-├── SupportedOrientations[]
-├── SupportedProfiles[]
-├── Capabilities[]
-├── MaximumImageWidth?
-├── MaximumImageHeight?
-├── MaximumImagePixels?
-├── RecommendedConcurrency
-├── InitializationCost
-├── PrivacyClassification
-├── ExecutionClasses[]
-└── CapabilityMetadata?
-```
-
-### Capabilities
-
-```text
-REGION_DETECTION
-TEXT_RECOGNITION
-COMBINED_DETECTION_AND_RECOGNITION
-HORIZONTAL_TEXT
-VERTICAL_TEXT
-MIXED_ORIENTATION
-LANGUAGE_DETECTION
-SCRIPT_DETECTION
-READING_ORDER
-REGION_CONFIDENCE
-LINE_CONFIDENCE
-LINE_GEOMETRY
-CHARACTER_GEOMETRY
-RECOGNITION_ALTERNATIVES
-PARTIAL_OUTPUT
-CANCELLATION
-BATCH_RECOGNITION
-LOCAL_EXECUTION
-REMOTE_EXECUTION
-CPU_EXECUTION
-GPU_EXECUTION
-NPU_EXECUTION
-```
-
-### Initialization Cost
-
-```text
-NONE
-LOW
-MEDIUM
-HIGH
-```
-
-### Privacy Classification
-
-```text
-LOCAL_ONLY
-LOCAL_SERVICE
-REMOTE_PRIVATE
-REMOTE_THIRD_PARTY
-UNKNOWN
-```
-
-Provider operational status không thuộc Recognition Artifact.
-
----
-
-## 51. Provider Adapter Input
-
-```text
-ProviderRecognitionRequest
-├── ProviderRequestId
-├── AttemptId
-├── ImageInputRef
-├── ProcessedCoordinateSpace
-├── RecognitionProfile
-├── LanguageHints[]
-├── ScriptHints[]
-├── OrientationHint?
-├── ReadingDirectionHint?
-├── ReturnLineGeometry
-├── ReturnAlternatives
-├── Deadline?
-├── TraceContext
-└── ProviderCancellationContext
-```
-
-Provider adapter không nhận Session object, UI object hoặc Runtime mutable state.
-
----
-
-## 52. Provider Adapter Output
-
-```text
-ProviderRecognitionResponse
-├── ProviderRequestId
-├── ProviderIdentity
-├── Regions[]
-├── ProviderReadingOrder?
-├── DetectedLanguages?
-├── DetectedScripts?
-├── Warnings[]
-├── Metrics?
-└── Metadata?
-```
-
-Provider response type là internal Recognition contract.
-
-Phải normalize trước Candidate assembly.
-
----
-
-## 53. Provider Adapter Obligations
-
-Mỗi adapter phải:
-
-1. validate provider config;
-2. report capability accurately;
-3. convert normalized request;
-4. normalize coordinates;
-5. normalize language/script/orientation;
-6. normalize confidence;
-7. normalize errors;
-8. preserve raw text;
-9. support cancellation khi available;
-10. declare unsupported cancellation;
-11. remove credential from output;
-12. prevent SDK object leakage;
-13. report provider/model version;
-14. release provider-request resources;
-15. map empty result thành empty-valid khi appropriate;
-16. distinguish no-text from provider failure;
-17. enforce privacy before remote transmission;
-18. not perform hidden retry;
-19. not publish Runtime Artifact;
-20. not mutate Runtime state.
-
----
-
-## 54. Capability Description Queries
-
-Recognition có thể expose read-only description contracts:
-
-```text
-DescribeRecognitionProfiles
-DescribeRecognitionContract
-DescribeRecognitionCapabilityRequirements
-```
-
-Provider-specific availability/health queries thuộc Provider Manager.
-
-Published Artifact query thuộc Artifact Store.
-
----
-
-## 55. Recognition Diagnostic Facts
-
-Recognition-specific facts có thể emit:
+Recognition có thể emit:
 
 ```text
 RECOGNITION_PLAN_CREATED
-RECOGNITION_PREPARATION_COMPLETED
-RECOGNITION_REGIONS_DETECTED
-RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
-RECOGNITION_READING_ORDER_RESOLVED
+RECOGNITION_OCR_COMPLETED
 RECOGNITION_WARNING_RECORDED
 RECOGNITION_CANDIDATE_CREATED
 ```
 
-Không emit:
+Không emit Recognition-owned terminal authority events.
 
-```text
-RECOGNITION_COMPLETED
-RECOGNITION_FAILED
-RECOGNITION_CANCELLED
-```
+Terminal Attempt semantics thuộc Runtime.
 
-như terminal authority events; Runtime đã sở hữu Attempt events.
+Diagnostic facts:
 
-Diagnostic fact rules:
-
-- immutable;
-- bounded;
-- content-free;
-- optional;
-- not required for correctness;
-- not used for downstream orchestration.
+* immutable
+* bounded
+* optional
+* content-safe
+* not required for correctness
+* not used for hidden orchestration
 
 ---
 
-## 56. Artifact Compatibility Metadata
+# 39. Compatibility Metadata
 
 ```text
 RecognitionCompatibilityMetadata
 ├── InputContentIdentity
 ├── RecognitionContractVersion
 ├── RecognitionProfileVersion
-├── PreparationProfileVersion
-├── DetectionModelVersion?
-├── RecognitionModelVersion
+├── OCRPipelineVersion
+├── OCRProfileVersion
 ├── ProviderProfileVersion
 ├── LanguageHints[]
 ├── ScriptHints[]
-├── OrientationHint?
-├── ReadingOrderPolicyVersion
-├── CoordinateTransformVersion
-├── QualityPolicyVersion
 ├── ConfigurationVersions[]
-└── PrivacyPartition
+├── PrivacyPartition
+└── OCRSemanticDependencies
 ```
 
-Recognition defines semantic dependency.
+`OCRSemanticDependencies` có thể reference stage/result/model versions thông qua OCR Document lineage.
 
-Cache Policy decides reuse.
+Recognition không cần duplicate:
 
----
+* Detection Model Version
+* Reading Order Policy Version
+* Quality Policy Version
 
-## 57. Compatibility Evaluation
-
-Two Recognition Artifacts may be compatible when:
-
-- InputContentIdentity matches;
-- contract major version compatible;
-- profile semantics compatible;
-- preparation version compatible;
-- provider/model differences allowed by Recognition policy;
-- language/script/orientation requirements compatible;
-- coordinate transform semantics compatible;
-- privacy partition allows reuse;
-- required output fields present.
-
-RevisionId match không bắt buộc.
+nếu chúng đã có trong referenced OCR artifacts.
 
 ---
 
-## 58. Validation Rules — Attempt Input
+# 40. Compatibility Evaluation
+
+Hai Recognition Artifact có thể reusable về semantic khi:
+
+* InputContentIdentity tương thích
+* major contract compatible
+* Recognition Profile compatible
+* OCR semantic dependencies compatible
+* required language/script requirements compatible
+* Provider differences được policy cho phép
+* privacy partition compatible
+* required output references tồn tại
+
+`RevisionId` match không bắt buộc.
+
+Cache Policy quyết định reuse cuối cùng.
+
+---
+
+# 41. Attempt Input Validation
 
 Invalid khi:
 
-- unsupported major contract version;
-- missing Runtime identity;
-- missing InputArtifactRef;
-- unsupported Artifact type;
-- invalid image metadata;
-- invalid CoordinateSpace;
-- RegionSelection out of bounds;
-- conflicting LocalOnly/RemoteAllowed;
-- invalid profile;
-- impossible capability requirement;
-- privacy context missing;
-- cancellation context malformed.
+* unsupported contract major
+* Runtime identity thiếu
+* Input Artifact thiếu
+* Artifact type sai
+* RegionSelection không hợp lệ
+* Profile sai
+* impossible Capability Requirements
+* Privacy Context thiếu/xung đột
+* Cancellation Context malformed
 
 ---
 
-## 59. Validation Rules — Candidate Artifact
+# 42. Candidate Validation
 
-Before submission:
+Candidate phải đảm bảo:
 
-- CandidateArtifactId present;
-- OwnerModule = recognition;
-- ArtifactType = RECOGNITION_ARTIFACT;
-- InputArtifactRef present;
-- ContentIdentity present;
-- RegionId unique;
-- LineId unique;
-- line references valid region;
-- ReadingOrder references valid region;
-- OrderIndex unique;
-- geometry in bounds;
-- confidence normalized range valid;
-- ProviderProvenance present;
-- Completeness consistent;
-- region/line counts consistent;
-- no SDK object in Metadata;
-- no credential;
-- transform chain valid;
-- CompatibilityMetadata complete enough for declared reuse scope.
+* CandidateArtifactId present
+* OwnerModule = recognition
+* correct ArtifactType
+* InputArtifactRef present
+* ContentIdentity present
+* OCRDocumentRef valid
+* referenced optional ReadingOrder/Quality artifact compatible
+* ProviderProvenance valid
+* Completeness consistent
+* no SDK object
+* no credential
+* CompatibilityMetadata sufficient
+* IntegrityMetadata valid
+
+OCR entity-level validation thuộc OCR Document/ReadingOrder/Quality owner.
 
 ---
 
-## 60. Validation Rules — Published Artifact
+# 43. Published Artifact Validation
 
-Published Artifact validation belongs to Artifact Store/Runtime, nhưng Recognition contract requires:
+Recognition Contract yêu cầu:
 
-- all Candidate semantic invariants preserved;
-- ArtifactId assigned;
-- ownership transferred;
-- publication atomic;
-- no mutable Candidate-only reference remains;
-- no Attempt state embedded.
+* Candidate semantics preserved
+* ArtifactId assigned
+* ownership transferred
+* publication atomic
+* no Attempt state embedded
+* immutable references retained
+
+Publication validation implementation thuộc Runtime/Artifact Store.
 
 ---
 
-## 61. Authority Rules
+# 44. Authority Rules
 
-1. Recognition cannot accept/reject Runtime authority.
-2. Candidate may be technically valid but authority-rejected.
-3. Late provider output may create no published Artifact.
-4. Canceled Attempt may still physically finish.
-5. Recognition Completion does not imply publication.
-6. Runtime Control owns current Revision relevance.
+1. Recognition cannot grant authority.
+2. Candidate có thể valid nhưng stale.
+3. Late output không tự publish.
+4. Canceled Attempt có thể physically finish.
+5. Completion không đồng nghĩa publication.
+6. Runtime owns current Revision relevance.
 7. Artifact Store publication requires Runtime approval.
 
 ---
 
-## 62. Cancellation Rules
+# 45. Cancellation Rules
 
-1. Recognition checks CancellationContext at declared checkpoints.
-2. Cancellation request does not guarantee immediate physical stop.
-3. Provider interruption capability must be declared.
-4. Recognition must release Attempt-local resource.
-5. Recognition must not publish Artifact.
-6. Late provider output remains traceable but not authoritative.
-7. Runtime terminal outcome stays singular.
-8. Cancellation reason remains Runtime-owned.
+1. Recognition cooperative-check Runtime cancellation.
+2. Cancellation không đảm bảo immediate physical stop.
+3. Provider interruption capability được khai báo ngoài module contract.
+4. Attempt-local resources phải release.
+5. Recognition không publish.
+6. Late output không authoritative.
+7. Runtime owns singular terminal outcome.
 
 ---
 
-## 63. Empty Artifact Contract
+# 46. Empty Artifact Contract
 
 No readable text:
 
 ```text
 RecognitionArtifact
 ├── Completeness = EMPTY_VALID
-├── Regions = []
-├── ReadingOrder = []
+├── OCRDocumentRef → valid empty OCR Document
 └── Warnings includes NO_READABLE_TEXT_DETECTED
 ```
 
 Không phải failure.
 
-Failure nghĩa là requested Recognition execution không thể hoàn thành đáng tin cậy.
-
 ---
 
-## 64. Partial Artifact Contract
+# 47. Partial Artifact Contract
 
-Khi `AllowPartialCandidate = true`:
+Khi partial được policy cho phép:
 
 ```text
 CandidateRecognitionArtifact
 ├── Completeness = PARTIAL
-├── Regions = usable recognized regions
+├── OCRDocumentRef → partial-compatible OCR Document
 └── Warnings includes PARTIAL_RECOGNITION
 ```
 
 Rules:
 
-1. Partial explicit.
-2. Failed regions ghi trong warning/diagnostics metadata.
-3. Không che giấu total provider failure.
-4. Runtime/consumer quyết định có publish/use hay không.
-5. Partial Candidate không cache eligible mặc định.
-6. Recognition không tạo `CompletedWithWarnings` status.
+1. partial explicit
+2. failed scopes traceable
+3. provider total failure không bị che giấu
+4. Runtime decides publish/use
+5. Candidate not cache eligible by default
 
 ---
 
-## 65. Privacy Contract
+# 48. Privacy Contract
 
-### Local-Only Guarantee
+## Local-Only Guarantee
 
 Khi:
 
@@ -1835,246 +1193,214 @@ Khi:
 LocalProcessingRequired = true
 ```
 
-Guarantees:
+Recognition phải đảm bảo:
 
-- no image data sent remote;
-- no recognized text sent remote;
-- remote provider not selected;
-- remote fallback disabled;
-- provenance reports local execution.
-
-### Remote Disclosure
-
-Remote execution phải reflect:
-
-```text
-ExecutionLocation = REMOTE_SERVICE
-```
-
-và normally include:
-
-```text
-REMOTE_PROVIDER_USED
-```
-
-### Logging
-
-Normal logs may include:
-
-- Runtime IDs;
-- provider ID;
-- duration;
-- region count;
-- warning count;
-- error code;
-- operation phase.
-
-Must not include:
-
-- image payload;
-- complete recognized text;
-- provider token;
-- API key;
-- authorization header;
-- sensitive temporary path;
-- full remote response.
+* image không gửi remote
+* recognized content không gửi remote
+* remote fallback disabled
+* provenance reflects local processing
 
 ---
 
-## 66. Producer Obligations
+## Logging
 
-Recognition implementation must:
+Normal logs có thể chứa:
 
-1. validate Attempt input;
-2. preserve Runtime identity;
-3. normalize provider output;
-4. return source-space geometry;
-5. preserve raw recognized text;
-6. represent uncertainty explicitly;
-7. create immutable Candidate;
-8. normalize errors;
-9. separate warning from error;
-10. enforce local-only privacy;
-11. release Attempt-local resource;
-12. use Resource Lease correctly;
-13. never grant authority;
-14. never publish accepted Artifact;
-15. never retry itself;
-16. never own provider lifetime;
-17. never depend on Translation implementation;
-18. never depend on UI;
-19. maintain contract compatibility;
-20. keep diagnostics content-safe.
+* Runtime IDs
+* Provider ID
+* duration
+* entity counts
+* warning count
+* error code
+* phase
+
+Không được chứa:
+
+* image payload
+* full recognized text
+* API key
+* provider token
+* authorization header
+* sensitive temp path
+* full remote response
 
 ---
 
-## 67. Consumer Obligations
+# 49. Producer Obligations
 
-Consumers of Recognition Artifact must:
+Recognition implementation phải:
 
-1. honor immutability;
-2. use explicit ReadingOrder;
-3. handle UNKNOWN confidence;
-4. handle EMPTY_VALID;
-5. handle PARTIAL separately;
-6. not assume line geometry exists;
-7. not assume all geometry rectangular forever;
-8. not parse ProviderMetadata for core behavior;
-9. not treat hints as detected facts;
-10. perform semantic cleanup outside Recognition;
-11. not expose raw text in unsafe logs;
-12. preserve Artifact traceability;
-13. use ArtifactRef/Lease for shared access;
-14. not mutate Recognition Artifact for corrections;
-15. handle unknown enum values safely.
+1. validate Attempt Input
+2. preserve Runtime identity
+3. use OCR Architecture contracts
+4. preserve source traceability
+5. preserve raw source meaning
+6. represent uncertainty explicitly
+7. create immutable Candidate
+8. normalize module errors
+9. separate warning/error
+10. enforce Privacy Context
+11. release Attempt-local resources
+12. use Resource Lease correctly
+13. never grant authority
+14. never publish accepted Artifact
+15. never retry itself
+16. never own Provider lifecycle
+17. never depend on Translation implementation
+18. never depend on UI
+19. maintain contract compatibility
+20. keep diagnostics content-safe
 
 ---
 
-## 68. Runtime Obligations
+# 50. Consumer Obligations
+
+Consumers must:
+
+1. honor immutability
+2. handle EMPTY_VALID
+3. handle PARTIAL separately
+4. preserve Artifact traceability
+5. not parse Provider metadata for core semantics
+6. use OCRDocumentRef as canonical OCR content
+7. use ReadingOrderResultRef when ordering is required
+8. use QualityReportRef when quality evaluation is required
+9. handle unknown enum values safely
+10. not mutate Recognition Artifact for correction
+11. perform semantic cleanup outside Recognition
+
+---
+
+# 51. Runtime Obligations
 
 Runtime must:
 
-1. create WorkItem/Attempt identity;
-2. supply immutable input ArtifactRef;
-3. provide ExecutionContextRef;
-4. provide CancellationContextRef;
-5. own timeout/deadline;
-6. own Scheduler admission;
-7. own retry decision;
-8. own authority validation;
-9. own terminal Attempt outcome;
-10. coordinate Candidate cleanup;
-11. transfer ownership to Artifact Store;
-12. publish atomically;
-13. reject stale/duplicate/unauthorized Candidate;
-14. maintain Artifact lifecycle;
-15. provide Cache Policy;
-16. keep provider availability outside Recognition contract.
+1. create WorkItem/Attempt identity
+2. supply immutable ArtifactRef
+3. provide Execution Context
+4. provide Cancellation Context
+5. own deadline
+6. own Scheduler admission
+7. own retry decision
+8. own authority validation
+9. own terminal Attempt outcome
+10. coordinate Candidate cleanup
+11. transfer ownership to Artifact Store
+12. publish atomically
+13. reject stale/duplicate Candidate
+14. provide Cache Policy
+15. keep Provider operational state outside Recognition contract
 
 ---
 
-## 69. Provider Manager Obligations
+# 52. Provider Integration Obligations
 
-Provider Manager must:
+Provider integration must:
 
-- maintain provider registry;
-- initialize provider;
-- own health state;
-- own model/client lifecycle;
-- enforce concurrency;
-- resolve credentials;
-- expose capability;
-- supervise shutdown;
-- preserve privacy;
-- provide selected adapter through stable contract.
+* expose capabilities through OCR Provider Contract
+* isolate SDK objects
+* normalize Provider responses
+* normalize Provider errors
+* protect credentials
+* enforce privacy
+* report Provider identity/version
+* avoid hidden retry
+* avoid Runtime publication
+
+Detailed provider contract belongs to:
+
+```text
+01-architecture/ocr/PROVIDERS.md
+```
 
 ---
 
-## 70. Artifact Store Obligations
+# 53. Artifact Store Obligations
 
 Artifact Store must:
 
-- register Candidate transfer;
-- verify transfer preconditions;
-- assign ArtifactId;
-- own published payload;
-- publish atomically;
-- provide immutable lookup;
-- coordinate Lease;
-- coordinate retention/disposal;
-- reject duplicate publication;
-- clean up failed transfer.
+* receive accepted Candidate transfer
+* assign ArtifactId
+* own published payload lifecycle
+* publish atomically
+* provide immutable lookup
+* manage lease/retention
+* reject duplicate publication
+* clean failed transfers
 
 ---
 
-## 71. Serialization Guidance
+# 54. Serialization Guidance
 
 Recommended:
 
 ```text
-In-process:
-- typed native objects
+In-process
+    → typed native objects
 
-Cross-process:
-- Protocol Buffers
-- JSON
-- MessagePack
+Cross-process
+    → Protocol Buffers / JSON / MessagePack
 ```
 
-JSON naming:
+Large OCR payload should use artifact references.
 
-```text
-snake_case
-```
-
-Large payload uses references.
+Contract should avoid embedding duplicated OCR graphs when references are sufficient.
 
 ---
 
-## 72. Contract Evolution
+# 55. Contract Evolution
 
-### Backward-Compatible
+Backward-compatible changes within same major:
 
-Allowed within same major:
+* optional fields
+* new warning codes
+* new module error codes
+* optional metadata
+* new Recognition Profiles
+* new optional references
+* additive enum values when unknown-safe
 
-- optional fields;
-- enum values when consumers support unknown handling;
-- warning/error codes;
-- capability additions;
-- optional diagnostic facts;
-- clarified descriptions;
-- optional metadata keys.
+Breaking changes requiring major version:
 
-### Breaking
-
-Major required for:
-
-- field removal/rename;
-- semantic meaning change;
-- coordinate convention change;
-- confidence range change;
-- optional → required;
-- identity semantics change;
-- privacy guarantee change;
-- raw-text preservation change;
-- Candidate/publication boundary change;
-- ownership semantics change.
-
-### Unknown Values
-
-Consumers:
-
-- preserve unknown where possible;
-- fallback safely;
-- not crash on unknown warning;
-- treat unknown capability unsupported;
-- treat unknown confidence UNKNOWN;
-- reject unsupported major version.
+* removing/renaming required field
+* semantic meaning change
+* identity semantics change
+* privacy guarantee change
+* Candidate/publication boundary change
+* ownership change
+* OCRDocumentRef contract meaning change
+* compatibility semantics change
 
 ---
 
-## 73. Example Recognition Attempt Input
+# 56. Unknown Values
+
+Consumers must:
+
+* preserve unknown when possible
+* fall back safely
+* reject unsupported major version
+* not crash on unknown warning
+* treat unknown capability as unsupported
+* retain unknown uncertainty rather than fabricate values
+
+---
+
+# 57. Example Recognition Attempt Input
 
 ```json
 {
   "runtime_context": {
-    "contract_version": "1.0.0",
-    "application_instance_id": "app_01",
+    "contract_version": "1.1.0",
     "session_id": "session_01",
     "revision_id": "revision_104",
     "work_item_id": "work_recognition_104",
     "attempt_id": "attempt_01",
-    "configuration_snapshot_id": "config_42",
-    "trace_context": {
-      "trace_id": "trace_01"
-    },
-    "created_at": "2026-08-03T01:15:42.184Z"
+    "configuration_snapshot_id": "config_42"
   },
   "input_artifact_ref": {
     "artifact_id": "image_artifact_104",
     "artifact_type": "IMAGE_ARTIFACT",
-    "contract_version": "1.0.0",
-    "resource_id": "resource_image_104",
     "content_identity": {
       "identity_algorithm": "sha256",
       "identity_version": "1",
@@ -2082,62 +1408,42 @@ Consumers:
     }
   },
   "operation": "RECOGNIZE_IMAGE",
-  "source_coordinate_space": {
-    "space_id": "frame_104",
-    "width": 1600,
-    "height": 900,
-    "origin": "TOP_LEFT",
-    "unit": "PIXEL",
-    "rotation_degrees": 0
-  },
   "options": {
     "profile": "COMIC_PAGE",
     "language_hints": ["zh-Hans"],
     "script_hints": ["Hans"],
-    "orientation_hint": "MIXED",
-    "reading_direction_hint": "TOP_TO_BOTTOM",
-    "return_line_geometry": true,
-    "return_provider_alternatives": false,
     "allow_partial_candidate": true,
-    "diagnostic_level": "BASIC"
+    "diagnostic_level": "BASIC",
+    "ocr_profile_ref": "ocr_comic_default"
   },
   "capability_requirements": {
-    "region_detection_required": true,
-    "text_recognition_required": true,
-    "combined_recognition_allowed": true,
-    "line_geometry_required": false,
+    "required_capabilities": [
+      "DETECTION",
+      "RECOGNITION"
+    ],
+    "required_languages": ["zh-Hans"],
     "local_only": true,
-    "remote_allowed": false,
-    "execution_classes": ["CPU", "GPU"]
-  },
-  "execution_context_ref": {
-    "execution_class": "GPU"
-  },
-  "cancellation_context_ref": {
-    "cancellation_id": "cancel_attempt_01",
-    "is_cancellation_requested": false
+    "remote_allowed": false
   },
   "privacy_context_ref": {
     "privacy_mode": "LOCAL_ONLY",
     "privacy_partition": "profile_local",
     "local_processing_required": true,
-    "remote_processing_allowed": false,
-    "diagnostic_content_allowed": false,
-    "persistence_allowed": false
+    "remote_processing_allowed": false
   }
 }
 ```
 
 ---
 
-## 74. Example Candidate Recognition Artifact
+# 58. Example Candidate Recognition Artifact
 
 ```json
 {
   "candidate_artifact_id": "candidate_recognition_104",
   "artifact_type": "RECOGNITION_ARTIFACT",
   "owner_module": "recognition",
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "input_artifact_ref": {
     "artifact_id": "image_artifact_104",
     "artifact_type": "IMAGE_ARTIFACT"
@@ -2147,351 +1453,305 @@ Consumers:
     "identity_version": "1",
     "value": "content_identity_redacted"
   },
-  "source_coordinate_space": {
-    "space_id": "frame_104",
-    "width": 1600,
-    "height": 900,
-    "origin": "TOP_LEFT",
-    "unit": "PIXEL",
-    "rotation_degrees": 0
+  "ocr_document_ref": {
+    "artifact_id": "ocr_document_candidate_104",
+    "contract_version": "1.1"
+  },
+  "reading_order_result_ref": {
+    "artifact_id": "reading_order_candidate_104"
+  },
+  "quality_report_ref": {
+    "artifact_id": "quality_report_candidate_104"
   },
   "provider_provenance": {
-    "provider_id": "local_recognition_01",
+    "provider_id": "local_ocr_01",
     "provider_version": "1.2.0",
-    "adapter_version": "1.0.0",
+    "adapter_version": "1.1.0",
     "execution_location": "LOCAL_PROCESS",
-    "execution_class": "GPU",
-    "model_id": "chinese_comic_recognition",
-    "model_version": "0.4",
-    "fallback_index": 0
+    "model_id": "chinese_comic_ocr",
+    "model_version": "0.4"
   },
-  "regions": [
-    {
-      "region_id": "region_01",
-      "geometry": {
-        "geometry_type": "RECTANGLE",
-        "x": 104,
-        "y": 88,
-        "width": 260,
-        "height": 142
-      },
-      "raw_text": "你今天怎么来了？",
-      "surface_text": "你今天怎么来了？",
-      "lines": [],
-      "detection_confidence": {
-        "level": "HIGH",
-        "normalized_value": 0.95,
-        "source": "DETECTOR"
-      },
-      "recognition_confidence": {
-        "level": "HIGH",
-        "normalized_value": 0.91,
-        "source": "RECOGNIZER"
-      },
-      "orientation": "HORIZONTAL",
-      "reading_direction": "LEFT_TO_RIGHT",
-      "region_type": "SPEECH_BUBBLE_TEXT",
-      "geometry_source": "PROVIDER_DETECTED",
-      "alternatives": [],
-      "warnings": []
-    }
-  ],
-  "reading_order": [
-    {
-      "order_index": 0,
-      "region_id": "region_01",
-      "order_source": "COMBINED_HEURISTIC",
-      "confidence": {
-        "level": "MEDIUM",
-        "normalized_value": 0.76,
-        "source": "HEURISTIC"
-      },
-      "manually_overridden": false,
-      "rule_id": "comic_mixed_layout_v1"
-    }
-  ],
-  "warnings": [
-    {
-      "warning_code": "READING_ORDER_UNCERTAIN",
-      "operation_phase": "ORDERING",
-      "severity": "DEGRADED",
-      "message_key": "recognition.reading_order_uncertain"
-    }
-  ],
+  "warnings": [],
   "completeness": "COMPLETE"
 }
 ```
 
 ---
 
-## 75. Example Empty Candidate
+# 59. Contract Test Requirements
 
-```json
-{
-  "candidate_artifact_id": "candidate_recognition_105",
-  "artifact_type": "RECOGNITION_ARTIFACT",
-  "owner_module": "recognition",
-  "contract_version": "1.0.0",
-  "regions": [],
-  "reading_order": [],
-  "warnings": [
-    {
-      "warning_code": "NO_READABLE_TEXT_DETECTED",
-      "operation_phase": "RECOGNIZING",
-      "severity": "INFORMATION",
-      "message_key": "recognition.no_readable_text"
-    }
-  ],
-  "completeness": "EMPTY_VALID"
-}
-```
+## Attempt Input
+
+* valid full-image input
+* valid selected-region input
+* missing ArtifactRef
+* unsupported Artifact type
+* invalid profile
+* privacy conflict
+* malformed capability requirement
+* unsupported contract major
 
 ---
 
-## 76. Contract Test Requirements
+## Candidate Artifact
 
-### Attempt Input
-
-- valid full-image input;
-- valid region input;
-- invalid ArtifactRef;
-- unsupported Artifact type;
-- invalid coordinate space;
-- invalid region;
-- unsupported major version;
-- privacy conflict;
-- malformed capability requirement.
-
-### Candidate Artifact
-
-- valid Candidate;
-- Candidate with warnings;
-- empty-valid Candidate;
-- partial Candidate;
-- missing line geometry;
-- unknown confidence;
-- mixed orientation;
-- mixed language;
-- source-coordinate mapping;
-- duplicate RegionId;
-- invalid ReadingOrder reference;
-- missing compatibility metadata.
-
-### Error and Cancellation
-
-- provider unavailable;
-- provider timeout normalized;
-- invalid provider response;
-- preparation failure;
-- coordinate mapping failure;
-- cancellation checkpoint;
-- non-cancelable provider;
-- resource exhaustion;
-- late output returned to Runtime.
-
-### Provider Adapter
-
-- local-only enforcement;
-- confidence normalization;
-- coordinate normalization;
-- no SDK leakage;
-- no hidden retry;
-- empty result mapping;
-- credential redaction.
-
-### Privacy
-
-- raw image excluded from events/logs;
-- raw text excluded from normal logs;
-- remote provider disclosure;
-- protected diagnostics authorization;
-- EPHEMERAL persistence restriction.
+* valid Candidate
+* warnings
+* empty-valid
+* partial
+* invalid OCRDocumentRef
+* incompatible ReadingOrderResultRef
+* incompatible QualityReportRef
+* missing CompatibilityMetadata
+* SDK leakage
+* credential leakage
 
 ---
 
-## 77. Contract Invariants
+## Runtime / Authority
+
+* stale Candidate rejected
+* canceled Attempt output rejected
+* non-cancelable provider returns late
+* Candidate accepted and atomically published
+
+---
+
+## Privacy
+
+* local-only enforcement
+* raw image excluded from event/log
+* raw OCR content excluded from normal logs
+* remote execution disclosure
+* credential redaction
+
+---
+
+# 60. Contract Invariants
 
 1. Recognition input is image-based Artifact.
-2. Runtime identity explicit.
-3. Candidate and published Artifact are different.
+
+2. Runtime identity is explicit.
+
+3. Candidate and Published Artifact are distinct.
+
 4. Recognition creates Candidate only.
+
 5. Runtime owns authority.
-6. Artifact Store owns published payload.
-7. Provider SDK type never crosses adapter boundary.
-8. Provider credential never appears in public output.
-9. Local-only never sends source data remote.
-10. Public geometry maps to source coordinate space.
-11. RegionId unique.
-12. LineId unique.
-13. Line references existing Region.
-14. ReadingOrder references existing Region.
-15. Raw recognized text preserved.
-16. Semantic correction outside Recognition.
-17. Missing confidence = UNKNOWN.
-18. Empty text may be successful.
-19. Partial output explicit.
-20. Warning does not replace error.
-21. Candidate immutable after assembly.
-22. Published Artifact immutable.
-23. Recognition never retries itself.
-24. Recognition never owns cancellation authority.
-25. Recognition never publishes accepted Artifact.
-26. Recognition never owns provider lifecycle.
-27. Recognition output contains source text only.
-28. Runtime Attempt status is not embedded in Artifact.
+
+6. Artifact Store owns published payload lifecycle.
+
+7. Provider SDK types never cross public boundary.
+
+8. Provider credentials never appear in public output.
+
+9. Local-only content never goes remote.
+
+10. OCR semantics are referenced from `01-architecture/ocr/`.
+
+11. Recognition Contract does not redefine Region semantics.
+
+12. Recognition Contract does not redefine text hierarchy.
+
+13. Recognition Contract does not redefine Direction.
+
+14. Recognition Contract does not redefine Layout.
+
+15. Recognition Contract does not redefine Reading Order.
+
+16. Recognition Contract does not redefine Quality.
+
+17. OCRDocumentRef is the canonical OCR semantic reference.
+
+18. Raw source meaning is preserved.
+
+19. Empty result may be successful.
+
+20. Partial output is explicit.
+
+21. Warning does not replace error.
+
+22. Candidate immutable after assembly.
+
+23. Published Artifact immutable.
+
+24. Recognition never retries itself.
+
+25. Recognition never owns cancellation authority.
+
+26. Recognition never publishes accepted Artifact.
+
+27. Recognition never owns Provider lifecycle.
+
+28. Runtime Attempt state is not embedded in Artifact.
+
 29. Queue/retry timing is not embedded in Artifact.
+
 30. Compatibility metadata is explicit.
+
 31. RevisionId is not reuse identity by default.
-32. Input Artifact accessed via Lease.
+
+32. Input Artifact accessed through lease/reference.
+
 33. Candidate rejection triggers cleanup.
-34. Late provider output cannot gain authority.
+
+34. Late output cannot regain authority.
+
 35. Diagnostic facts do not create hidden orchestration.
+
 36. Event/log payloads remain content-safe.
-37. Unknown enum values handled safely.
+
+37. Unknown values handled safely.
+
 38. Contract major version protects semantic compatibility.
-39. Consumer does not parse provider metadata for core logic.
+
+39. Provider metadata is not core business semantics.
+
 40. User correction never mutates original Recognition Artifact.
 
 ---
 
-## 78. MVP Contract Subset
+# 61. MVP Contract Subset
 
-### Required Operation
+Required operations:
 
 ```text
 RECOGNIZE_IMAGE
 RECOGNIZE_REGION
 ```
 
-### Required Input
+Required input:
 
 ```text
 Image ArtifactRef
-Source CoordinateSpace
+AUTOMATIC / COMIC_PAGE / SINGLE_REGION Profile
 Simplified Chinese hint
 English hint
-AUTOMATIC profile
-COMIC_PAGE profile
-SINGLE_REGION profile
-LOCAL_ONLY policy support
+LOCAL_ONLY support
 CancellationContextRef
 ExecutionContextRef
 ```
 
-### Required Candidate Output
+Required Candidate output:
 
 ```text
 CandidateArtifactId
+OCRDocumentRef
 ProviderProvenance
-Rectangle regions
-RawText
-SurfaceText
-Source geometry
-Confidence when available
-Orientation
-Initial ReadingOrder
 Warnings
 Completeness
 CompatibilityMetadata
 TraceabilityMetadata
 ```
 
-### Optional for MVP
+Recommended when available:
 
 ```text
-Line geometry
-Polygon geometry
-Recognition alternatives
-Language auto-detection
-Script auto-detection
-Partial Candidate
-Remote providers
-Character-level geometry
-STRUCTURED_PAGE profile
+ReadingOrderResultRef
+QualityReportRef
 ```
 
-No Recognition-owned terminal events are required.
+Optional MVP features:
+
+* Partial Candidate
+* remote Provider
+* character geometry
+* advanced Provider alternatives
+* structured document profile
 
 ---
 
-## 79. Deferred Extensions
+# 62. Deferred Extensions
 
-Potential future:
+Future possibilities:
 
-- streaming provider output;
-- long-page chunks;
-- tiled-image recognition;
-- character geometry;
-- speech-bubble geometry;
-- sound-effect recognition;
-- handwriting;
-- table/formula recognition;
-- cross-frame region tracking;
-- incremental Artifact derivation;
-- provider ensemble voting;
-- benchmark metadata;
-- region semantic classification;
-- Artifact-difference contract;
-- manual reading-order correction;
-- OCR correction feedback;
-- encrypted remote envelope.
+* streaming OCR candidate updates
+* long-page chunk contracts
+* tiled image processing
+* Artifact diff
+* user correction layer
+* provider ensemble result
+* OCR feedback contract
+* encrypted remote request envelope
 
-Chỉ thêm khi capability cụ thể yêu cầu.
+Only add when a concrete capability requires them.
 
 ---
 
-## 80. Related Documents
+# 63. Related Documents
 
 ```text
-modules/recognition/README.md
-modules/recognition/MODULE.md
-modules/recognition/PIPELINE.md
-modules/recognition/PROVIDER.md
-modules/recognition/COORDINATE_MODEL.md
-modules/recognition/READING_ORDER.md
-modules/recognition/QUALITY_MODEL.md
-modules/recognition/ERRORS.md
-modules/recognition/EVENTS.md
-runtime/PIPELINE_RUNTIME.md
-runtime/CANCELLATION.md
-runtime/RETRY_POLICY.md
-runtime/RESOURCE_LIFECYCLE.md
-runtime/CACHE_POLICY.md
-runtime/RUNTIME_OBSERVABILITY.md
-modules/text-processing/README.md
+01-architecture/ocr/README.md
+01-architecture/ocr/PIPELINE.md
+01-architecture/ocr/PREPROCESS.md
+01-architecture/ocr/DETECTION.md
+01-architecture/ocr/RECOGNITION.md
+01-architecture/ocr/TEXT_DIRECTION.md
+01-architecture/ocr/LAYOUT.md
+01-architecture/ocr/POSTPROCESS.md
+01-architecture/ocr/QUALITY.md
+01-architecture/ocr/READING_ORDER.md
+01-architecture/ocr/PROVIDERS.md
+
+01-architecture/runtime/CANCELLATION.md
+01-architecture/runtime/RETRY_POLICY.md
+01-architecture/runtime/RESOURCE_LIFECYCLE.md
+01-architecture/runtime/CACHE_POLICY.md
+
+02-modules/recognition/MODULE.md
+02-modules/recognition/STATES.md
+02-modules/recognition/EVENTS.md
+02-modules/recognition/ERRORS.md
+02-modules/recognition/README.md
 ```
 
 ---
 
-## 81. Summary
+# 64. Summary
 
-Recognition Contract định nghĩa cách Runtime đưa image Artifact vào Recognition execution và nhận Candidate structured source-content Artifact.
+Recognition Contract định nghĩa cách Runtime đưa Image Artifact vào Recognition Module và nhận Candidate Artifact.
 
 ```text
 RecognitionAttemptInput
-    ↓
-Recognition Execution
-    ↓
+        ↓
+Recognition Module
+        ↓
+OCR Architecture
+        ↓
 RecognitionAttemptOutput
-    ↓
+        ↓
 CandidateRecognitionArtifact
-    ↓
+        ↓
 Runtime Authority Validation
-    ↓
+        ↓
 RecognitionArtifact
 ```
 
 Essential guarantees:
 
-- provider-independent domain contract;
-- immutable Candidate/Artifact;
-- source-relative geometry;
-- explicit reading order;
-- explicit uncertainty;
-- normalized warnings/errors;
-- local-only privacy enforcement;
-- safe cancellation cooperation;
-- clear authority/publication separation;
-- compatibility metadata for safe reuse.
+```text
+OCR Architecture
+    owns OCR semantics.
 
-Recognition contract rộng hơn một OCR string interface, nhưng hẹp hơn Runtime orchestration contract.
+Recognition Contract
+    owns module boundary objects.
+
+Runtime
+    owns authority, retry and cancellation.
+
+Artifact Store
+    owns published artifact lifecycle.
+
+Provider Integration
+    owns provider-specific adaptation.
+```
+
+Contract quan trọng nhất là:
+
+```text
+RecognitionArtifact
+    references OCR semantics.
+
+RecognitionArtifact
+    does not redefine OCR semantics.
+```

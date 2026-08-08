@@ -1,1852 +1,1785 @@
 # Presentation Events
 
-- **Module:** Presentation
-- **Version:** 1.0.0
-- **Status:** Draft
-- **Owner:** CRAI Architecture
-- **Related documents:**
-  - `modules/presentation/MODULE.md`
-  - `modules/presentation/CONTRACT.md`
-  - `modules/presentation/STATES.md`
-  - `modules/presentation/ERRORS.md`
-  - `docs/architecture/EVENT_BUS.md`
+> **Project:** CRAI
+> **Module:** `presentation`
+> **Path:** `doc/02-modules/presentation/EVENTS.md`
+> **Version:** 2.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2 aligned
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-08
 
 ---
 
 # 1. Purpose
 
-This document defines the integration events consumed and published by the Presentation Module.
+This document defines the event boundary of the Presentation module.
 
-It establishes:
+It specifies:
 
-- event ownership;
-- event naming;
-- event envelopes;
-- payload contracts;
-- revision rules;
-- idempotency requirements;
-- ordering guarantees;
-- failure and rejection behavior;
-- relationships between events, commands, state transitions, and consumers.
+* Presentation-owned facts;
+* event ownership;
+* canonical envelope requirements;
+* event payload semantics;
+* PresentationRevision rules;
+* event ordering;
+* idempotency;
+* commit/event relationship;
+* rejection and failure facts;
+* external integration boundaries;
+* event privacy and observability rules.
 
-This document does not define command schemas.
+Presentation events describe facts about:
 
-Command schemas belong to `CONTRACT.md`.
+```text
+Presentation semantic state
+Presentation commit
+Presentation layout
+Presentation mode
+Presentation clear
+Presentation rejection
+Presentation failure
+```
 
-This document may reference the Presentation operation caused by an event for traceability, but an event is never treated as a command.
+This document does not define:
+
+* Presentation commands;
+* Runtime WorkItem events;
+* Runtime Attempt events;
+* Runtime authority events;
+* Translation execution events;
+* Reading Session lifecycle;
+* native UI lifecycle;
+* Event Bus implementation.
+
+Commands belong to:
+
+```text
+doc/02-modules/presentation/CONTRACT.md
+```
+
+Presentation state transitions belong to:
+
+```text
+doc/02-modules/presentation/STATES.md
+```
 
 ---
 
-# 2. Event Model
+# 2. Core Event Principle
 
-Presentation supports both command-driven operations and event-driven integration.
+An event describes:
 
-```text
-Application / Orchestrator
-        │
-        ├── Command
-        ▼
-   Presentation
-        │
-        ├── Published Event
-        ▼
-     Consumers
-```
+> **A fact that already became true.**
 
-Other modules may publish facts that are relevant to Presentation:
+An event does not express:
+
+> **Work that should now be performed.**
+
+Correct examples:
 
 ```text
-Reading Session
-Translation
-Preferences
-UI Adapter
-        │
-        ├── Integration Event
-        ▼
-Application / Event Routing
-        │
-        ├── Presentation Command or Accepted Event
-        ▼
-Presentation
-```
-
-Presentation MUST NOT depend on UI rendering technology.
-
-Presentation MUST NOT manipulate:
-
-- browser DOM;
-- native windows;
-- UI widgets;
-- canvas state;
-- mouse listeners;
-- keyboard listeners;
-- platform-specific rendering surfaces.
-
-Presentation produces immutable presentation data and publishes events after successful state commits.
-
----
-
-# 3. Event Principles
-
-## 3.1 Events Represent Facts
-
-An event describes something that already happened.
-
-Examples:
-
-```text
-SessionContentAccepted
-TranslationUpdated
 PresentationPrepared
+PresentationUpdated
+PresentationLayoutChanged
+PresentationModeChanged
 PresentationCleared
+PresentationRejected
+PresentationFailed
 ```
 
-An event MUST NOT express an imperative such as:
+Incorrect event-as-command examples:
 
 ```text
 BuildPresentation
-RefreshLayout
-ClearPresentation
-```
-
-Those are commands.
-
----
-
-## 3.2 Events Are Immutable
-
-After publication, an event MUST NOT be modified.
-
-A correction requires a new event with:
-
-- a new `EventId`;
-- a new producer-owned revision when applicable;
-- a causal reference to the event or operation being corrected.
-
----
-
-## 3.3 Events Follow Ownership
-
-Each event is owned by the module that owns the fact.
-
-Examples:
-
-```text
-TranslationUpdated
-    owner: Translation
-
-ViewportChanged
-    owner: UI Adapter
-
-PresentationPrepared
-    owner: Presentation
-```
-
-Translation MUST NOT publish a `PresentationId` as an authoritative identifier because Translation does not own Presentation identity.
-
-Presentation MUST NOT publish events claiming that translation, session, or UI rendering work has completed.
-
----
-
-## 3.4 Events Follow Atomic Commit
-
-A successful Presentation event MUST be published only after the corresponding Presentation state has committed successfully.
-
-Correct:
-
-```text
-Build candidate
-Validate candidate
-Commit PresentationSnapshot and RenderPlan
-Advance PresentationRevision
-Enter stable state
-Publish success event
-```
-
-Incorrect:
-
-```text
-Publish success event
-Commit state later
-```
-
----
-
-## 3.5 Events Are Not the Source of Mutable State
-
-Published events may carry immutable state or immutable references.
-
-Consumers MUST NOT mutate Presentation-owned objects received through an event.
-
-The authoritative Presentation result is:
-
-```text
-PresentationSnapshot
-RenderPlan
-PresentationRevision
-```
-
----
-
-# 4. Event Naming
-
-Events use completed-fact naming.
-
-```text
-<Noun><PastParticiple>
-```
-
-Examples:
-
-```text
-SessionContentAccepted
-TranslationUpdated
-PresentationPrepared
-PresentationLayoutChanged
-PresentationCleared
-```
-
-Event names MUST:
-
-- describe an observable fact;
-- use past tense;
-- avoid transport-specific wording;
-- avoid implementation-specific framework names;
-- avoid command verbs.
-
-Event names MUST NOT include terms such as:
-
-```text
-Do
-Request
-Execute
-Refresh
+RefreshPresentation
+RecomputeLayout
 RenderNow
+ClearNow
 ```
 
-unless the event explicitly represents a completed request lifecycle fact.
+Those are commands or application intents.
 
 ---
 
-# 5. Common Event Envelope
+# 3. Event Ownership
 
-Every integration event SHOULD use the following common envelope.
+Every event belongs to the owner of the fact.
+
+Examples:
+
+```text
+RuntimeRevisionSuperseded
+    → Runtime
+
+TranslationArtifactPublished
+    → Runtime / Artifact publication boundary
+
+PresentationPrepared
+    → Presentation
+
+PresentationApplyFailed
+    → UI Adapter
+
+PreferenceProfileChanged
+    → Preferences
+```
+
+Presentation MUST NOT publish facts claiming that it owns:
+
+* Runtime Revision lifecycle;
+* WorkItem lifecycle;
+* Attempt lifecycle;
+* Translation execution;
+* Artifact publication;
+* Reading Session lifecycle;
+* persistent preference update;
+* actual native rendering completion;
+* storage completion.
+
+---
+
+# 4. Event Bus Is Not the Workflow Engine
+
+CRAI does not use Presentation events or external events as hidden orchestration.
+
+Invalid architecture:
+
+```text
+TranslationCompleted
+    ↓
+Presentation subscribes
+    ↓
+BuildPresentation automatically
+```
+
+Required architecture:
+
+```text
+Accepted Artifact / External Fact
+        ↓
+Application / Runtime / Integration Boundary
+        ↓
+Business Pipeline / explicit decision
+        ↓
+Presentation Command
+        ↓
+Presentation
+```
+
+Events may inform that decision.
+
+They do not replace it.
+
+---
+
+# 5. Presentation Does Not Own a Consumed Business Event Set
+
+Presentation v2 has no mandatory set of external business events that must directly mutate Presentation state.
+
+External facts may be observed by:
+
+```text
+Application
+Runtime
+Integration Router
+UI coordination layer
+```
+
+Those components may translate relevant facts into explicit Presentation commands.
+
+Presentation correctness MUST NOT depend on direct Event Bus subscriptions to:
+
+```text
+TranslationUpdated
+TranslationCompleted
+SessionContentAccepted
+ViewportChanged
+PreferenceChanged
+ProfileChanged
+```
+
+---
+
+# 6. External Integration Facts
+
+The following facts may be relevant to Presentation integration but are **not Presentation-owned commands or state transitions**.
+
+Examples:
+
+```text
+Runtime Revision / authority facts
+Artifact publication facts
+Reading Session facts
+Preference facts
+UI Adapter geometry facts
+```
+
+The exact event names belong to their owning modules.
+
+Presentation documentation may reference those facts only to explain integration.
+
+---
+
+# 7. Example Integration — Translation Result
+
+Preferred model:
+
+```text
+Translation Candidate
+    ↓
+Runtime Authority Validation
+    ↓
+Translation Artifact published
+    ↓
+Business Pipeline / Application determines Presentation is needed
+    ↓
+BuildPresentation
+or
+UpdatePresentationContent
+```
+
+Presentation does not need a `TranslationCompleted` event to discover that work exists.
+
+---
+
+# 8. Example Integration — Viewport Change
+
+UI Adapter may observe:
+
+```text
+Viewport change
+```
+
+It may report a normalized fact or invoke an application port.
+
+Application/Presentation integration may then issue:
+
+```text
+RecomputePresentationLayout
+```
+
+Presentation must not depend on raw UI events or operating-system callbacks.
+
+---
+
+# 9. Example Integration — Preference Change
+
+Preferences may publish a fact that resolved Presentation preferences changed.
+
+Application may determine whether the impact requires:
+
+```text
+ApplyPresentationProfile
+RecomputePresentationLayout
+ChangePresentationMode
+```
+
+Presentation does not persist or own preference lifecycle.
+
+---
+
+# 10. Common Event Envelope
+
+Presentation events follow the canonical CRAI Event Convention.
+
+Conceptually:
 
 ```text
 EventEnvelope
-- eventId
-- eventType
-- eventVersion
-- occurredAt
-- producer
-- correlationId
-- causationId
-- traceId
-- payload
+├── eventId
+├── eventType
+├── eventVersion
+├── occurredAt
+├── producer
+├── correlationId?
+├── causationId?
+├── traceId?
+├── runtimeIdentity?
+├── payload
+└── metadata?
 ```
 
-## 5.1 Required Fields
+The canonical architecture event envelope remains authoritative if field names differ.
 
-### EventId
-
-Stable unique identifier for one published event instance.
-
-```text
-eventId: EventId
-```
-
-The same `EventId` MUST be processed at most once logically.
+Presentation MUST NOT invent a competing global event-envelope definition.
 
 ---
 
-### EventType
-
-Canonical event name.
-
-Examples:
+# 11. EventId
 
 ```text
-TranslationUpdated
+EventId
+```
+
+uniquely identifies one published event instance.
+
+Rules:
+
+* immutable;
+* globally unique within the required event identity domain;
+* duplicate delivery of the same EventId must not create duplicate logical effects.
+
+---
+
+# 12. EventType
+
+Canonical Presentation-owned names include:
+
+```text
 PresentationPrepared
+PresentationUpdated
+PresentationLayoutChanged
+PresentationModeChanged
+PresentationCleared
+PresentationRejected
+PresentationFailed
 ```
 
 ---
 
-### EventVersion
+# 13. EventVersion
 
-Version of the event payload contract.
+Each event contract has its own version.
 
 Example:
 
 ```text
-1.0
+2.0
 ```
 
----
+Event schema compatibility follows the canonical Event Convention.
 
-### OccurredAt
-
-Timestamp at which the fact became true in the producer.
+Presentation module contract version and individual event version are related but not necessarily identical values.
 
 ---
 
-### Producer
+# 14. Producer
 
-Canonical module name.
-
-Examples:
+Presentation-owned events declare:
 
 ```text
+producer = presentation
+```
+
+A Presentation event MUST NOT impersonate:
+
+```text
+runtime
 translation
 reading-session
 preferences
 ui-adapter
-presentation
+storage
 ```
 
 ---
 
-## 5.2 Optional Correlation Fields
+# 15. Correlation and Causation
 
-### CorrelationId
+Presentation events may include:
 
-Groups events and commands belonging to the same user-visible operation or reading flow.
+```text
+correlationId
+causationId
+traceId
+```
 
-### CausationId
+Typical causation:
 
-References the command, event, or operation that caused the current event.
+```text
+Presentation Command
+    ↓
+Presentation Operation
+    ↓
+Presentation Commit
+    ↓
+Presentation Event
+```
 
-### TraceId
-
-Allows end-to-end diagnostics across modules.
+The event should be traceable to the operation that caused it without embedding mutable operation state.
 
 ---
 
-# 6. Shared Identity and Authority Fields
+# 16. Runtime Identity Metadata
 
-Events MAY carry the following identifiers when relevant:
+Where Presentation work was invoked through Runtime, events may carry bounded Runtime identity:
 
 ```text
-SessionId
-PresentationContextId
-ContentId
-ContentRevision
-TranslationId
-TranslationRevision
-PresentationId
-PresentationRevision
-ViewportRevision
-PreferenceRevision
-ProfileRevision
-OperationId
-RequestId
+RuntimeEventIdentity
+├── sessionId
+├── runtimeRevisionId
+├── workItemId?
+├── attemptId?
+└── configurationSnapshotRef?
 ```
 
-Each producer MUST publish only revisions it owns.
+Rules:
 
-## 6.1 Revision Ownership
+1. Presentation may report these values.
+2. Presentation does not own them.
+3. Their presence does not make the event authoritative for Runtime lifecycle.
+4. Presentation events MUST NOT change Runtime state.
+
+---
+
+# 17. Presentation-Owned Identity
+
+Presentation events may carry:
 
 ```text
-Reading Session owns:
-- ContentRevision
-- accepted reading target authority
-
-Translation owns:
-- TranslationId
-- TranslationRevision
-
-UI Adapter owns:
-- ViewportRevision
-- SurfaceId
-- TransformRevision
-
-Preferences owns:
-- PreferenceRevision
-- ProfileRevision
+presentationContextId
+presentationId
+presentationRevision
+operationId?
+requestId?
+```
 
 Presentation owns:
-- PresentationId
-- PresentationRevision
-- optional LayoutRevision
-```
-
-A consumed event MUST NOT claim an authoritative `PresentationRevision`.
-
-Commands targeting an existing presentation MAY contain:
 
 ```text
-ExpectedPresentationRevision
-```
-
-Published Presentation events MUST contain the committed:
-
-```text
+PresentationContext state
+PresentationId
 PresentationRevision
+Presentation Operation identity
 ```
+
+It does not own Runtime Revision.
 
 ---
 
-# 7. Consumed Events
+# 18. PresentationRevision Rule
 
-Presentation consumes integration facts from other modules.
-
-The application or integration layer MAY transform these events into Presentation commands.
-
-Presentation MUST preserve the same validation, revision, and authority rules regardless of whether an operation began through a command or an integration event.
-
----
-
-## 7.1 SessionContentAccepted
-
-### Publisher
+Every successful committed Presentation mutation event MUST carry:
 
 ```text
-reading-session
-```
-
-### Meaning
-
-Reading Session accepted a content revision as the current reading target for a presentation context.
-
-This event replaces the broad and ambiguous `ReadingSessionChanged`.
-
-Presentation MUST NOT react to every Reading Session mutation.
-
-Presentation reacts only when the accepted content target relevant to Presentation changes.
-
-### Payload
-
-```text
-SessionContentAcceptedPayload
-- sessionId
-- presentationContextId
-- contentId
-- contentRevision
-- contentType
-- sourceReference
-- previousContentId?
-- previousContentRevision?
-- acceptanceReason
-```
-
-### AcceptanceReason
-
-Examples:
-
-```text
-InitialContent
-ChapterChanged
-PageChanged
-DocumentReplaced
-SessionRestored
-UserSelectedContent
-```
-
-### Presentation Behavior
-
-Presentation MAY:
-
-- update its expected target authority;
-- clear an incompatible active presentation;
-- retain a pending target while clearing;
-- wait for translation content;
-- accept a later `TranslationUpdated` or `TranslationCompleted`;
-- start `BuildPresentation` only when sufficient inputs exist.
-
-### Possible Presentation Result
-
-```text
-PresentationCleared
-PresentationPrepared
-PresentationRejected
-```
-
-`PresentationPrepared` is not required immediately after `SessionContentAccepted`.
-
----
-
-## 7.2 TranslationUpdated
-
-### Publisher
-
-```text
-translation
-```
-
-### Meaning
-
-Translation produced a new or corrected immutable translation revision for part or all of the accepted content.
-
-This event supports partial translation.
-
-It may arrive before translation is final.
-
-### Payload
-
-```text
-TranslationUpdatedPayload
-- sessionId
-- presentationContextId
-- contentId
-- contentRevision
-- translationId
-- translationRevision
-- changedSegmentIds
-- changedSegments
-- availableSegmentIds
-- failedSegmentIds
-- completeness
-- isFinal
-- sourceRegions?
-- translationMetadata?
-```
-
-### Boundary Rule
-
-This event MUST NOT require `PresentationId`.
-
-Translation does not own Presentation identity.
-
-Presentation locates the applicable presentation context using:
-
-```text
-SessionId
-PresentationContextId
-ContentId
-ContentRevision
-```
-
-### Presentation Behavior
-
-Presentation MAY:
-
-- build the first partial presentation;
-- update affected presentation items;
-- preserve stable item identity;
-- recompute local layout;
-- perform a full reflow when incremental layout is unsafe;
-- expose partial content according to the active presentation policy;
-- ignore stale or unrelated translation revisions.
-
-### Possible Presentation Result
-
-```text
-PresentationPrepared
-PresentationUpdated
-PresentationLayoutChanged
-PresentationRejected
-PresentationFailed
-```
-
----
-
-## 7.3 TranslationCompleted
-
-### Publisher
-
-```text
-translation
-```
-
-### Meaning
-
-A translation job reached its terminal state for the specified content revision.
-
-Terminal does not necessarily mean every segment succeeded.
-
-### Payload
-
-```text
-TranslationCompletedPayload
-- sessionId
-- presentationContextId
-- contentId
-- contentRevision
-- translationId
-- translationRevision
-- availableSegmentIds
-- failedSegmentIds
-- completeness
-- finalStatus
-- segments?
-- sourceRegions?
-- translationMetadata?
-```
-
-### FinalStatus
-
-Examples:
-
-```text
-Completed
-CompletedWithPartialFailure
-Cancelled
-Failed
-```
-
-### Presentation Behavior
-
-Presentation MAY:
-
-- build a presentation if none exists;
-- finalize an existing partial presentation;
-- mark unavailable segments;
-- apply a fallback presentation mode;
-- preserve a valid partial presentation;
-- reject only when the content cannot produce a valid presentation.
-
-### Important Rule
-
-Presentation MUST NOT reject a request only because translation is incomplete.
-
-Partial translation is allowed when the active profile and presentation mode support it.
-
-### Possible Presentation Result
-
-```text
-PresentationPrepared
-PresentationUpdated
-PresentationRejected
-PresentationFailed
-```
-
----
-
-## 7.4 ViewportChanged
-
-### Publisher
-
-```text
-ui-adapter
-```
-
-### Meaning
-
-The visible reading surface or its geometry changed.
-
-### Payload
-
-```text
-ViewportChangedPayload
-- presentationContextId
-- surfaceId
-- viewportRevision
-- viewport
-- coordinateSpace
-- transformRevision
-- presentationId?
-- expectedPresentationRevision?
-```
-
-### Viewport
-
-```text
-Viewport
-- width
-- height
-- zoom
-- scrollOffset
-- deviceScale?
-- orientation?
-- visibleRegion?
-```
-
-### Boundary Rule
-
-`PresentationId` is optional correlation data.
-
-The authoritative surface identity is:
-
-```text
-PresentationContextId
-SurfaceId
-ViewportRevision
-```
-
-A viewport may change while Presentation is still `Empty` or `Preparing`.
-
-### Presentation Behavior
-
-Presentation MAY:
-
-- cache the latest viewport for a pending build;
-- recompute layout;
-- coalesce rapid viewport events;
-- discard obsolete calculations;
-- preserve the previous committed render plan until a new plan commits.
-
-### Possible Presentation Result
-
-```text
-PresentationLayoutChanged
-PresentationUpdated
-PresentationRejected
-PresentationFailed
-```
-
----
-
-## 7.5 PresentationPreferenceChanged
-
-### Publisher
-
-```text
-preferences
-```
-
-### Meaning
-
-A user preference relevant to Presentation changed.
-
-### Payload
-
-```text
-PresentationPreferenceChangedPayload
-- sessionId?
-- presentationContextId?
-- preferenceRevision
-- changedKeys
-- impact
-- effectivePreferences
-```
-
-### Impact
-
-```text
-StyleOnly
-Layout
-Mode
-FullRebuild
-NoPresentationImpact
-```
-
-### Presentation Behavior
-
-```text
-StyleOnly
-    → update RenderPlan without semantic rebuild
-
-Layout
-    → recompute layout
-
-Mode
-    → reconfigure presentation strategy
-
-FullRebuild
-    → rebuild PresentationSnapshot and RenderPlan
-
-NoPresentationImpact
-    → no Presentation mutation
-```
-
-### Possible Presentation Result
-
-```text
-PresentationUpdated
-PresentationLayoutChanged
-PresentationModeChanged
-PresentationRejected
-PresentationFailed
-```
-
----
-
-## 7.6 PresentationProfileChanged
-
-### Publisher
-
-```text
-preferences
-```
-
-### Meaning
-
-The active presentation profile changed.
-
-A profile may include:
-
-- typography;
-- spacing;
-- accessibility rules;
-- marker behavior;
-- overflow policy;
-- preferred presentation mode;
-- fallback policy.
-
-### Payload
-
-```text
-PresentationProfileChangedPayload
-- sessionId?
-- presentationContextId?
-- profileId
-- profileRevision
-- previousProfileId?
-- changedCapabilities
-- profile
-```
-
-### Presentation Behavior
-
-Presentation MAY:
-
-- apply the profile;
-- reflow layout;
-- change mode;
-- rebuild presentation structure;
-- apply a safe fallback when the profile is incompatible.
-
-### Possible Presentation Result
-
-```text
-PresentationUpdated
-PresentationLayoutChanged
-PresentationModeChanged
-PresentationRejected
-PresentationFailed
-```
-
----
-
-# 8. Published Events
-
-Presentation publishes events describing committed Presentation facts.
-
-Successful events MUST include the newly committed `PresentationRevision`.
-
-Events MAY carry immutable output directly or immutable references according to the runtime profile.
-
-The delivery form MUST be consistent within one runtime.
-
----
-
-## 8.1 PresentationPrepared
-
-### Meaning
-
-A new Presentation became available for the accepted content target.
-
-### Typical Transition
-
-```text
-Preparing → Ready
-```
-
-### Payload
-
-```text
-PresentationPreparedPayload
-- presentationId
-- presentationContextId
-- sessionId
-- contentId
-- contentRevision
-- translationId?
-- translationRevision?
-- presentationRevision
-- mode
-- target
-- completeness
-- snapshot
-- renderPlan
-- appliedProfileId?
-- fallback?
-- operationId
-- requestId?
-```
-
-### Invariants
-
-- `snapshot` is immutable;
-- `renderPlan` is immutable;
-- both belong to the same `PresentationRevision`;
-- the event is emitted only after atomic commit;
-- the event references the accepted content authority;
-- the result is renderable by a compatible UI Adapter.
-
-### Subscribers
-
-Typical consumers:
-
-```text
-ui-adapter
-diagnostics
-application
-```
-
----
-
-## 8.2 PresentationUpdated
-
-### Meaning
-
-The committed Presentation content or non-layout presentation data changed.
-
-### Typical Transition
-
-```text
-Updating → Ready
-```
-
-### Payload
-
-```text
-PresentationUpdatedPayload
-- presentationId
-- presentationContextId
-- sessionId
-- contentId
-- contentRevision
-- previousPresentationRevision
-- presentationRevision
-- changeSet
-- snapshot
-- renderPlan
-- completeness
-- operationId
-```
-
-### ChangeSet
-
-```text
-PresentationChangeSet
-- addedItemIds
-- updatedItemIds
-- removedItemIds
-- styleChanged
-- visibilityChanged
-- focusChanged
-- semanticContentChanged
-- layoutChanged
-```
-
-### Invariants
-
-- unchanged semantic items preserve stable identity;
-- a stale update does not emit this event;
-- no partial candidate state is exposed;
-- `presentationRevision` is greater than `previousPresentationRevision`.
-
----
-
-## 8.3 PresentationLayoutChanged
-
-### Meaning
-
-The committed geometry or layout changed while the active content authority remained compatible.
-
-### Typical Transition
-
-```text
-Reflowing → Ready
-```
-
-### Payload
-
-```text
-PresentationLayoutChangedPayload
-- presentationId
-- presentationContextId
-- sessionId
-- contentId
-- contentRevision
-- previousPresentationRevision
-- presentationRevision
-- viewportRevision
-- renderPlan
-- changedItemIds
-- operationId
-```
-
-### Revision Policy
-
-For v1, `PresentationRevision` is the required public revision.
-
-A separate `LayoutRevision` MAY exist internally.
-
-If `LayoutRevision` is exposed, it MUST NOT replace `PresentationRevision`.
-
-### Invariants
-
-- semantic translated content is unchanged unless the same atomic commit also contains an explicit content update;
-- layout is deterministic for equivalent inputs;
-- the event is not emitted for stale layout calculations;
-- coordinate spaces are valid and explicit.
-
----
-
-## 8.4 PresentationModeChanged
-
-### Meaning
-
-The active Presentation mode changed successfully.
-
-### Typical Transition
-
-```text
-Reconfiguring → Ready
-```
-
-### Payload
-
-```text
-PresentationModeChangedPayload
-- presentationId
-- presentationContextId
-- sessionId
-- contentId
-- contentRevision
-- previousPresentationRevision
-- presentationRevision
-- previousMode
-- currentMode
-- fallbackApplied
-- fallbackReason?
-- snapshot
-- renderPlan
-- operationId
-```
-
-### Invariants
-
-- `currentMode` is the committed mode;
-- an unsupported requested mode does not replace the current mode;
-- source traceability remains available;
-- `snapshot` and `renderPlan` match `currentMode`.
-
----
-
-## 8.5 PresentationCleared
-
-### Meaning
-
-An active Presentation was logically removed from a presentation context.
-
-### Typical Transition
-
-```text
-Clearing → Empty
-```
-
-### Payload
-
-```text
-PresentationClearedPayload
-- presentationId
-- presentationContextId
-- sessionId
-- contentId
-- contentRevision
-- lastPresentationRevision
-- reason
-- operationId
-```
-
-### Reason
-
-```text
-UserRequested
-SessionEnded
-ContentReplaced
-SurfaceClosed
-ApplicationShutdown
-RecoveryReset
-InternalRecovery
-```
-
-### Invariants
-
-- the old Presentation is no longer active before publication;
-- outstanding operations for the cleared Presentation are invalid;
-- one active Presentation lifecycle emits this event at most once;
-- repeated clear commands while already empty do not emit duplicate clear events.
-
----
-
-## 8.6 PresentationRejected
-
-### Meaning
-
-A Presentation request, event-driven operation, or mutation was deterministically rejected without corrupting the current valid state.
-
-### Typical Outcome
-
-```text
-Stable state preserved
-```
-
-or:
-
-```text
-Preparing → Empty
-```
-
-### Payload
-
-```text
-PresentationRejectedPayload
-- requestId?
-- operationId
-- presentationId?
-- presentationContextId?
-- sessionId?
-- contentId?
-- contentRevision?
-- expectedPresentationRevision?
-- currentPresentationRevision?
-- errorCode
-- category
-- retryability
-- message?
-- rejectedEventId?
-```
-
-### Category
-
-```text
-Validation
-StaleRevision
-AuthorityMismatch
-UnsupportedMode
-InvalidGeometry
-InvalidViewport
-MissingRequiredData
-Conflict
-Cancelled
-Superseded
-```
-
-### Retryability
-
-```text
-NotRetryable
-RetryWithLatestRevision
-RetryAfterInputUpdate
-RetryAfterCapabilityChange
-```
-
-### Invariants
-
-- rejection does not imply state corruption;
-- `PresentationRevision` does not increase;
-- the previous committed Presentation remains valid when one exists;
-- `message` is not the authoritative machine-readable contract.
-
----
-
-## 8.7 PresentationFailed
-
-### Meaning
-
-Presentation entered or confirmed an internal failure condition where it cannot guarantee a valid active state.
-
-### Typical Transition
-
-```text
-Any transitional state → Failed
-```
-
-or:
-
-```text
-Ready → Failed
-```
-
-only when committed state can no longer be trusted.
-
-### Payload
-
-```text
-PresentationFailedPayload
-- operationId
-- presentationId?
-- presentationContextId?
-- sessionId?
-- contentId?
-- contentRevision?
-- presentationRevision?
-- errorCode
-- failureCategory
-- recoveryState
-- lastKnownGoodAvailable
-- traceId?
-```
-
-### FailureCategory
-
-```text
-InvariantViolation
-RevisionCorruption
-RollbackFailure
-GeometryStateCorruption
-ResourceLifecycleCorruption
-UnexpectedInternalFailure
-```
-
-### RecoveryState
-
-```text
-ResetRequired
-ClearRequired
-RestorePossible
-ApplicationRestartRecommended
-```
-
-### Invariants
-
-- this event is not used for ordinary validation errors;
-- normal mutation operations stop until verified recovery;
-- an unverified snapshot is not exposed as `Ready`;
-- diagnostics contain enough information to identify the failed operation without logging translated content by default.
-
----
-
-# 9. Event-to-Operation Mapping
-
-Consumed events do not directly bypass Presentation contracts.
-
-The application or Presentation integration boundary maps accepted events to operations.
-
-| Consumed Event | Typical Presentation Operation |
-|---|---|
-| `SessionContentAccepted` | update expected target, clear incompatible presentation, or prepare pending build |
-| `TranslationUpdated` | `BuildPresentation` or `UpdatePresentationContent` |
-| `TranslationCompleted` | finalize, build, update, or apply partial-result policy |
-| `ViewportChanged` | `RecomputePresentationLayout` |
-| `PresentationPreferenceChanged` | update style, reflow, change mode, or rebuild |
-| `PresentationProfileChanged` | `ApplyPresentationProfile` |
-
-The same guards defined in `CONTRACT.md` and `STATES.md` apply.
-
----
-
-# 10. Event Ordering
-
-## 10.1 No Global Total Order
-
-Presentation MUST NOT assume one total order across all producers.
-
-The following may occur concurrently:
-
-- viewport changes;
-- translation updates;
-- preference changes;
-- session target changes;
-- presentation commands.
-
-A viewport event may arrive before translation.
-
-A preference event may arrive while Presentation is `Empty`.
-
-A content replacement may supersede an in-flight layout operation.
-
----
-
-## 10.2 Per-Producer Revision Order
-
-Events from one producer stream are ordered by that producer's revision.
-
-Examples:
-
-```text
-TranslationRevision
-ViewportRevision
-PreferenceRevision
-ProfileRevision
-ContentRevision
-```
-
-Lower revisions are stale.
-
-Equal revisions are duplicates or idempotent replays.
-
-Higher revisions may supersede older in-flight work.
-
----
-
-## 10.3 Per-Context Authority
-
-Ordering comparisons are valid only inside the same relevant authority context.
-
-Examples:
-
-```text
-same SessionId
-same PresentationContextId
-same ContentId
-same ContentRevision
-```
-
-A revision from another context MUST NOT supersede the active context.
-
----
-
-## 10.4 Causal Ordering
-
-The following causal rules MUST hold:
-
-```text
-PresentationPrepared
-    causally follows
-accepted build input and atomic commit
-```
-
-```text
-PresentationUpdated
-    causally follows
-accepted content update and atomic commit
-```
-
-```text
-PresentationLayoutChanged
-    causally follows
-accepted viewport/layout input and atomic commit
-```
-
-```text
-PresentationCleared
-    invalidates
-all earlier outstanding operations for that presentation lifecycle
-```
-
-Successful Presentation events MUST NOT be emitted before their commits.
-
----
-
-## 10.5 Supersession
-
-A newer accepted authority revision MAY supersede an older operation.
-
-Superseded operations:
-
-- MUST NOT commit;
-- MUST NOT increment `PresentationRevision`;
-- MUST NOT publish success events;
-- MAY publish diagnostics;
-- MAY publish `PresentationRejected` only when externally useful.
-
----
-
-# 11. Idempotency
-
-## 11.1 Event Identity
-
-The same `EventId` MUST be processed at most once logically.
-
-Duplicate delivery MUST NOT:
-
-- commit twice;
-- increment Presentation revision twice;
-- emit duplicate success events;
-- clear the same lifecycle twice.
-
----
-
-## 11.2 Semantic Duplicates
-
-Two events with different `EventId` values MAY still represent the same semantic revision.
-
-Examples:
-
-```text
-same TranslationRevision
-same ViewportRevision
-same PreferenceRevision
-same ContentRevision
-```
-
-Equivalent semantic duplicates MUST result in:
-
-- no-op;
-- cached acknowledgement;
-- or deterministic same-state behavior.
-
-They MUST NOT produce an unnecessary Presentation revision.
-
----
-
-## 11.3 Duplicate Translation Update
-
-A duplicate `TranslationUpdated` MUST NOT:
-
-- replace newer translated content;
-- increment `PresentationRevision`;
-- emit `PresentationUpdated` again.
-
----
-
-## 11.4 Duplicate Viewport Event
-
-Equivalent viewport inputs MUST produce equivalent layout output.
-
-Repeated identical viewport events MUST NOT create new revisions unless an explicitly changed layout dependency also exists.
-
----
-
-## 11.5 Duplicate Clear
-
-Repeated clear operations MUST end in:
-
-```text
-Empty
-```
-
-Only one `PresentationCleared` event may be emitted for one active lifecycle.
-
----
-
-# 12. Revision Rules
-
-## 12.1 Consumed Events
-
-Consumed events carry producer-owned revisions.
-
-```text
-SessionContentAccepted
-    → ContentRevision
-
-TranslationUpdated
-TranslationCompleted
-    → TranslationRevision
-
-ViewportChanged
-    → ViewportRevision
-
-PresentationPreferenceChanged
-    → PreferenceRevision
-
-PresentationProfileChanged
-    → ProfileRevision
-```
-
-Consumed events SHOULD NOT require `PresentationRevision`.
-
-They MAY carry:
-
-```text
-ExpectedPresentationRevision
-```
-
-as an optional optimistic concurrency hint when the producer legitimately observed it.
-
-The final authority check remains inside Presentation.
-
----
-
-## 12.2 Published Events
-
-Every successful Presentation mutation event MUST carry:
-
-```text
-PresentationRevision
+presentationRevision
 ```
 
 Update-like events SHOULD also carry:
 
 ```text
-PreviousPresentationRevision
+previousPresentationRevision
 ```
 
-`PresentationRevision` MUST increase monotonically after each successful committed Presentation mutation.
+PresentationRevision:
 
-It MUST NOT increase for:
-
-- rejected operations;
-- stale events;
-- duplicate events;
-- superseded operations;
-- no-op changes;
-- failed candidate calculations.
+* increases only after committed visible state changes;
+* never decreases;
+* does not increase for rejected Candidates;
+* does not increase for superseded operations;
+* does not increase for Runtime authority rejection;
+* does not increase for no-op operations.
 
 ---
 
-## 12.3 Content Authority
+# 19. Commit Before Event
 
-An event containing source-dependent data MUST identify:
+Successful Presentation events follow:
 
 ```text
-SessionId
-PresentationContextId
-ContentId
-ContentRevision
+Candidate
+    ↓
+Presentation validation
+    ↓
+Runtime authority revalidation
+    ↓
+PresentationRevision validation
+    ↓
+Atomic Presentation Commit
+    ↓
+Presentation state transition
+    ↓
+Success Event
 ```
 
-Presentation MUST reject or discard events that do not match the current accepted authority.
+Never:
+
+```text
+Success Event
+    ↓
+Commit later
+```
 
 ---
 
-# 13. Delivery Semantics
+# 20. Candidate Events
 
-Presentation MUST tolerate duplicate delivery.
+Presentation does not publish a normal success event merely because a Candidate exists.
 
-The actual transport guarantee is runtime-specific.
-
-Possible runtime profiles:
+For example, v2 does not require:
 
 ```text
-InProcessNonDurable
+PresentationCandidateCreated
+PresentationCandidateValidated
+```
+
+as business integration events.
+
+Candidate observations may appear in:
+
+* traces;
+* diagnostics;
+* internal telemetry;
+
+but are not required for business correctness.
+
+---
+
+# 21. PresentationPrepared
+
+## Meaning
+
+A new Presentation became the current committed Presentation for a Presentation Context.
+
+Typical state transition:
+
+```text
+PREPARING → READY
+```
+
+## Payload
+
+```text
+PresentationPreparedPayload
+├── presentationContextId
+├── presentationId
+├── presentationRevision
+├── contentIdentity
+├── sourceArtifactRefs[]
+├── requestedMode
+├── effectiveMode
+├── completeness
+├── targetId
+├── targetRevision
+├── snapshot
+├── renderPlan
+├── fallback?
+├── runtimeIdentity?
+├── operationId?
+└── requestId?
+```
+
+## Invariants
+
+* Snapshot is immutable.
+* RenderPlan is immutable.
+* Both share the same PresentationRevision.
+* Event occurs only after Presentation commit.
+* Input Artifact references are accepted immutable references.
+* Event does not claim that UI Adapter successfully rendered it.
+
+---
+
+# 22. PresentationUpdated
+
+## Meaning
+
+A committed Presentation changed semantically or in Presentation-level visible data.
+
+Typical transition:
+
+```text
+UPDATING → READY
+```
+
+## Payload
+
+```text
+PresentationUpdatedPayload
+├── presentationContextId
+├── presentationId
+├── previousPresentationRevision
+├── presentationRevision
+├── contentIdentity
+├── sourceArtifactRefs[]
+├── changeSet
+├── snapshot
+├── renderPlan
+├── completeness
+├── fallback?
+├── runtimeIdentity?
+└── operationId?
+```
+
+## Invariants
+
+* `presentationRevision > previousPresentationRevision`;
+* unchanged semantic items preserve stable IDs;
+* stale Candidate does not emit this event;
+* no Candidate-only state is exposed;
+* Snapshot and RenderPlan share one revision.
+
+---
+
+# 23. PresentationChangeSet
+
+Conceptual payload:
+
+```text
+PresentationChangeSet
+├── addedItemIds[]
+├── updatedItemIds[]
+├── removedItemIds[]
+├── semanticContentChanged
+├── layoutChanged
+├── styleChanged
+├── visibilityChanged
+├── focusChanged
+├── completenessChanged
+└── modeChanged
+```
+
+ChangeSet describes already committed changes.
+
+It is not a mutable UI patch command.
+
+---
+
+# 24. PresentationLayoutChanged
+
+## Meaning
+
+The committed framework-neutral layout changed while Presentation semantic content remained compatible.
+
+Typical transition:
+
+```text
+REFLOWING → READY
+```
+
+## Payload
+
+```text
+PresentationLayoutChangedPayload
+├── presentationContextId
+├── presentationId
+├── previousPresentationRevision
+├── presentationRevision
+├── targetId
+├── targetRevision
+├── viewportRevision
+├── renderPlan
+├── changedItemIds[]
+├── fallback?
+├── runtimeIdentity?
+└── operationId?
+```
+
+## Invariants
+
+* semantic order remains compatible;
+* geometry uses explicit coordinate spaces;
+* obsolete viewport result never emits this event;
+* event reflects the committed RenderPlan;
+* RenderPlan uses the same PresentationRevision.
+
+---
+
+# 25. PresentationModeChanged
+
+## Meaning
+
+The effective committed Presentation mode changed.
+
+Typical transition:
+
+```text
+RECONFIGURING → READY
+```
+
+## Payload
+
+```text
+PresentationModeChangedPayload
+├── presentationContextId
+├── presentationId
+├── previousPresentationRevision
+├── presentationRevision
+├── requestedMode
+├── previousEffectiveMode
+├── effectiveMode
+├── fallbackApplied
+├── fallbackReason?
+├── snapshot
+├── renderPlan
+├── targetId
+├── targetRevision
+└── operationId?
+```
+
+## Invariants
+
+* `effectiveMode` is the committed mode;
+* unsupported mode does not replace a valid current mode unless fallback commits;
+* source traceability remains preserved;
+* Snapshot and RenderPlan agree with effective mode.
+
+---
+
+# 26. Mode Fallback Semantics
+
+A mode fallback does not require a separate:
+
+```text
+PresentationModeFallbackApplied
+```
+
+event in v2.
+
+Fallback is represented in committed facts such as:
+
+```text
+PresentationPrepared
+PresentationUpdated
+PresentationLayoutChanged
+PresentationModeChanged
+```
+
+through:
+
+```text
+requestedMode
+effectiveMode
+fallback
+```
+
+This avoids duplicate events describing the same commit.
+
+---
+
+# 27. PresentationCleared
+
+## Meaning
+
+A previously committed Presentation is no longer current for the Presentation Context.
+
+Typical transition:
+
+```text
+CLEARING → EMPTY
+```
+
+## Payload
+
+```text
+PresentationClearedPayload
+├── presentationContextId
+├── presentationId
+├── lastPresentationRevision
+├── contentIdentity?
+├── reason
+├── runtimeIdentity?
+└── operationId?
+```
+
+Possible reasons:
+
+```text
+SessionStopped
+SessionReplaced
+ContentReplaced
+TargetDestroyed
+PrivacyInvalidation
+ApplicationShutdown
+UserRequested
+RecoveryReset
+```
+
+## Invariants
+
+* logical invalidation occurred before publication;
+* old Candidates cannot commit;
+* repeated clear while already empty emits no duplicate clear fact;
+* event does not claim that native resources have already been physically destroyed.
+
+---
+
+# 28. Logical Clear vs Physical UI Cleanup
+
+`PresentationCleared` means:
+
+```text
+Presentation logical state no longer current
+```
+
+It does not mean:
+
+```text
+native window destroyed
+DOM node removed
+platform resource fully disposed
+```
+
+Those facts belong to UI Adapter/platform owners.
+
+---
+
+# 29. PresentationRejected
+
+## Meaning
+
+A Presentation command, Candidate, or commit attempt was deterministically rejected without Presentation-owned state corruption.
+
+Typical outcomes:
+
+```text
+PREPARING → EMPTY
+```
+
+or:
+
+```text
+transitional state → previous stable READY
+```
+
+## Payload
+
+```text
+PresentationRejectedPayload
+├── requestId?
+├── operationId?
+├── presentationContextId?
+├── presentationId?
+├── expectedPresentationRevision?
+├── currentPresentationRevision?
+├── rejectionSource
+├── reasonCode
+├── recoverability
+├── retryHint?
+├── runtimeReasonCode?
+├── issues[]
+└── runtimeIdentity?
+```
+
+---
+
+# 30. RejectionSource
+
+```text
+RejectionSource
+- PresentationValidation
+- PresentationRevision
+- RuntimeAuthority
+- TargetCompatibility
+- ViewportCompatibility
+- CancellationObservation
+- Supersession
+```
+
+This prevents Presentation from redefining external Runtime errors as Presentation-owned errors.
+
+---
+
+# 31. Presentation-Owned Rejection Categories
+
+Typical categories:
+
+```text
+InvalidCommand
+InvalidMapping
+IncompatibleArtifact
+InvalidGeometry
+InvalidViewport
+UnsupportedMode
+TargetCapabilityMismatch
+InvalidProfile
+PresentationRevisionConflict
+CandidateInvalid
+```
+
+---
+
+# 32. Runtime Authority Rejection
+
+When Runtime rejects a commit:
+
+```text
+rejectionSource = RuntimeAuthority
+```
+
+Presentation may expose the normalized Runtime reason.
+
+Examples:
+
+```text
+RejectedStale
+RejectedCanceled
+RejectedSessionInactive
+RejectedRuntimeRevision
+```
+
+Presentation MUST NOT reclassify these as internal Presentation failure.
+
+---
+
+# 33. Supersession Event Policy
+
+A superseded Presentation Candidate does not require `PresentationRejected`.
+
+Default behavior:
+
+```text
+discard
++
+diagnostics / trace
+```
+
+Publish `PresentationRejected` only when the rejection is externally meaningful to a caller or user-visible workflow.
+
+This avoids flooding the Event Bus during normal coalescing.
+
+---
+
+# 34. Cancellation Event Policy
+
+Presentation does not publish:
+
+```text
+PresentationCancelled
+```
+
+as a Runtime terminal event.
+
+Runtime owns cancellation lifecycle.
+
+Presentation may:
+
+* observe cancellation;
+* discard Candidate;
+* optionally publish `PresentationRejected` with normalized cancellation source if externally useful.
+
+---
+
+# 35. PresentationFailed
+
+## Meaning
+
+Presentation entered an internal state where Presentation-owned correctness cannot be guaranteed.
+
+Typical transition:
+
+```text
+READY → FAILED
+```
+
+or:
+
+```text
+transitional state → FAILED
+```
+
+only when Presentation-owned current state cannot be trusted.
+
+## Payload
+
+```text
+PresentationFailedPayload
+├── presentationContextId
+├── presentationId?
+├── presentationRevision?
+├── operationId?
+├── failureCode
+├── failureCategory
+├── recoveryState
+├── lastKnownGoodAvailable
+├── runtimeIdentity?
+└── diagnosticRef?
+```
+
+---
+
+# 36. Failure Categories
+
+```text
+InvariantViolation
+PresentationRevisionCorruption
+CommittedStateMismatch
+RollbackStateCorruption
+GeometryStateCorruption
+InternalResourceStateCorruption
+UnexpectedInternalFailure
+```
+
+Do not include Runtime terminal categories such as:
+
+```text
+AttemptFailed
+RetryExhausted
+RuntimeCanceled
+RevisionSuperseded
+```
+
+---
+
+# 37. Recovery State
+
+```text
+RecoveryState
+- RestorePossible
+- ClearRequired
+- ResetRequired
+- ApplicationRestartRecommended
+```
+
+`PresentationFailed` is not used for ordinary candidate rejection.
+
+---
+
+# 38. UI Apply Events
+
+Presentation does not publish:
+
+```text
+PresentationRendered
+PresentationDisplayed
+```
+
+because actual rendering belongs to UI Adapter.
+
+UI Adapter may own facts such as:
+
+```text
+PresentationApplied
+PresentationApplyRejected
+PresentationApplyFailed
+PresentationTargetUnavailable
+```
+
+if such events are architecturally required.
+
+These events MUST NOT be published by Presentation.
+
+---
+
+# 39. Presentation Event Subscribers
+
+Typical consumers of Presentation-owned events:
+
+```text
+UI Adapter
+Application
+Diagnostics
+Telemetry bridge
+```
+
+Consumers use Presentation events as facts.
+
+They MUST NOT mutate Presentation-owned payloads.
+
+---
+
+# 40. UI Adapter Consumption Rule
+
+UI Adapter may consume:
+
+```text
+PresentationPrepared
+PresentationUpdated
+PresentationLayoutChanged
+PresentationModeChanged
+PresentationCleared
+```
+
+or use a direct Presentation binding/query contract.
+
+If events are used:
+
+* it must compare PresentationRevision;
+* stale events must not overwrite newer applied state;
+* clear invalidates older Presentation lifecycle output;
+* actual UI apply result remains UI Adapter-owned.
+
+---
+
+# 41. Events Are Not Guaranteed Query Replacement
+
+Event delivery may be missed depending on Runtime profile.
+
+Therefore consumers requiring current Presentation state should use:
+
+```text
+GetCurrentPresentation
+GetPresentationSnapshot
+GetRenderPlan
+```
+
+where appropriate.
+
+Event Bus does not replace Query Interface.
+
+---
+
+# 42. Event Delivery Semantics
+
+Actual delivery guarantees belong to Event Bus architecture.
+
+Presentation must tolerate the delivery semantics declared by the active Runtime.
+
+Possible profiles may include:
+
+```text
+InProcess
+NonDurable
 AtMostOnce
 AtLeastOnce
 DurableAtLeastOnce
 ```
 
-## 13.1 MVP Runtime
+Presentation EVENTS documentation does not redefine Event Bus guarantees.
 
-For a local CRAI MVP, the event bus MAY use:
+---
+
+# 43. MVP Event Delivery
+
+If CRAI MVP uses an in-process non-durable bus:
+
+* events may be lost on process crash;
+* no durability is implied;
+* replay is not guaranteed;
+* ordering is bounded by canonical Event Bus policy.
+
+Presentation correctness must not depend solely on event durability.
+
+---
+
+# 44. Event Idempotency
+
+Duplicate delivery of the same `EventId` must not produce duplicate consumer-side logical effects.
+
+Presentation itself publishes one event per committed Presentation fact.
+
+Consumers should deduplicate when delivery semantics require it.
+
+---
+
+# 45. Semantic Duplicate Facts
+
+Two different EventIds may describe equivalent Presentation state only in exceptional replay/recovery scenarios.
+
+Consumers should primarily compare:
 
 ```text
-in-process
-non-durable
-ordered only within one publisher callback stream
+presentationContextId
+presentationId
+presentationRevision
+eventType
 ```
 
-The architecture MUST NOT claim durable at-least-once delivery unless the runtime actually provides persistence, replay, and acknowledgement.
+A lower PresentationRevision is stale.
+
+An equal revision is duplicate/equivalent unless event semantics explicitly differ.
 
 ---
 
-## 13.2 Consumer Responsibility
+# 46. No Global Ordering
 
-Consumers of Presentation events MUST:
-
-- handle duplicate events;
-- compare revisions;
-- avoid applying stale snapshots;
-- treat `PresentationCleared` as lifecycle invalidation;
-- avoid mutating event payloads.
-
----
-
-## 13.3 Outbox
-
-An outbox or equivalent mechanism MAY be introduced when state and event durability become necessary.
-
-Until then, atomic in-memory commit followed by immediate event publication is acceptable for MVP, provided failure behavior is explicit.
-
----
-
-# 14. Invalid Event Handling
-
-Invalid events MUST be classified.
-
-## 14.1 Duplicate
-
-Behavior:
+Presentation consumers MUST NOT assume a total order across:
 
 ```text
-No-op or return cached outcome
+Runtime events
+Preference events
+UI Adapter events
+Presentation events
+Storage events
 ```
 
+Causality and owner-owned revisions must be used instead.
+
 ---
 
-## 14.2 Stale
+# 47. Presentation Event Ordering
 
-Examples:
-
-- older translation revision;
-- older viewport revision;
-- obsolete content revision.
-
-Behavior:
+Within one Presentation lineage:
 
 ```text
-Discard
-Do not mutate
-Do not increment revision
-Record diagnostic when useful
+PresentationRevision 7
+PresentationRevision 8
+PresentationRevision 9
 ```
 
----
+defines Presentation state order.
 
-## 14.3 Unrelated
-
-Examples:
-
-- another presentation context;
-- another session;
-- another content target.
-
-Behavior:
+Consumers MUST NOT apply:
 
 ```text
-Ignore or route elsewhere
+Revision 8
 ```
 
----
-
-## 14.4 Malformed
-
-Examples:
-
-- missing required identifiers;
-- invalid event version;
-- invalid payload shape;
-- invalid coordinate declaration.
-
-Behavior:
+after already applying:
 
 ```text
-Reject or quarantine
-Record diagnostic
-Do not mutate Presentation
+Revision 9
 ```
 
 ---
 
-## 14.5 Authority Mismatch
+# 48. Clear Ordering
 
-Examples:
+`PresentationCleared` logically invalidates prior Presentation revisions for that lifecycle.
 
-- event claims obsolete content authority;
-- session does not own the target;
-- source region does not belong to content revision.
-
-Behavior:
+Example:
 
 ```text
-Reject or discard
-Do not mutate current Presentation
-Emit security or integrity diagnostic when appropriate
+PresentationUpdated revision 12
+    ↓
+PresentationCleared lastRevision = 12
+```
+
+A late duplicate:
+
+```text
+PresentationUpdated revision 11
+```
+
+must not recreate the cleared Presentation.
+
+---
+
+# 49. New Presentation After Clear
+
+A future Presentation may use a new:
+
+```text
+PresentationId
+```
+
+for the same Presentation Context.
+
+Example:
+
+```text
+Context A
+Presentation P1
+    ↓
+Cleared
+    ↓
+Presentation P2
+```
+
+Events for P1 must not mutate or replace P2.
+
+---
+
+# 50. Presentation Context Ordering
+
+Revision comparison is valid only inside compatible Presentation lineage/context.
+
+Do not compare:
+
+```text
+Context A revision 10
+Context B revision 7
+```
+
+as if they belonged to one global sequence.
+
+---
+
+# 51. Runtime Revision Is Not Presentation Event Order
+
+RuntimeRevisionId may appear for correlation.
+
+It does not replace PresentationRevision ordering.
+
+One Runtime Revision may lead to multiple Presentation revisions.
+
+Example:
+
+```text
+Runtime Revision 42
+    ↓
+Presentation Revision 1
+Presentation Revision 2
+Presentation Revision 3
 ```
 
 ---
 
-## 14.6 Recoverable Processing Failure
+# 52. No TranslationRevision Ordering Inside Presentation Events
 
-Examples:
+Presentation events may optionally reference upstream Artifact provenance.
 
-- optional font metrics unavailable;
-- one layout strategy fails;
-- source geometry can fall back to side panel;
-- one segment cannot be displayed.
-
-Behavior MAY include:
+They SHOULD NOT require:
 
 ```text
-Fallback
-Partial Presentation
-Item suppression
-PresentationRejected
-PresentationUpdated
-PresentationModeChanged
+TranslationRevision
 ```
 
-The committed result MUST still satisfy all Presentation invariants.
+as the Presentation ordering mechanism.
 
----
-
-## 14.7 Internal Failure
-
-Examples:
-
-- impossible revision ordering;
-- rollback failure;
-- corrupted committed graph;
-- active identifiers disagree with committed snapshot.
-
-Behavior:
+The authoritative accepted input is represented through:
 
 ```text
-Transition to Failed
-Publish PresentationFailed
-Stop normal mutations
-Require verified recovery
+TranslationArtifactRef
 ```
+
+and compatibility metadata.
+
+PresentationRevision orders Presentation state.
 
 ---
 
-# 15. Event Dependencies
+# 53. Artifact References in Events
+
+Presentation events should prefer immutable references where payload size is significant.
+
+For example:
 
 ```text
-Reading Session ─────────────┐
-Translation ─────────────────┤
-Preferences ─────────────────┤
-UI Adapter ──────────────────┤
-                             ▼
-                  Application / Event Routing
-                             │
-                             ▼
-                      Presentation
-                        │         │
-                        ▼         ▼
-                    UI Adapter  Diagnostics
-                        │
-                        ▼
-                     Renderer
+snapshotRef?
+renderPlanRef?
+sourceArtifactRefs[]
 ```
 
-Presentation MAY publish events consumed by the application, UI Adapter, and Diagnostics.
+An implementation may embed bounded immutable Snapshot/RenderPlan values for local MVP.
 
-Presentation MUST NOT publish events claiming ownership of:
-
-- translation completion;
-- session acceptance;
-- preference persistence;
-- rendering completion;
-- export completion;
-- storage completion.
+The chosen delivery form should remain consistent within one runtime profile.
 
 ---
 
-# 16. Event Invariants
+# 54. Large Payload Rule
 
-The following invariants MUST always hold:
+Events MUST NOT routinely duplicate:
 
-1. Events are immutable.
-2. Every event has a stable `EventId`.
-3. Successful Presentation events are emitted only after atomic commit.
-4. Every successful Presentation mutation event carries `PresentationRevision`.
-5. A stale operation never publishes a success event.
-6. A duplicate event does not cause duplicate mutation.
-7. Translation events do not require authoritative `PresentationId`.
-8. Consumed events carry producer-owned revisions.
-9. Published Presentation events carry Presentation-owned revisions.
-10. `PresentationPrepared` includes or references immutable `PresentationSnapshot` and `RenderPlan`.
-11. `PresentationUpdated` references an existing Presentation lifecycle.
-12. `PresentationCleared` invalidates all outstanding operations for that lifecycle.
-13. `PresentationRejected` is used for deterministic rejection, not internal corruption.
-14. `PresentationFailed` is reserved for broken invariants or untrusted internal state.
-15. Events do not expose mutable internal objects.
-16. Event payloads do not contain translated user content in diagnostics fields by default.
-17. No event grants Presentation ownership of UI rendering.
-18. No total ordering is assumed across independent producers.
-19. Per-context revision comparison is deterministic.
-20. Event processing preserves the state machine defined in `STATES.md`.
+* entire SourceDocument;
+* complete Recognition payload;
+* complete Translation Artifact;
+* screenshots;
+* page images.
+
+Use immutable references where payload size would be excessive.
 
 ---
 
-# 17. Observability Requirements
+# 55. Privacy
 
-Event diagnostics SHOULD include:
+Normal Presentation event payloads and metadata MUST NOT expose:
+
+* provider credentials;
+* full page images;
+* full source documents in diagnostic fields;
+* full translated documents in diagnostic fields;
+* native window handles;
+* private filesystem paths;
+* raw provider responses.
+
+Snapshot/RenderPlan may contain user-visible text where required by their semantic contract.
+
+That content must be treated according to CRAI privacy policy and must not be copied unnecessarily into logs/telemetry.
+
+---
+
+# 56. Diagnostic Event Metadata
+
+Useful bounded metadata:
 
 ```text
 eventId
 eventType
 eventVersion
-producer
-correlationId
-causationId
-traceId
-sessionId
 presentationContextId
-contentId
-contentRevision
-translationRevision
-viewportRevision
-preferenceRevision
 presentationId
 presentationRevision
-operationId
-processingResult
-processingDuration
-rejectionCode
-failureCode
+previousPresentationRevision?
+runtimeRevisionId?
+workItemId?
+attemptId?
+operationId?
+requestId?
+targetId?
+targetRevision?
+viewportRevision?
+effectiveMode?
+fallbackReason?
+result?
+issueCode?
 ```
 
-Normal diagnostics SHOULD NOT include:
-
-- full translated text;
-- full source text;
-- full page images;
-- full geometry arrays;
-- credentials;
-- filesystem paths containing private user data.
-
-Geometry SHOULD be summarized unless explicit diagnostic mode is enabled.
-
 ---
 
-# 18. Testing Requirements
+# 57. Diagnostic Content Rule
 
-## 18.1 Contract Tests
-
-Tests MUST verify:
-
-- required envelope fields;
-- valid event versions;
-- required payload fields;
-- event ownership;
-- producer revision ownership;
-- immutable payload behavior.
-
----
-
-## 18.2 Idempotency Tests
-
-Tests MUST verify:
-
-- duplicate `EventId` causes one logical mutation;
-- duplicate translation revision does not increment Presentation revision;
-- duplicate viewport revision does not create a second layout commit;
-- duplicate clear emits one clear event.
-
----
-
-## 18.3 Ordering Tests
-
-Tests MUST verify:
-
-- stale translation does not overwrite newer translation;
-- stale viewport result does not overwrite newer layout;
-- preference change during reflow is queued, merged, or superseded deterministically;
-- content replacement invalidates old in-flight work;
-- no global producer order is assumed.
-
----
-
-## 18.4 Event-after-Commit Tests
-
-Tests MUST verify:
-
-- `PresentationPrepared` publishes after commit;
-- `PresentationUpdated` publishes after commit;
-- `PresentationLayoutChanged` publishes after commit;
-- `PresentationModeChanged` publishes after commit;
-- `PresentationCleared` publishes after logical invalidation;
-- no success event publishes after failed candidate validation.
-
----
-
-## 18.5 Rejection and Failure Tests
-
-Tests MUST verify:
-
-- stale input produces rejection or discard without entering `Failed`;
-- unsupported mode preserves the previous presentation;
-- malformed event does not mutate state;
-- authority mismatch does not mutate another context;
-- invariant corruption publishes `PresentationFailed`;
-- ordinary validation errors do not publish `PresentationFailed`.
-
----
-
-## 18.6 Payload Consistency Tests
-
-Tests MUST verify:
-
-- snapshot and render plan share one Presentation revision;
-- event mode matches render plan mode;
-- content identifiers match accepted authority;
-- previous and current Presentation revisions are ordered correctly;
-- changed item identifiers belong to the published snapshot.
-
----
-
-# 19. MVP Event Set
-
-The v1 Presentation event set is:
-
-## Consumed
+Logs/telemetry generated from Presentation events should normally record:
 
 ```text
-SessionContentAccepted
-TranslationUpdated
-TranslationCompleted
-ViewportChanged
-PresentationPreferenceChanged
-PresentationProfileChanged
+IDs
+counts
+revisions
+timings
+modes
+fallback categories
+issue codes
 ```
 
-## Published
+not full content.
+
+---
+
+# 58. Events vs Telemetry
+
+A Presentation event is an architectural fact.
+
+It is not automatically:
+
+* a log entry;
+* a metric;
+* a trace span.
+
+Observability infrastructure may derive telemetry from events.
+
+Event schema must not be polluted with arbitrary telemetry-only data.
+
+---
+
+# 59. Events vs State
+
+State answers:
+
+> What lifecycle condition is Presentation in now?
+
+Event answers:
+
+> What Presentation fact became true?
+
+Example:
+
+```text
+State:
+READY
+
+Fact:
+PresentationUpdated revision 15
+```
+
+They are related but not equivalent.
+
+---
+
+# 60. Events vs Commands
+
+Command:
+
+```text
+RecomputePresentationLayout
+```
+
+means:
+
+> Please attempt this operation.
+
+Event:
+
+```text
+PresentationLayoutChanged
+```
+
+means:
+
+> A new layout was successfully committed.
+
+A command may produce no success event if:
+
+* rejected;
+* superseded;
+* canceled;
+* no-op;
+* authority rejected.
+
+---
+
+# 61. No-op Event Rule
+
+A command that results in no committed Presentation change should normally emit no success mutation event.
+
+Examples:
+
+* same effective mode;
+* same focus;
+* equivalent viewport;
+* duplicate profile;
+* equivalent Artifact input.
+
+Diagnostics may still record the operation.
+
+---
+
+# 62. PresentationPrepared Invariant
+
+`PresentationPrepared` means:
+
+```text
+A committed initial Presentation exists.
+```
+
+It does not mean:
+
+```text
+Translation completed.
+UI rendered successfully.
+Reading Session changed.
+Artifact publication completed.
+```
+
+---
+
+# 63. PresentationUpdated Invariant
+
+`PresentationUpdated` means:
+
+```text
+Committed Presentation semantic/visible state changed.
+```
+
+It does not imply that every upstream Artifact changed.
+
+---
+
+# 64. PresentationLayoutChanged Invariant
+
+`PresentationLayoutChanged` means:
+
+```text
+Committed framework-neutral layout changed.
+```
+
+It does not mean the platform UI has already repainted.
+
+---
+
+# 65. PresentationModeChanged Invariant
+
+`PresentationModeChanged` means:
+
+```text
+effective committed Presentation mode changed.
+```
+
+A requested unsupported mode that falls back to the already-current mode may be a rejection/no-op rather than a mode-change event.
+
+---
+
+# 66. PresentationCleared Invariant
+
+`PresentationCleared` means:
+
+```text
+Presentation no longer has current logical state for that lifecycle.
+```
+
+It does not guarantee physical memory/UI resources have all been disposed.
+
+---
+
+# 67. PresentationRejected Invariant
+
+`PresentationRejected` means:
+
+```text
+requested Presentation mutation did not commit.
+```
+
+PresentationRevision does not increase.
+
+Existing committed Presentation remains valid when applicable.
+
+---
+
+# 68. PresentationFailed Invariant
+
+`PresentationFailed` means:
+
+```text
+Presentation-owned internal correctness cannot be guaranteed.
+```
+
+It does not mean:
+
+```text
+Runtime Attempt failed
+Translation failed
+UI apply failed
+```
+
+unless those external failures caused a separate genuine Presentation invariant failure.
+
+---
+
+# 69. Event Error Payload
+
+Machine-readable fields are authoritative:
+
+```text
+reasonCode
+failureCode
+category
+rejectionSource
+recoverability
+```
+
+Human text:
+
+```text
+message?
+```
+
+is optional and non-authoritative.
+
+---
+
+# 70. Retry Semantics
+
+Presentation events do not decide Runtime retry.
+
+`PresentationRejected` may provide:
+
+```text
+retryHint
+```
+
+Examples:
+
+```text
+DoNotRetry
+RetryWithLatestPresentationRevision
+RetryAfterInputChange
+RetryAfterTargetChange
+```
+
+Runtime/Application decides whether to issue new work.
+
+---
+
+# 71. Supersession Does Not Trigger Retry
+
+A Candidate superseded by newer useful work normally requires no retry.
+
+Example:
+
+```text
+Viewport 20 candidate
+Viewport 21 candidate
+Viewport 22 candidate
+```
+
+Only 22 may matter.
+
+Discarding 20/21 is optimization/correctness behavior.
+
+---
+
+# 72. Runtime Event Separation
+
+Presentation MUST NOT publish:
+
+```text
+PresentationAttemptCompleted
+PresentationAttemptFailed
+PresentationAttemptCancelled
+PresentationRetryScheduled
+PresentationWorkItemCompleted
+```
+
+as Runtime lifecycle facts.
+
+Those belong to Runtime.
+
+---
+
+# 73. Artifact Event Separation
+
+Presentation MUST NOT publish:
+
+```text
+TranslationArtifactPublished
+RecognitionArtifactPublished
+SourceDocumentArtifactPublished
+```
+
+Those facts belong to Runtime/Artifact publication owners.
+
+---
+
+# 74. UI Event Separation
+
+Presentation MUST NOT publish:
+
+```text
+OverlayRendered
+WindowOpened
+WidgetMounted
+DOMUpdated
+PresentationPainted
+```
+
+Those facts belong to UI Adapter/platform implementations.
+
+---
+
+# 75. Storage Event Separation
+
+Presentation MUST NOT publish:
+
+```text
+PresentationSaved
+PresentationHistoryPersisted
+PresentationCacheWritten
+```
+
+unless a future explicitly Presentation-owned persistence lifecycle is introduced.
+
+Current ownership belongs outside Presentation.
+
+---
+
+# 76. Deferred Presentation Events
+
+Not part of Presentation v2:
+
+```text
+PresentationCandidateCreated
+PresentationCandidateValidated
+PresentationCancelled
+PresentationRetryScheduled
+PresentationRendered
+PresentationDisplayed
+PresentationExported
+PresentationCached
+PresentationRestored
+OverlayRebuilt
+AccessibilityProfileChanged
+```
+
+Ownership or reasoning:
+
+```text
+Candidate events
+    → diagnostics/trace unless future need
+
+PresentationCancelled
+    → Runtime cancellation lifecycle
+
+PresentationRendered / Displayed
+    → UI Adapter
+
+PresentationExported
+    → Export
+
+PresentationCached / Restored
+    → Storage/Application unless future explicit ownership
+
+OverlayRebuilt
+    → UI Adapter/rendering integration
+
+AccessibilityProfileChanged
+    → Preferences
+```
+
+---
+
+# 77. MVP Published Event Set
+
+Presentation v2 MVP publishes:
 
 ```text
 PresentationPrepared
@@ -1858,223 +1791,679 @@ PresentationRejected
 PresentationFailed
 ```
 
-Events outside this set require a documented architecture decision before becoming part of v1.
+This is intentionally small.
 
 ---
 
-# 20. Deferred Events
+# 78. MVP Mandatory Consumed Event Set
 
-The following are not Presentation-owned v1 events:
-
-```text
-PresentationExported
-OverlayRebuilt
-AccessibilityProfileChanged
-PresentationCached
-PresentationRestored
-```
-
-Ownership guidance:
+Presentation has:
 
 ```text
-PresentationExported
-    → Export Module
-
-OverlayRebuilt
-    → UI Adapter or renderer integration
-
-AccessibilityProfileChanged
-    → Preferences
-
-PresentationCached
-PresentationRestored
-    → Storage or application orchestration
+No mandatory direct consumed business-event set.
 ```
 
-Presentation MAY later publish a specific restoration-related event only if Presentation itself owns a validated restoration lifecycle in a future version.
+Correctness flows through explicit Presentation contracts.
+
+Implementations may subscribe to integration facts as optimization or adapter convenience only when doing so does not introduce hidden orchestration.
 
 ---
 
-# 21. Example Flows
+# 79. Optional Integration Subscription Rule
 
-## 21.1 Initial Partial Comic Presentation
+If an implementation subscribes to an external event:
+
+1. event must be owned externally;
+2. handler must not bypass Presentation command validation;
+3. handler must not grant Runtime authority;
+4. handler should translate fact into an explicit command/application decision;
+5. Event Bus subscription must be replaceable;
+6. Presentation correctness must remain testable without the subscription.
+
+---
+
+# 80. Invalid External Event
+
+Malformed or unrelated external integration facts are handled by their routing/integration owner.
+
+Presentation should not become a generic event quarantine service.
+
+If a mapped Presentation command is invalid, Presentation returns its normal rejection contract.
+
+---
+
+# 81. Event Publication Failure
+
+Presentation commit and Event Bus publication are separate technical operations.
+
+For MVP:
 
 ```text
-SessionContentAccepted
-    │
-    ▼
-Presentation target authority updated
-    │
-    ▼
-TranslationUpdated
-isFinal = false
-completeness = partial
-    │
-    ▼
+Presentation commit
+    ↓
+attempt event publication
+```
+
+If event publication fails:
+
+* the committed Presentation MUST NOT be rolled back automatically merely to recreate the event;
+* Presentation operation MUST NOT be re-executed automatically;
+* failure is diagnosed;
+* UI/application may recover via queries where possible.
+
+A future durable outbox may strengthen this guarantee.
+
+---
+
+# 82. Event Publication Failure Is Not Business Failure
+
+If:
+
+```text
+Presentation Revision 8 committed
+```
+
+but:
+
+```text
+PresentationUpdated event publication fails
+```
+
+the Presentation is still Revision 8.
+
+Observability must distinguish:
+
+```text
+business commit success
+event publication failure
+```
+
+---
+
+# 83. Outbox
+
+A durable outbox may be introduced if CRAI later requires:
+
+* crash-safe event publication;
+* replay;
+* stronger delivery guarantees.
+
+The outbox is infrastructure.
+
+It does not change Presentation event semantics.
+
+---
+
+# 84. Event Compatibility
+
+Unknown optional fields may be ignored when safe.
+
+Unknown required semantic values require:
+
+* rejection;
+* or explicitly documented compatibility fallback.
+
+Major semantic changes require major event-version changes.
+
+---
+
+# 85. Event Versioning
+
+Patch-level event changes may include:
+
+* clarification;
+* optional diagnostics;
+* non-semantic documentation fixes.
+
+Minor-compatible changes may include:
+
+* new optional field;
+* new optional enum values safely ignorable;
+* bounded new metadata.
+
+Major version required for:
+
+* ownership change;
+* required-field removal;
+* revision semantics change;
+* event meaning change;
+* committed-vs-candidate meaning change.
+
+---
+
+# 86. Testing — Ownership
+
+Tests MUST verify:
+
+* Presentation publishes only Presentation-owned facts;
+* Presentation does not publish Runtime terminal facts;
+* Presentation does not publish Translation lifecycle facts;
+* Presentation does not publish UI rendering completion;
+* Presentation does not publish Storage completion.
+
+---
+
+# 87. Testing — Commit Ordering
+
+Tests MUST verify:
+
+```text
+commit
+before
+success event
+```
+
+for:
+
+* `PresentationPrepared`;
+* `PresentationUpdated`;
+* `PresentationLayoutChanged`;
+* `PresentationModeChanged`;
+* `PresentationCleared`.
+
+---
+
+# 88. Testing — Candidate Rejection
+
+Tests MUST verify:
+
+* Candidate validation failure emits no success fact;
+* Runtime authority rejection emits no success fact;
+* Presentation revision conflict emits no success fact;
+* superseded reflow emits no success fact;
+* stale viewport Candidate emits no success fact.
+
+---
+
+# 89. Testing — Revision
+
+Tests MUST verify:
+
+* success event carries committed PresentationRevision;
+* previous revision is correct when applicable;
+* lower PresentationRevision cannot replace newer;
+* equal revision is duplicate/no-op;
+* RuntimeRevisionId is never used as Presentation order.
+
+---
+
+# 90. Testing — Clear
+
+Tests MUST verify:
+
+* `PresentationCleared` publishes after logical invalidation;
+* old Presentation events cannot recreate cleared state;
+* repeated clear does not create duplicate clear events;
+* new PresentationId after clear remains isolated from old lifecycle.
+
+---
+
+# 91. Testing — Rejection vs Failure
+
+Tests MUST verify:
+
+```text
+unsupported mode
+revision conflict
+Runtime authority rejection
+supersession
+invalid viewport
+```
+
+do not produce `PresentationFailed` unless an actual Presentation invariant also breaks.
+
+---
+
+# 92. Testing — UI Boundary
+
+Tests MUST verify:
+
+* `PresentationPrepared` does not claim UI apply success;
+* UI apply failure does not rewrite Presentation event history;
+* stale UI Adapter consumers reject lower Presentation revisions.
+
+---
+
+# 93. Testing — Event Publication Failure
+
+Tests SHOULD verify:
+
+* committed Presentation survives Event Bus publication failure;
+* operation is not re-executed automatically;
+* diagnostics record publication failure;
+* query path can recover current Presentation state.
+
+---
+
+# 94. Observability
+
+Recommended event metrics:
+
+```text
+presentation_event_published_total
+presentation_event_publish_failed_total
+presentation_event_payload_bytes
+presentation_rejected_event_total
+presentation_failed_event_total
+presentation_success_event_total
+```
+
+Useful labels:
+
+```text
+eventType
+eventVersion
+mode
+result
+rejectionSource
+failureCategory
+```
+
+Never label metrics with raw user content.
+
+---
+
+# 95. Example — Initial Presentation
+
+```text
+Accepted upstream Artifacts
+        ↓
+Runtime / Application determines Presentation work
+        ↓
 BuildPresentation
-    │
-    ▼
-Preparing
-    │
-    ├── Build partial PresentationSnapshot
-    ├── Build marker RenderPlan
-    ├── Apply side-panel fallback if needed
-    └── Commit
-    │
-    ▼
-Ready
-    │
-    ▼
+        ↓
+PREPARING
+        ↓
+Candidate built
+        ↓
+Runtime authority revalidation
+        ↓
+Atomic Presentation commit
+        ↓
+READY
+        ↓
 PresentationPrepared
+        ↓
+UI Adapter receives fact or queries current Presentation
 ```
 
 ---
 
-## 21.2 Translation Correction
+# 96. Example — Translation Update
 
 ```text
-TranslationUpdated
-translationRevision = 8
-    │
-    ▼
-Validate authority and revision
-    │
-    ▼
+New TranslationArtifact published
+        ↓
+Application / Business Pipeline decides update required
+        ↓
 UpdatePresentationContent
-    │
-    ▼
-Updating
-    │
-    ├── preserve previous committed snapshot
-    ├── update affected items
-    ├── reflow affected geometry if required
-    └── commit revision 15
-    │
-    ▼
-Ready
-    │
-    ▼
+        ↓
+UPDATING
+        ↓
+Candidate Presentation Revision 15
+        ↓
+commit
+        ↓
+READY
+        ↓
 PresentationUpdated
-previousPresentationRevision = 14
-presentationRevision = 15
 ```
+
+There is no required direct:
+
+```text
+TranslationUpdated event
+    → Presentation mutation
+```
+
+subscription.
 
 ---
 
-## 21.3 Rapid Viewport Changes
+# 97. Example — Rapid Viewport Changes
 
 ```text
-ViewportChanged revision 20
-ViewportChanged revision 21
-ViewportChanged revision 22
-    │
-    ▼
-Coalesce obsolete viewport work
-    │
-    ▼
-RecomputePresentationLayout for revision 22
-    │
-    ▼
-Commit latest RenderPlan
-    │
-    ▼
+UI Adapter observes viewport 20
+UI Adapter observes viewport 21
+UI Adapter observes viewport 22
+        ↓
+Application / Presentation integration coalesces
+        ↓
+RecomputePresentationLayout viewport 22
+        ↓
+REFLOWING
+        ↓
+commit
+        ↓
 PresentationLayoutChanged
 ```
 
-No success event is emitted for viewport revisions 20 or 21.
+No success Presentation events are emitted for discarded layout candidates.
 
 ---
 
-## 21.4 Content Replacement
+# 98. Example — Runtime Authority Rejection
 
 ```text
-SessionContentAccepted
-ContentId = Chapter-11
-    │
-    ▼
-Current Presentation belongs to Chapter-10
-    │
-    ▼
-ClearPresentation
-    │
-    ▼
-PresentationCleared
-reason = ContentReplaced
-    │
-    ▼
-Wait for compatible translation
-    │
-    ▼
-TranslationUpdated or TranslationCompleted
-    │
-    ▼
-PresentationPrepared
+Presentation Candidate prepared
+        ↓
+Runtime Revision superseded
+        ↓
+Authority Revalidation
+        ↓
+RejectedStale
+        ↓
+Candidate discarded
 ```
 
----
-
-## 21.5 Unsupported Mode
+Optional externally useful fact:
 
 ```text
-PresentationPreferenceChanged
-impact = Mode
-requested mode = AdvancedImageRewrite
-    │
-    ▼
-Mode capability check fails
-    │
-    ▼
-Previous Presentation remains committed
-    │
-    ▼
 PresentationRejected
-category = UnsupportedMode
-retryability = RetryAfterCapabilityChange
+rejectionSource = RuntimeAuthority
 ```
 
-The module remains `Ready`.
-
----
-
-## 21.6 Internal Invariant Failure
+No:
 
 ```text
-Reflowing
-    │
-    ▼
-Candidate geometry violates internal invariant
-    │
-    ├── previous committed snapshot trusted
-    │       ▼
-    │     discard candidate
-    │     return Ready
-    │     optional PresentationRejected
-    │
-    └── previous committed snapshot untrusted
-            ▼
-          Failed
-            ▼
-          PresentationFailed
+PresentationFailed
+```
+
+and no Presentation success event.
+
+---
+
+# 99. Example — Presentation Revision Conflict
+
+```text
+Current PresentationRevision = 8
+
+Candidate A expects 8
+Candidate B expects 8
+
+Candidate B commits 9
+
+Candidate A commit attempt
+    ↓
+revision conflict
+    ↓
+discard
+```
+
+Optional:
+
+```text
+PresentationRejected
+rejectionSource = PresentationRevision
+```
+
+Revision remains 9.
+
+---
+
+# 100. Example — Mode Fallback
+
+```text
+ChangePresentationMode
+requestedMode = Overlay
+        ↓
+Overlay cannot satisfy readability
+        ↓
+SidePanel fallback allowed
+        ↓
+Candidate effectiveMode = SidePanel
+        ↓
+commit
+```
+
+If effective committed mode changed:
+
+```text
+PresentationModeChanged
+fallbackApplied = true
+```
+
+If resulting state is equivalent to the current state:
+
+```text
+no success mutation event
+```
+
+may be appropriate.
+
+---
+
+# 101. Example — Clear
+
+```text
+ClearPresentation
+        ↓
+Presentation logically invalidated
+        ↓
+CLEARING → EMPTY
+        ↓
+PresentationCleared
+        ↓
+UI Adapter removes native representation independently
 ```
 
 ---
 
-# 22. Completion Criteria
+# 102. Example — UI Apply Failure
 
-This event specification is considered implemented when:
+```text
+PresentationUpdated revision 12
+        ↓
+UI Adapter tries to apply revision 12
+        ↓
+TargetUnavailable
+```
 
-- every v1 event has a runtime schema;
-- all events use a common envelope;
-- event ownership is enforced;
-- consumed events use producer-owned revisions;
-- published Presentation events use `PresentationRevision`;
-- duplicate delivery is safe;
-- stale revisions cannot commit;
-- successful events publish only after atomic commit;
-- partial translation is supported;
-- `PresentationRejected` and `PresentationFailed` are distinct;
-- `SessionContentAccepted` replaces broad session-change coupling;
-- Translation does not depend on `PresentationId`;
-- UI Adapter can obtain immutable `PresentationSnapshot` and `RenderPlan`;
-- contract tests cover payloads, revisions, ordering, idempotency, and failure behavior;
-- the event model remains consistent with `MODULE.md`, `CONTRACT.md`, and `STATES.md`.
+Possible UI Adapter-owned fact:
+
+```text
+PresentationApplyFailed
+```
+
+Presentation does not emit `PresentationFailed` solely because of this.
+
+---
+
+# 103. Example — Internal Presentation Failure
+
+```text
+Current Presentation
+Snapshot revision = 20
+RenderPlan revision = 19
+        ↓
+Presentation invariant violated
+        ↓
+FAILED
+        ↓
+PresentationFailed
+failureCategory = CommittedStateMismatch
+```
+
+This is a genuine Presentation-owned failure.
+
+---
+
+# 104. Architecture Invariants
+
+1. Events describe facts, not commands.
+
+2. Presentation events describe Presentation-owned facts only.
+
+3. Presentation has no mandatory direct consumed business-event set.
+
+4. Event Bus does not replace Business Pipeline Orchestration.
+
+5. External facts do not bypass Presentation command validation.
+
+6. Presentation does not publish Runtime WorkItem events.
+
+7. Presentation does not publish Runtime Attempt events.
+
+8. Presentation does not publish Runtime cancellation events.
+
+9. Presentation does not publish Translation terminal events.
+
+10. Presentation does not publish Artifact publication facts.
+
+11. Presentation does not publish native rendering completion.
+
+12. Successful Presentation events publish only after atomic commit.
+
+13. Candidate preparation alone produces no success fact.
+
+14. Every successful mutation fact contains PresentationRevision.
+
+15. PresentationRevision orders Presentation state.
+
+16. RuntimeRevisionId is correlation metadata, not Presentation ordering.
+
+17. Stale Candidate publishes no success event.
+
+18. Superseded Candidate normally publishes no business event.
+
+19. Runtime authority rejection is not Presentation internal failure.
+
+20. Presentation revision conflict is not Presentation internal failure.
+
+21. `PresentationRejected` means no commit occurred.
+
+22. `PresentationFailed` means Presentation-owned correctness is untrusted.
+
+23. Clear fact means logical invalidation, not physical UI destruction.
+
+24. UI apply remains UI Adapter-owned.
+
+25. Duplicate delivery does not create duplicate logical effects.
+
+26. No global total ordering is assumed.
+
+27. Event payloads are immutable.
+
+28. Large upstream payloads should use Artifact references.
+
+29. Standard diagnostics do not duplicate complete user content.
+
+30. Event publication failure does not roll back valid Presentation commit automatically.
+
+31. Event publication failure does not rerun Presentation business work automatically.
+
+32. Query Interface remains available independently of Event Bus delivery.
+
+---
+
+# 105. Related Documents
+
+```text
+doc/02-modules/presentation/MODULE.md
+doc/02-modules/presentation/CONTRACT.md
+doc/02-modules/presentation/STATES.md
+doc/02-modules/presentation/ERRORS.md
+doc/02-modules/presentation/README.md
+
+doc/01-architecture/core/EVENT_BUS.md
+doc/01-architecture/core/EVENT_CONVENTION.md
+doc/01-architecture/core/STATE_MACHINE.md
+
+doc/01-architecture/modules/OWNERSHIP_MAP.md
+doc/01-architecture/modules/MODULE_DEPENDENCY.md
+
+doc/01-architecture/runtime/BUSINESS_PIPELINE_ORCHESTRATION.md
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+doc/01-architecture/runtime/RUNTIME_OBSERVABILITY.md
+
+doc/02-modules/translation/EVENTS.md
+doc/02-modules/reading-session/EVENTS.md
+doc/02-modules/preferences/EVENTS.md
+doc/02-modules/ui-adapter/EVENTS.md
+```
+
+---
+
+# 106. Completion Criteria
+
+This specification is synchronized when:
+
+* Presentation event ownership is explicit;
+* Presentation has no hidden event-driven workflow;
+* no external business event directly defines Presentation state transitions;
+* Runtime/Application remains responsible for invoking Presentation work;
+* success facts occur only after Presentation commit;
+* PresentationRevision is the public ordering mechanism;
+* Runtime identity remains external metadata;
+* Runtime authority rejection is distinct from Presentation rejection;
+* Presentation rejection is distinct from Presentation failure;
+* candidate/supersession behavior does not flood the Event Bus;
+* clear means logical Presentation invalidation;
+* UI apply remains outside Presentation event ownership;
+* Artifact publication remains outside Presentation ownership;
+* Event Bus publication failure does not invalidate committed Presentation state;
+* event payloads remain immutable, serializable, bounded, and privacy-aware;
+* tests cover ownership, commit timing, ordering, idempotency, rejection, failure, clear, and UI boundary.
+
+---
+
+# 107. Summary
+
+Presentation v2 event flow is:
+
+```text
+External Artifact / Fact
+        ↓
+Application / Runtime Decision
+        ↓
+Presentation Command
+        ↓
+Presentation Operation
+        ↓
+Candidate
+        ↓
+Authority Revalidation
+        ↓
+Presentation Commit
+        ↓
+Presentation-owned Fact
+```
+
+Presentation publishes:
+
+```text
+PresentationPrepared
+PresentationUpdated
+PresentationLayoutChanged
+PresentationModeChanged
+PresentationCleared
+PresentationRejected
+PresentationFailed
+```
+
+The critical rule is:
+
+```text
+Events explain what Presentation already committed,
+rejected, cleared, or failed.
+
+Events do not tell Presentation what work to execute.
+```
+
+And the ownership boundary remains:
+
+```text
+Runtime
+    → execution authority and terminal work lifecycle
+
+Artifact Store
+    → accepted Artifact publication
+
+Presentation
+    → Presentation state and Presentation facts
+
+UI Adapter
+    → actual rendering and UI-apply facts
+```

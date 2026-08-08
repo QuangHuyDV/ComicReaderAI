@@ -1,40 +1,35 @@
 # Text Detection
 
-> **Status:** Draft (V1)
-> **Version:** 0.1.0
+> **Status:** Draft
+> **Version:** 1.1.0
 > **Owner:** OCR Architecture
-> **Last Updated:** 2026-07-28
+> **Layer:** OCR Architecture
+> **Depends On:** Preprocessing
+> **Next Layer:** Recognition, Text Direction, Layout Analysis
 
 ---
 
 # 1. Purpose
 
-Text Detection là thành phần chịu trách nhiệm xác định **vị trí của toàn bộ vùng chứa văn bản** trên một hình ảnh mà **không thực hiện nhận dạng nội dung chữ**.
+Text Detection là thành phần chịu trách nhiệm xác định:
 
-Detection là bước đầu tiên của OCR Pipeline và đóng vai trò tạo nền tảng cho toàn bộ các giai đoạn phía sau như:
+```text
+Where is the text?
+```
 
-* Text Recognition
+trên một hình ảnh.
+
+Detection tìm các vùng có khả năng chứa văn bản và biểu diễn chúng dưới dạng `Region` có identity, geometry và metadata ổn định.
+
+Detection không nhận dạng nội dung chữ.
+
+Nó tạo nền tảng hình học cho:
+
+* Recognition
+* Text Direction
+* Layout Analysis
 * Reading Order
-* Text Processing
-* Translation
 * Presentation
-
-Kết quả của Detection phải đủ chính xác để các module phía sau có thể hoạt động độc lập mà không cần tự tìm lại vị trí văn bản.
-
----
-
-## Design Principles
-
-Text Detection phải đảm bảo các nguyên tắc sau:
-
-* Chỉ xác định **"Where is the text?"**
-* Không trả lời **"What is the text?"**
-* Không dịch.
-* Không chỉnh sửa ảnh.
-* Không render.
-* Không thay đổi dữ liệu gốc.
-
-Detection chỉ sinh ra metadata mô tả các vùng văn bản.
 
 ---
 
@@ -42,48 +37,97 @@ Detection chỉ sinh ra metadata mô tả các vùng văn bản.
 
 Detection chịu trách nhiệm:
 
-* tìm toàn bộ vùng chứa văn bản
-* xác định hình học của từng vùng
-* phân loại sơ bộ vùng văn bản
-* ước lượng hướng đọc
-* tính confidence ban đầu
-* chuẩn hóa kết quả thành Detection Result
+* phát hiện vùng chứa văn bản
+* tạo Region
+* xác định geometry
+* chuẩn hóa coordinate
+* xác định Detection Confidence
+* phân loại sơ bộ Region Type
+* tạo Region hierarchy khi có đủ dữ liệu
+* merge/split Region
+* validate Region
+* cung cấp direction hint khi phù hợp
 
-Detection hoạt động trên mọi nguồn ảnh:
+Detection có thể xử lý:
 
-* Comic
 * Manga
 * Manhua
+* Manhwa
 * Novel Screenshot
 * Web Page
 * Captured Screen
 * Local Image
+* user-selected ROI
 
 ---
 
-## Out of Scope
+# 3. Non-Goals
 
-Detection **không chịu trách nhiệm**:
+Detection không thực hiện:
 
-* OCR
+* Character Recognition
 * Translation
-* Text Correction
-* Grammar
-* Spell Check
-* Font Estimation
-* Bubble Redrawing
-* Image Enhancement
-* Rendering
-
-Các nhiệm vụ trên thuộc module khác.
+* semantic text analysis
+* grammar correction
+* spell checking
+* final Reading Order
+* font estimation
+* text rendering
+* bubble redrawing
+* Runtime scheduling
+* Runtime retry
+* Event Bus behavior
+* global cache lifecycle
 
 ---
 
-# 3. Terminology
+# 4. Architecture Position
+
+```text
+Image
+  │
+  ▼
+Preprocessing
+  │
+  ▼
+Text Detection
+  │
+  ▼
+Detection Result
+  │
+  ├──► Recognition
+  ├──► Text Direction
+  └──► Layout Analysis
+```
+
+Detection chỉ giao tiếp thông qua CRAI contract.
+
+Detection Engine implementation không được rò rỉ sang các stage phía sau.
+
+---
+
+# 5. Design Principles
+
+Detection phải:
+
+* chỉ trả lời "text nằm ở đâu"
+* không trả lời "text là gì"
+* giữ source image immutable
+* provider-neutral
+* deterministic khi cùng semantic input và strategy version
+* serializable
+* versionable
+* giữ Region identity ổn định trong cùng Detection Result
+* giữ geometry có thể truy vết về source image
+* không tạo semantic dependency vào Translation hoặc Presentation
+
+---
+
+# 6. Terminology
 
 ## Image
 
-Ảnh đầu vào của OCR Pipeline.
+Ảnh đầu vào đã được chuẩn bị cho Detection.
 
 ---
 
@@ -91,479 +135,206 @@ Các nhiệm vụ trên thuộc module khác.
 
 Một vùng nghi ngờ chứa văn bản.
 
-Một Region chưa chắc đã chứa chữ hợp lệ.
-
----
-
-## Detection
-
-Quá trình phát hiện Region.
-
----
-
-## Bounding Box
-
-Hình chữ nhật bao quanh Region.
-
----
-
-## Polygon
-
-Đa giác mô tả chính xác biên của Region.
-
----
-
-## Mask
-
-Ma trận biểu diễn từng pixel thuộc Region.
-
-Mask có độ chính xác cao hơn Bounding Box.
+Region chưa chắc chứa văn bản hợp lệ cho tới khi validation hoàn tất.
 
 ---
 
 ## Detection Result
 
-Danh sách Region được tạo ra sau Detection.
+Tập hợp Region và metadata được Detection tạo ra.
 
 ---
 
-## Confidence
+## Geometry
 
-Độ tin cậy của Detection.
+Biểu diễn hình học của Region.
 
-Confidence chỉ phản ánh khả năng vùng đó chứa văn bản.
+Có thể gồm:
 
-Không phản ánh OCR đúng hay sai.
-
----
-
-# 4. Goals
-
-Detection được thiết kế nhằm đạt các mục tiêu sau.
-
-## Accuracy
-
-Phát hiện được nhiều vùng văn bản nhất có thể.
+* Bounding Box
+* Polygon
+* optional Segmentation Mask
+* Rotation
+* Transform reference
 
 ---
 
-## Stability
+## Detection Confidence
 
-Cùng một ảnh phải tạo ra kết quả gần như giống nhau.
-
----
-
-## Performance
-
-Hoạt động đủ nhanh cho chế độ đọc thời gian thực.
+Độ tin cậy rằng Region thực sự chứa văn bản.
 
 ---
 
-## Extensibility
+## Classification Confidence
 
-Có thể thay đổi Detection Engine mà không ảnh hưởng Recognition.
+Độ tin cậy của `Region Type`.
 
----
-
-## Independence
-
-Không phụ thuộc Translation.
-
-Không phụ thuộc Presentation.
+Hai confidence này độc lập.
 
 ---
 
-## Deterministic Output
+## Region Type
 
-Đầu vào giống nhau nên tạo ra kết quả giống nhau trong cùng một cấu hình.
-
----
-
-## Provider Agnostic
-
-Có thể sử dụng:
-
-* PaddleOCR
-* MMOCR
-* EasyOCR
-* OpenCV
-* Custom AI
-
-mà không thay đổi contract.
+Phân loại sơ bộ của Region.
 
 ---
 
-# 5. Non-Goals
+## ROI
 
-Detection không cố gắng:
-
-* đọc nội dung
-* đoán ngôn ngữ
-* sửa lỗi OCR
-* dịch
-* suy luận ngữ nghĩa
-* xác định người nói
-* thay thế Bubble
-* chỉnh sửa hình ảnh
-
-Các bước này sẽ được xử lý ở pipeline phía sau.
+Region of Interest giới hạn phạm vi Detection.
 
 ---
 
-# 6. Responsibilities
-
-Detection chịu trách nhiệm:
-
-* nhận Image đã được chuẩn hóa
-* phân tích toàn bộ ảnh
-* phát hiện vùng chứa văn bản
-* tạo Detection Region
-* chuẩn hóa tọa độ
-* sinh Detection Metadata
-* trả về Detection Result
-
-Detection phải hoạt động như một dịch vụ độc lập.
-
----
-
-## Detection MUST
-
-Detection phải:
-
-* bất biến với ảnh gốc
-* không thay đổi pixel gốc
-* không tạo bản dịch
-* không OCR
-* không cache sai định dạng
-* không làm mất Region hợp lệ
-
----
-
-# 7. Architecture Position
-
-Detection là bước đầu tiên của OCR.
+# 7. High-Level Detection Pipeline
 
 ```text
-Image
-
-        │
-
-        ▼
-
-Preprocessing
-
-        │
-
-        ▼
-
-Text Detection
-
-        │
-
-        ▼
-
-Recognition
-
-        │
-
-        ▼
-
-Reading Order
-
-        │
-
-        ▼
-
-Text Processing
-
-        │
-
-        ▼
-
-Translation
-
-        │
-
-        ▼
-
-Presentation
+Processed Image
+      │
+      ▼
+1. Input Validation
+      │
+      ▼
+2. Detection Context Resolution
+      │
+      ▼
+3. Detection Engine
+      │
+      ▼
+4. Region Generation
+      │
+      ▼
+5. Geometry Normalization
+      │
+      ▼
+6. Region Classification
+      │
+      ▼
+7. Region Merge / Split
+      │
+      ▼
+8. Region Validation
+      │
+      ▼
+9. Detection Result Assembly
 ```
 
-Detection chỉ giao tiếp thông qua contract.
+Implementation có thể gộp một số bước nếu provider hỗ trợ trực tiếp.
 
-Không được gọi trực tiếp Recognition Engine.
-
-Điều này giúp:
-
-* dễ thay Detection
-* dễ benchmark
-* dễ cache
-* dễ retry
+Contract cuối cùng vẫn phải giữ cùng semantics.
 
 ---
 
-# 8. High-Level Pipeline
+# 8. Stage 1 — Input Validation
 
-Detection bao gồm các bước chính.
+Detection kiểm tra:
 
-```text
-Input Image
+* image hợp lệ
+* image readable
+* dimensions hợp lệ
+* coordinate space tồn tại
+* ROI hợp lệ nếu có
+* Detection Profile hợp lệ
 
-↓
-
-Validation
-
-↓
-
-Normalization
-
-↓
-
-Preprocessing
-
-↓
-
-Detection Engine
-
-↓
-
-Region Generation
-
-↓
-
-Region Validation
-
-↓
-
-Confidence Estimation
-
-↓
-
-Output Assembly
-
-↓
-
-Detection Result
-```
-
-Mỗi bước phải có thể được thay thế bằng implementation khác mà không thay đổi contract.
+Detection không nên tiếp tục khi geometry input không xác định được.
 
 ---
 
-## Detection Engine
+# 9. Stage 2 — Detection Context Resolution
 
-Detection Engine là thành phần tìm Region.
+Detection Context có thể sử dụng:
 
-Ví dụ:
+* Processed Image
+* image dimensions
+* ROI
+* Detection Profile
+* language/script hint
+* source type
+* previous compatible Detection Result
+
+Hints chỉ hỗ trợ Detection.
+
+Chúng không làm thay đổi semantic boundary của Detection.
+
+---
+
+# 10. Stage 3 — Detection Engine
+
+Detection Engine chịu trách nhiệm tìm candidate region.
+
+Implementation có thể là:
 
 * Deep Learning
-* Classical Vision
+* Classical Computer Vision
 * Hybrid Detection
+* OCR Provider with detection capability
+* custom AI model
 
 Pipeline không phụ thuộc engine cụ thể.
 
 ---
 
-# 9. Detection Lifecycle
+# 11. Stage 4 — Region Generation
 
-Một Detection Request trải qua các trạng thái sau.
+Engine output được chuẩn hóa thành CRAI `Region`.
 
-```text
-Created
-
-↓
-
-Queued
-
-↓
-
-Running
-
-↓
-
-Region Detecting
-
-↓
-
-Region Validating
-
-↓
-
-Completed
-```
-
-Nếu xảy ra lỗi.
-
-```text
-Running
-
-↓
-
-Failed
-```
-
-Nếu bị hủy.
-
-```text
-Running
-
-↓
-
-Cancelled
-```
-
-Lifecycle này sẽ được mở rộng ở Runtime Architecture.
-
----
-
-# 10. Inputs
-
-Detection nhận các dữ liệu sau.
-
-## Required
-
-* Image
-* Image Metadata
-* Detection Profile
-
----
-
-## Optional
-
-* Previous Detection Result
-* ROI
-* Language Hint
-* Runtime Configuration
-
----
-
-## Input Requirements
-
-Ảnh đầu vào phải:
-
-* hợp lệ
-* đọc được
-* đã normalize
-* có kích thước xác định
-* có hệ tọa độ rõ ràng
-
-Nếu không đáp ứng, Detection phải trả lỗi thay vì tiếp tục xử lý.
-
----
-
-# 11. Outputs
-
-Detection trả về một Detection Result.
-
-Detection Result bao gồm:
-
-* danh sách Region
-* metadata
-* confidence
-* statistics
-* execution information
-
-Detection Result là đầu vào duy nhất của Recognition.
-
-Recognition không được tự detect lại nếu không có yêu cầu đặc biệt.
-
----
-
-## Output Characteristics
-
-Output phải:
-
-* immutable
-* deterministic
-* serializable
-* versioned
-* cacheable
-
-Điều này cho phép lưu cache và tái sử dụng giữa nhiều lần OCR.
-
----
-
-# 12. Region Model
-
-Region là đơn vị cơ bản của Detection.
-
-Mỗi Region đại diện cho một vùng nghi ngờ chứa văn bản.
-
-Ở phiên bản V1, Region được định nghĩa ở mức khái niệm.
+Mỗi Region tối thiểu cần:
 
 ```text
 Region
-
-id
-
-geometry
-
-confidence
-
-metadata
+├── Region ID
+├── Geometry
+├── Detection Confidence
+└── Metadata
 ```
 
-Trong các phiên bản tiếp theo, Region sẽ được mở rộng với:
+Có thể bổ sung:
 
-* Bounding Box
-* Polygon
-* Segmentation Mask
-* Rotation
-* Region Type
-* Reading Direction Hint
-* Parent / Child Relationship
-* Detection Provider Metadata
-* Runtime Metadata
-
-Region phải có định danh ổn định trong suốt vòng đời của một Detection Result để các bước Recognition, Translation và Presentation có thể tham chiếu cùng một thực thể mà không cần tạo lại.
+```text
+Region Type
+Classification Confidence
+Rotation
+Direction Hint
+Parent ID
+Child IDs
+Provider Metadata
+```
 
 ---
 
-# Summary
+# 12. Detection Result
 
-Text Detection là tầng chịu trách nhiệm **xác định vị trí của văn bản**, không phải **đọc hay hiểu nội dung văn bản**.
+Canonical output:
 
-Việc tách Detection khỏi Recognition giúp:
+```text
+Detection Result
+├── Metadata
+├── Image Reference
+├── Image Version
+├── Regions[]
+├── Statistics
+└── Diagnostics
+```
 
-* thay đổi OCR Engine mà không ảnh hưởng pipeline;
-* cache Detection lâu hơn Recognition;
-* xử lý song song nhiều Recognition Provider;
-* hỗ trợ incremental OCR trong tương lai;
-* giữ kiến trúc OCR của CRAI theo hướng module hóa và dễ mở rộng.
+Detection Result phải:
 
-## 13. Coordinate System
-
-### Overview
-
-Text Detection phải sử dụng một hệ tọa độ thống nhất trong toàn bộ OCR Pipeline nhằm đảm bảo mọi module đều tham chiếu đến cùng một vị trí trên ảnh.
-
-Mọi Detection Result phải được biểu diễn theo **Image Coordinate System** của ảnh đầu vào sau khi đã hoàn thành bước Normalization.
-
-Detection không được sử dụng hệ tọa độ riêng của từng OCR Provider trong contract công khai.
-
----
-
-### Design Goals
-
-Coordinate System phải đảm bảo:
-
-* nhất quán giữa mọi module
-* độc lập với OCR Provider
-* không phụ thuộc độ phân giải hiển thị
-* có thể chuyển đổi giữa nhiều phiên bản ảnh
-* hỗ trợ lưu cache lâu dài
-* hỗ trợ nhiều phép biến đổi hình học
+* immutable sau khi publish
+* serializable
+* versioned
+* provider-neutral
+* giữ exact image identity
+* giữ Region IDs ổn định trong cùng revision
 
 ---
 
-### Coordinate Origin
+# 13. Coordinate System
 
-Gốc tọa độ được định nghĩa:
+Detection sử dụng coordinate system thống nhất của image artifact mà nó tham chiếu.
+
+Default origin:
 
 ```text
 (0,0)
-┌────────────────────────────► X
-│
+┌────────────────────► X
 │
 │
 │
@@ -571,1407 +342,966 @@ Gốc tọa độ được định nghĩa:
 Y
 ```
 
-Trong đó:
+* origin nằm ở góc trên trái
+* X tăng từ trái sang phải
+* Y tăng từ trên xuống dưới
 
-* gốc tọa độ nằm tại góc trên bên trái ảnh
-* trục X tăng từ trái sang phải
-* trục Y tăng từ trên xuống dưới
-
-Đây là hệ tọa độ chuẩn được sử dụng xuyên suốt CRAI.
+Đơn vị chuẩn là pixel trong coordinate space được khai báo.
 
 ---
 
-### Coordinate Unit
+# 14. Coordinate Precision
 
-Đơn vị mặc định là **pixel**.
+Geometry nên hỗ trợ floating-point coordinates.
 
-Không sử dụng:
+Điều này giúp giảm sai số khi:
 
-* inch
-* point
-* phần trăm
-* đơn vị phụ thuộc DPI
+* resize
+* rotate
+* perspective transform
+* polygon mapping
+* nhiều transform liên tiếp
 
-Mọi Region phải có thể ánh xạ trực tiếp về pixel trên ảnh nguồn.
-
----
-
-### Coordinate Precision
-
-Hệ thống phải hỗ trợ tọa độ dấu phẩy động (`float`) nhằm:
-
-* giảm sai số khi resize
-* giảm sai số khi rotate
-* hỗ trợ polygon chính xác
-* tránh lỗi tích lũy khi transform nhiều lần
-
-Việc làm tròn sang số nguyên chỉ được thực hiện khi thực sự cần thiết (ví dụ: render hoặc crop ảnh).
+Integer rounding chỉ nên xảy ra khi downstream operation thực sự yêu cầu.
 
 ---
 
-### Coordinate Invariants
+# 15. Coordinate Invariants
 
-Coordinate System phải đảm bảo:
+Geometry phải đảm bảo:
 
-* cùng một Region luôn tham chiếu đến cùng vị trí trên ảnh
-* không thay đổi khi thay OCR Provider
+* cùng Region luôn tham chiếu cùng visual location trong cùng image version
+* không phụ thuộc OCR Provider
 * không thay đổi sau Recognition
-* không thay đổi sau Translation
-* chỉ Geometry Transformation mới được phép sinh hệ tọa độ mới
+* không thay đổi bởi Translation
+* mọi transform có lineage rõ ràng
 
 ---
 
-## 14. Bounding Box
+# 16. Bounding Box
 
-### Purpose
+Bounding Box là hình chữ nhật bao quanh Region.
 
-Bounding Box là hình chữ nhật nhỏ nhất bao phủ toàn bộ Region.
-
-Bounding Box được sử dụng cho:
-
-* crop ảnh
-* preview
-* indexing
-* spatial search
-* collision detection
-* viewport optimization
-
-Bounding Box không nhằm mô tả chính xác hình dạng văn bản.
-
----
-
-### Structure
-
-Một Bounding Box tối thiểu bao gồm:
+Conceptual model:
 
 ```text
 BoundingBox
-
-x
-
-y
-
-width
-
-height
+├── x
+├── y
+├── width
+└── height
 ```
 
-Trong đó:
+Bounding Box phù hợp cho:
 
-* `(x, y)` là góc trên bên trái
-* `width` là chiều rộng
-* `height` là chiều cao
+* indexing
+* quick crop
+* preview
+* spatial search
+* viewport optimization
 
----
-
-### Characteristics
-
-Bounding Box:
-
-* luôn song song với trục ảnh
-* dễ tính toán
-* chi phí lưu trữ thấp
-* phù hợp cho cache
-
-Nhược điểm:
-
-* không mô tả chính xác chữ cong
-* không mô tả bubble nghiêng
-* chứa nhiều khoảng trắng dư
+Bounding Box không phải biểu diễn chính xác nhất của text contour.
 
 ---
 
-### Usage
+# 17. Polygon
 
-Bounding Box được khuyến nghị cho:
+Polygon mô tả Region chính xác hơn Bounding Box.
 
-* UI
-* Cache
-* Index
-* Crop
-* Quick Selection
-
-Không nên sử dụng Bounding Box cho:
-
-* OCR chính xác cao
-* Text Wrapping
-* Bubble Reconstruction
-
----
-
-## 15. Polygon
-
-### Purpose
-
-Polygon mô tả chính xác đường bao của Region.
-
-Polygon là hình học chuẩn được khuyến nghị sử dụng trong CRAI.
-
----
-
-### Design Goals
-
-Polygon phải:
-
-* mô tả sát biên văn bản
-* hỗ trợ nhiều đỉnh
-* hỗ trợ hình dạng bất quy tắc
-* hỗ trợ văn bản cong
-* hỗ trợ bong bóng thoại méo
-
----
-
-### Structure
+Conceptual model:
 
 ```text
 Polygon
-
-points[]
-
-Point
-
-x
-
-y
+└── points[]
+     ├── x
+     └── y
 ```
 
-Ví dụ:
+Polygon nên:
 
-```text
-P1(x1,y1)
+* giữ point ordering nhất quán
+* hỗ trợ Region nghiêng
+* hỗ trợ irregular shape
+* hỗ trợ vertical text
+* hỗ trợ geometry mapping
 
-P2(x2,y2)
-
-P3(x3,y3)
-
-P4(x4,y4)
-```
-
-Số lượng điểm không bị giới hạn.
+Bounding Box và Polygon có thể cùng tồn tại.
 
 ---
 
-### Ordering
+# 18. Segmentation Mask
 
-Các điểm của Polygon phải được lưu theo cùng một chiều (clockwise hoặc counter-clockwise) và nhất quán trong toàn bộ hệ thống.
+Segmentation Mask là biểu diễn pixel-level của Region.
 
-Việc thay đổi thứ tự điểm có thể làm sai kết quả khi:
+Mask có thể hữu ích cho:
 
-* tính diện tích
-* clipping
-* rendering
-* collision detection
-
----
-
-### Advantages
-
-Polygon:
-
-* chính xác hơn Bounding Box
-* hỗ trợ OCR tốt hơn
-* giảm nền dư
-* hỗ trợ bubble méo
-* hỗ trợ text nghiêng
-* hỗ trợ manga dọc
-
----
-
-### Trade-offs
-
-Polygon có:
-
-* chi phí lưu trữ lớn hơn
-* nhiều phép tính hơn
-* khó debug hơn Bounding Box
-
-Do đó Bounding Box và Polygon nên cùng tồn tại trong Detection Result.
-
----
-
-## 16. Segmentation Mask
-
-### Purpose
-
-Segmentation Mask biểu diễn chính xác từng pixel thuộc về Region.
-
-Mask là biểu diễn có độ chính xác cao nhất.
-
----
-
-### Characteristics
-
-Mask cho phép:
-
-* tách nền chính xác
-* OCR chất lượng cao
-* bubble reconstruction
+* precise region extraction
+* advanced OCR
 * text removal
 * inpainting
-* AI editing
+
+Mask không bắt buộc phải nằm trực tiếp trong mọi Detection Result.
+
+Có thể lưu dưới dạng:
+
+* optional artifact
+* compressed representation
+* lazily generated artifact
+
+Mask lifecycle thuộc resource/artifact owner tương ứng.
 
 ---
 
-### Data Model
+# 19. Rotation
 
-Khái niệm:
+Region có thể có góc xoay.
 
-```text
-Mask
-
-width
-
-height
-
-binary data
-```
-
-Mỗi pixel chỉ thuộc một trong hai trạng thái:
-
-* thuộc Region
-* không thuộc Region
-
----
-
-### Storage
-
-Do kích thước lớn, Mask không nên luôn được lưu trong Detection Result.
-
-Có thể:
-
-* sinh theo yêu cầu
-* cache riêng
-* lưu dưới dạng nén
-
----
-
-### Usage
-
-Mask phù hợp cho:
-
-* Accurate OCR
-* Image Editing
-* AI Inpainting
-* Bubble Replacement
-
-Không phù hợp cho:
-
-* Quick Preview
-* Simple UI
-* Lightweight Cache
-
----
-
-## 17. Rotation
-
-### Purpose
-
-Không phải mọi Region đều song song với ảnh.
-
-Detection phải hỗ trợ xác định góc xoay của từng Region.
-
----
-
-### Rotation Angle
-
-Rotation được biểu diễn theo đơn vị:
-
-```text
-Degree
-```
-
-hoặc
-
-```text
-Radian
-```
-
-Toàn bộ hệ thống nên thống nhất một chuẩn duy nhất.
-
----
-
-### Use Cases
-
-Rotation xuất hiện trong:
-
-* manga
-* manhwa
-* sound effects
-* poster
-* quảng cáo
-* camera capture
-* ảnh chụp màn hình bị nghiêng
-
----
-
-### Design Requirements
-
-Rotation phải:
-
-* độc lập với OCR Provider
-* không làm thay đổi Coordinate System
-* hỗ trợ Deskew
-* hỗ trợ Render
-
----
-
-### Notes
-
-Rotation chỉ mô tả hình học của Region.
-
-Rotation không làm thay đổi ảnh nguồn.
-
----
-
-## 18. Geometry Transformation
-
-### Purpose
-
-Geometry Transformation mô tả mọi phép biến đổi hình học giữa các phiên bản ảnh.
-
-Detection chỉ sử dụng kết quả của Transformation, không trực tiếp thực hiện các phép biến đổi.
-
----
-
-### Supported Transformations
-
-Geometry Transformation có thể bao gồm:
-
-* Resize
-* Crop
-* Rotate
-* Flip
-* Perspective Correction
-* Padding
-* Scale
-* Translation
-
----
-
-### Coordinate Mapping
-
-Mọi phép biến đổi phải cho phép ánh xạ hai chiều:
-
-```text
-Original Image
-
-⇄
-
-Normalized Image
-```
-
-Điều này đảm bảo mọi Region luôn có thể quy đổi ngược về ảnh gốc.
-
----
-
-### Transformation Chain
-
-Trong quá trình xử lý, một Region có thể đi qua nhiều phép biến đổi liên tiếp.
+Rotation chỉ là geometry metadata.
 
 Ví dụ:
 
 ```text
-Original
+0°
+90°
+180°
+270°
+```
 
-↓
+hoặc góc bất kỳ nếu provider hỗ trợ.
 
+Rotation không thay đổi source image.
+
+---
+
+# 20. Geometry Transformation
+
+Detection sử dụng transform metadata để ánh xạ Region giữa các image version hoặc derived image.
+
+Ví dụ:
+
+```text
+Source Image
+    ↓
 Resize
-
-↓
-
+    ↓
 Deskew
-
-↓
-
+    ↓
 Crop
-
-↓
-
+    ↓
+Processed Image
+    ↓
 Detection
 ```
 
-Hệ thống phải lưu đủ thông tin để truy vết chuỗi biến đổi nếu cần.
+Mọi Region phải có thể truy vết về coordinate space nguồn khi transform metadata đủ.
+
+Detection không sở hữu toàn bộ artifact lifecycle của transform.
 
 ---
 
-### Geometry Invariants
+# 21. Region Type
 
-Geometry Transformation phải đảm bảo:
+Detection có thể phân loại sơ bộ Region để hỗ trợ downstream processing.
 
-* không làm mất Region hợp lệ
-* không thay đổi thứ tự Region
-* có thể đảo ngược khi đủ dữ liệu
-* không phụ thuộc Detection Engine
-* không phụ thuộc Recognition Engine
-
-Geometry là lớp nền tảng cho toàn bộ OCR Pipeline. Mọi module phía sau (Recognition, Reading Order, Translation và Presentation) đều phải sử dụng cùng một mô hình hình học nhằm đảm bảo tính nhất quán của dữ liệu.
-
-## 19. Region Types
-
-### Purpose
-
-Region Type mô tả **ý nghĩa của một vùng văn bản** thay vì chỉ mô tả hình học của vùng đó.
-
-Việc phân loại Region ngay từ giai đoạn Detection giúp các module phía sau giảm đáng kể lượng suy luận cần thực hiện.
-
----
-
-### Classification Principles
-
-Mỗi Region:
-
-* chỉ có một Region Type chính
-* có thể chứa metadata bổ sung
-* phải được phân loại độc lập với OCR
-* không phụ thuộc Translation
-* không phụ thuộc Presentation
-
-Nếu không đủ thông tin để xác định loại, Detection phải sử dụng `Unknown Region`.
-
----
-
-### Built-in Region Types
-
-Phiên bản đầu tiên của CRAI định nghĩa các loại Region sau:
+Built-in types hiện tại:
 
 * Speech Bubble
 * Narration Box
-* Sound Effects (SFX)
+* Sound Effects
 * Background Text
 * UI Text
 * Watermark
 * Advertisement
 * Unknown Region
 
-Trong tương lai có thể bổ sung thêm mà không phá vỡ Detection Contract.
+Nếu không đủ bằng chứng:
+
+```text
+Unknown Region
+```
+
+phải được sử dụng thay vì ép classification.
 
 ---
 
-### Region Type Invariants
+# 22. Region Type Semantics
 
-Region Type phải đảm bảo:
+## Speech Bubble
 
-* ổn định trong cùng một Detection Result
-* không thay đổi sau Recognition
-* không phụ thuộc OCR Provider
-* không thay đổi bởi Translation
+Vùng chứa dialogue.
 
----
+Detection có thể nhận diện:
 
-## 20. Speech Bubble
+* outer bubble geometry
+* inner text region
+* bubble relationship
 
-### Purpose
-
-Speech Bubble đại diện cho vùng chứa lời thoại của nhân vật.
-
-Đây là Region quan trọng nhất trong truyện tranh và luôn được ưu tiên xử lý.
+Detection không xác định speaker identity.
 
 ---
 
-### Characteristics
+## Narration Box
 
-Speech Bubble thường có:
+Vùng chứa narration hoặc descriptive text.
 
-* viền khép kín
-* nền sáng
-* chứa một hoặc nhiều đoạn văn
-* có đuôi hướng về nhân vật
-
-Tuy nhiên hệ thống không được giả định tất cả Bubble đều có đầy đủ các đặc điểm trên.
+Không được phân loại thành Speech Bubble chỉ dựa vào shape.
 
 ---
 
-### Detection Strategy
+## Sound Effects
 
-Detection nên ưu tiên:
+Text visual effect thường:
 
-* xác định toàn bộ vùng Bubble
-* xác định vùng Text bên trong
-* tách Bubble độc lập với nền ảnh
-
-Detection không cần xác định nhân vật đang nói.
-
----
-
-### Common Variations
-
-Speech Bubble có thể xuất hiện dưới dạng:
-
-* hình elip
-* hình tròn
-* hình chữ nhật
-* không viền
-* nhiều ngăn
-* nhiều đoạn văn
-* bubble nối nhau
-* bubble bị cắt bởi mép trang
-
----
-
-### Detection Challenges
-
-Các trường hợp khó:
-
-* Bubble chồng nhau
-* Bubble trong suốt
-* Bubble bị che khuất
-* Bubble méo
-* Bubble có nền tối
-
----
-
-### Classification Rules
-
-Speech Bubble được ưu tiên hơn:
-
-* Background Text
-* UI Text
-
-Nếu chưa đủ bằng chứng, Region phải được đánh dấu `Unknown Region`.
-
----
-
-## 21. Narration Box
-
-### Purpose
-
-Narration Box biểu diễn lời dẫn chuyện hoặc mô tả bối cảnh.
-
----
-
-### Characteristics
-
-Thông thường:
-
-* có khung chữ nhật
-* nền sáng hoặc tối
-* không có đuôi
-* không gắn với nhân vật cụ thể
-
----
-
-### Detection Strategy
-
-Detection cần nhận diện toàn bộ khung thay vì chỉ nhận diện từng dòng chữ.
-
----
-
-### Classification Rules
-
-Narration Box không được phân loại thành Speech Bubble chỉ vì có hình chữ nhật bao quanh.
-
----
-
-## 22. Sound Effects (SFX)
-
-### Purpose
-
-Sound Effects đại diện cho chữ biểu diễn âm thanh trong truyện.
-
-Ví dụ:
-
-* BOOM
-* BAM
-* ゴゴゴ
-* ドン
-* 啪
-* 轰
-
----
-
-### Characteristics
-
-SFX thường:
-
-* có font lớn
-* nghiêng
 * xoay
+* nghiêng
 * biến dạng
-* hòa vào hình minh họa
+* hòa vào illustration
+
+Detection tập trung vào geometry.
 
 ---
 
-### Detection Strategy
+## Background Text
 
-Detection cần ưu tiên phát hiện hình học chính xác thay vì cố xác định ý nghĩa.
+Text thuộc visual background:
 
----
-
-### Detection Challenges
-
-Khó khăn phổ biến:
-
-* chữ cong
-* chữ nhiều màu
-* chữ bị biến dạng
-* chữ hòa nền
+* sign
+* label
+* poster
+* shop name
+* environmental text
 
 ---
 
-### Classification Rules
+## UI Text
 
-SFX không được gộp vào Speech Bubble chỉ vì nằm gần Bubble.
-
----
-
-## 23. Background Text
-
-### Purpose
-
-Background Text là văn bản xuất hiện trong bối cảnh của hình ảnh.
-
-Ví dụ:
-
-* biển hiệu
-* bảng tên
-* cửa hàng
-* chỉ dẫn
-* áp phích
+Text thuộc application/web interface.
 
 ---
 
-### Characteristics
+## Watermark
 
-Background Text:
-
-* không thuộc lời thoại
-* không thuộc narration
-* thường là một phần của hình minh họa
+Text biểu thị source, copyright hoặc publishing mark.
 
 ---
 
-### Detection Strategy
+## Advertisement
 
-Detection cần nhận diện nhưng không cần ưu tiên cao hơn Speech Bubble.
-
----
-
-### Classification Rules
-
-Background Text có thể được Presentation bỏ qua tùy cấu hình người dùng.
+Text/region thuộc nội dung quảng cáo.
 
 ---
 
-## 24. UI Text
+## Unknown Region
 
-### Purpose
+Fallback khi classification chưa đủ chắc chắn.
 
-UI Text là văn bản thuộc giao diện ứng dụng hoặc website.
-
-Ví dụ:
-
-* Login
-* Share
-* Menu
-* Next Chapter
-* Back
+Unknown không phải lỗi.
 
 ---
 
-### Characteristics
+# 23. Region Type Invariants
 
-UI Text:
+Region Type:
 
-* thường nằm sát mép màn hình
-* có bố cục cố định
-* không thuộc nội dung truyện
-
----
-
-### Detection Strategy
-
-Detection nên nhận diện riêng để hệ thống có thể lọc hoặc dịch tùy chế độ.
+* độc lập Translation
+* độc lập Presentation
+* không phụ thuộc OCR Provider-specific enum
+* giữ stable semantics trong cùng contract version
+* có Classification Confidence riêng
 
 ---
 
-### Classification Rules
+# 24. Region Hierarchy
 
-UI Text không được gộp với Background Text nếu có đủ bằng chứng nhận biết giao diện.
-
----
-
-## 25. Watermark
-
-### Purpose
-
-Watermark là văn bản biểu thị nguồn phát hành hoặc bản quyền.
-
----
-
-### Characteristics
-
-Ví dụ:
-
-* MangaDex
-* NetTruyen
-* Bilibili
-* Copyright
-
-Watermark thường xuất hiện lặp lại trên nhiều trang.
-
----
-
-### Detection Strategy
-
-Detection chỉ cần nhận diện vùng chứa Watermark.
-
-Không cần xác minh tính hợp lệ của nội dung.
-
----
-
-### Classification Rules
-
-Watermark mặc định có thể bị Translation và Presentation bỏ qua.
-
----
-
-## 26. Advertisement
-
-### Purpose
-
-Advertisement đại diện cho các nội dung quảng cáo không thuộc truyện.
-
----
-
-### Characteristics
-
-Có thể bao gồm:
-
-* banner
-* popup
-* khuyến mại
-* hình quảng cáo
-
----
-
-### Detection Strategy
-
-Detection nên tách Advertisement khỏi nội dung truyện càng sớm càng tốt.
-
----
-
-### Classification Rules
-
-Advertisement không được tham gia Reading Order mặc định.
-
----
-
-## 27. Unknown Region
-
-### Purpose
-
-Unknown Region là loại dự phòng khi Detection không đủ bằng chứng để phân loại.
-
----
-
-### Fallback Strategy
-
-Thay vì phân loại sai, hệ thống phải:
-
-* giữ nguyên Region
-* gán Unknown Region
-* chuyển tiếp cho Recognition
-
----
-
-### Classification Rules
-
-Unknown Region luôn là lựa chọn cuối cùng.
-
-Không được ép Region vào loại khác chỉ để tăng tỷ lệ phân loại.
-
----
-
-## 28. Region Hierarchy
-
-### Purpose
-
-Một Region có thể bao gồm nhiều Region con.
-
-Hierarchy giúp biểu diễn cấu trúc logic của trang truyện.
-
----
-
-### Parent-Child Relationship
+Region có thể có parent-child relationship.
 
 Ví dụ:
 
 ```text
 Page
  ├── Speech Bubble
- │    ├── Text Region
- │    ├── Text Region
- │    └── Tail
- ├── Narration Box
- └── SFX
+ │    ├── Text Region A
+ │    └── Text Region B
+ └── Narration Box
+      └── Text Region C
 ```
+
+Hierarchy giúp downstream:
+
+* Layout
+* Recognition
+* Reading Order
+* Presentation
+
+không phải suy luận lại toàn bộ visual grouping.
 
 ---
 
-### Nested Regions
+# 25. Hierarchy Rules
 
-Detection phải cho phép Region lồng nhau khi cần thiết.
+Một Region:
+
+* có tối đa một direct parent trong tree model
+* có thể có nhiều child
+* không được tạo cycle
+* child phải nằm trong semantic/geometry relation hợp lệ với parent
+
+Complex graph relationships ngoài hierarchy thuộc Layout Analysis.
+
+---
+
+# 26. Detection Relationships vs Layout Relationships
+
+Detection chỉ sở hữu relationship cần thiết để mô tả Region generation và hierarchy sơ bộ.
+
+Các quan hệ không gian tổng quát như:
+
+```text
+above
+below
+left_of
+right_of
+adjacent
+overlaps
+```
+
+được Layout Analysis chuẩn hóa ở bước sau.
+
+Detection không nên trở thành owner của toàn bộ Layout graph.
+
+---
+
+# 27. Region Merge
+
+Merge kết hợp nhiều Region thành một Region logic.
+
+Có thể merge khi:
+
+* geometry gần nhau
+* cùng Region Type
+* cùng orientation
+* cùng probable visual entity
+* profile cho phép
+
+Merge không được dùng để thực hiện semantic text reconstruction.
+
+---
+
+# 28. Merge Result
+
+Sau merge:
+
+* tạo hoặc giữ Region identity theo strategy versioned
+* Geometry được tính lại
+* Bounding Box được cập nhật
+* Polygon được cập nhật nếu cần
+* Confidence được đánh giá lại
+* lineage của source Regions phải giữ được khi cần diagnostics
+
+---
+
+# 29. Region Split
+
+Split tách một Region thành nhiều Region nhỏ hơn.
+
+Có thể split khi:
+
+* chứa nhiều visual text blocks
+* có whitespace separation rõ
+* có orientation khác nhau
+* có Region Type khác nhau
+* provider detection quá coarse
+
+---
+
+# 30. Split Result
+
+Mỗi Region mới phải có:
+
+* Region ID riêng
+* Geometry riêng
+* Detection Confidence riêng
+* source lineage phù hợp
+
+Split không được làm mất visual content đã được detect hợp lệ.
+
+---
+
+# 31. Region Validation
+
+Trước khi publish Detection Result, Region phải được validate.
+
+Checks có thể gồm:
+
+* non-zero area
+* coordinates nằm trong image bounds
+* Bounding Box hợp lệ
+* Polygon hợp lệ
+* Polygon không tự cắt khi contract yêu cầu
+* Confidence trong range hợp lệ
+* Region Type hợp lệ
+* identity uniqueness
+
+---
+
+# 32. Invalid Region
+
+Invalid Region có thể:
+
+* bị reject
+* được giữ với warning
+
+tùy Detection Profile và downstream requirement.
+
+Không được âm thầm sửa geometry khi thiếu đủ bằng chứng.
+
+---
+
+# 33. Detection Confidence
+
+Detection Confidence trả lời:
+
+```text
+How likely is this Region to contain text?
+```
+
+Nó không phản ánh:
+
+* recognition correctness
+* translation correctness
+* layout correctness
+
+---
+
+# 34. Classification Confidence
+
+Classification Confidence trả lời:
+
+```text
+How likely is this Region Type correct?
+```
 
 Ví dụ:
 
-* Bubble chứa nhiều đoạn văn
-* Narration chứa nhiều dòng
-* UI chứa nhiều thành phần
+```text
+Region contains text = 0.97
+Region type = Speech Bubble = 0.62
+```
+
+Hai confidence phải được giữ riêng.
 
 ---
 
-### Hierarchy Rules
+# 35. Confidence Propagation
 
-Một Region chỉ có:
+Detection Confidence có thể được downstream sử dụng như signal.
 
-* tối đa một Parent
-* nhiều Child
+Nhưng không được tự động chuyển thành:
 
-Không được tạo vòng lặp trong cây Region.
+* Recognition Confidence
+* Layout Confidence
+* Reading Confidence
+* Quality Score
 
----
-
-## 29. Detection Rules
-
-### Rule Evaluation Order
-
-Detection Rules phải được đánh giá theo thứ tự xác định trước nhằm đảm bảo tính nhất quán.
+Mỗi component sở hữu confidence semantics của chính nó.
 
 ---
 
-### Merge Rules
+# 36. Reading Direction Hint
 
-Hai Region có thể được gộp khi:
+Detection có thể tạo direction hint sơ bộ cho Region.
 
-* cùng loại
-* giao nhau vượt ngưỡng
-* thuộc cùng đối tượng
+Ví dụ:
 
----
-
-### Split Rules
-
-Một Region có thể bị tách khi:
-
-* chứa nhiều vùng độc lập
-* khoảng cách lớn
-* khác hướng đọc
-
----
-
-### Reject Rules
-
-Region phải bị loại bỏ khi:
-
-* diện tích bằng 0
-* ngoài ảnh
-* confidence quá thấp
-* không hợp lệ
-
----
-
-### Overlap Rules
-
-Khi hai Region giao nhau:
-
-* ưu tiên Region có confidence cao hơn
-* hoặc giữ cả hai nếu mang ý nghĩa khác nhau
-
----
-
-### Priority Rules
-
-Thứ tự ưu tiên mặc định:
-
-1. Speech Bubble
-2. Narration Box
-3. SFX
-4. Background Text
-5. UI Text
-6. Watermark
-7. Advertisement
-8. Unknown Region
-
-Thứ tự này có thể thay đổi theo Detection Profile.
-
----
-
-## 30. Classification Confidence
-
-### Detection Confidence
-
-Đánh giá khả năng Region thực sự chứa văn bản.
-
----
-
-### Classification Confidence
-
-Đánh giá mức độ tin cậy của Region Type.
-
-Detection Confidence và Classification Confidence là hai giá trị độc lập.
-
----
-
-### Confidence Levels
-
-Khuyến nghị chia thành:
-
-* Very High
-* High
-* Medium
-* Low
-* Very Low
-
-Ngưỡng cụ thể được cấu hình theo Detection Profile.
-
----
-
-### Confidence Propagation
-
-Confidence của Detection không được tự động kế thừa sang Recognition.
-
-Mỗi giai đoạn trong OCR Pipeline phải tự đánh giá độ tin cậy của mình.
-
----
-
-### Confidence Invariants
-
-Classification Confidence phải:
-
-* độc lập với OCR Provider
-* ổn định với cùng đầu vào
-* không bị thay đổi bởi Translation
-* luôn gắn với đúng Region trong suốt vòng đời của Detection Result.
-
-## 31. Reading Direction Hint
-
-### Purpose
-
-Reading Direction Hint mô tả hướng đọc được ước lượng của từng Region.
-
-Detection chỉ cung cấp **gợi ý** về hướng đọc, không xác định thứ tự đọc cuối cùng của toàn trang.
-
-Việc tính toán Reading Order thuộc tài liệu và module riêng.
-
----
-
-### Supported Directions
-
-Detection nên hỗ trợ các hướng đọc sau:
-
-* Left to Right (LTR)
-* Right to Left (RTL)
-* Top to Bottom (TTB)
-* Bottom to Top (BTT)
+* LTR
+* RTL
+* TopToBottom
+* BottomToTop
 * Unknown
 
----
+Đây chỉ là hint.
 
-### Direction Estimation
+Authoritative writing-direction semantics thuộc:
 
-Hướng đọc có thể được suy luận từ:
+```text
+TEXT_DIRECTION.md
+```
 
-* hình dạng Region
-* tỷ lệ chiều rộng và chiều cao
-* bố cục ký tự
-* OCR Provider metadata
-* Detection Profile
-
-Detection không được phụ thuộc hoàn toàn vào OCR Result để xác định Reading Direction.
+Detection không sở hữu final Reading Order.
 
 ---
 
-### Direction Invariants
+# 37. Incremental Detection Semantics
 
-Reading Direction Hint:
+Detection có thể hỗ trợ semantic reuse khi chỉ một phần visual input thay đổi.
 
-* không thay đổi Geometry
-* không thay đổi Region Type
-* chỉ là metadata
-* có thể được cập nhật ở bước Reading Order
+Ví dụ:
 
----
+* long scrolling image
+* screen region update
+* user-selected ROI change
 
-## 32. Region Merge
+Semantic requirement:
 
-### Purpose
+```text
+unchanged Region
+    → may preserve identity when compatibility is proven
 
-Region Merge kết hợp nhiều Region thành một Region logic khi chúng đại diện cho cùng một thực thể.
+changed scope
+    → recompute affected Region set
+```
 
----
-
-### Merge Conditions
-
-Hai hoặc nhiều Region có thể được gộp khi:
-
-* cùng Region Type
-* có khoảng cách nhỏ hơn ngưỡng cấu hình
-* có hướng đọc tương thích
-* có khả năng thuộc cùng đoạn văn
+Execution scheduling của incremental work thuộc Runtime.
 
 ---
 
-### Merge Restrictions
+# 38. Detection Compatibility
 
-Không được Merge khi:
+Detection Result có thể được tái sử dụng khi semantic inputs vẫn tương thích.
 
-* khác Region Type
-* khác hướng đọc rõ ràng
-* thuộc các Bubble khác nhau
-* vượt quá ngưỡng khoảng cách
-
----
-
-### Merge Result
-
-Sau khi Merge:
-
-* Geometry phải được tính lại
-* Bounding Box được cập nhật
-* Polygon được tái tạo nếu cần
-* Confidence được tính lại
-* Parent-Child Relationship được bảo toàn
-
----
-
-## 33. Region Split
-
-### Purpose
-
-Region Split chia một Region thành nhiều Region nhỏ hơn khi Detection xác định rằng Region hiện tại chứa nhiều thực thể độc lập.
-
----
-
-### Split Conditions
-
-Region nên được tách khi:
-
-* chứa nhiều khối văn bản độc lập
-* khoảng trắng lớn chia Region
-* khác hướng đọc
-* khác loại nội dung
-
----
-
-### Split Restrictions
-
-Không được Split nếu:
-
-* làm mất liên kết của đoạn văn
-* tạo Region quá nhỏ
-* làm giảm đáng kể độ tin cậy
-
----
-
-### Split Result
-
-Mỗi Region mới phải:
-
-* có ID riêng
-* có Geometry riêng
-* có Confidence riêng
-* vẫn tham chiếu đến cùng Detection Result
-
----
-
-## 34. Region Validation
-
-### Purpose
-
-Region Validation kiểm tra tính hợp lệ của Detection Result trước khi chuyển sang Recognition.
-
----
-
-### Validation Rules
-
-Region phải được kiểm tra:
-
-* Geometry hợp lệ
-* Bounding Box hợp lệ
-* Polygon không tự cắt
-* Confidence trong khoảng hợp lệ
-* Region Type hợp lệ
-
----
-
-### Invalid Region
-
-Region được coi là không hợp lệ nếu:
-
-* diện tích bằng 0
-* nằm ngoài ảnh
-* Polygon lỗi
-* tọa độ không hợp lệ
-* dữ liệu bị thiếu
-
----
-
-### Validation Result
-
-Sau Validation:
-
-* Region hợp lệ được giữ lại
-* Region không hợp lệ bị loại hoặc đánh dấu lỗi tùy Detection Profile
-
----
-
-## 35. Incremental Detection
-
-### Purpose
-
-Incremental Detection chỉ xử lý phần ảnh thay đổi thay vì thực hiện Detection trên toàn bộ ảnh.
-
-Điều này đặc biệt quan trọng trong chế độ đọc thời gian thực.
-
----
-
-### Supported Scenarios
-
-Incremental Detection phù hợp với:
-
-* cuộn trang
-* phóng to
-* thu nhỏ
-* cập nhật một phần màn hình
-* video frame
-
----
-
-### Design Principles
-
-Incremental Detection phải:
-
-* tái sử dụng Region cũ
-* chỉ Detect vùng mới
-* giữ nguyên ID của Region không đổi
-* giảm chi phí tính toán
-
----
-
-## 36. Detection Cache
-
-### Purpose
-
-Detection Cache lưu kết quả Detection để tái sử dụng giữa nhiều lần xử lý.
-
----
-
-### Cache Key
-
-Cache nên dựa trên:
+Compatibility có thể phụ thuộc:
 
 * Image ID
 * Image Version
-* Detection Profile
-* Detection Provider
-* Configuration Version
+* content hash
+* Detection Profile version
+* Detection Strategy version
+* provider capability version
+* ROI
+
+Detection chỉ định nghĩa semantic compatibility.
+
+Global cache policy thuộc Runtime.
 
 ---
 
-### Cache Content
+# 39. Provider Independence
 
-Cache có thể lưu:
+Detection Provider có thể là:
 
-* Region List
+* PaddleOCR detector
+* MMOCR
+* EasyOCR
+* custom model
+* classical CV
+* cloud OCR capability
+
+Provider output phải được normalize thành CRAI Detection Result.
+
+Provider-native type không được crossing public boundary.
+
+---
+
+# 40. Provider Metadata
+
+Detection Result có thể giữ provider metadata để:
+
+* diagnostics
+* reproducibility
+* compatibility
+* benchmarking
+
+Nhưng downstream logic không được phụ thuộc trực tiếp vào provider-native schema.
+
+---
+
+# 41. Detection Profile
+
+Detection Profile có thể ảnh hưởng:
+
+* detector strategy
+* Region Type policy
+* confidence threshold
+* merge/split policy
+* ROI policy
+* output geometry detail
+* optional mask generation
+
+Profile phải versioned nếu thay đổi semantics có thể ảnh hưởng output.
+
+---
+
+# 42. Determinism
+
+Với cùng:
+
+```text
+Image semantic identity
++
+Detection Profile
++
+Detection Strategy Version
+```
+
+Detection nên tạo structurally equivalent result, ngoại trừ provider nondeterminism được ghi nhận rõ.
+
+Determinism quan trọng cho:
+
+* debugging
+* cache compatibility
+* regression detection
+* repeatability
+
+---
+
+# 43. Immutability
+
+Source image không được mutate.
+
+Published Detection Result cũng nên immutable.
+
+Nếu Detection cần thay đổi:
+
+```text
+new Detection Result revision
+```
+
+phải được tạo thay vì sửa silent result cũ.
+
+---
+
+# 44. OCR Pipeline Integration
+
+Detection chỉ là một stage của OCR Pipeline.
+
+```text
+Processed Image
+    ↓
+Detection
+    ↓
+Detection Result
+    ↓
+Recognition
+```
+
+Detection không tự gọi downstream stage theo business/runtime semantics.
+
+Runtime/Pipeline orchestration quyết định execution flow.
+
+---
+
+# 45. Recognition Integration
+
+Recognition sử dụng:
+
+* Region identity
+* Region Geometry
+* Region Type
+* Detection Confidence
+* Detection metadata
+
+Recognition không được tự detect lại Region nếu không có explicit reason/policy.
+
+---
+
+# 46. Text Direction Integration
+
+Text Direction có thể sử dụng:
+
+* Region Geometry
+* Detection orientation hint
+* Recognition geometry
+* Character/Line positions
+
+Direction semantics vẫn thuộc `TEXT_DIRECTION.md`.
+
+---
+
+# 47. Layout Integration
+
+Layout sử dụng:
+
+* Regions
 * Geometry
-* Confidence
-* Metadata
-* Statistics
+* Region Type
+* hierarchy hints
 
-Không nên lưu dữ liệu tạm thời của Runtime.
+để xây:
 
----
+* Panel
+* Container
+* Block
+* Layout Tree
+* Spatial Relationship Graph
 
-### Cache Invalidation
-
-Cache phải bị hủy khi:
-
-* ảnh thay đổi
-* profile thay đổi
-* provider thay đổi
-* cấu hình thay đổi
+Layout mới là owner của page-level spatial structure.
 
 ---
 
-## 37. Detection Events
+# 48. Presentation Integration
 
-### Purpose
+Presentation có thể sử dụng Detection Geometry để:
 
-Detection phát sinh các sự kiện phục vụ Runtime và Event Bus.
+* highlight
+* overlay
+* map source text
+* locate visual areas
+
+Presentation không được thay đổi Detection semantics.
 
 ---
 
-### Recommended Events
+# 49. Runtime Integration
+
+Detection không sở hữu:
+
+* Queued state
+* Running state
+* retry attempts
+* execution timeout policy
+* cancellation authority
+* Scheduler behavior
+* stale authority
+
+Runtime chịu trách nhiệm những phần này.
+
+Detection chỉ tạo semantic result hoặc semantic failure information.
+
+---
+
+# 50. Cache Integration
+
+Detection có thể định nghĩa khi một Detection Result không còn compatible.
 
 Ví dụ:
 
+* image content thay đổi
+* ROI thay đổi
+* Detection Profile thay đổi
+* Detection Strategy thay đổi
+
+Eviction, retention và cache storage thuộc Runtime.
+
+---
+
+# 51. Event Integration
+
+Detection có thể tạo domain facts như:
+
 ```text
-DetectionRequested
-
-DetectionStarted
-
-RegionDetected
-
-RegionMerged
-
-RegionSplit
-
-RegionRejected
-
 DetectionCompleted
-
 DetectionFailed
-
-DetectionCancelled
+RegionDetected
 ```
 
-Tên sự kiện cụ thể phải tuân theo tài liệu `EVENT_CONVENTION.md`.
+Ý nghĩa Detection-specific thuộc Detection.
+
+Event transport, envelope và delivery semantics thuộc Event Bus.
 
 ---
 
-### Event Principles
+# 52. Error Integration
 
-Mỗi Event phải:
-
-* bất biến (Immutable)
-* có Timestamp
-* có Correlation ID
-* có Detection ID
-
----
-
-## 38. Detection State Machine
-
-### Purpose
-
-State Machine mô tả trạng thái của Detection Job.
-
----
-
-### States
+Detection có thể sinh semantic errors như:
 
 ```text
-Created
-
-↓
-
-Queued
-
-↓
-
-Running
-
-↓
-
-Validating
-
-↓
-
-Completed
+InvalidImage
+InvalidROI
+InvalidGeometry
+DetectionUnavailable
+DetectionResultInvalid
+UnsupportedDetectionMode
 ```
 
-Ngoài luồng chính:
+Provider-specific errors phải được map trước khi crossing Detection boundary.
+
+Runtime Error Model sở hữu normalization ở cấp execution.
+
+---
+
+# 53. Observability Integration
+
+Detection có thể cung cấp measurements như:
+
+* Region count
+* Detection duration
+* Detection confidence distribution
+* invalid Region count
+* merge/split count
+* provider identity
+* strategy version
+
+Telemetry transport và lifecycle thuộc Runtime/Infrastructure.
+
+---
+
+# 54. Architecture Invariants
+
+Detection luôn phải đảm bảo:
+
+1. Không thay đổi source image.
+
+2. Chỉ xác định vị trí và visual classification của text-like Regions.
+
+3. Không thực hiện Recognition.
+
+4. Không thực hiện Translation.
+
+5. Region identity phải ổn định trong cùng Detection Result revision.
+
+6. Geometry luôn tham chiếu exact image version.
+
+7. Geometry không phụ thuộc OCR Provider-native schema.
+
+8. Detection Confidence và Classification Confidence là hai khái niệm độc lập.
+
+9. Unknown Region là fallback hợp lệ.
+
+10. Provider-native response không được crossing Detection contract.
+
+11. Detection không sở hữu final Reading Order.
+
+12. Detection không sở hữu Layout Tree.
+
+13. Detection không sở hữu Runtime scheduling.
+
+14. Detection không sở hữu Runtime retry.
+
+15. Detection không sở hữu cancellation authority.
+
+16. Detection không sở hữu global cache lifecycle.
+
+17. Detection Result phải serializable và provider-neutral.
+
+18. Published Detection Result không bị mutate âm thầm.
+
+19. Region merge/split phải giữ đủ lineage để truy vết khi cần.
+
+20. Detection-specific semantics chỉ được định nghĩa authoritative tại tài liệu này.
+
+---
+
+# 55. Recommended MVP Detection
+
+MVP nên ưu tiên mô hình đơn giản:
 
 ```text
-Running
-
-↓
-
-Failed
+Processed Image
+      ↓
+General Text Detector
+      ↓
+Region Generation
+      ↓
+Bounding Box / Polygon
+      ↓
+Basic Region Classification
+      ↓
+Region Validation
+      ↓
+Detection Result
 ```
 
-hoặc
+MVP nên hỗ trợ:
+
+* full-page detection
+* manual ROI
+* Bounding Box
+* Polygon khi provider hỗ trợ
+* Detection Confidence
+* Region Type cơ bản
+* Speech Bubble
+* Narration
+* SFX
+* Background Text
+* UI Text
+* Unknown Region
+* stable Region identity trong một result
+* provider-neutral contract
+
+Không bắt buộc MVP phải có:
+
+* segmentation mask mọi Region
+* semantic AI detection
+* 3D geometry
+* video temporal detection
+* distributed Detection
+* learned merge/split strategies
+
+---
+
+# 56. Ownership References
+
+| Concern                    | Owner               |
+| -------------------------- | ------------------- |
+| Preprocessing              | `PREPROCESS.md`     |
+| Detection Result           | `DETECTION.md`      |
+| Region                     | `DETECTION.md`      |
+| Region Type                | `DETECTION.md`      |
+| Detection Geometry         | `DETECTION.md`      |
+| Detection Confidence       | `DETECTION.md`      |
+| Recognition Text           | `RECOGNITION.md`    |
+| Writing Direction          | `TEXT_DIRECTION.md` |
+| Layout Tree                | `LAYOUT.md`         |
+| Spatial Relationship Graph | `LAYOUT.md`         |
+| OCR Document               | `POSTPROCESS.md`    |
+| Reading Order              | `READING_ORDER.md`  |
+| Retry                      | Runtime             |
+| Cancellation               | Runtime             |
+| Scheduling                 | Runtime             |
+| Cache Lifecycle            | Runtime             |
+| Event Transport            | Event Bus           |
+| Telemetry Transport        | Infrastructure      |
+
+---
+
+# 57. Summary
+
+Text Detection chuyển:
 
 ```text
-Running
-
-↓
-
-Cancelled
+Processed Image
 ```
 
----
+thành:
 
-### State Transition Rules
+```text
+Detection Result
+```
 
-* Không được bỏ qua trạng thái.
-* Không được quay ngược từ Completed về Running.
-* Failed và Cancelled là trạng thái kết thúc.
+gồm:
 
----
+```text
+Regions
++
+Geometry
++
+Region Type
++
+Detection Confidence
++
+Metadata
+```
 
-## 39. Performance Considerations
+Detection trả lời duy nhất:
 
-### Objectives
+```text
+Where is the text?
+```
 
-Detection phải đáp ứng:
+Các stage phía sau lần lượt chịu trách nhiệm:
 
-* độ trễ thấp
-* khả năng mở rộng
-* khả năng xử lý song song
-* hiệu quả bộ nhớ
+```text
+Recognition
+    → What is the text?
 
----
+Text Direction
+    → How is it written?
 
-### Optimization Strategies
+Layout
+    → How is it organized?
 
-Khuyến nghị:
+Reading Order
+    → In what order should it be read?
+```
 
-* xử lý đa luồng
-* cache kết quả
-* incremental detection
-* giới hạn vùng xử lý (ROI)
-* sử dụng nhiều Detection Provider khi cần
+Nguyên tắc cốt lõi:
 
----
+```text
+Detection owns Region semantics.
 
-### Scalability
+Layout owns spatial structure.
 
-Detection phải hỗ trợ:
+Recognition owns recognized text.
 
-* một ảnh đơn
-* nhiều trang
-* xử lý hàng loạt
-* xử lý song song nhiều Session
-
----
-
-## 40. Detection Architecture Invariants
-
-### Purpose
-
-Architecture Invariants xác định các quy tắc bất biến của Detection.
-
-Mọi implementation đều phải tuân thủ.
-
----
-
-### Invariants
-
-Detection phải đảm bảo:
-
-* không thay đổi ảnh nguồn
-* không thực hiện OCR
-* không thực hiện Translation
-* không phụ thuộc Presentation
-* Geometry luôn nhất quán
-* Region ID ổn định trong Detection Result
-* Detection Result có thể tuần tự hóa (Serializable)
-* Detection Result có thể Cache
-* Detection Provider có thể thay thế mà không đổi Contract
-* Detection luôn là bước độc lập trong OCR Pipeline
-
----
-
-### Future Extensions
-
-Kiến trúc hiện tại phải cho phép mở rộng trong tương lai mà không phá vỡ Contract hiện có, bao gồm:
-
-* AI-based Semantic Detection
-* Multi-layer Region Detection
-* 3D Geometry
-* Temporal Detection cho video
-* Multi-page Context Detection
-* Plugin Detection Provider
-* Distributed Detection Runtime
-
+Runtime owns execution.
+```

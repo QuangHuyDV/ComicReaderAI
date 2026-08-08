@@ -1,593 +1,473 @@
-# Secret Management Infrastructure
+# 03-infrastructure/resource-manager/MODULE.md
 
-> **Project:** CRAI
->
-> **Layer:** Infrastructure
->
-> **Module:** Secret Management
->
-> **Status:** Architecture Draft
->
-> **Path:** `03-infrastructure/secret-management/MODULE.md`
+# Module: Resource Manager
 
----
+## Purpose
 
-# 1. Purpose
+Resource Manager chịu trách nhiệm quản lý toàn bộ tài nguyên (resource) mà CRAI sử dụng trong suốt vòng đời của ứng dụng.
 
-The Secret Management module provides the secure storage, retrieval, lifecycle management and controlled usage of sensitive credentials throughout CRAI.
+Khác với Configuration hay Scheduler, module này **không thực hiện nghiệp vụ** mà đóng vai trò là tầng điều phối và quản lý tài nguyên hệ thống nhằm đảm bảo:
 
-It ensures that business modules never directly own or expose secrets.
+* Khởi tạo đúng thứ tự.
+* Chia sẻ resource dùng chung.
+* Quản lý lifecycle.
+* Giải phóng tài nguyên đúng lúc.
+* Theo dõi tình trạng hoạt động.
+* Ngăn rò rỉ tài nguyên (resource leak).
+* Hỗ trợ graceful shutdown.
 
-Secret Management is an infrastructure capability shared by the entire system.
+Đây là một trong những module hạ tầng cốt lõi mà hầu như mọi module khác đều phụ thuộc.
 
 ---
 
-# 2. Responsibilities
+# Responsibilities
 
-Secret Management is responsible for:
+## Resource Registration
 
-- credential storage
-- secure retrieval
-- secret reference resolution
-- provider credential lifecycle
-- encryption at rest
-- in-memory secret protection
-- access authorization
-- secret rotation
-- secret validation
-- secure deletion
-- audit metadata
-- credential versioning
+Cho phép module khác đăng ký resource.
 
-Secret Management is **not** responsible for:
+Ví dụ:
 
-- provider business logic
-- configuration loading
-- provider execution
-- authentication protocols
-- API request construction
-- translation
-- OCR
-- logging
-- persistence of business data
+* OCR Engine
+* Translator Client
+* Browser Instance
+* Image Cache
+* Font Cache
+* HTTP Client
+* WebSocket Client
+* GPU Context
+* Database Connection
+* Thread Pool
+* Worker Pool
 
 ---
 
-# 3. Module Position
+## Resource Discovery
+
+Cho phép module khác lấy resource đã được đăng ký.
+
+Ví dụ
+
+Presentation cần:
 
 ```
-                 CRAI
+Renderer
+```
 
-                   │
+Resource Manager trả về instance hiện có.
 
-     ┌─────────────────────────────┐
-     │                             │
-     │     Secret Management       │
-     │                             │
-     └─────────────────────────────┘
+Nếu chưa tồn tại:
 
-      │      │      │      │
+* tạo mới
+* hoặc báo lỗi
+* hoặc trả Lazy Resource
 
-      ▼      ▼      ▼      ▼
+tùy policy.
+
+---
+
+## Lifecycle Management
+
+Quản lý toàn bộ vòng đời resource.
+
+```
+Created
+↓
+
+Initializing
+↓
+
+Ready
+↓
+
+Busy
+↓
+
+Idle
+↓
+
+Disposing
+↓
+
+Disposed
+```
+
+Resource Manager đảm bảo:
+
+* init đúng lúc
+* dispose đúng lúc
+* không dispose resource đang sử dụng
+* không tạo duplicate
+
+---
+
+## Shared Resource Management
+
+Một số resource cần dùng chung.
+
+Ví dụ
+
+```
+HTTP Client
+
+GPU Context
+
+Translation Engine
+
+Playwright Browser
+
+Logger
+```
+
+Không nên tạo mới mỗi lần sử dụng.
+
+Resource Manager sẽ quản lý singleton hoặc pool tùy loại resource.
+
+---
+
+## Resource Pool
+
+Một số resource có chi phí tạo cao.
+
+Ví dụ
+
+```
+OCR Worker
+
+Translator Worker
+
+Image Decoder
+
+Playwright Context
+
+AI Model Session
+```
+
+Resource Manager hỗ trợ:
+
+* acquire
+* release
+* timeout
+* maximum size
+* minimum idle
+* auto expand
+* auto shrink
+
+---
+
+## Resource Health Monitoring
+
+Theo dõi tình trạng resource.
+
+Ví dụ
+
+```
+Healthy
+
+Busy
+
+Slow
+
+Disconnected
+
+Restarting
+
+Failed
+```
+
+Nếu resource lỗi:
+
+* restart
+* recreate
+* remove khỏi pool
+* notify Telemetry
+
+---
+
+## Dependency Resolution
+
+Một số resource phụ thuộc resource khác.
+
+Ví dụ
+
+```
+Translator
+
+↓
+
+HTTP Client
+
+↓
 
 Configuration
 
-Provider Management
+↓
 
-Translation
-
-Recognition
-
-Runtime
+Logger
 ```
 
-Every module requests secrets through Secret Management.
-
-No module owns raw credentials.
+Resource Manager đảm bảo dependency được khởi tạo đúng thứ tự.
 
 ---
 
-# 4. Goals
+## Graceful Shutdown
 
-The module exists to guarantee:
-
-- secure credential handling
-- provider independence
-- secret isolation
-- implementation independence
-- centralized lifecycle management
-- least privilege access
-- deterministic ownership
-- auditability
-
----
-
-# 5. Design Philosophy
-
-Secrets are infrastructure resources.
-
-They are **not**
-
-- configuration values
-- environment variables
-- provider settings
-- business objects
-
-Secrets exist independently from providers.
-
----
-
-# 6. Core Concepts
-
-The module is built around:
+Khi ứng dụng đóng:
 
 ```
-Secret
+Stop Scheduler
 
 ↓
 
-Secret Reference
+Stop Workers
 
 ↓
 
-Secret Version
+Flush Cache
 
 ↓
 
-Secret Lease
+Close Browser
 
 ↓
 
-Secret Access
+Close HTTP
 
 ↓
 
-Secret Rotation
+Release GPU
+
+↓
+
+Dispose Logger
 ```
 
-These concepts appear throughout all Secret Management documents.
+Không để resource bị mất dữ liệu.
 
 ---
 
-# 7. Ownership
+## Memory Protection
 
-Secret Management owns:
+Theo dõi:
 
-- secret lifecycle
-- encryption
-- storage abstraction
-- access policy
-- secret references
-- rotation metadata
-- lease tracking
+* memory usage
+* object count
+* cache size
+* image buffer
+* OCR buffer
+* translation buffer
 
-Provider Management owns:
+Khi vượt ngưỡng:
 
-- provider registration
-- provider capabilities
-- provider configuration
+* release cache
+* shrink pool
+* GC hint
+* emit warning
 
-Configuration owns:
+---
 
-- credential references
+## Leak Detection
 
-never
+Phát hiện:
+
+* resource không release
+* worker bị treo
+* browser context quên đóng
+* stream chưa dispose
+* file handle chưa close
+
+---
+
+## Resource Statistics
+
+Thu thập:
+
+* active resources
+* idle resources
+* pool size
+* acquire count
+* release count
+* average lifetime
+* memory usage
+* failure count
+
+Telemetry sẽ sử dụng các thống kê này.
+
+---
+
+# Out of Scope
+
+Không chịu trách nhiệm:
+
+* OCR
+* Translation
+* Rendering
+* Download
+* Storage
+* Scheduler
+* Event Bus
+* Logging
+* Telemetry
+
+Module chỉ quản lý lifecycle của các thành phần trên.
+
+---
+
+# Public Responsibilities
+
+Resource Manager cung cấp:
+
+* register resource
+* unregister resource
+* acquire resource
+* release resource
+* resolve dependency
+* initialize
+* dispose
+* monitor health
+* collect statistics
+
+---
+
+# Dependencies
+
+Required
+
+* Configuration
+* Logging
+* Event Bus
+* Telemetry
+
+Optional
+
+* Scheduler
+* Cache
+* Storage
+
+---
+
+# Used By
+
+Hầu như toàn bộ hệ thống:
+
+* Presentation
+* OCR
+* Translation
+* Overlay
+* Automation
+* Browser
+* Downloader
+* Cache
+* AI
+* Export
+* Synchronization
+
+---
+
+# Design Principles
+
+## Lazy Initialization
+
+Chỉ tạo resource khi cần.
+
+---
+
+## Deterministic Lifecycle
+
+Lifecycle rõ ràng.
+
+Không tồn tại resource ở trạng thái không xác định.
+
+---
+
+## Reusable Resources
+
+Ưu tiên tái sử dụng.
+
+Giảm:
+
+* startup time
+* memory
+* CPU
+* GPU
+
+---
+
+## Isolation
+
+Resource lỗi không làm hỏng resource khác.
+
+---
+
+## Fail Fast
+
+Khởi tạo thất bại phải báo ngay.
+
+Không tiếp tục với resource không hợp lệ.
+
+---
+
+## Graceful Recovery
+
+Có thể:
+
+* recreate
+* restart
+* reconnect
+
+mà không cần khởi động lại toàn bộ ứng dụng.
+
+---
+
+## Observable
+
+Mọi thay đổi lifecycle đều sinh metric và event để Logging và Telemetry theo dõi.
+
+---
+
+# Typical Flow
 
 ```
-Raw Credentials
+Application Start
+        │
+        ▼
+Register Resources
+        │
+        ▼
+Resolve Dependencies
+        │
+        ▼
+Initialize Resources
+        │
+        ▼
+Ready
+        │
+        ▼
+Acquire / Release
+        │
+        ▼
+Health Monitoring
+        │
+        ▼
+Graceful Shutdown
+        │
+        ▼
+Dispose All Resources
 ```
 
 ---
 
-# 8. Secret Model
-
-Every secret consists of two independent parts.
-
-```
-Metadata
-
-+
-
-Protected Payload
-```
-
-Metadata may be observable.
-
-Payload never is.
-
----
-
-# 9. Secret References
-
-Other modules exchange:
-
-```
-SecretReference
-```
-
-instead of
-
-```
-API Key
-
-Password
-
-OAuth Token
-```
-
-Secret references are stable.
-
-Secret values remain private.
-
----
-
-# 10. Secret Lifecycle
-
-```
-Create
-
-↓
-
-Validate
-
-↓
-
-Encrypt
-
-↓
-
-Store
-
-↓
-
-Activate
-
-↓
-
-Lease
-
-↓
-
-Rotate
-
-↓
-
-Retire
-
-↓
-
-Destroy
-```
-
-Each transition is deterministic.
-
----
-
-# 11. Secret Types
-
-Conceptual secret types include:
-
-```
-API Key
-
-Access Token
-
-Refresh Token
-
-OAuth Credential
-
-Private Key
-
-Certificate
-
-Cookie
-
-Session Token
-
-License Key
-
-Custom Secret
-```
-
-The architecture is type-independent.
-
----
-
-# 12. Secret Storage
-
-Storage implementation is abstract.
-
-Possible implementations include:
-
-```
-Operating System Secure Storage
-
-Encrypted Local Store
-
-External Secret Manager
-
-Cloud Secret Service
-```
-
-Business modules never depend on any specific implementation.
-
----
-
-# 13. Encryption Model
-
-Secrets must remain encrypted while stored.
-
-Only controlled retrieval may expose decrypted values.
-
-Encryption implementation is replaceable.
-
----
-
-# 14. In-Memory Protection
-
-Secret values should exist in memory only for the minimum required duration.
-
-Preferred principles:
-
-- minimal lifetime
-- minimal copies
-- explicit disposal
-- zeroization where practical
-
-Memory handling remains implementation-dependent.
-
----
-
-# 15. Lease Model
-
-Consumers do not permanently own secrets.
-
-Instead they receive temporary access.
-
-Conceptually
-
-```
-Secret
-
-↓
-
-Lease
-
-↓
-
-Consumer
-
-↓
-
-Release
-```
-
-Lease duration depends on usage.
-
----
-
-# 16. Access Model
-
-Access requires:
-
-- identity
-- authorization
-- purpose
-- scope
-
-Every access request is validated.
-
----
-
-# 17. Rotation Model
-
-Secrets may rotate without changing:
-
-```
-Secret Reference
-```
-
-Consumers continue using the same reference.
-
-Only Secret Management updates the underlying value.
-
----
-
-# 18. Version Model
-
-Every secret may have multiple versions.
-
-Example
-
-```
-Secret
-
-↓
-
-Version 1
-
-↓
-
-Version 2
-
-↓
-
-Version 3
-```
-
-Only one version is normally active.
-
----
-
-# 19. Audit Model
-
-Secret Management records metadata about:
-
-- creation
-- activation
-- rotation
-- retirement
-- destruction
-- access attempts
-
-Audit never stores secret values.
-
----
-
-# 20. Security Principles
-
-The module guarantees:
-
-✓ no raw secrets in logs
-
-✓ no raw secrets in events
-
-✓ no raw secrets in diagnostics
-
-✓ no raw secrets in public contracts
-
-✓ least privilege access
-
-✓ immutable audit history
-
----
-
-# 21. Dependencies
-
-Secret Management depends only on infrastructure abstractions such as:
-
-- Configuration
-- Storage
-- Logging
-- Metrics
-- Runtime
-
-It does not depend on:
-
-- Translation
-- Recognition
-- Presentation
-- Reading Session
-
----
-
-# 22. Module Boundaries
-
-Secret Management does not:
-
-- authenticate users
-- authorize business operations
-- validate provider requests
-- execute HTTP requests
-- refresh OAuth automatically
-- manage provider sessions
-
-Those belong to other modules.
-
----
-
-# 23. Public Surface
-
-The public API is intentionally small.
-
-Conceptually it supports:
-
-- create secret
-- resolve reference
-- acquire lease
-- release lease
-- rotate secret
-- revoke secret
-- query metadata
-
-Internal implementation remains hidden.
-
----
-
-# 24. Architectural Invariants
-
-The module guarantees:
-
-- one owner for every secret
-- immutable secret identity
-- version-aware lifecycle
-- encrypted persistence
-- secret-safe diagnostics
-- deterministic access control
-- implementation independence
-- replay-safe audit history
-
----
-
-# 25. Relationship to Other Documents
-
-This module is specified by:
-
-```
-MODULE.md
-
-↓
-
-CONTRACT.md
-
-↓
-
-STATES.md
-
-↓
-
-EVENTS.md
-
-↓
-
-ERRORS.md
-
-↓
-
-README.md
-```
-
-Each document describes one architectural aspect.
-
----
-
-# 26. MVP Scope
-
-The MVP includes:
-
-- local secure storage
-- API key management
-- secret references
-- provider credential resolution
-- encrypted persistence
-- rotation support
-- audit metadata
-
-Future versions may add:
-
-- cloud secret backends
-- hardware security modules
-- enterprise key management
-- distributed secret synchronization
-
----
-
-# 27. Summary
-
-Secret Management provides a provider-independent, implementation-independent infrastructure for protecting sensitive credentials across CRAI.
-
-It centralizes:
-
-- secret ownership
-- encryption
-- secure retrieval
-- lifecycle management
-- versioning
-- rotation
-- access control
-
-while ensuring that no business module directly owns or exposes secret values.
-
----
-
-# End of Document
+# Future Extensions
+
+Có thể mở rộng thêm:
+
+* Dynamic Resource Plugin
+* Distributed Resource Manager
+* Remote Worker Pool
+* GPU Pool
+* AI Model Pool
+* Multi-browser Pool
+* Adaptive Pool Scaling
+* Resource Priority Scheduling
+* Memory Pressure Response
+* Automatic Resource Migration

@@ -1,1629 +1,2108 @@
 # Reading Session Errors
 
-- Module: Reading Session
-- Identifier: reading-session
-- Layer: Business Orchestration
-- Version: 2.0.0
-- Status: Draft
-- Owner: CRAI Architecture
+> **Project:** CRAI
+> **Module:** `reading-session`
+> **Path:** `doc/02-modules/reading-session/ERRORS.md`
+> **Version:** 3.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2 aligned
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-08
 
 ---
 
 # 1. Purpose
 
-This document defines all business error contracts owned by the Reading Session Module.
+This document defines the Reading Session-owned error model.
 
-Unlike Runtime errors,
-
-Reading Session errors describe failures in business consistency,
-
-business validation,
-
-or business lifecycle progression.
-
-This specification defines:
-
-- business error ownership
-- error categories
-- stable error codes
-- severity levels
-- recovery policies
-- logging requirements
-- architectural guarantees
-
----
-
-# 2. Error Philosophy
-
-Reading Session owns only business errors.
-
-It never reports implementation failures occurring inside Runtime.
-
-Examples of Reading Session errors:
-
-✔ Invalid Session
-
-✔ Invalid Reading Context
-
-✔ Invalid Revision
-
-✔ Invalid Business Transition
-
-✔ ProcessingIntent cannot be created
-
-Examples that are NOT Reading Session errors:
-
-✘ OCR timeout
-
-✘ Translation provider failure
-
-✘ Worker crashed
-
-✘ Queue unavailable
-
-✘ GPU memory exhausted
-
-Those belong to Runtime.
-
----
-
-## 2.1 Errors Represent Business Failures
-
-Errors describe why a requested business operation cannot be accepted.
-
-They never expose infrastructure details.
-
----
-
-## 2.2 Stable Error Contracts
-
-Consumers depend on stable ErrorCode values.
-
-Consumers must never depend on:
-
-- exception names
-- stack traces
-- implementation messages
-
-Only ErrorCode is part of the public contract.
-
----
-
-## 2.3 Errors Never Corrupt Business State
-
-When an error occurs,
-
-Reading Session guarantees that:
-
-- current business state remains valid
-- previous revisions remain immutable
-- business history remains consistent
-
-Errors never partially update business state.
-
----
-
-## 2.4 Runtime Isolation
-
-Failures occurring inside Runtime remain Runtime responsibilities.
-
-Reading Session may observe that:
+It standardizes:
 
 ```text
-Business outcome unavailable
+error ownership
+stable ErrorCode values
+error categories
+severity
+recovery semantics
+ReadingContextRevision conflicts
+lifecycle rejection
+context validation
+configuration validation
+consistency failures
+event publication failures
+internal invariant failures
+diagnostics
+privacy
 ```
 
-It never reports:
+Reading Session errors describe failures inside the reading-domain boundary only.
+
+They do not describe Runtime or processing execution failure.
+
+---
+
+# 2. Error Ownership
+
+Reading Session owns errors related to:
 
 ```text
-Translation provider timeout
-
-OCR crashed
-
-GPU unavailable
+ReadingSession lifecycle
+ReadingContext
+ReadingSource
+ReadingTarget
+ReadingPosition
+ReadingContextRevision
+SessionConfiguration
+domain validation
+domain consistency
+domain commit
+domain recovery
 ```
 
----
-
-# 3. Error Ownership
-
-Reading Session owns only business errors.
-
----
-
-## Reading Session Owns
+Reading Session does not own:
 
 ```text
-Business Validation
+RuntimeRevision failure
+WorkItem failure
+Attempt failure
+Runtime cancellation
+Runtime retry
+Capture failure
+Recognition failure
+Translation failure
+Artifact publication failure
+Presentation failure
+UI apply failure
+Storage implementation failure
+```
 
-Session Lifecycle
+External failures may be referenced for correlation when necessary.
 
-Reading Context
+They must not be reclassified as Reading Session-owned errors.
 
-Content Revision
+---
 
-Processing Intent
+# 3. Error Philosophy
 
-Configuration
+## 3.1 Stable Machine Contract
 
-Business Consistency
+Every public error has a stable machine-readable:
+
+```text
+ErrorCode
+```
+
+Consumers MUST NOT branch on:
+
+* exception types;
+* stack traces;
+* implementation language;
+* human-readable messages.
+
+---
+
+## 3.2 Domain Failure Only
+
+Reading Session errors answer:
+
+> Why could this reading-domain operation not be committed safely?
+
+They do not answer:
+
+> Why did processing execution fail?
+
+---
+
+## 3.3 Failed Candidate Does Not Corrupt Current State
+
+Default behavior:
+
+```text
+Current committed ReadingContext
+        +
+Candidate ReadingContext
+        ↓
+Candidate rejected
+        ↓
+Discard Candidate
+        ↓
+Current ReadingContext unchanged
 ```
 
 ---
 
-## Reading Session Does Not Own
+## 3.4 Expected Outcomes Are Not Fatal Errors
+
+Examples:
 
 ```text
-Worker Errors
-
-Queue Errors
-
-Scheduler Errors
-
-Recognition Errors
-
-Translation Errors
-
-Presentation Errors
-
-Provider Errors
-
-Storage Errors
+duplicate request
+no-op update
+ReadingContextRevision conflict
+already paused
+already active
+candidate superseded by newer domain mutation
 ```
+
+These may produce `Info` or `Warning` results.
+
+They do not imply internal corruption.
 
 ---
 
 # 4. Error Categories
 
-Business errors are grouped according to business ownership.
+Reading Session v3 defines:
+
+| Prefix | Category                 |
+| ------ | ------------------------ |
+| `VAL`  | Input Validation         |
+| `SES`  | Session Lifecycle        |
+| `CTX`  | Reading Context          |
+| `REV`  | ReadingContextRevision   |
+| `CFG`  | Session Configuration    |
+| `CON`  | Domain Consistency       |
+| `REC`  | Recovery                 |
+| `PUB`  | Domain Event Publication |
+| `INT`  | Internal Invariant       |
+
+Removed categories:
 
 ```text
-Reading Session Errors
-
-├── Validation
-├── Session
-├── Reading Context
-├── Content Revision
-├── Processing Intent
-├── Configuration
-├── Consistency
-└── Internal
+ProcessingIntent
+ContentRevision lifecycle
 ```
-
-Each category represents one business responsibility.
 
 ---
 
-# 5. Error Code Convention
-
-Every business error follows a stable identifier.
+# 5. Error Code Format
 
 ```text
-SES-<CATEGORY>-<NUMBER>
+RS-<CATEGORY>-<NUMBER>
 ```
 
 Examples:
 
 ```text
-SES-VALIDATION-001
-
-SES-SESSION-002
-
-SES-CONTEXT-001
-
-SES-REVISION-004
-
-SES-INTENT-002
-
-SES-CONFIG-001
-
-SES-CONSISTENCY-001
-
-SES-INTERNAL-001
+RS-VAL-001
+RS-SES-004
+RS-CTX-003
+RS-REV-001
+RS-CFG-002
+RS-CON-001
+RS-INT-002
 ```
 
-Error codes never change after publication.
+Rules:
+
+* codes are stable;
+* meanings are never reused;
+* deprecated codes remain documented;
+* incompatible meaning changes require major version review.
 
 ---
 
-# 6. Severity Levels
+# 6. Severity
 
-Reading Session classifies errors into four levels.
-
-| Severity | Meaning |
-|----------|---------|
-| Info | Expected business condition |
-| Warning | Invalid business request |
-| Error | Business operation failed |
-| Critical | Business invariant violated |
-
-Severity never determines recovery policy.
-
-Recovery is defined independently.
-
----
-
-# 7. Recovery Policies
-
-Each error defines one recovery recommendation.
-
-| Policy | Meaning |
-|---------|---------|
-| Never | Retry will never help |
-| AfterCorrection | Retry after correcting business input |
-| Reevaluate | Recompute business state |
-| RestartSession | Create a new Reading Session |
-| ManualIntervention | Human action required |
-
-Recovery policies describe business recovery,
-
-not Runtime retry behavior.
-
----
-
-# 8. Validation Errors
-
-Validation errors occur before Reading Session modifies any business state.
-
-They indicate that the requested operation cannot be evaluated because the supplied business input is invalid.
-
-Validation errors never modify:
-
-- Session
-- Reading Context
-- Content Revision
-- Processing Intent
-
----
-
-## 8.1 SES-VALIDATION-001 MissingSessionIdentifier
-
-Meaning
-
-The requested operation does not specify a SessionId.
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-## 8.2 SES-VALIDATION-002 InvalidSessionIdentifier
-
-Meaning
-
-The supplied SessionId is syntactically or semantically invalid.
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-## 8.3 SES-VALIDATION-003 UnsupportedOperation
-
-Meaning
-
-The requested business operation is not supported by Reading Session.
-
-Severity
-
-Warning
-
-Recovery
-
-Never
-
-Business State
-
-Unchanged
-
----
-
-## 8.4 SES-VALIDATION-004 MissingConfiguration
-
-Meaning
-
-The required SessionConfiguration is unavailable.
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-## 8.5 SES-VALIDATION-005 InvalidConfiguration
-
-Meaning
-
-SessionConfiguration violates business validation rules.
-
-Examples:
-
-- unsupported language combination
-- invalid reading mode
-- incompatible business options
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-# 9. Session Errors
-
-Session errors describe failures related to Reading Session lifecycle management.
-
----
-
-## 9.1 SES-SESSION-001 SessionNotFound
-
-Meaning
-
-The requested Reading Session does not exist.
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-## 9.2 SES-SESSION-002 SessionAlreadyExists
-
-Meaning
-
-A Reading Session with the same identity already exists.
-
-Severity
-
-Warning
-
-Recovery
-
-Never
-
-Business State
-
-Unchanged
-
----
-
-## 9.3 SES-SESSION-003 SessionAlreadyActive
-
-Meaning
-
-The Session is already Active.
-
-The requested activation has no business effect.
-
-Severity
-
+```text
 Info
-
-Recovery
-
-Never
-
-Business State
-
-Unchanged
-
----
-
-## 9.4 SES-SESSION-004 SessionAlreadyCompleted
-
-Meaning
-
-The Session has already reached the Completed lifecycle state.
-
-No further business progression is allowed.
-
-Severity
-
-Info
-
-Recovery
-
-RestartSession
-
-Business State
-
-Completed
-
----
-
-## 9.5 SES-SESSION-005 SessionAlreadyCancelled
-
-Meaning
-
-The Session has already been cancelled.
-
-Business progression cannot resume.
-
-Severity
-
-Info
-
-Recovery
-
-RestartSession
-
-Business State
-
-Cancelled
-
----
-
-## 9.6 SES-SESSION-006 SessionDisposed
-
-Meaning
-
-The Session has already been disposed.
-
-Disposed Sessions cannot receive new business operations.
-
-Severity
-
-Info
-
-Recovery
-
-RestartSession
-
-Business State
-
-Disposed
-
----
-
-# 10. Reading Context Errors
-
-Reading Context errors occur when the current business understanding of the reading world cannot support the requested operation.
-
----
-
-## 10.1 SES-CONTEXT-001 ReadingContextUnavailable
-
-Meaning
-
-No Reading Context currently exists.
-
-Severity
-
 Warning
-
-Recovery
-
-Reevaluate
-
-Business State
-
-Unchanged
-
----
-
-## 10.2 SES-CONTEXT-002 ReadingContextInvalid
-
-Meaning
-
-The current Reading Context is invalid.
-
-Business evaluation cannot continue.
-
-Severity
-
 Error
-
-Recovery
-
-Reevaluate
-
-Business State
-
-Unchanged
-
----
-
-## 10.3 SES-CONTEXT-003 ReadingContextDisposed
-
-Meaning
-
-The requested Reading Context has already been disposed.
-
-Severity
-
-Warning
-
-Recovery
-
-Reevaluate
-
-Business State
-
-Disposed
-
----
-
-## 10.4 SES-CONTEXT-004 ReadingContextMismatch
-
-Meaning
-
-The supplied Reading Context does not match the active Reading Session.
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-# 11. Content Revision Errors
-
-Content Revision errors describe failures related to immutable business snapshots.
-
----
-
-## 11.1 SES-REVISION-001 RevisionNotFound
-
-Meaning
-
-The requested ContentRevision does not exist.
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-## 11.2 SES-REVISION-002 RevisionAlreadyCurrent
-
-Meaning
-
-The requested revision is already the current business authority.
-
-Severity
-
-Info
-
-Recovery
-
-Never
-
-Business State
-
-Unchanged
-
----
-
-## 11.3 SES-REVISION-003 RevisionSuperseded
-
-Meaning
-
-The revision has already been replaced by a newer revision.
-
-It remains historically valid,
-
-but may no longer participate in active business evaluation.
-
-Severity
-
-Info
-
-Recovery
-
-Reevaluate
-
-Business State
-
-Unchanged
-
----
-
-## 11.4 SES-REVISION-004 RevisionArchived
-
-Meaning
-
-The revision has already been archived.
-
-Archived revisions cannot become active again.
-
-Severity
-
-Info
-
-Recovery
-
-Never
-
-Business State
-
-Archived
-
----
-
-## 11.5 SES-REVISION-005 RevisionDiscarded
-
-Meaning
-
-The revision has been permanently discarded.
-
-Severity
-
-Warning
-
-Recovery
-
-Never
-
-Business State
-
-Discarded
-
----
-
-## 11.6 SES-REVISION-006 DuplicateRevision
-
-Meaning
-
-An identical immutable revision already exists.
-
-Severity
-
-Warning
-
-Recovery
-
-Never
-
-Business State
-
-Unchanged
-
----
-
-# 12. Processing Intent Errors
-
-Processing Intent errors occur when Reading Session cannot correctly create, publish, or evaluate a business intention.
-
-These errors describe business failures only.
-
-They never describe Runtime execution failures.
-
----
-
-## 12.1 SES-INTENT-001 ProcessingIntentNotFound
-
-Meaning
-
-The requested ProcessingIntent does not exist.
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-## 12.2 SES-INTENT-002 ProcessingIntentAlreadyPublished
-
-Meaning
-
-The ProcessingIntent has already been published.
-
-Publishing the same business intent again would violate business consistency.
-
-Severity
-
-Info
-
-Recovery
-
-Never
-
-Business State
-
-Unchanged
-
----
-
-## 12.3 SES-INTENT-003 ProcessingIntentObsolete
-
-Meaning
-
-The ProcessingIntent has already become obsolete.
-
-A newer business intention has replaced it.
-
-Severity
-
-Info
-
-Recovery
-
-Reevaluate
-
-Business State
-
-Unchanged
-
----
-
-## 12.4 SES-INTENT-004 ProcessingIntentFulfilled
-
-Meaning
-
-The requested ProcessingIntent has already been fulfilled.
-
-No additional business action is required.
-
-Severity
-
-Info
-
-Recovery
-
-Never
-
-Business State
-
-Fulfilled
-
----
-
-## 12.5 SES-INTENT-005 ProcessingIntentDiscarded
-
-Meaning
-
-The ProcessingIntent has already been discarded.
-
-Discarded intents cannot become active again.
-
-Severity
-
-Warning
-
-Recovery
-
-Never
-
-Business State
-
-Discarded
-
----
-
-## 12.6 SES-INTENT-006 ProcessingIntentCannotBeCreated
-
-Meaning
-
-Reading Session cannot generate a valid ProcessingIntent because business preconditions are not satisfied.
-
-Typical causes include:
-
-- ReadingContext is invalid
-- no active ContentRevision
-- Session is not Active
-
-Severity
-
-Error
-
-Recovery
-
-Reevaluate
-
-Business State
-
-Unchanged
-
----
-
-# 13. Configuration Errors
-
-Configuration errors occur when business configuration conflicts with Reading Session requirements.
-
----
-
-## 13.1 SES-CONFIG-001 UnsupportedLanguage
-
-Meaning
-
-The requested language is not supported by the current Reading Session configuration.
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-## 13.2 SES-CONFIG-002 UnsupportedReadingMode
-
-Meaning
-
-The requested reading mode is unsupported.
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-## 13.3 SES-CONFIG-003 InvalidConfigurationCombination
-
-Meaning
-
-The supplied business configuration contains incompatible options.
-
-Examples:
-
-- mutually exclusive translation strategies
-- conflicting reading preferences
-- unsupported configuration combinations
-
-Severity
-
-Warning
-
-Recovery
-
-AfterCorrection
-
-Business State
-
-Unchanged
-
----
-
-## 13.4 SES-CONFIG-004 ConfigurationVersionMismatch
-
-Meaning
-
-The supplied configuration version does not match the active SessionConfiguration.
-
-Severity
-
-Warning
-
-Recovery
-
-Reevaluate
-
-Business State
-
-Unchanged
-
----
-
-# 14. Consistency Errors
-
-Consistency errors indicate that one or more architectural invariants have been violated.
-
-These errors should be extremely rare.
-
-Most indicate a defect in implementation rather than user input.
-
----
-
-## 14.1 SES-CONSISTENCY-001 MultipleCurrentRevisions
-
-Meaning
-
-More than one ContentRevision is marked as Current.
-
-This violates the Reading Session state model.
-
-Severity
-
 Critical
+```
 
-Recovery
+Meaning:
 
-ManualIntervention
+| Severity   | Meaning                                                    |
+| ---------- | ---------------------------------------------------------- |
+| `Info`     | Expected control/no-op condition                           |
+| `Warning`  | Invalid/rejected domain request                            |
+| `Error`    | Domain operation failed and recovery is required           |
+| `Critical` | Reading Session-owned correctness is no longer trustworthy |
 
-Business State
-
-Unknown
-
----
-
-## 14.2 SES-CONSISTENCY-002 MultipleActiveContexts
-
-Meaning
-
-More than one ReadingContext is simultaneously Ready.
-
-Exactly one active ReadingContext is permitted.
-
-Severity
-
-Critical
-
-Recovery
-
-ManualIntervention
-
-Business State
-
-Unknown
+Severity does not determine Runtime retry.
 
 ---
 
-## 14.3 SES-CONSISTENCY-003 InvalidLifecycleTransition
+# 7. Recovery Hint
 
-Meaning
+```text
+RecoveryHint
+- None
+- CorrectInput
+- RefreshReadingContext
+- RefreshReadingContextRevision
+- ReplaceSource
+- UpdateTarget
+- UpdateConfiguration
+- RebuildContext
+- RestoreKnownGood
+- CancelSession
+- DisposeSession
+- RestartSession
+```
 
-A lifecycle transition violates the transition rules defined in `STATES.md`.
+Reading Session recovery hints describe reading-domain recovery.
+
+They do not schedule Runtime retry.
+
+---
+
+# 8. Public Error Contract
+
+Conceptually:
+
+```text
+ReadingSessionError
+├── errorId
+├── errorCode
+├── category
+├── severity
+├── recoveryHint
+├── messageKey?
+├── readingSessionId?
+├── readingContextRevision?
+├── expectedReadingContextRevision?
+├── currentReadingContextRevision?
+├── sourceId?
+├── targetId?
+├── lifecycleState?
+├── requestId?
+├── correlationId?
+├── causationId?
+├── traceId?
+├── diagnosticRef?
+└── occurredAt
+```
+
+All public error values are immutable and serializable.
+
+---
+
+# 9. Message Rules
+
+Human-readable messages:
+
+* are optional;
+* are non-authoritative;
+* must not contain raw reading content;
+* must not expose secrets;
+* must not expose implementation internals.
+
+Consumers branch on:
+
+```text
+errorCode
+category
+recoveryHint
+```
+
+---
+
+# 10. Validation Errors
+
+Validation errors occur before domain state commit.
+
+They never partially mutate ReadingSession or ReadingContext.
+
+---
+
+## RS-VAL-001 — MissingReadingSessionId
+
+Required ReadingSessionId is missing.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+## RS-VAL-002 — InvalidReadingSessionId
+
+ReadingSessionId is malformed or invalid.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+## RS-VAL-003 — MissingRequiredField
+
+A command is missing required reading-domain data.
 
 Examples:
 
 ```text
-Completed
-
-↓
-
-Active
+ReadingSource
+ReadingTarget
+SessionConfiguration
+expectedReadingContextRevision
 ```
 
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+## RS-VAL-004 — InvalidFieldValue
+
+A supplied domain value is invalid.
+
+Examples:
+
+* malformed target;
+* invalid position;
+* invalid language identifier;
+* unsupported enum value.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+## RS-VAL-005 — UnsupportedContractVersion
+
+Command contract version is incompatible.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+# 11. Session Lifecycle Errors
+
+---
+
+## RS-SES-001 — SessionNotFound
+
+The ReadingSession does not exist.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+## RS-SES-002 — SessionAlreadyExists
+
+A ReadingSession with the requested identity already exists.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+None
+```
+
+---
+
+## RS-SES-003 — SessionAlreadyActive
+
+Session is already `ACTIVE`.
+
+Requested activation is a no-op.
+
+Severity:
+
+```text
+Info
+```
+
+Recovery:
+
+```text
+None
+```
+
+---
+
+## RS-SES-004 — SessionAlreadyPaused
+
+Session is already `PAUSED`.
+
+Severity:
+
+```text
+Info
+```
+
+Recovery:
+
+```text
+None
+```
+
+---
+
+## RS-SES-005 — SessionCompleted
+
+Requested mutation targets an already completed ReadingSession.
+
+Severity:
+
+```text
+Info
+```
+
+Recovery:
+
+```text
+RestartSession
+```
+
+---
+
+## RS-SES-006 — SessionCancelled
+
+Requested mutation targets a canceled ReadingSession.
+
+Severity:
+
+```text
+Info
+```
+
+Recovery:
+
+```text
+RestartSession
+```
+
+---
+
+## RS-SES-007 — SessionDisposed
+
+Requested mutation targets a disposed ReadingSession.
+
+Severity:
+
+```text
+Info
+```
+
+Recovery:
+
+```text
+RestartSession
+```
+
+---
+
+## RS-SES-008 — InvalidSessionTransition
+
+Requested lifecycle transition is not legal.
+
+Examples:
+
+```text
+COMPLETED → ACTIVE
+CANCELLED → ACTIVE
+DISPOSED → PAUSED
+```
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+Important:
+
+A rejected invalid command is not itself a Critical consistency failure.
+
+A Critical error occurs only if the invalid transition was actually committed internally.
+
+---
+
+# 12. Reading Context Errors
+
+---
+
+## RS-CTX-001 — ReadingContextUnavailable
+
+No committed ReadingContext currently exists.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+RebuildContext
+```
+
+---
+
+## RS-CTX-002 — ReadingContextInvalid
+
+Current ReadingContext cannot be trusted.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+RebuildContext
+```
+
+This must describe a Reading Session domain problem.
+
+Do not use this for:
+
+```text
+OCR failed
+Translation failed
+Presentation failed
+```
+
+---
+
+## RS-CTX-003 — ReadingContextDisposed
+
+Requested context has been disposed.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+RebuildContext
+```
+
+---
+
+## RS-CTX-004 — ReadingContextSessionMismatch
+
+Supplied ReadingContext belongs to another ReadingSession.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+## RS-CTX-005 — InvalidReadingSource
+
+ReadingSource cannot represent a valid reading-domain source.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+ReplaceSource
+```
+
+---
+
+## RS-CTX-006 — InvalidReadingTarget
+
+ReadingTarget is invalid or incompatible with the current ReadingSource.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+UpdateTarget
+```
+
+---
+
+## RS-CTX-007 — InvalidReadingPosition
+
+ReadingPosition cannot be interpreted for the current source/target.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+UpdateTarget
+```
+
+---
+
+## RS-CTX-008 — CandidateContextInvalid
+
+Candidate ReadingContext violates domain invariants.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+CorrectInput
 or
-
-```text
-Disposed
-
-↓
-
-Ready
+RebuildContext
 ```
 
-Severity
-
-Critical
-
-Recovery
-
-ManualIntervention
-
-Business State
-
-Unchanged
+Current committed context remains unchanged.
 
 ---
 
-## 14.4 SES-CONSISTENCY-004 BusinessHistoryCorrupted
+# 13. ReadingContextRevision Errors
 
-Meaning
+Reading Session owns only:
 
-Business history can no longer be reconstructed deterministically.
+```text
+ReadingContextRevision
+```
 
-Examples include:
-
-- missing revisions
-- duplicate revision sequence
-- invalid event ordering
-
-Severity
-
-Critical
-
-Recovery
-
-ManualIntervention
-
-Business State
-
-Unknown
+It does not own Runtime Revision authority.
 
 ---
 
-## 14.5 SES-CONSISTENCY-005 AggregateVersionConflict
+## RS-REV-001 — ReadingContextRevisionConflict
 
-Meaning
+Command expected:
 
-The aggregate version supplied for a business operation is inconsistent with the current aggregate state.
+```text
+Revision N
+```
 
-Severity
+but current is:
+
+```text
+Revision N+K
+```
+
+Severity:
+
+```text
+Info or Warning
+```
+
+Recovery:
+
+```text
+RefreshReadingContextRevision
+```
+
+This is normal optimistic concurrency behavior.
+
+---
+
+## RS-REV-002 — ReadingContextRevisionMissing
+
+A command requiring current revision did not supply one.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+RefreshReadingContextRevision
+```
+
+---
+
+## RS-REV-003 — ReadingContextRevisionInvalid
+
+Revision value is malformed or incompatible with the ReadingSession.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+## RS-REV-004 — NonMonotonicReadingContextRevision
+
+Internal commit attempts to advance to an invalid/non-monotonic revision.
+
+Severity:
+
+```text
+Critical
+```
+
+Recovery:
+
+```text
+RestoreKnownGood
+or
+RestartSession
+```
+
+This indicates implementation/state corruption.
+
+---
+
+## RS-REV-005 — DuplicateSemanticRevision
+
+A candidate would create a new revision without any semantic ReadingContext change.
+
+Preferred result:
+
+```text
+NoOp
+```
+
+Severity:
+
+```text
+Info
+```
+
+Recovery:
+
+```text
+None
+```
+
+This should normally be prevented before reaching an error path.
+
+---
+
+# 14. Removed Revision Errors
+
+The following old error semantics are removed:
+
+```text
+RevisionAlreadyCurrent
+RevisionSuperseded
+RevisionArchived
+RevisionDiscarded
+DuplicateRevision
+```
+
+as lifecycle states.
+
+Reason:
+
+ReadingContextRevision no longer has:
+
+```text
+Current
+Superseded
+Archived
+Discarded
+```
+
+public lifecycle states.
+
+Historical retention is a storage/lifetime concern.
+
+Runtime supersession is Runtime-owned.
+
+---
+
+# 15. Runtime Staleness Is Not RS-REV
+
+Do not map:
+
+```text
+Runtime Revision obsolete
+Attempt superseded
+Work canceled
+```
+
+to:
+
+```text
+ReadingContextRevisionConflict
+```
+
+These are separate authority domains.
+
+---
+
+# 16. Configuration Errors
+
+---
+
+## RS-CFG-001 — UnsupportedLanguage
+
+Requested language value is unsupported by Reading Session domain policy.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+UpdateConfiguration
+```
+
+Provider capability failure belongs outside Reading Session.
+
+---
+
+## RS-CFG-002 — UnsupportedReadingMode
+
+Requested reading-domain mode is unsupported.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+UpdateConfiguration
+```
+
+Do not confuse ReadingMode with PresentationMode.
+
+---
+
+## RS-CFG-003 — InvalidConfigurationCombination
+
+Session configuration contains incompatible domain options.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+UpdateConfiguration
+```
+
+---
+
+## RS-CFG-004 — ConfigurationVersionConflict
+
+Configuration mutation was based on stale Reading Session configuration state.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+RefreshReadingContext
+```
+
+Where configuration is part of ReadingContext, prefer the primary ReadingContextRevision concurrency guard rather than maintaining a second unnecessary concurrency domain.
+
+---
+
+# 17. Processing Intent Errors Removed
+
+Reading Session v3 does not define:
+
+```text
+ProcessingIntentNotFound
+ProcessingIntentAlreadyPublished
+ProcessingIntentObsolete
+ProcessingIntentFulfilled
+ProcessingIntentDiscarded
+ProcessingIntentCannotBeCreated
+```
+
+Reason:
+
+Reading Session no longer owns ProcessingIntent.
+
+Pipeline requirement evaluation belongs to:
+
+```text
+Business Pipeline Orchestration
+```
+
+Runtime execution lifecycle belongs to:
+
+```text
+Runtime Control
+```
+
+---
+
+# 18. Domain Consistency Errors
+
+Consistency errors indicate Reading Session-owned invariants were actually violated.
+
+They should be rare.
+
+---
+
+## RS-CON-001 — MultipleCurrentContexts
+
+More than one ReadingContext is exposed as current for one ReadingSession.
+
+Severity:
+
+```text
+Critical
+```
+
+Recovery:
+
+```text
+RestoreKnownGood
+```
+
+---
+
+## RS-CON-002 — ContextRevisionMismatch
+
+Current ReadingContextSnapshot revision does not match:
+
+```text
+currentReadingContextRevision
+```
+
+Severity:
+
+```text
+Critical
+```
+
+Recovery:
+
+```text
+RestoreKnownGood
+```
+
+---
+
+## RS-CON-003 — CommittedInvalidLifecycleTransition
+
+ReadingSession internal state contains a lifecycle transition forbidden by `STATES.md`.
+
+Severity:
+
+```text
+Critical
+```
+
+Recovery:
+
+```text
+RestoreKnownGood
+or
+RestartSession
+```
+
+This differs from `RS-SES-008`, where an invalid requested transition is safely rejected.
+
+---
+
+## RS-CON-004 — DomainHistoryCorrupted
+
+Retained Reading Session history cannot be reconstructed consistently.
+
+Examples:
+
+* duplicate revision sequence;
+* missing required committed snapshot;
+* impossible lifecycle ordering;
+* conflicting aggregate identities.
+
+Severity:
+
+```text
+Critical
+```
+
+Recovery:
+
+```text
+RestoreKnownGood
+or
+RestartSession
+```
+
+---
+
+## RS-CON-005 — AggregateIdentityConflict
+
+ReadingSession-owned objects disagree about aggregate identity.
+
+Severity:
+
+```text
+Critical
+```
+
+Recovery:
+
+```text
+RestoreKnownGood
+```
+
+---
+
+# 19. Recovery Errors
+
+---
+
+## RS-REC-001 — RestoredSessionInvalid
+
+Persisted ReadingSession data fails domain validation.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+RestartSession
+```
+
+Invalid restored data must not become authoritative.
+
+---
+
+## RS-REC-002 — RestoredContextInvalid
+
+Persisted ReadingContext fails validation.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+RebuildContext
+```
+
+---
+
+## RS-REC-003 — RestoredRevisionInvalid
+
+Persisted current ReadingContextRevision is inconsistent with restored domain state.
+
+Severity:
+
+```text
+Critical
+```
+
+Recovery:
+
+```text
+RestoreKnownGood
+or
+RestartSession
+```
+
+---
+
+## RS-REC-004 — KnownGoodStateUnavailable
+
+Recovery requires a valid known-good domain snapshot but none exists.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+RestartSession
+```
+
+---
+
+# 20. Event Publication Errors
+
+Reading Session commit and event publication are separate technical operations.
+
+---
+
+## RS-PUB-001 — EventSerializationFailed
+
+A Reading Session-owned event cannot satisfy its public event schema.
+
+Severity:
+
+```text
+Error
+```
+
+The already committed domain state remains committed.
+
+---
+
+## RS-PUB-002 — EventPublicationFailed
+
+Reading Session state committed successfully but publication of the corresponding domain fact failed.
+
+Severity:
+
+```text
+Error
+```
+
+Critical invariant:
+
+```text
+Domain commit remains valid.
+```
+
+Do not:
+
+```text
+roll back valid domain state
+rerun domain command
+create another ReadingContextRevision
+```
+
+merely to recreate the event.
+
+Recovery belongs to Event Bus/outbox/reconciliation policy.
+
+---
+
+## RS-PUB-003 — EventPayloadContractViolation
+
+Constructed event payload violates Reading Session event schema.
+
+Severity:
+
+```text
+Error
+```
+
+If the problem only affects event construction:
+
+```text
+committed Reading Session state remains valid
+```
+
+If it reveals committed domain corruption, escalate to a Consistency/Internal error.
+
+---
+
+# 21. Internal Errors
+
+---
+
+## RS-INT-001 — UnexpectedInternalFailure
+
+Unexpected failure inside Reading Session with no more specific classification.
+
+If committed state remains trustworthy:
+
+```text
+Severity = Error
+```
+
+If correctness is uncertain:
+
+```text
+Severity = Critical
+```
+
+---
+
+## RS-INT-002 — InvariantViolation
+
+A core Reading Session invariant was violated.
+
+Examples:
+
+* Candidate exposed as current;
+* committed snapshot mutated;
+* impossible revision sequence;
+* multiple current contexts;
+* illegal domain ownership mutation.
+
+Severity:
+
+```text
+Critical
+```
+
+Recovery:
+
+```text
+RestoreKnownGood
+or
+RestartSession
+```
+
+---
+
+## RS-INT-003 — AtomicDomainCommitFailed
+
+Reading Session could not atomically commit:
+
+```text
+ReadingContextRevision
++
+ReadingContextSnapshot
++
+current context reference
+```
+
+If previous state is certainly intact:
+
+```text
+Error
+preserve previous state
+```
+
+If commit outcome is uncertain:
+
+```text
+Critical
+restore/restart
+```
+
+---
+
+## RS-INT-004 — SnapshotSerializationViolation
+
+Candidate or committed ReadingContextSnapshot violates required serialization contract.
+
+Candidate-only:
+
+```text
+Error
+discard Candidate
+```
+
+Committed state affected:
+
+```text
+Critical
+```
+
+---
+
+# 22. Runtime Errors
+
+The following are explicitly not Reading Session errors:
+
+```text
+RuntimeRevisionSuperseded
+AttemptCancelled
+AttemptTimedOut
+RetryExhausted
+WorkItemRejected
+SchedulerOverloaded
+```
+
+Reading Session may remain:
+
+```text
+ACTIVE
++
+ReadingContext READY
+```
+
+while any of these occur.
+
+---
+
+# 23. Processing Module Errors
+
+Also external:
+
+```text
+Capture failure
+Recognition failure
+Text Processing failure
+Translation failure
+Presentation failure
+```
+
+A processing failure does not automatically cause:
+
+```text
+ReadingContextInvalid
+ReadingSessionCancelled
+```
+
+---
+
+# 24. UI Errors
+
+UI Adapter failures such as:
+
+```text
+viewport unavailable
+surface destroyed
+Presentation apply failed
+native window failure
+```
+
+remain UI-owned.
+
+A UI interaction may later cause Application to issue a Reading Session domain command, but the UI failure itself is not a Reading Session error.
+
+---
+
+# 25. Storage Errors
+
+Storage implementation failure remains Storage-owned.
+
+Reading Session may receive normalized persistence failure through a persistence port.
+
+If current in-memory domain state remains valid, Storage failure does not become Reading Session invariant corruption.
+
+---
+
+# 26. Error-to-State Mapping
+
+| Condition                       | Reading Session Result                   |
+| ------------------------------- | ---------------------------------------- |
+| Invalid command                 | Preserve current state                   |
+| Invalid target/source           | Preserve current state                   |
+| ReadingContextRevision conflict | Preserve current state                   |
+| Candidate context invalid       | Preserve current context                 |
+| Already active/paused           | No-op                                    |
+| Runtime failure                 | No automatic domain transition           |
+| Processing failure              | No automatic domain transition           |
+| UI failure                      | No automatic domain transition           |
+| Event publication failure       | Committed domain state remains committed |
+| Restored context invalid        | Do not expose as `READY`                 |
+| Domain invariant corruption     | Recovery/restart required                |
+
+---
+
+# 27. ReadingContextInvalid vs Processing Failure
+
+Use:
+
+```text
+ReadingContextInvalid
+```
+
+only when Reading Session cannot trust its understanding of:
+
+```text
+source
+target
+position
+configuration
+domain identity
+```
+
+Do not use it merely because the system failed to translate or recognize the content.
+
+---
+
+# 28. SessionCancelled vs RuntimeCancelled
+
+`ReadingSessionCancelled` means:
+
+```text
+reading activity terminated
+```
+
+Runtime cancellation means:
+
+```text
+execution work stopped or lost authority
+```
+
+They may be correlated.
+
+They are not the same state or error.
+
+---
+
+# 29. No-Op Conditions
+
+Prefer no-op over error where possible.
+
+Examples:
+
+```text
+Activate already ACTIVE session
+Pause already PAUSED session
+apply equivalent configuration
+update to same ReadingTarget
+update to same ReadingPosition
+```
+
+No-op:
+
+* does not increment ReadingContextRevision;
+* does not publish context mutation success event;
+* may emit diagnostics at Debug/Info level.
+
+---
+
+# 30. Candidate Supersession
+
+If a newer Reading Session command wins before an older Candidate commits:
+
+```text
+older Candidate → discard
+```
+
+This is expected optimistic concurrency behavior.
+
+Do not classify as Critical failure.
+
+Usually:
+
+```text
+RS-REV-001
+```
+
+or internal supersession diagnostics are sufficient.
+
+---
+
+# 31. Event Publication Failure Is Not Domain Failure
+
+Example:
+
+```text
+Revision 18 committed
+    ↓
+ReadingContextChanged publication fails
+```
+
+Current domain state remains:
+
+```text
+Revision 18
+```
+
+Observability should distinguish:
+
+```text
+domain commit success
+event publication failure
+```
+
+---
+
+# 32. Error Logging
+
+Recommended structured fields:
+
+```text
+errorCode
+category
+severity
+recoveryHint
+readingSessionId
+lifecycleState
+readingContextRevision
+expectedReadingContextRevision
+sourceId?
+targetId?
+requestId?
+correlationId?
+traceId?
+occurredAt
+```
+
+---
+
+# 33. Privacy
+
+Normal error payloads and logs MUST NOT contain:
+
+```text
+screenshot
+full source text
+translated text
+raw HTML
+provider prompt
+provider response
+auth token
+secret
+cookie
+native handle
+```
+
+Use:
+
+```text
+opaque IDs
+state
+revision
+reason code
+bounded metadata
+```
+
+instead.
+
+---
+
+# 34. Logging Levels
+
+Suggested:
+
+```text
+Debug
+    no-op / low-level diagnostic
+
+Info
+    expected revision conflict or duplicate condition
+
+Warning
+    invalid domain request
 
 Error
-
-Recovery
-
-Reevaluate
-
-Business State
-
-Unchanged
-
----
-
-# 15. Internal Errors
-
-Internal errors represent failures inside Reading Session itself.
-
-They do not describe Runtime failures.
-
-Internal errors indicate that Reading Session cannot safely continue normal business operation.
-
----
-
-## 15.1 SES-INTERNAL-001 InternalFailure
-
-Meaning
-
-An unexpected internal failure occurred.
-
-The exact implementation detail is intentionally hidden.
-
-Severity
+    recoverable Reading Session operation failure
 
 Critical
-
-Recovery
-
-ManualIntervention
-
-Business State
-
-Unknown
-
----
-
-## 15.2 SES-INTERNAL-002 InvariantViolation
-
-Meaning
-
-One or more architectural invariants have been violated.
-
-Reading Session can no longer guarantee deterministic behavior.
-
-Severity
-
-Critical
-
-Recovery
-
-ManualIntervention
-
-Business State
-
-Unknown
-
----
-
-## 15.3 SES-INTERNAL-003 AtomicCommitFailed
-
-Meaning
-
-A business state transition could not be committed atomically.
-
-No partial business update is allowed.
-
-Severity
-
-Critical
-
-Recovery
-
-ManualIntervention
-
-Business State
-
-Previous consistent state retained
-
----
-
-## 15.4 SES-INTERNAL-004 EventPublicationFailed
-
-Meaning
-
-Reading Session failed to publish a required business event.
-
-Business state remains unchanged until publication consistency can be guaranteed.
-
-Severity
-
-Critical
-
-Recovery
-
-ManualIntervention
-
-Business State
-
-Unchanged
-
----
-
-# 16. Error Mapping
-
-Every Reading Session error maps to a deterministic business outcome.
-
-The same error must always produce the same business behavior.
-
----
-
-## 16.1 Validation Errors
-
-| Error Category | Business Result |
-|----------------|-----------------|
-| MissingSessionIdentifier | Reject request |
-| InvalidSessionIdentifier | Reject request |
-| UnsupportedOperation | Reject request |
-| MissingConfiguration | Reject request |
-| InvalidConfiguration | Reject request |
-
-Validation errors never modify business state.
-
----
-
-## 16.2 Session Errors
-
-| Error | Business Result |
-|--------|-----------------|
-| SessionNotFound | Reject operation |
-| SessionAlreadyExists | Reject creation |
-| SessionAlreadyActive | Ignore request |
-| SessionAlreadyCompleted | Reject operation |
-| SessionAlreadyCancelled | Reject operation |
-| SessionDisposed | Reject operation |
-
-The Session lifecycle remains unchanged.
-
----
-
-## 16.3 Reading Context Errors
-
-| Error | Business Result |
-|--------|-----------------|
-| ReadingContextUnavailable | Stop business evaluation |
-| ReadingContextInvalid | Stop business evaluation |
-| ReadingContextDisposed | Reject operation |
-| ReadingContextMismatch | Reject operation |
-
-No new ContentRevision should be created until the Reading Context becomes valid.
-
----
-
-## 16.4 Revision Errors
-
-| Error | Business Result |
-|--------|-----------------|
-| RevisionNotFound | Reject operation |
-| RevisionAlreadyCurrent | Ignore request |
-| RevisionSuperseded | Ignore obsolete operation |
-| RevisionArchived | Reject activation |
-| RevisionDiscarded | Reject operation |
-| DuplicateRevision | Ignore duplicate |
-
-Revision history remains immutable.
-
----
-
-## 16.5 Processing Intent Errors
-
-| Error | Business Result |
-|--------|-----------------|
-| ProcessingIntentNotFound | Reject operation |
-| ProcessingIntentAlreadyPublished | Ignore request |
-| ProcessingIntentObsolete | Ignore obsolete operation |
-| ProcessingIntentFulfilled | Ignore request |
-| ProcessingIntentDiscarded | Reject operation |
-| ProcessingIntentCannotBeCreated | Abort business evaluation |
-
-ProcessingIntent history remains append-only.
-
----
-
-## 16.6 Configuration Errors
-
-| Error | Business Result |
-|--------|-----------------|
-| UnsupportedLanguage | Reject configuration |
-| UnsupportedReadingMode | Reject configuration |
-| InvalidConfigurationCombination | Reject configuration |
-| ConfigurationVersionMismatch | Reevaluate Session |
-
-Historical revisions remain unchanged.
-
----
-
-## 16.7 Consistency Errors
-
-Consistency errors always take precedence over operational errors.
-
-Whenever a business invariant is violated,
-
-Reading Session must stop producing new business objects until consistency has been restored.
-
----
-
-## 16.8 Internal Errors
-
-Internal errors indicate Reading Session can no longer guarantee deterministic business behavior.
-
-Consumers should assume that:
-
-- the current request failed;
-- no partial business update occurred;
-- previously committed business history remains valid.
-
----
-
-# 17. Logging
-
-Business logging exists to explain business decisions,
-
-not implementation details.
-
-Logs should make it possible to reconstruct the complete business timeline.
-
----
-
-## 17.1 Required Fields
-
-Every business error log should include:
-
-```text
-ErrorCode
-
-Severity
-
-SessionId
-
-ContextId
-
-RevisionId
-
-IntentId
-
-CorrelationId
-
-OccurredAt
-```
-
-Additional identifiers may be recorded,
-
-provided they remain implementation-independent.
-
----
-
-## 17.2 Optional Fields
-
-Depending on the business operation,
-
-logs may also include:
-
-```text
-AggregateVersion
-
-ConfigurationVersion
-
-OperationName
-
-BusinessAction
-
-EventId
+    Reading Session-owned correctness compromised
 ```
 
 ---
 
-## 17.3 Sensitive Information
+# 35. Metrics
 
-Business logs must never expose:
-
-```text
-Captured Image
-
-OCR Result
-
-Translated Text
-
-Prompt
-
-Authentication Token
-
-Secret Key
-
-Provider Credential
-
-User Personal Content
-```
-
-Reading Session records business metadata only.
-
----
-
-## 17.4 Logging Principles
-
-Business logs should satisfy the following principles.
-
-- deterministic
-- structured
-- privacy-preserving
-- append-only
-- traceable
-- implementation-independent
-
----
-
-# 18. Metrics
-
-Reading Session exposes business-oriented metrics.
-
-Infrastructure metrics belong to Runtime.
-
----
-
-## 18.1 Recommended Metrics
+Recommended:
 
 ```text
-reading_session_created_total
-
-reading_session_completed_total
-
-reading_session_cancelled_total
-
+reading_session_error_total
+reading_session_rejection_total
 reading_context_invalid_total
+reading_context_revision_conflict_total
+reading_session_invalid_transition_total
+reading_session_recovery_total
+reading_session_event_publish_failure_total
+reading_session_consistency_failure_total
+```
 
-content_revision_created_total
+Remove old metrics such as:
 
+```text
 content_revision_superseded_total
-
 processing_intent_created_total
-
-processing_intent_published_total
-
 processing_intent_obsolete_total
-
-business_error_total
-
-business_consistency_error_total
 ```
 
-These metrics describe business behavior,
-
-not execution performance.
+from Reading Session ownership.
 
 ---
 
-## 18.2 Metrics Principles
+# 36. Testing — Ownership
 
-Business metrics should answer questions such as:
-
-- How many reading sessions were created?
-- How many sessions completed successfully?
-- How often do Reading Contexts become invalid?
-- How many Content Revisions are generated?
-- How many ProcessingIntent objects become obsolete?
-
-They should never answer questions such as:
-
-- OCR latency
-- GPU utilization
-- Translation provider response time
-- Worker queue length
-
-Those belong to Runtime monitoring.
-
----
-
-# 19. Error Invariants
-
-The following guarantees always remain true.
-
----
-
-## 19.1 Business State Safety
-
-Errors never partially modify business state.
-
-Either the requested business operation succeeds completely,
-
-or the previous business state remains unchanged.
-
----
-
-## 19.2 Immutable History
-
-Errors never rewrite:
-
-- ReadingContext history
-- ContentRevision history
-- ProcessingIntent history
-- Session history
-
-Historical business facts remain valid.
-
----
-
-## 19.3 Stable Error Codes
-
-Published ErrorCode values remain stable across versions.
-
-Internal implementation may change,
-
-but business contracts must remain compatible.
-
----
-
-## 19.4 Runtime Isolation
-
-Reading Session never exposes Runtime implementation failures.
-
-Consumers receive only business error contracts.
-
----
-
-## 19.5 Deterministic Recovery
-
-Given identical business state,
-
-the same recovery policy must always be recommended.
-
-Recovery advice is therefore deterministic.
-
----
-
-## 19.6 Business Ownership
-
-Every business error belongs to exactly one module.
-
-Reading Session never reports errors owned by:
-
-- Runtime
-- Recognition
-- Translation
-- Presentation
-- Scheduler
-- Provider
-
-Likewise,
-
-those modules never publish Reading Session business errors.
-
----
-
-# 20. Related Documents
-
-This specification complements the remaining Reading Session architecture documents.
+Tests MUST verify Reading Session never returns internal error codes for:
 
 ```text
-README.md
-
-MODULE.md
-
-CONTRACT.md
-
-STATES.md
-
-EVENTS.md
+Runtime timeout
+Attempt cancellation
+Translation provider failure
+OCR failure
+Presentation failure
+UI apply failure
+Scheduler overload
 ```
-
-Responsibilities are divided as follows.
-
-| Document | Responsibility |
-|----------|----------------|
-| README | Module overview |
-| MODULE | Ownership and responsibilities |
-| CONTRACT | Public contracts |
-| STATES | Business lifecycle |
-| EVENTS | Business events |
-| ERRORS | Business failure model |
-
-Each document owns one architectural concern.
 
 ---
 
-# 21. Summary
+# 37. Testing — Candidate Isolation
 
-Reading Session defines business error contracts independently from Runtime.
+Tests MUST verify:
 
-Business errors describe why a business operation cannot continue,
+* invalid Candidate does not mutate current ReadingContext;
+* revision conflict does not mutate current context;
+* source/target validation failure does not increment revision;
+* configuration rejection preserves previous committed state.
 
-while Runtime errors describe how execution failed.
+---
 
-The module defines eight error categories.
+# 38. Testing — Revision
+
+Tests MUST verify:
 
 ```text
-Reading Session Errors
+successful context commit
+    → revision increments
 
-├── Validation
-├── Session
-├── Reading Context
-├── Content Revision
-├── Processing Intent
-├── Configuration
-├── Consistency
-└── Internal
+no-op
+    → revision unchanged
+
+failed Candidate
+    → revision unchanged
+
+revision conflict
+    → revision unchanged
 ```
-
-The architecture guarantees that:
-
-- business errors are deterministic;
-- ErrorCode values remain stable;
-- business history is never corrupted by failures;
-- Runtime failures remain isolated;
-- recovery policies are predictable;
-- business ownership is explicit.
-
-Together with `MODULE.md`, `CONTRACT.md`, `STATES.md`, and `EVENTS.md`, this document completes the core behavioral specification of the Reading Session module.
 
 ---
 
-# End of Document
+# 39. Testing — Lifecycle
+
+Tests MUST distinguish:
+
+```text
+invalid requested lifecycle transition
+```
+
+from:
+
+```text
+committed lifecycle corruption
+```
+
+The former is normally `Warning`.
+
+The latter is `Critical`.
+
+---
+
+# 40. Testing — Runtime Independence
+
+Verify:
+
+```text
+Runtime work fails
+```
+
+while:
+
+```text
+ReadingSession = ACTIVE
+ReadingContext = READY
+```
+
+remains valid.
+
+---
+
+# 41. Testing — Event Publication
+
+Tests MUST verify:
+
+```text
+domain commit succeeds
+event publication fails
+```
+
+does not:
+
+* roll back domain state automatically;
+* rerun the command;
+* create another revision;
+* corrupt ReadingSession.
+
+---
+
+# 42. Testing — Recovery
+
+Tests should cover:
+
+* invalid restored Session;
+* invalid restored Context;
+* inconsistent restored Revision;
+* successful known-good restoration;
+* missing known-good state;
+* no activation before restored data validation.
+
+---
+
+# 43. Deprecated v2 Errors
+
+The following v2 errors are removed or replaced.
+
+## Content Revision
+
+```text
+SES-REVISION-001 RevisionNotFound
+SES-REVISION-002 RevisionAlreadyCurrent
+SES-REVISION-003 RevisionSuperseded
+SES-REVISION-004 RevisionArchived
+SES-REVISION-005 RevisionDiscarded
+SES-REVISION-006 DuplicateRevision
+```
+
+Replacement active semantics:
+
+```text
+RS-REV-001 ReadingContextRevisionConflict
+RS-REV-002 ReadingContextRevisionMissing
+RS-REV-003 ReadingContextRevisionInvalid
+RS-REV-004 NonMonotonicReadingContextRevision
+RS-REV-005 DuplicateSemanticRevision
+```
+
+---
+
+## Processing Intent
+
+All:
+
+```text
+SES-INTENT-*
+```
+
+are removed from Reading Session ownership.
+
+---
+
+# 44. Error Code Summary
+
+## Validation
+
+```text
+RS-VAL-001 MissingReadingSessionId
+RS-VAL-002 InvalidReadingSessionId
+RS-VAL-003 MissingRequiredField
+RS-VAL-004 InvalidFieldValue
+RS-VAL-005 UnsupportedContractVersion
+```
+
+## Session
+
+```text
+RS-SES-001 SessionNotFound
+RS-SES-002 SessionAlreadyExists
+RS-SES-003 SessionAlreadyActive
+RS-SES-004 SessionAlreadyPaused
+RS-SES-005 SessionCompleted
+RS-SES-006 SessionCancelled
+RS-SES-007 SessionDisposed
+RS-SES-008 InvalidSessionTransition
+```
+
+## Context
+
+```text
+RS-CTX-001 ReadingContextUnavailable
+RS-CTX-002 ReadingContextInvalid
+RS-CTX-003 ReadingContextDisposed
+RS-CTX-004 ReadingContextSessionMismatch
+RS-CTX-005 InvalidReadingSource
+RS-CTX-006 InvalidReadingTarget
+RS-CTX-007 InvalidReadingPosition
+RS-CTX-008 CandidateContextInvalid
+```
+
+## ReadingContextRevision
+
+```text
+RS-REV-001 ReadingContextRevisionConflict
+RS-REV-002 ReadingContextRevisionMissing
+RS-REV-003 ReadingContextRevisionInvalid
+RS-REV-004 NonMonotonicReadingContextRevision
+RS-REV-005 DuplicateSemanticRevision
+```
+
+## Configuration
+
+```text
+RS-CFG-001 UnsupportedLanguage
+RS-CFG-002 UnsupportedReadingMode
+RS-CFG-003 InvalidConfigurationCombination
+RS-CFG-004 ConfigurationVersionConflict
+```
+
+## Consistency
+
+```text
+RS-CON-001 MultipleCurrentContexts
+RS-CON-002 ContextRevisionMismatch
+RS-CON-003 CommittedInvalidLifecycleTransition
+RS-CON-004 DomainHistoryCorrupted
+RS-CON-005 AggregateIdentityConflict
+```
+
+## Recovery
+
+```text
+RS-REC-001 RestoredSessionInvalid
+RS-REC-002 RestoredContextInvalid
+RS-REC-003 RestoredRevisionInvalid
+RS-REC-004 KnownGoodStateUnavailable
+```
+
+## Publication
+
+```text
+RS-PUB-001 EventSerializationFailed
+RS-PUB-002 EventPublicationFailed
+RS-PUB-003 EventPayloadContractViolation
+```
+
+## Internal
+
+```text
+RS-INT-001 UnexpectedInternalFailure
+RS-INT-002 InvariantViolation
+RS-INT-003 AtomicDomainCommitFailed
+RS-INT-004 SnapshotSerializationViolation
+```
+
+---
+
+# 45. Architecture Invariants
+
+1. Reading Session errors describe Reading Session-owned failures only.
+
+2. Runtime failure is not a Reading Session error.
+
+3. Runtime cancellation is not a Reading Session error.
+
+4. Processing module failure is not a Reading Session error.
+
+5. UI apply failure is not a Reading Session error.
+
+6. Reading Session owns ReadingContextRevision errors only.
+
+7. RuntimeRevisionId is never treated as ReadingContextRevision.
+
+8. ContentRevision lifecycle errors are removed.
+
+9. ProcessingIntent errors are removed.
+
+10. Validation errors never partially mutate domain state.
+
+11. Candidate rejection never mutates committed ReadingContext.
+
+12. ReadingContextRevision conflict is expected concurrency behavior.
+
+13. No-op does not advance ReadingContextRevision.
+
+14. Processing failure alone does not invalidate ReadingContext.
+
+15. ReadingSessionCancelled is not Runtime Attempt cancellation.
+
+16. Invalid requested lifecycle transition is not automatically Critical.
+
+17. Committed lifecycle corruption is Critical.
+
+18. Event publication failure does not roll back valid committed domain state.
+
+19. Event publication failure does not rerun the domain command.
+
+20. Atomic commit failure preserves previous state when certainty exists.
+
+21. Reading Session recovery restores domain state only.
+
+22. Error payloads remain immutable.
+
+23. Error codes remain stable.
+
+24. Normal diagnostics contain no raw reading content.
+
+---
+
+# 46. Related Documents
+
+```text
+doc/02-modules/reading-session/MODULE.md
+doc/02-modules/reading-session/CONTRACT.md
+doc/02-modules/reading-session/STATES.md
+doc/02-modules/reading-session/EVENTS.md
+doc/02-modules/reading-session/README.md
+
+doc/01-architecture/core/STATE_MACHINE.md
+doc/01-architecture/core/EVENT_BUS.md
+doc/01-architecture/core/EVENT_CONVENTION.md
+
+doc/01-architecture/modules/OWNERSHIP_MAP.md
+doc/01-architecture/modules/MODULE_DEPENDENCY.md
+
+doc/01-architecture/runtime/BUSINESS_PIPELINE_ORCHESTRATION.md
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RETRY_POLICY.md
+```
+
+---
+
+# 47. Completion Criteria
+
+This error specification is synchronized when:
+
+* only Reading Session-owned failure categories remain;
+* ProcessingIntent errors are removed;
+* old ContentRevision lifecycle errors are removed;
+* ReadingContextRevisionConflict replaces ambiguous stale-revision semantics;
+* Runtime staleness remains external;
+* processing failures remain external;
+* UI failures remain external;
+* validation/candidate failures preserve current committed state;
+* event publication failure preserves committed domain state;
+* consistency errors distinguish rejected illegal requests from actual state corruption;
+* recovery restores reading-domain state only;
+* diagnostics and metrics remain privacy-safe.
+
+---
+
+# 48. Summary
+
+Reading Session v3 error flow is:
+
+```text
+Reading Session Command
+        ↓
+Domain Validation
+        ├── rejected
+        │      ↓
+        │   Reading Session error
+        │   committed state unchanged
+        │
+        └── accepted
+               ↓
+        Candidate Reading Context
+               ↓
+        candidate validation
+               ↓
+        ReadingContextRevision guard
+               ↓
+        atomic domain commit
+               ↓
+        committed Reading Session state
+               ↓
+        event publication
+               ├── success
+               └── publication failure
+                    domain state remains committed
+```
+
+External execution remains separate:
+
+```text
+Reading Session
+    → reading-domain errors
+
+Business Pipeline Orchestration
+    → pipeline-decision errors
+
+Runtime
+    → execution/authority errors
+
+Processing Modules
+    → processing errors
+
+Presentation
+    → presentation errors
+
+UI Adapter
+    → rendering/apply errors
+```
+
+The central rule is:
+
+```text
+Reading Session owns errors
+about the reading world.
+
+It does not own errors
+about executing work for that world.
+```

@@ -79,7 +79,7 @@ Implementation
 | Runtime Architecture | ✅ Runtime v2 synchronized | Runtime documents now use the same WorkItem/Attempt, authority, Candidate Artifact, ownership, publication, Lease, retention and disposal model. |
 | Business Module Architecture | ✅ Complete | Core business modules (including Translation, Presentation and Provider Management) have completed the standard document set. Cross-module Runtime v2 terminology review remains an ongoing maintenance task. |
 | Detailed Recognition/OCR Architecture | 🟡 Next review area | The detailed `doc/01-architecture/ocr/` documents exist but have not yet been reconciled with the newly completed Recognition module contracts. |
-| Infrastructure Architecture | 🟡 In Progress | Configuration Infrastructure module document set has been completed and Infrastructure documentation has started. |
+| Infrastructure Architecture | ✅ Complete | All seven Infrastructure modules (Configuration, Secret Management, Event Bus, Logging, Telemetry, Scheduler and Resource Manager) have completed the standard document set. |
 | Technology Selection | ⏳ Not Started | Frameworks, languages, providers and process topology have not been finalized. |
 | Implementation | ❌ Not Started | No production implementation has begun. |
 
@@ -135,6 +135,7 @@ Presentation Commit
 | Logging Infrastructure | ✅ Complete | Structured logging architecture completed. |
 | Telemetry Infrastructure | ✅ Complete | Metrics, tracing and observability contracts completed. |
 | Scheduler Infrastructure | ✅ Complete | Scheduling lifecycle, retry, timeout, cancellation and orchestration documented. |
+| Resource Manager Infrastructure | ✅ Complete | Standard document set (README, MODULE, CONTRACT, STATES, EVENTS, ERRORS) completed. |
 
 
 | Module | Status | Notes |
@@ -190,11 +191,11 @@ The immediate focus is completion of the Infrastructure Architecture before tech
 
 Current priorities are:
 
-1. complete `03-infrastructure/resource-manager/`
-2. continue the remaining Infrastructure modules
-3. synchronize architecture terminology across modules
-4. revisit OCR architecture after Infrastructure stabilization
-5. update PROJECT_STATUS after each completed document group
+1. review and simplify Infrastructure documentation for consistency
+2. synchronize architecture terminology across modules
+3. reconcile `doc/01-architecture/ocr/` with `doc/02-modules/recognition/`
+4. update PROJECT_STATUS after each completed document group
+5. begin technology selection after architecture stabilization
 
 
 ## 1.6 Architecture Snapshot

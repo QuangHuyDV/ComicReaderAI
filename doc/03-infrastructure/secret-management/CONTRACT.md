@@ -1,778 +1,501 @@
-# Telemetry Contract
+# 03-infrastructure/resource-manager/CONTRACT.md
 
-> **Project:** CRAI
-> **Layer:** Infrastructure
-> **Module:** Telemetry
-> **Document:** Public Contracts
-> **Path:** `03-infrastructure/telemetry/CONTRACT.md`
-> **Version:** 0.1
-> **Status:** Architecture Draft
-> **Last Updated:** 2026-08-06
+# Resource Manager Contract
 
----
+## Purpose
 
-# 1. Purpose
+Tài liệu này định nghĩa các interface, contract và quy tắc tương tác giữa Resource Manager với các module khác trong hệ thống.
 
-Tài liệu này định nghĩa toàn bộ **public contract**, **interface**, **DTO**, **value object** và **invariants** của module Telemetry.
-
-Contract đảm bảo:
-
-* mọi module phát telemetry theo cùng chuẩn;
-* metrics, traces và health có lifecycle thống nhất;
-* exporter có thể thay thế mà không ảnh hưởng producer;
-* không có telemetry nào mang dữ liệu nhạy cảm;
-* tương thích với OpenTelemetry nhưng không phụ thuộc trực tiếp.
+Resource Manager là **điểm duy nhất** chịu trách nhiệm quản lý lifecycle của mọi shared resource trong CRAI.
 
 ---
 
-# 2. Design Principles
+# Core Principles
 
-## 2.1 Stable API
+Resource Manager phải đảm bảo:
 
-Producer chỉ làm việc với abstraction.
-
-```text
-Feature Module
-      │
-      ▼
-Telemetry API
-      │
-      ▼
-Implementation
-```
+* Mỗi resource có định danh duy nhất.
+* Resource chỉ được khởi tạo theo policy.
+* Không tồn tại nhiều instance ngoài ý muốn.
+* Lifecycle luôn xác định.
+* Resource có thể được theo dõi (observable).
+* Resource có thể được giải phóng an toàn.
+* Resource không được sử dụng sau khi đã dispose.
 
 ---
 
-## 2.2 Immutable Signals
+# Resource Identity
 
-Sau khi publish:
-
-* Metric không sửa.
-* Span đã End không sửa.
-* Trace đã Complete không sửa.
-
----
-
-## 2.3 Safe Metadata
-
-Metadata chỉ được chứa:
+Mỗi resource được xác định bởi:
 
 ```text
-module
-operation
-duration
-status
-errorCode
-resourceClass
-provider
-```
-
-Không được chứa:
-
-```text
-OCR text
-translated text
-secret
-token
-password
-prompt
-image
-payload
-authorization
-```
-
----
-
-# 3. Public Interfaces
-
-## 3.1 TelemetryService
-
-```text
-interface TelemetryService {
-
-    Counter counter(name)
-
-    Gauge gauge(name)
-
-    Histogram histogram(name)
-
-    Timer timer(name)
-
-    Trace createTrace(...)
-
-    Span createSpan(...)
-
-    HealthReporter health()
-
-    MetricsExporter exporter()
-
-}
-```
-
-Là entry point của module.
-
----
-
-## 3.2 Counter
-
-```text
-interface Counter {
-
-    increment()
-
-    increment(value)
-
-}
-```
-
-Contract:
-
-* chỉ tăng
-* không giảm
-* thread-safe
-
-Ví dụ:
-
-```text
-translation_requests_total
-```
-
----
-
-## 3.3 Gauge
-
-```text
-interface Gauge {
-
-    set(value)
-
-    increase()
-
-    decrease()
-
-}
+Resource ID
+Resource Type
+Version
+Scope
+Owner Module
 ```
 
 Ví dụ:
 
 ```text
-gpu_usage
+browser.default
+ocr.primary
+translator.openai
+translator.gemini
+renderer.overlay
+http.default
+gpu.main
+cache.image
+```
 
-memory_usage
+Resource ID phải là duy nhất trong phạm vi Runtime.
 
-queue_depth
+---
+
+# Resource Scope
+
+Resource Manager hỗ trợ các phạm vi sau:
+
+| Scope       | Mô tả                            |
+| ----------- | -------------------------------- |
+| Application | Dùng chung toàn bộ ứng dụng      |
+| Session     | Tồn tại trong một phiên làm việc |
+| Task        | Chỉ tồn tại trong một tác vụ     |
+| Request     | Chỉ phục vụ một request          |
+| Worker      | Gắn với một worker cụ thể        |
+| Module      | Chỉ dùng trong một module        |
+
+---
+
+# Resource Registration Contract
+
+## register()
+
+Đăng ký resource.
+
+Input
+
+```text
+ResourceDescriptor
+```
+
+Output
+
+```text
+RegistrationResult
+```
+
+Điều kiện:
+
+* Resource ID chưa tồn tại.
+* Type hợp lệ.
+* Lifecycle Policy hợp lệ.
+
+Nếu trùng Resource ID:
+
+* trả lỗi
+* hoặc ghi đè nếu policy cho phép.
+
+---
+
+## unregister()
+
+Xóa resource.
+
+Điều kiện:
+
+* Không còn client đang sử dụng.
+* Không ở trạng thái Busy.
+* Không còn dependency.
+
+Nếu không đáp ứng điều kiện:
+
+```text
+RESOURCE_IN_USE
 ```
 
 ---
 
-## 3.4 Histogram
+# Resource Lookup Contract
+
+## resolve()
+
+Lấy resource.
+
+Input
 
 ```text
-interface Histogram {
-
-    observe(value)
-
-}
+Resource ID
 ```
 
-Dùng cho:
+Output
 
-* latency
-* duration
-* payload size
-* queue wait
+```text
+Resource Instance
+```
+
+Nếu chưa được tạo:
+
+* Lazy Create
+* hoặc trả lỗi
+
+theo Resource Policy.
 
 ---
 
-## 3.5 Timer
+## exists()
+
+Kiểm tra resource tồn tại.
+
+Output
 
 ```text
-interface Timer {
-
-    start()
-
-    stop()
-
-}
-```
-
-Kết quả được ghi vào Histogram.
-
----
-
-## 3.6 Trace
-
-```text
-interface Trace {
-
-    traceId()
-
-    rootSpan()
-
-    end()
-
-}
-```
-
-Một Trace có nhiều Span.
-
----
-
-## 3.7 Span
-
-```text
-interface Span {
-
-    spanId()
-
-    parent()
-
-    child()
-
-    attribute()
-
-    event()
-
-    status()
-
-    end()
-
-}
-```
-
-Contract:
-
-* parent không đổi
-* end đúng một lần
-* immutable sau End
-
----
-
-## 3.8 HealthReporter
-
-```text
-interface HealthReporter {
-
-    reportHealthy()
-
-    reportDegraded()
-
-    reportUnavailable()
-
-}
+true
+false
 ```
 
 ---
 
-## 3.9 MetricsExporter
+## list()
 
-```text
-interface MetricsExporter {
+Liệt kê toàn bộ resource.
 
-    export()
+Có thể lọc theo:
 
-    flush()
-
-}
-```
-
----
-
-## 3.10 TraceExporter
-
-```text
-interface TraceExporter {
-
-    export()
-
-    flush()
-
-}
-```
+* Scope
+* Type
+* Module
+* State
+* Tag
 
 ---
 
-# 4. Context Objects
+# Lifecycle Contract
 
-## 4.1 TelemetryContext
-
-```text
-TelemetryContext {
-
-    traceId
-
-    spanId
-
-    correlationId
-
-    module
-
-    operation
-
-}
-```
-
-Không chứa:
-
-* user content
-* OCR result
-* translated text
-
----
-
-## 4.2 MetricLabel
+Resource phải đi theo lifecycle chuẩn:
 
 ```text
-MetricLabel {
-
-    key
-
-    value
-
-}
-```
-
-Giới hạn:
-
-* cardinality thấp
-* không chứa secret
-* immutable
-
----
-
-## 4.3 HealthSnapshot
-
-```text
-HealthSnapshot {
-
-    module
-
-    state
-
-    timestamp
-
-    details
-
-}
-```
-
-`details` chỉ chứa metadata an toàn.
-
----
-
-# 5. Metric Contracts
-
-## Counter
-
-Invariants:
-
-```text
->= previous value
-```
-
-Không reset bằng API thường.
-
----
-
-## Gauge
-
-Cho phép:
-
-```text
-increase
-
-decrease
-
-set
-```
-
----
-
-## Histogram
-
-Không trả về percentile trực tiếp.
-
-Aggregation thực hiện nội bộ.
-
----
-
-## Timer
-
-```text
-start()
-
+Registered
 ↓
 
-running
-
-↓
-
-stop()
-
-↓
-
-immutable
-```
-
----
-
-# 6. Trace Contracts
-
-Một Trace:
-
-```text
-1 Root Span
-
-↓
-
-N Child Span
-```
-
-Không có nhiều Root Span.
-
----
-
-## Span Hierarchy
-
-```text
-Root
-
-↓
-
-OCR
-
-↓
-
-Translate
-
-↓
-
-Layout
-
-↓
-
-Render
-```
-
-Không tạo vòng lặp.
-
----
-
-## Span Status
-
-```text
-RUNNING
-
-SUCCESS
-
-FAILED
-
-CANCELLED
-
-TIMEOUT
-```
-
-Terminal:
-
-```text
-SUCCESS
-
-FAILED
-
-TIMEOUT
-
-CANCELLED
-```
-
----
-
-# 7. Health Contracts
-
-Health có ba mức:
-
-```text
-HEALTHY
-
-DEGRADED
-
-UNAVAILABLE
-```
-
-Health không phản ánh business state.
-
----
-
-# 8. Export Contracts
-
-Exporter phải:
-
-* async
-* bounded
-* retry được
-* flush được
-* shutdown được
-
-Exporter không được block producer.
-
----
-
-# 9. Sampling Contracts
-
-```text
-Sampler {
-
-    shouldSample(...)
-}
-```
-
-Sampling chỉ ảnh hưởng telemetry.
-
-Không ảnh hưởng business logic.
-
----
-
-# 10. Aggregation Contracts
-
-Aggregation hỗ trợ:
-
-* Counter
-* Histogram
-* Gauge
-* Trace summary
-
-Aggregation không sửa dữ liệu gốc.
-
----
-
-# 11. Resource Contracts
-
-```text
-ResourceSnapshot {
-
-    cpu
-
-    memory
-
-    gpu
-
-    disk
-
-    network
-
-}
-```
-
-Không chứa process memory dump.
-
----
-
-# 12. Correlation Contracts
-
-Correlation gồm:
-
-```text
-traceId
-
-spanId
-
-correlationId
-```
-
-Không dùng User ID làm correlation.
-
----
-
-# 13. Runtime Contracts
-
-Runtime Collector:
-
-```text
-collect()
-
-↓
-
-snapshot
-
-↓
-
-publish
-```
-
-Không can thiệp Runtime.
-
----
-
-# 14. Security Contracts
-
-Telemetry không được export:
-
-* OCR result
-* Translation result
-* Image
-* Prompt
-* Secret
-* Password
-* Token
-* Cookie
-* Authorization Header
-
----
-
-# 15. Performance Contracts
-
-Tất cả API:
-
-* thread-safe
-* async-friendly
-* low allocation
-* bounded memory
-
----
-
-# 16. Error Contracts
-
-Producer không nhận exception nội bộ của exporter.
-
-Chỉ nhận:
-
-```text
-accepted
-
-ignored
-
-sampled
-
-dropped
-```
-
-Chi tiết exporter thuộc `ERRORS.md`.
-
----
-
-# 17. Lifecycle Contracts
-
-Telemetry:
-
-```text
-Initialize
-
+Initializing
 ↓
 
 Ready
-
 ↓
 
-Running
-
+Busy
 ↓
 
-Degraded
-
+Idle
 ↓
 
-Stopping
-
+Disposing
 ↓
 
-Terminated
+Disposed
 ```
 
-Không publish metric sau Terminated.
-
----
-
-# 18. Compatibility
-
-Contract tương thích với:
-
-* OpenTelemetry
-* Prometheus
-* OTLP
-* Jaeger
-* Zipkin
-
-Không khóa implementation.
-
----
-
-# 19. Invariants
-
-## Metrics
-
-* immutable sau publish
-* bounded labels
-* không secret
-
-## Trace
-
-* một Root
-* không cycle
-* end một lần
-
-## Span
-
-* parent bất biến
-* terminal một lần
-
-## Export
-
-* không block producer
-* retry bounded
-
-## Health
-
-* chỉ phản ánh hạ tầng
-
----
-
-# 20. Module Boundary
-
-Telemetry sở hữu:
-
-* Counter
-* Gauge
-* Histogram
-* Timer
-* Trace
-* Span
-* Health
-* Exporter
-* Sampler
-* Aggregator
-
-Không sở hữu:
-
-* Logging
-* Event Bus
-* Storage
-* OCR
-* Translation
-
----
-
-# 21. Related Documents
+Không được phép:
 
 ```text
-MODULE.md
-STATES.md
-EVENTS.md
-ERRORS.md
-README.md
+Ready
+↓
+
+Registered
+```
+
+hoặc
+
+```text
+Disposed
+↓
+
+Busy
 ```
 
 ---
 
-# 22. Summary
+# Acquire Contract
 
-Contract của Telemetry xác định một API thống nhất cho toàn bộ hệ thống CRAI trong việc phát Metrics, Traces và Health Signals.
+## acquire()
 
-Mọi implementation phải đảm bảo:
+Yêu cầu sử dụng resource.
 
-* immutable signals;
-* bounded memory;
-* thread-safe;
-* asynchronous;
-* metadata an toàn;
-* không rò rỉ dữ liệu nhạy cảm;
-* exporter có thể thay thế mà không thay đổi producer;
-* tương thích với các hệ sinh thái observability phổ biến.
+Input
+
+```text
+Resource ID
+```
+
+Output
+
+```text
+Lease
+```
+
+Acquire có thể:
+
+* thành công
+* timeout
+* bị từ chối
+* chờ pool
+
+---
+
+## release()
+
+Giải phóng lease.
+
+Input
+
+```text
+Lease
+```
+
+Sau release:
+
+* giảm usage count
+* trả về pool
+* hoặc dispose
+
+theo policy.
+
+---
+
+# Pool Contract
+
+Nếu resource thuộc Pool:
+
+Manager phải hỗ trợ:
+
+* max size
+* min idle
+* max idle
+* acquire timeout
+* idle timeout
+* lifetime
+* auto expand
+* auto shrink
+
+Pool phải đảm bảo:
+
+* không cấp cùng một instance cho hai client nếu resource không hỗ trợ chia sẻ đồng thời.
+* không vượt quá giới hạn cấu hình.
+
+---
+
+# Dependency Contract
+
+Resource có thể khai báo dependency.
+
+Ví dụ:
+
+```text
+Translator
+
+depends on
+
+HTTP Client
+Configuration
+Logger
+Telemetry
+```
+
+Manager phải:
+
+* resolve dependency trước.
+* khởi tạo đúng thứ tự.
+* phát hiện dependency bị thiếu.
+* phát hiện vòng lặp (circular dependency).
+
+---
+
+# Health Contract
+
+Mỗi resource phải cung cấp trạng thái:
+
+```text
+Healthy
+Busy
+Idle
+Restarting
+Slow
+Disconnected
+Failed
+Disposed
+```
+
+Resource Manager phải có khả năng:
+
+* đọc trạng thái.
+* phát hiện thay đổi.
+* phát sinh event.
+* chuyển sang quy trình recovery nếu cần.
+
+---
+
+# Recovery Contract
+
+Khi resource lỗi:
+
+Có thể áp dụng một trong các policy:
+
+```text
+Restart
+Reconnect
+Recreate
+Ignore
+Fail Fast
+Manual
+```
+
+Policy được cấu hình theo từng resource.
+
+---
+
+# Monitoring Contract
+
+Resource Manager phải cung cấp tối thiểu các chỉ số:
+
+```text
+Active Resources
+Idle Resources
+Busy Resources
+Pool Size
+Acquire Count
+Release Count
+Failure Count
+Restart Count
+Memory Usage
+Average Lifetime
+Average Acquire Time
+```
+
+Các metric này được Telemetry thu thập định kỳ.
+
+---
+
+# Thread Safety Contract
+
+Mọi thao tác sau phải an toàn trong môi trường đa luồng:
+
+* register
+* unregister
+* resolve
+* acquire
+* release
+* dispose
+* statistics
+
+Không được xảy ra:
+
+* race condition
+* double initialization
+* double dispose
+* duplicate registration
+
+---
+
+# Event Contract
+
+Resource Manager phát sinh các sự kiện:
+
+```text
+ResourceRegistered
+ResourceInitialized
+ResourceReady
+ResourceAcquired
+ResourceReleased
+ResourceBusy
+ResourceIdle
+ResourceRestarted
+ResourceRecovered
+ResourceFailed
+ResourceDisposed
+PoolExpanded
+PoolShrunk
+HealthChanged
+```
+
+Chi tiết payload được định nghĩa trong `EVENTS.md`.
+
+---
+
+# Error Contract
+
+Các lỗi chuẩn:
+
+```text
+RESOURCE_NOT_FOUND
+RESOURCE_ALREADY_EXISTS
+RESOURCE_INITIALIZATION_FAILED
+RESOURCE_DISPOSE_FAILED
+RESOURCE_BUSY
+RESOURCE_IN_USE
+RESOURCE_TIMEOUT
+RESOURCE_POOL_EXHAUSTED
+RESOURCE_DEPENDENCY_FAILED
+RESOURCE_CIRCULAR_DEPENDENCY
+RESOURCE_INVALID_SCOPE
+RESOURCE_INVALID_STATE
+RESOURCE_HEALTH_FAILED
+RESOURCE_RECOVERY_FAILED
+```
+
+Chi tiết mã lỗi được định nghĩa trong `ERRORS.md`.
+
+---
+
+# Security Contract
+
+Resource Manager không được:
+
+* trả về resource đã dispose.
+* trả về resource chưa khởi tạo.
+* cho phép truy cập resource vượt phạm vi (scope).
+* tự ý tạo resource không được đăng ký.
+* ghi đè resource khi policy không cho phép.
+
+---
+
+# Performance Targets
+
+| Metric                  | Target                                                       |
+| ----------------------- | ------------------------------------------------------------ |
+| Register Resource       | < 5 ms                                                       |
+| Resolve Resource        | < 1 ms (cached)                                              |
+| Acquire Resource        | < 2 ms (không chờ pool)                                      |
+| Release Resource        | < 1 ms                                                       |
+| Resource Initialization | Theo từng loại resource                                      |
+| Dispose Resource        | Theo từng loại resource                                      |
+| Pool Expansion          | Không chặn các resource đang hoạt động                       |
+| Health Check            | Có thể chạy định kỳ mà không ảnh hưởng đáng kể tới hiệu năng |
+
+---
+
+# Compatibility
+
+Resource Manager phải hỗ trợ quản lý thống nhất cho nhiều loại tài nguyên:
+
+* Browser Instance
+* Browser Context
+* OCR Engine
+* Translation Engine
+* AI Model Session
+* GPU Context
+* CPU Worker
+* Thread Pool
+* HTTP Client
+* WebSocket Client
+* Event Bus Client
+* Cache
+* Font Cache
+* Image Decoder
+* Renderer
+* Downloader
+* Exporter
+* Storage Connection
+
+Việc bổ sung loại resource mới không được yêu cầu thay đổi contract hiện có (Open/Closed Principle).

@@ -1,3192 +1,2633 @@
-# Translation States
+# Translation Module States
 
 > **Project:** CRAI
 > **Module:** Translation
-> **Document:** State Machines
-> **Path:** `modules/translation/STATES.md`
-> **Version:** 0.2
+> **Path:** `02-modules/translation/STATES.md`
+> **Version:** 1.0
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-08-03
-> **Source of Truth:**
->
-> * `modules/translation/MODULE.md`
-> * `modules/translation/CONTRACT.md`
-> * `modules/translation/EVENTS.md`
+> **Related:** `MODULE.md`, `CONTRACT.md`
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-This document defines the lifecycle states and valid state transitions owned by the Translation module.
+Tài liệu này định nghĩa state model mà Translation Module thực sự sở hữu.
 
-It covers:
+Translation state model bao phủ:
 
-* translation job lifecycle;
-* translation attempt lifecycle;
-* translation batch lifecycle;
-* translation result lifecycle;
-* translation variant lifecycle;
-* cancellation behavior;
-* supersession behavior;
-* invalidation behavior;
-* retry behavior;
-* partial completion;
-* progressive publication;
-* stale-result rejection;
-* relationships between independent state machines.
+* module availability
+* Translation Plan lifecycle
+* Translation Unit planning
+* Translation Batch local lifecycle
+* Provider Execution observations
+* provider output validation
+* Candidate Translation Artifact validation
+* Translation completeness
+* cancellation/deadline observations
+* cleanup observations
+* Runtime Candidate disposition observations
+* concurrency rules
+* recovery
+* state invariants
 
-This document does not define:
+Translation không định nghĩa canonical lifecycle của:
 
-* command payloads;
-* event payload schemas;
-* detailed error catalogs;
-* provider-specific states;
-* persistence tables;
-* worker implementation;
-* UI display states.
-
----
-
-## 2. State Ownership
-
-Translation owns state for:
-
-```text
-TranslationJob
-TranslationAttempt
-TranslationBatch
-TranslationResult
-TranslationVariant
-```
-
-Translation does not own state for:
-
-```text
-PreparedDocument
-PreparedSegment
-ReadingSession
-KnowledgeSnapshot
-Provider credential
-Presentation overlay
-OCR job
-```
-
-External entity state may influence Translation transitions but remains owned by its original module.
-
-### 2.1 Runtime execution ownership
-
-Runtime owns queue admission, scheduling, worker execution, retry timing, concurrency enforcement, backpressure, and physical cancellation coordination.
-
-Translation owns the domain lifecycle reflected by these state machines. Therefore, states such as `QUEUED`, `RUNNING`, and `RETRY_SCHEDULED` represent Translation's observed domain condition; they do not imply that Translation implements its own scheduler or worker runtime.
-
-```text
-Translation decides what work is valid and required.
-Runtime decides when and how execution proceeds.
-```
-
-### 2.2 State Ownership Matrix
-
-| State machine | Owner |
-|---|---|
-| `TranslationJobState` | Translation |
-| `TranslationBatchState` | Translation |
-| `TranslationAttemptState` | Translation |
-| `TranslationResultState` | Translation |
-| `TranslationVariantState` | Translation |
-| Queue admission and scheduler state | Runtime |
-| Worker and physical execution state | Runtime |
-| Retry timer and backoff state | Runtime |
-| Cancellation coordination state | Runtime |
-| `ReadingSessionState` | Reading Session |
-| Presentation lifecycle state | Presentation |
+* Runtime WorkItem
+* Runtime Attempt
+* Scheduler
+* Work Queue
+* retry
+* cancellation
+* supersession
+* authority
+* Artifact publication
+* Artifact retention
+* Reading Session active variant
+* Provider lifecycle
 
 ---
 
-## 3. State Machine Separation
+# 2. State Ownership
 
-Translation does not use one global state enumeration for every entity.
+Translation owns:
 
-Each lifecycle has its own state set:
+```text
+TranslationModuleAvailabilityState
+
+TranslationPlanState
+
+TranslationUnitPlanningState
+
+TranslationBatchState
+
+ProviderExecutionObservation
+
+ProviderOutputValidationState
+
+TranslationCandidateValidationState
+
+TranslationCompleteness
+
+CleanupObservation
+```
+
+Translation does not own:
 
 ```text
 TranslationJobState
+
 TranslationAttemptState
-TranslationBatchState
-TranslationResultState
-TranslationVariantState
+
+WorkItemState
+
+AttemptState
+
+QueueState
+
+SchedulerState
+
+RetryState
+
+CancellationState
+
+SupersessionState
+
+PublicationState
+
+ArtifactLifecycleState
+
+ActiveVariantState
+
+ProviderLifecycleState
 ```
 
-This separation is required because:
-
-* a job may be running while one batch is already completed;
-* an attempt may fail while the job remains retryable;
-* a result may be partial while the job remains active;
-* a variant may remain stored after its job is superseded;
-* a completed result may later be invalidated administratively.
+External states may be observed but are not mutated by Translation.
 
 ---
 
-## 4. State Principles
-
-### 4.1 State represents current domain truth
-
-State describes the current lifecycle condition of an entity.
-
-An event describes that a transition occurred.
+# 3. State Model Overview
 
 ```text
-State
-    = current condition
+Translation Module
+│
+├── Module Availability
+│
+├── Translation Plan
+│
+├── Translation Unit Planning
+│
+├── Translation Batch
+│
+│   └── Provider Execution Observation
+│
+├── Provider Output Validation
+│
+├── Candidate Validation
+├── Translation Completeness
+│
+└── External Observations
+    ├── Runtime Cancellation
+    ├── Runtime Deadline
+    ├── Runtime Authority
+    ├── Candidate Disposition
+    └── Cleanup
+```
 
-Event
-    = historical fact
+There is no module-owned:
+
+```text
+TranslationJob Registry
+
+TranslationAttempt Registry
+
+Translation Retry Registry
+
+Translation Supersession Registry
+
+Translation Publication Registry
 ```
 
 ---
 
-### 4.2 Transitions must be explicit
+# 4. State Principles
 
-Entities must not jump between unrelated states without a defined transition.
+## 4.1 Runtime Attempt Is the Execution Boundary
 
-Incorrect:
-
-```text
-CREATED → COMPLETED
-```
-
-unless an explicit cache-reuse path defines that transition.
-
-Correct:
+Translation executes inside:
 
 ```text
-CREATED
+Runtime WorkItem
     ↓
-QUEUED
+Runtime Attempt
     ↓
-RUNNING
-    ↓
-COMPLETED
+Translation Module
+```
+
+Translation does not create another Attempt lifecycle.
+
+---
+
+## 4.2 Semantic State vs Runtime State
+
+Translation-owned state describes:
+
+```text
+what translation work has been planned
+
+what batch is being processed
+
+what provider output has been observed
+
+whether translated output is semantically valid
+```
+
+Runtime-owned state describes:
+
+```text
+whether execution is queued
+
+whether execution is running
+
+whether it should retry
+
+whether it was cancelled
+
+whether it became stale
+
+whether the Attempt succeeded
 ```
 
 ---
 
-### 4.3 Terminal does not always mean deleted
-
-Terminal states prevent normal execution transitions.
-
-They do not imply physical deletion.
-
-Historical data may be retained for:
-
-* auditing;
-* cache reuse;
-* user variant selection;
-* diagnostics;
-* usage tracking.
-
----
-
-### 4.4 Cancellation and supersession are authoritative controls
-
-A cancelled or superseded job must not later become authoritative, even if provider execution finishes.
-
----
-
-### 4.5 Errors do not always terminate the job
-
-An attempt or batch may fail while the parent job remains active and schedules another attempt.
-
----
-
-### 4.6 Results and execution are separate
-
-Provider execution completion does not automatically mean the result is authoritative.
-
-Result assembly, validation, source-revision verification and publication checks must occur first.
-
----
-
-## 4.7 Canonical aggregate hierarchy
-
-The canonical execution hierarchy is:
+## 4.3 Candidate Is Not Published Artifact
 
 ```text
-TranslationJob
-    ├── TranslationBatch A
-    │       ├── TranslationAttempt 1
-    │       └── TranslationAttempt 2
-    └── TranslationBatch B
-            └── TranslationAttempt 1
+Candidate VALID
+    ≠
+TranslationArtifact published
 ```
 
-`TranslationBatch` is the stable provider execution unit derived from a selected segment set. `TranslationAttempt` is one immutable physical execution attempt for that batch. When retry changes batch membership, a replacement batch with a new `TranslationBatchId` is created.
-
-# Part I — Translation Job State Machine
-
-## 5. TranslationJobState
-
-The canonical Translation job states are:
+Candidate validation means only:
 
 ```text
-CREATED
-QUEUED
-RUNNING
-PARTIALLY_COMPLETED
-RETRY_SCHEDULED
-CANCELLATION_REQUESTED
-
-COMPLETED
-COMPLETED_WITH_WARNINGS
-FAILED
-CANCELLED
-SUPERSEDED
-INVALIDATED
+Translation contract-valid
 ```
 
 ---
 
-## 6. Job State Categories
-
-### 6.1 Initial state
+## 4.4 Provider Response Is Not Translation Success
 
 ```text
-CREATED
+HTTP 200
+or
+provider response received
+    ≠
+valid translated output
 ```
 
-### 6.2 Active states
-
-```text
-QUEUED
-RUNNING
-PARTIALLY_COMPLETED
-RETRY_SCHEDULED
-CANCELLATION_REQUESTED
-```
-
-### 6.3 Successful terminal states
-
-```text
-COMPLETED
-COMPLETED_WITH_WARNINGS
-```
-
-### 6.4 Unsuccessful terminal states
-
-```text
-FAILED
-CANCELLED
-SUPERSEDED
-```
-
-### 6.5 Administrative terminal state
-
-```text
-INVALIDATED
-```
-
-`INVALIDATED` may follow a previously successful state.
-
-It represents loss of validity, not execution failure.
+Provider output must pass normalization and validation.
 
 ---
 
-## 7. CREATED
-
-The job has been accepted and assigned a `TranslationJobId`.
-
-At this point:
-
-* source identity is fixed;
-* configuration snapshot is fixed;
-* selected source segments are fixed;
-* execution may not yet be scheduled;
-* no active attempt is required yet.
-
-Entry causes may include:
+## 4.5 Partiality Is Semantic Metadata
 
 ```text
-StartTranslation accepted
-RequestRetranslation accepted
-Manual variant request accepted
+PARTIAL
 ```
 
-Expected event:
+is Translation completeness.
 
-```text
-TranslationJobCreated
-```
-
-Valid outgoing transitions:
-
-```text
-CREATED → QUEUED
-CREATED → RUNNING
-CREATED → COMPLETED
-CREATED → COMPLETED_WITH_WARNINGS
-CREATED → CANCELLATION_REQUESTED
-CREATED → CANCELLED
-CREATED → SUPERSEDED
-CREATED → FAILED
-```
-
-Direct completion is allowed only for a valid cache-reuse path.
+It is not Runtime lifecycle state.
 
 ---
 
-## 8. QUEUED
+## 4.6 Variant Activity Is External
 
-The job is waiting for execution resources.
+Translation Artifact may describe immutable variant semantics.
 
-At this point:
-
-* the job is schedulable;
-* no provider execution is required to be active;
-* priority may affect scheduling order;
-* cancellation and supersession remain possible.
-
-Expected event:
+But:
 
 ```text
-TranslationJobQueued
+ACTIVE
+
+INACTIVE
 ```
 
-Valid outgoing transitions:
-
-```text
-QUEUED → RUNNING
-QUEUED → CANCELLATION_REQUESTED
-QUEUED → CANCELLED
-QUEUED → SUPERSEDED
-QUEUED → FAILED
-```
-
-A queue failure may transition the job to `FAILED` when no recovery path exists.
+for the current Reading Session are not Translation execution states.
 
 ---
 
-## 9. RUNNING
-
-At least one Translation attempt is active or execution work is being assembled.
-
-At this point:
-
-* batches may be pending, running, completed or failed;
-* partial results may exist;
-* retries may still be possible;
-* no final authoritative completion has been established.
-
-Expected events may include:
+# 5. Translation Module Availability
 
 ```text
-TranslationJobStarted
-TranslationAttemptStarted
-TranslationBatchStarted
-TranslationProgressUpdated
-```
-
-Valid outgoing transitions:
-
-```text
-RUNNING → PARTIALLY_COMPLETED
-RUNNING → RETRY_SCHEDULED
-RUNNING → CANCELLATION_REQUESTED
-RUNNING → COMPLETED
-RUNNING → COMPLETED_WITH_WARNINGS
-RUNNING → FAILED
-RUNNING → CANCELLED
-RUNNING → SUPERSEDED
+TranslationModuleAvailabilityState
+├── UNINITIALIZED
+├── INITIALIZING
+├── AVAILABLE
+├── DEGRADED
+├── UNAVAILABLE
+├── DRAINING
+└── STOPPED
 ```
 
 ---
 
-## 10. PARTIALLY_COMPLETED
+# 6. UNINITIALIZED
 
-At least one selected prepared segment has an accepted translated result, while other selected segments remain incomplete or failed.
+Translation module has not initialized required module-owned components.
 
-This state is used when partial progress is meaningful at the job level.
+Not ready:
 
-At this point:
+* Translation Profiles
+* Unit planner
+* Batch planner
+* validators
+* Provider Adapter registry references
+* terminology integration
+* context builder
 
-* a partial `TranslationResult` exists;
-* some segments may be authoritative under progressive publication;
-* the complete job remains non-terminal;
-* pending or retryable work remains.
-
-Expected event:
-
-```text
-TranslationPartialResultAvailable
-```
-
-Possible supporting events:
+Allowed:
 
 ```text
-TranslationSegmentsCompleted
-TranslationProgressUpdated
-TranslationBatchFailed
+UNINITIALIZED
+    → INITIALIZING
+    → STOPPED
 ```
-
-Valid outgoing transitions:
-
-```text
-PARTIALLY_COMPLETED → RUNNING
-PARTIALLY_COMPLETED → RETRY_SCHEDULED
-PARTIALLY_COMPLETED → CANCELLATION_REQUESTED
-PARTIALLY_COMPLETED → COMPLETED
-PARTIALLY_COMPLETED → COMPLETED_WITH_WARNINGS
-PARTIALLY_COMPLETED → FAILED
-PARTIALLY_COMPLETED → CANCELLED
-PARTIALLY_COMPLETED → SUPERSEDED
-```
-
-The state must not be used merely because an internal provider token stream has started.
-
-At least one structurally validated translated segment must exist.
 
 ---
 
-## 11. RETRY_SCHEDULED
+# 7. INITIALIZING
 
-A previous batch attempt failed, and Translation has requested another eligible execution. Runtime owns the actual retry timer, backoff, admission, and execution start.
+Module prepares:
 
-At this point:
+* Translation Profile definitions
+* Translation Unit planner
+* Batch planner
+* context builder
+* terminology resolver
+* output validators
+* Candidate validator
+* Provider capability mappings
 
-* the logical job remains active;
-* a new `TranslationAttemptId` may not yet have started;
-* retry policy has approved another execution;
-* `TranslationJobId` remains unchanged.
+Translation does not initialize:
 
-Expected event:
+* Runtime Queue
+* Runtime Scheduler
+* provider credentials
+* Provider lifecycle
+* Artifact Store
+* Reading Session
+
+Allowed:
 
 ```text
-TranslationRetryScheduled
+INITIALIZING
+    → AVAILABLE
+    → DEGRADED
+    → UNAVAILABLE
+    → DRAINING
 ```
-
-Possible supporting event:
-
-```text
-TranslationProviderFallbackSelected
-```
-
-Valid outgoing transitions:
-
-```text
-RETRY_SCHEDULED → RUNNING
-RETRY_SCHEDULED → CANCELLATION_REQUESTED
-RETRY_SCHEDULED → CANCELLED
-RETRY_SCHEDULED → SUPERSEDED
-RETRY_SCHEDULED → FAILED
-```
-
-`RETRY_SCHEDULED` must not create a new logical job.
 
 ---
 
-## 12. CANCELLATION_REQUESTED
+# 8. AVAILABLE
 
-Logical cancellation has been accepted, but cleanup or active execution shutdown may still be in progress.
+Translation can execute supported Translation Plans.
 
-At this point:
-
-* no new attempts may start;
-* no new batches may be scheduled;
-* active provider requests should be physically cancelled where supported;
-* newly arriving results cannot become authoritative;
-* partial retained data depends on policy.
-
-Expected event:
+Requirements:
 
 ```text
-TranslationCancellationRequested
+contract_valid
+
+profile_registry_ready
+
+unit_planner_ready
+
+batch_planner_ready
+
+candidate_validator_ready
+
+provider_boundary_ready
+
+required_dependencies_available
 ```
 
-Valid outgoing transitions:
+Allowed:
 
 ```text
-CANCELLATION_REQUESTED → CANCELLED
-CANCELLATION_REQUESTED → SUPERSEDED
+AVAILABLE
+    → DEGRADED
+    → UNAVAILABLE
+    → DRAINING
 ```
-
-Normally, this state must not transition to:
-
-```text
-COMPLETED
-COMPLETED_WITH_WARNINGS
-RUNNING
-RETRY_SCHEDULED
-```
-
-A provider response received during cancellation may be retained diagnostically but cannot reverse logical cancellation.
 
 ---
 
-## 13. COMPLETED
+# 9. DEGRADED
 
-All required selected segments were translated successfully.
-
-At this point:
-
-* the final result is available;
-* alignment validation passed;
-* source revision checks passed;
-* cancellation and supersession checks passed;
-* no completion-level warnings require degraded status;
-* an immutable variant exists.
-
-Expected event:
-
-```text
-TranslationCompleted
-```
-
-Possible following event:
-
-```text
-TranslationVariantActivated
-```
-
-Normal outgoing transitions:
-
-```text
-COMPLETED → INVALIDATED
-COMPLETED → SUPERSEDED
-```
-
-`SUPERSEDED` after completion is allowed when newer translation work becomes authoritative.
-
-The completed historical result remains retained unless storage policy removes it.
-
----
-
-## 14. COMPLETED_WITH_WARNINGS
-
-All required output is usable, but one or more significant warnings exist.
+Module remains usable with reduced optional capability.
 
 Examples:
 
-* provider fallback was used;
-* some terminology remained ambiguous;
-* source language confidence was low;
-* untranslated sound effects were preserved;
-* output-length anomalies exist;
-* contextual ambiguity remains.
+* advanced context unavailable
+* optional Knowledge unavailable
+* preferred provider unavailable
+* streaming unavailable
+* optional glossary unavailable
+* only local provider available
+* only fallback provider available
 
-Expected event:
-
-```text
-TranslationCompletedWithWarnings
-```
-
-Normal outgoing transitions:
+Allowed:
 
 ```text
-COMPLETED_WITH_WARNINGS → INVALIDATED
-COMPLETED_WITH_WARNINGS → SUPERSEDED
+DEGRADED
+    → AVAILABLE
+    → UNAVAILABLE
+    → DRAINING
 ```
 
-This state is successful.
-
-Warnings must not be confused with fatal errors.
+Degradation must never violate hard privacy/provider constraints.
 
 ---
 
-## 15. FAILED
+# 10. UNAVAILABLE
 
-The logical job cannot continue and no further automatic attempts are scheduled.
+Translation cannot satisfy required contract.
 
-Possible causes:
+Examples:
 
-* invalid provider output after all attempts;
-* retry budget exhausted;
-* no eligible provider;
-* non-retryable input or configuration failure;
-* unresolved alignment failure;
-* required context unavailable;
-* final result assembly failure.
+* no eligible provider path
+* Translation Profile registry invalid
+* Candidate validator unavailable
+* required source contract incompatible
 
-Expected event:
+Runtime decides WorkItem outcome.
 
-```text
-TranslationFailed
-```
-
-Normal outgoing transitions:
+Allowed:
 
 ```text
-FAILED → INVALIDATED
-```
-
-A normal retry command must not mutate the failed job back into `RUNNING` unless project policy explicitly allows reopening.
-
-Recommended approach:
-
-* same translation intent and explicit retry: create a new attempt only if the job is defined as reopenable;
-* otherwise create a derived new job.
-
-For the initial architecture, failed jobs should be terminal and manual recovery should create a new logical job through retranslation.
-
----
-
-## 16. CANCELLED
-
-Cancellation has reached its terminal logical state.
-
-At this point:
-
-* no new attempts may start;
-* no result may become authoritative;
-* active provider responses are ignored for authority;
-* retained partial results remain non-authoritative unless policy explicitly preserved already published segments.
-
-Expected event:
-
-```text
-TranslationCancelled
-```
-
-Normal outgoing transitions:
-
-```text
-CANCELLED → INVALIDATED
-```
-
-A cancelled job must not return to active execution.
-
-A new translation request creates a new job.
-
----
-
-## 17. SUPERSEDED
-
-The job has been replaced by newer or more relevant work.
-
-Possible reasons:
-
-* source revision changed;
-* a newer translation job was created;
-* target language changed;
-* translation profile changed;
-* reading context changed;
-* manual retranslation replaced it.
-
-Expected event:
-
-```text
-TranslationSuperseded
-```
-
-At this point:
-
-* the job cannot become authoritative;
-* active execution should stop when practical;
-* completed historical output may remain available;
-* partial output cannot overwrite newer work.
-
-Normal outgoing transitions:
-
-```text
-SUPERSEDED → INVALIDATED
-```
-
-A superseded job must not return to `RUNNING`.
-
----
-
-## 18. INVALIDATED
-
-The job or its result has been marked invalid for future authoritative use.
-
-Invalidation may occur because:
-
-* source alignment was incorrect;
-* source content was later corrected;
-* result quality was administratively rejected;
-* privacy or security policy changed;
-* glossary constraints were materially violated;
-* stored data became incompatible.
-
-Expected event:
-
-```text
-TranslationInvalidated
-```
-
-`INVALIDATED` is terminal.
-
-No outgoing lifecycle transition is allowed.
-
-A replacement requires a new translation job.
-
----
-
-## 19. Translation Job State Diagram
-
-```text
-                    ┌──────────────┐
-                    │   CREATED    │
-                    └──────┬───────┘
-                           │
-                 ┌─────────┴──────────┐
-                 ▼                    ▼
-             ┌────────┐           ┌─────────┐
-             │ QUEUED │           │ RUNNING │
-             └───┬────┘           └────┬────┘
-                 │                     │
-                 └──────────┬──────────┘
-                            ▼
-                  ┌─────────────────────┐
-                  │ PARTIALLY_COMPLETED │
-                  └──────────┬──────────┘
-                             │
-             ┌───────────────┼────────────────┐
-             ▼               ▼                ▼
-    ┌─────────────────┐ ┌───────────┐ ┌─────────────────────────┐
-    │ RETRY_SCHEDULED │ │ COMPLETED │ │ COMPLETED_WITH_WARNINGS │
-    └────────┬────────┘ └───────────┘ └─────────────────────────┘
-             │
-             └──────────────► RUNNING
-```
-
-Alternative terminal paths from active states:
-
-```text
-CREATED
-QUEUED
-RUNNING
-PARTIALLY_COMPLETED
-RETRY_SCHEDULED
-        │
-        ├──► CANCELLATION_REQUESTED ──► CANCELLED
-        ├──► FAILED
-        └──► SUPERSEDED
-```
-
-Post-completion administrative path:
-
-```text
-COMPLETED
-COMPLETED_WITH_WARNINGS
-FAILED
-CANCELLED
-SUPERSEDED
-        │
-        └──► INVALIDATED
+UNAVAILABLE
+    → INITIALIZING
+    → DEGRADED
+    → AVAILABLE
+    → DRAINING
 ```
 
 ---
 
-# Part II — Translation Attempt State Machine
+# 11. DRAINING
 
-## 20. TranslationAttemptState
+Module:
 
-Canonical attempt states:
+* accepts no new module execution
+* starts no optional provider work
+* allows active Attempt-local cleanup
+* cooperatively responds to cancellation
+* releases Provider handles/resources
+
+Allowed:
 
 ```text
-CREATED
-PREPARING
-RUNNING
-PARTIALLY_COMPLETED
-COMPLETED
-FAILED
-CANCELLED
-SUPERSEDED
+DRAINING
+    → STOPPED
 ```
 
 ---
 
-## 21. Attempt CREATED
+# 12. STOPPED
 
-The attempt identity exists but execution preparation has not completed.
+No active module-owned execution resources remain.
 
-At this point:
-
-* attempt number is assigned;
-* attempt reason is known;
-* provider selection may still be unresolved;
-* batches may not yet exist.
-
-Valid outgoing transitions:
+Restart:
 
 ```text
-CREATED → PREPARING
-CREATED → CANCELLED
-CREATED → SUPERSEDED
-CREATED → FAILED
+STOPPED
+    → INITIALIZING
 ```
 
 ---
 
-## 22. Attempt PREPARING
-
-The module is preparing execution.
-
-Activities may include:
-
-* provider selection;
-* provider capability validation;
-* batch construction;
-* context resolution;
-* terminology snapshot resolution;
-* provider limit calculation.
-
-Valid outgoing transitions:
+# 13. Availability Diagram
 
 ```text
-PREPARING → RUNNING
-PREPARING → FAILED
-PREPARING → CANCELLED
-PREPARING → SUPERSEDED
-```
-
-A failure here may still allow the parent job to schedule another attempt.
-
----
-
-## 23. Attempt RUNNING
-
-At least one batch is running or eligible to run.
-
-Expected event:
-
-```text
-TranslationAttemptStarted
-```
-
-Valid outgoing transitions:
-
-```text
-RUNNING → PARTIALLY_COMPLETED
-RUNNING → COMPLETED
-RUNNING → FAILED
-RUNNING → CANCELLED
-RUNNING → SUPERSEDED
+UNINITIALIZED
+      ↓
+INITIALIZING
+   ┌──┼─────────────┐
+   ↓  ↓             ↓
+AVAILABLE ←→ DEGRADED ←→ UNAVAILABLE
+    \        |          /
+             ↓
+          DRAINING
+             ↓
+           STOPPED
 ```
 
 ---
 
-## 24. Attempt PARTIALLY_COMPLETED
-
-At least one batch completed successfully while other attempt work remains pending or failed.
-
-Valid outgoing transitions:
+# 14. Translation Plan State
 
 ```text
-PARTIALLY_COMPLETED → RUNNING
-PARTIALLY_COMPLETED → COMPLETED
-PARTIALLY_COMPLETED → FAILED
-PARTIALLY_COMPLETED → CANCELLED
-PARTIALLY_COMPLETED → SUPERSEDED
+TranslationPlanState
+├── NOT_CREATED
+├── BUILDING
+├── VALIDATING
+├── READY
+└── INVALID
 ```
 
-This state does not imply the parent job is necessarily `PARTIALLY_COMPLETED`.
-
-The parent job may already contain completed segments from earlier attempts.
+Plan is Attempt-local.
 
 ---
 
-## 25. Attempt COMPLETED
+# 15. NOT_CREATED
 
-The attempt completed all work assigned to it successfully.
-
-Expected event:
+No Translation Plan exists.
 
 ```text
-TranslationAttemptCompleted
-```
-
-This does not automatically imply:
-
-```text
-TranslationJob = COMPLETED
-```
-
-Result assembly or additional attempts may still be required.
-
-`COMPLETED` is terminal for the attempt.
-
----
-
-## 26. Attempt FAILED
-
-The attempt cannot continue.
-
-Expected event:
-
-```text
-TranslationAttemptFailed
-```
-
-The parent job may transition to:
-
-```text
-RETRY_SCHEDULED
-FAILED
-PARTIALLY_COMPLETED
-```
-
-depending on:
-
-* retryability;
-* retained completed batches;
-* retry budget;
-* fallback availability;
-* publication policy.
-
-`FAILED` is terminal for the attempt.
-
----
-
-## 27. Attempt CANCELLED
-
-The attempt stopped because the parent job or attempt scope was cancelled.
-
-No output from the attempt may become newly authoritative after this state.
-
-`CANCELLED` is terminal.
-
----
-
-## 28. Attempt SUPERSEDED
-
-The attempt became obsolete because:
-
-* a newer attempt replaced it;
-* the job was superseded;
-* retry execution moved to another provider;
-* source or intent changed.
-
-`SUPERSEDED` is terminal.
-
-Late provider responses are ignored for authority.
-
----
-
-## 29. Attempt State Diagram
-
-```text
-CREATED
-    ↓
-PREPARING
-    ↓
-RUNNING
-    ├──► PARTIALLY_COMPLETED ──► COMPLETED
-    ├──► COMPLETED
-    ├──► FAILED
-    ├──► CANCELLED
-    └──► SUPERSEDED
+NOT_CREATED
+    → BUILDING
 ```
 
 ---
 
-# Part III — Translation Batch State Machine
+# 16. BUILDING
 
-## 30. TranslationBatchState
+Translation resolves:
 
-Canonical batch states:
+* SourceDocumentArtifact
+* Source Selection
+* Translation Intent
+* Translation Profile
+* Context Policy
+* Knowledge Snapshot
+* Terminology Policy
+* Provider Policy
+* Privacy Context
+* Partial Result Policy
+* Configuration Snapshot
+
+Allowed:
 
 ```text
-CREATED
-READY
-RUNNING
+BUILDING
+    → VALIDATING
+
+BUILDING
+    → INVALID
+```
+
+---
+
+# 17. VALIDATING
+
+Checks:
+
+* SourceDocument compatible
+* target language present
+* Translation Profile supported
+* Provider Policy coherent
+* Privacy Context compatible
+* source selection valid
+* required Knowledge available
+* terminology constraints coherent
+* context requirements satisfiable
+* partial-result policy coherent
+
+Allowed:
+
+```text
 VALIDATING
-COMPLETED
-FAILED
-CANCELLED
-SUPERSEDED
+    → READY
+
+VALIDATING
+    → INVALID
 ```
 
 ---
 
-## 31. Batch CREATED
+# 18. READY
 
-The batch identity and segment membership exist.
+Translation Plan is immutable and executable.
 
-At this point:
+Fixed:
 
-* prepared segment IDs are fixed;
-* context-only segment membership is fixed;
-* provider request may not yet be constructible.
+* Translation Intent
+* source semantic identity
+* source selection
+* target language
+* Translation Profile
+* context policy
+* Knowledge identity
+* terminology policy
+* Provider Policy
+* Privacy constraints
+* Configuration Snapshot
 
-Valid outgoing transitions:
+No return to `BUILDING`.
+
+---
+
+# 19. INVALID
+
+Plan cannot execute.
+
+Examples:
+
+* unsupported target language
+* impossible provider constraint
+* contradictory privacy/provider policy
+* required Knowledge unavailable
+* incompatible SourceDocument
+* invalid Translation Profile
+
+Terminal for this Plan instance.
+
+Runtime still owns Attempt disposition.
+
+---
+
+# 20. Translation Plan Diagram
 
 ```text
-CREATED → READY
-CREATED → FAILED
-CREATED → CANCELLED
-CREATED → SUPERSEDED
+NOT_CREATED
+    ↓
+BUILDING
+    ↓
+VALIDATING
+   ┌┴──────┐
+   ↓       ↓
+ READY   INVALID
 ```
 
 ---
 
-## 32. Batch READY
+# 21. Translation Plan Invariants
 
-The batch is fully prepared and eligible for provider execution.
+1. One Attempt has at most one active Translation Plan.
+2. READY Plan is immutable.
+3. INVALID Plan never executes.
+4. Plan references one SourceDocument semantic identity.
+5. Plan has one target language.
+6. Plan preserves Privacy Context.
+7. Plan does not contain Runtime retry state.
+8. Plan does not contain Runtime queue state.
+9. Plan does not own authority.
+10. Plan does not publish Artifact.
 
-At this point:
+---
 
-* provider is selected;
-* limits are satisfied;
-* required context is available;
-* terminology constraints are resolved;
-* request construction can proceed.
-
-Valid outgoing transitions:
+# 22. Translation Unit Planning State
 
 ```text
-READY → RUNNING
-READY → CANCELLED
-READY → SUPERSEDED
-READY → FAILED
+TranslationUnitPlanningState
+├── NOT_STARTED
+├── SELECTING_SOURCE
+├── BUILDING_UNITS
+├── VALIDATING_UNITS
+├── READY
+└── INVALID
 ```
 
 ---
 
-## 33. Batch RUNNING
+# 23. SELECTING_SOURCE
 
-Provider execution is active.
+Translation resolves SourceBlocks included by Source Selection.
 
-Expected event:
+Checks:
+
+* selected blocks exist
+* excluded block handling
+* source sequence
+* language hints
+* structural types
+* source traceability
+
+---
+
+# 24. BUILDING_UNITS
+
+Translation constructs:
 
 ```text
-TranslationBatchStarted
+SourceBlock[]
+    ↓
+TranslationUnit[]
 ```
 
-Valid outgoing transitions:
+Possible mappings:
 
 ```text
-RUNNING → VALIDATING
-RUNNING → FAILED
-RUNNING → CANCELLED
-RUNNING → SUPERSEDED
+1 → 1
+
+N → 1
+
+1 → N
 ```
 
-An HTTP success response does not transition directly to `COMPLETED`.
-
-The output must first enter validation.
+according to Translation Profile and semantic constraints.
 
 ---
 
-## 34. Batch VALIDATING
+# 25. VALIDATING_UNITS
 
-Provider output has been received and is being checked.
+Checks:
 
-Validation may include:
+* unique TranslationUnitId
+* valid SourceBlock refs
+* deterministic order
+* no lost source selection
+* no unintended duplicates
+* target language consistency
+* traceability
+* context-only content separated
+* split/merge alignment metadata valid
 
-* response structure;
-* segment identity;
-* duplicate segment detection;
-* missing output detection;
-* target-language plausibility;
-* locked terminology;
-* output-length checks;
-* provider-control leakage;
-* source alignment.
+---
 
-Valid outgoing transitions:
+# 26. Translation Units READY
+
+All Translation Units satisfy contract.
+
+They become immutable for the current Plan.
+
+---
+
+# 27. Translation Units INVALID
+
+Unit planning cannot satisfy semantic/alignment contract.
+
+Examples:
+
+* source mapping lost
+* duplicate Unit identity
+* source split cannot be traced
+* incompatible target-language grouping
+* selected source content silently omitted
+
+---
+
+# 28. Unit Planning Diagram
 
 ```text
-VALIDATING → COMPLETED
-VALIDATING → FAILED
-VALIDATING → CANCELLED
-VALIDATING → SUPERSEDED
+NOT_STARTED
+    ↓
+SELECTING_SOURCE
+    ↓
+BUILDING_UNITS
+    ↓
+VALIDATING_UNITS
+   ┌────┴────┐
+   ↓         ↓
+ READY     INVALID
 ```
-
-Cancellation or supersession during validation prevents authoritative acceptance.
 
 ---
 
-## 35. Batch COMPLETED
+# 29. Translation Batch State
 
-The batch output passed required validation and has been accepted.
-
-Expected event:
+TranslationBatch remains a Translation-owned semantic/provider planning object.
 
 ```text
-TranslationBatchCompleted
+TranslationBatchState
+├── CREATED
+├── READY
+├── EXECUTION_REQUESTED
+├── OUTPUT_RECEIVED
+├── VALIDATING_OUTPUT
+├── VALID
+└── INVALID
 ```
 
-At this point:
-
-* translated segments are traceable;
-* output may contribute to a partial or final result;
-* the batch cannot be rerun in place.
-
-A retry creates a new batch instance under a new attempt or retry scope.
-
-`COMPLETED` is terminal.
-
----
-
-## 36. Batch FAILED
-
-The batch could not produce accepted output in its current attempt.
-
-Expected event:
+Important:
 
 ```text
-TranslationBatchFailed
+TranslationBatchState
+    ≠
+Runtime Attempt State
 ```
 
-Possible causes:
+---
 
-* provider timeout;
-* provider rejection;
-* malformed result;
-* missing segment identity;
-* output validation failure;
-* provider unavailable;
-* unsupported request;
-* context construction failure.
+# 30. Batch CREATED
 
-The parent attempt or job decides whether to retry.
+Batch membership exists.
 
-`FAILED` is terminal for this batch instance.
+Fixed:
+
+* TranslationBatchId
+* TranslationUnitIds
+* Unit sequence
+* context refs
+* terminology refs
+* provider capability requirements
+
+Provider execution may not yet be prepared.
 
 ---
 
-## 37. Batch CANCELLED
+# 31. Batch READY
 
-The batch was logically cancelled.
+Batch satisfies pre-execution requirements.
 
-A provider may still return physically, but the response cannot be accepted.
+Checks:
 
-`CANCELLED` is terminal.
-
----
-
-## 38. Batch SUPERSEDED
-
-The batch became obsolete because:
-
-* another attempt replaced it;
-* the job was superseded;
-* source revision changed;
-* execution policy selected a replacement batch.
-
-`SUPERSEDED` is terminal.
+* Unit membership valid
+* provider limits resolvable
+* context available
+* terminology resolved
+* Privacy Context satisfied
+* eligible Provider path exists
 
 ---
 
-## 39. Batch State Diagram
+# 32. EXECUTION_REQUESTED
+
+Translation has submitted provider-neutral execution through the Provider boundary.
+
+This means:
+
+```text
+provider execution requested
+```
+
+not:
+
+```text
+provider is definitely running
+```
+
+Physical execution belongs to Provider Management/provider implementation.
+
+---
+
+# 33. OUTPUT_RECEIVED
+
+Provider Adapter returned normalized provider output.
+
+Still not accepted Translation output.
+
+Required next:
+
+```text
+VALIDATING_OUTPUT
+```
+
+---
+
+# 34. VALIDATING_OUTPUT
+
+Checks:
+
+* expected Unit IDs
+* missing Units
+* duplicate Units
+* unexpected Units
+* structural parse
+* target-language plausibility
+* terminology constraints
+* output length
+* source leakage
+* provider control leakage
+* source alignment
+
+---
+
+# 35. Batch VALID
+
+Provider output has passed required Translation validation for this Batch.
+
+Validated TranslatedUnits may contribute to Candidate assembly.
+
+---
+
+# 36. Batch INVALID
+
+Current Batch execution output cannot contribute as valid Translation output.
+
+Examples:
+
+* malformed provider result
+* impossible alignment
+* locked terminology violation under strict policy
+* provider returned unrelated Unit IDs
+* provider response violates Privacy/contract boundary
+
+`INVALID` does not itself schedule retry.
+
+Translation may return a RetryHint.
+
+---
+
+# 37. Batch Diagram
 
 ```text
 CREATED
     ↓
 READY
     ↓
-RUNNING
+EXECUTION_REQUESTED
     ↓
-VALIDATING
-    ├──► COMPLETED
-    ├──► FAILED
-    ├──► CANCELLED
-    └──► SUPERSEDED
-```
-
-Alternative transitions from pre-execution states:
-
-```text
-CREATED / READY
-    ├──► FAILED
-    ├──► CANCELLED
-    └──► SUPERSEDED
+OUTPUT_RECEIVED
+    ↓
+VALIDATING_OUTPUT
+   ┌────┴────┐
+   ↓         ↓
+ VALID     INVALID
 ```
 
 ---
 
-# Part IV — Translation Result State Machine
+# 38. Why `RUNNING` Is Removed From Batch State
 
-## 40. TranslationResultState
+Old model used:
 
-Canonical result states:
+```text
+READY
+  ↓
+RUNNING
+  ↓
+VALIDATING
+```
+
+But actual provider execution may occur:
+
+* in-process
+* remote HTTP
+* local model worker
+* provider pool
+* another process
+
+Translation cannot always authoritatively know physical provider state.
+
+Therefore state is separated into:
+
+```text
+TranslationBatch:
+    EXECUTION_REQUESTED
+
+ProviderExecutionObservation:
+    REQUESTED / RUNNING / ...
+```
+
+---
+
+# 39. Provider Execution Observation
+
+```text
+ProviderExecutionObservation
+├── NOT_REQUESTED
+├── REQUESTED
+├── ACCEPTED
+├── RUNNING
+├── STREAMING
+├── OUTPUT_RECEIVED
+├── ERROR_RECEIVED
+├── CANCEL_REQUESTED
+├── PHYSICALLY_FINISHED
+└── UNKNOWN
+```
+
+This is observational.
+
+It is not provider lifecycle ownership.
+
+---
+
+# 40. NOT_REQUESTED
+
+No provider request made.
+
+---
+
+# 41. REQUESTED
+
+Translation submitted provider execution request.
+
+---
+
+# 42. ACCEPTED
+
+Provider boundary acknowledged request.
+
+It does not imply useful work has started.
+
+---
+
+# 43. RUNNING
+
+Provider reports active processing when such information exists.
+
+Optional.
+
+---
+
+# 44. STREAMING
+
+Provider is emitting partial/token output.
+
+Streaming provider output is not automatically public Translation output.
+
+---
+
+# 45. OUTPUT_RECEIVED
+
+A response/output arrived.
+
+Translation must normalize and validate it.
+
+---
+
+# 46. ERROR_RECEIVED
+
+Provider Adapter returned normalized provider failure.
+
+Translation may construct:
+
+```text
+TranslationModuleError
+
+RetryHint
+```
+
+Runtime owns next execution decision.
+
+---
+
+# 47. CANCEL_REQUESTED
+
+Physical provider cancellation has been requested.
+
+This does not mean Runtime Attempt is `CANCELED`.
+
+---
+
+# 48. PHYSICALLY_FINISHED
+
+Provider physical execution has ended.
+
+It does not imply:
+
+```text
+Batch VALID
+
+Candidate VALID
+
+Attempt SUCCEEDED
+```
+
+---
+
+# 49. UNKNOWN
+
+Provider execution state cannot be reliably determined.
+
+This is valid for some remote providers.
+
+---
+
+# 50. Provider Observation Rule
+
+Correctness must not require reliable intermediate Provider state.
+
+Architecture must tolerate:
+
+```text
+REQUESTED
+    ↓
+OUTPUT_RECEIVED
+```
+
+with no observable:
+
+```text
+ACCEPTED
+RUNNING
+```
+
+---
+
+# 51. Provider Output Validation State
+
+Optional explicit validator state:
+
+```text
+ProviderOutputValidationState
+├── NOT_STARTED
+├── VALIDATING
+├── VALID
+├── VALID_WITH_WARNINGS
+└── INVALID
+```
+
+---
+
+# 52. VALID_WITH_WARNINGS
+
+Output remains usable but contains warnings.
+
+Examples:
+
+* ambiguous terminology
+* low confidence
+* output-length anomaly
+* source-language fragment preserved
+* provider fallback used
+
+This may still contribute to Candidate.
+
+---
+
+# 53. Translation Completeness
+
+```text
+TranslationCompleteness
+├── COMPLETE
+├── PARTIAL
+├── EMPTY_VALID
+└── UNKNOWN
+```
+
+Completeness is Candidate/Artifact semantic metadata.
+
+Not an execution lifecycle.
+
+---
+
+# 54. COMPLETE
+
+All required Translation Units have valid translated output.
+
+---
+
+# 55. PARTIAL
+
+At least one required Unit has valid output and at least one remains missing/failed.
+
+Requirements:
+
+* valid completed Units explicit
+* missing Units explicit
+* failed Units explicit
+* alignment preserved
+* PartialResultPolicy allows output
+
+---
+
+# 56. EMPTY_VALID
+
+No selected content requires translated output.
+
+Examples:
+
+* SourceDocument has no translatable blocks
+* selected blocks all use PRESERVE/SKIP policy
+* empty source selection valid by policy
+
+Not a failure.
+
+---
+
+# 57. UNKNOWN
+
+Completeness cannot safely be determined.
+
+Must remain explicit.
+
+---
+
+# 58. No PARTIALLY_COMPLETED Lifecycle State
+
+Old:
+
+```text
+TranslationJob.PARTIALLY_COMPLETED
+```
+
+is removed.
+
+New:
+
+```text
+Candidate.Completeness = PARTIAL
+```
+
+This separates semantic completeness from Runtime execution lifecycle.
+
+---
+
+# 59. Candidate Validation State
+
+```text
+TranslationCandidateValidationState
+├── NOT_CREATED
+├── ASSEMBLING
+├── VALIDATING
+├── VALID
+├── INVALID
+└── SUBMITTED_TO_RUNTIME
+```
+
+---
+
+# 60. Candidate NOT_CREATED
+
+No Candidate exists.
+
+```text
+NOT_CREATED
+    → ASSEMBLING
+```
+
+---
+
+# 61. Candidate ASSEMBLING
+
+Collect:
+
+```text
+CandidateArtifactId
+
+SourceDocumentArtifactRef
+
+TranslationIntentId
+
+TranslationProfileRef
+
+TranslationUnits[]
+
+TranslatedUnits[]
+
+Completeness
+
+MissingTranslationUnitIds[]
+
+FailedTranslationUnitIds[]
+
+Warnings[]
+
+ProviderProvenance[]
+
+CompatibilityMetadata
+
+TraceabilityMetadata
+
+IntegrityMetadata
+```
+
+---
+
+# 62. Candidate VALIDATING
+
+Checks:
+
+* unique Candidate identity
+* SourceDocument reference
+* Translation Intent
+* Translation Unit integrity
+* TranslatedUnit mapping
+* target language
+* completeness
+* missing/failed Unit consistency
+* terminology policy
+* source traceability
+* Provider provenance
+* Compatibility metadata
+* Privacy Context
+* no credentials
+* no Runtime state
+
+---
+
+# 63. Candidate VALID
+
+Candidate satisfies Translation-owned contract.
+
+It is:
+
+* immutable
+* traceable
+* provider-neutral
+* non-authoritative
+* ready for Runtime submission
+
+---
+
+# 64. Candidate INVALID
+
+Candidate violates Translation contract.
+
+Examples:
+
+* missing Unit alignment
+* invalid completeness
+* duplicated TranslatedUnit
+* wrong target language
+* lost SourceBlock refs
+* credential leakage
+* provider control content leaked
+* privacy violation
+
+Cannot be submitted as valid.
+
+---
+
+# 65. SUBMITTED_TO_RUNTIME
+
+Candidate crossed Translation → Runtime boundary.
+
+After this:
+
+* no Candidate mutation
+* Runtime validates authority
+* Runtime may accept/reject
+* Artifact Store may receive accepted Candidate
+* rejected Candidate cleaned according to Resource policy
+
+---
+
+# 66. Candidate Diagram
+
+```text
+NOT_CREATED
+    ↓
+ASSEMBLING
+    ↓
+VALIDATING
+   ┌────┴────┐
+   ↓         ↓
+ VALID     INVALID
+   ↓
+SUBMITTED_TO_RUNTIME
+```
+
+---
+
+# 67. Runtime Candidate Disposition
+
+External observation:
+
+```text
+RuntimeCandidateDisposition
+├── ACCEPTED
+├── REJECTED_STALE
+├── REJECTED_CANCELED
+├── REJECTED_DUPLICATE
+├── REJECTED_INVALID
+├── REJECTED_AUTHORITY
+└── REJECTED_RUNTIME_FAILURE
+```
+
+This is not Translation Candidate state.
+
+---
+
+# 68. Candidate Ownership Boundary
 
 ```text
 ASSEMBLING
-PARTIAL
-FINALIZING
+VALIDATING
+VALID
+    → Translation producer ownership
+
+SUBMITTED_TO_RUNTIME
+    → transfer pending
+
+ACCEPTED
+    → Artifact Store ownership
+
+REJECTED_*
+    → cleanup
+```
+
+---
+
+# 69. Translation Artifact Has No Execution State Machine
+
+Published:
+
+```text
+TranslationArtifact
+```
+
+is immutable semantic data.
+
+It does not transition:
+
+```text
 AVAILABLE
+    → NON_AUTHORITATIVE
+    → INVALIDATED
+```
+
+inside Translation.
+
+External systems may track:
+
+* usability
+* retention
+* compatibility
+* active selection
+* administrative invalidation
+
+without mutating the Artifact.
+
+---
+
+# 70. No TranslationResult State Machine
+
+Removed legacy:
+
+```text
+ASSEMBLING
+
+PARTIAL
+
+FINALIZING
+
+AVAILABLE
+
 AVAILABLE_WITH_WARNINGS
+
 NON_AUTHORITATIVE
+
 INVALIDATED
 ```
 
-A Translation result is not treated as a provider execution state.
-
-It represents assembled output.
-
----
-
-## 41. Result ASSEMBLING
-
-Accepted batch and segment outputs are being assembled.
-
-At this point:
-
-* some translated segments may exist;
-* result ordering may still be incomplete;
-* missing and failed segments are still being calculated;
-* result revision may not yet be public.
-
-Valid outgoing transitions:
+Replacement:
 
 ```text
-ASSEMBLING → PARTIAL
-ASSEMBLING → FINALIZING
-ASSEMBLING → NON_AUTHORITATIVE
-ASSEMBLING → INVALIDATED
+CandidateValidationState
+
+TranslationCompleteness
+
+Warnings
+
+RuntimeCandidateDisposition
 ```
 
 ---
 
-## 42. Result PARTIAL
+# 71. Why `AVAILABLE` Is Removed
 
-The result contains validated output for only part of the selected source set.
-
-Expected event:
+A Translation Candidate being valid does not determine its authority.
 
 ```text
-TranslationPartialResultAvailable
+Candidate VALID
+    ↓
+Runtime ACCEPT
+    ↓
+Artifact Store publishes
 ```
 
-At this point:
+Only after this does a published TranslationArtifact exist.
 
-* completed segments are explicit;
-* missing segments are explicit;
-* failed segments are explicit;
-* `translationRevision` is assigned;
-* publication depends on policy.
+---
 
-Valid outgoing transitions:
+# 72. Why `NON_AUTHORITATIVE` Is Removed
+
+Authority belongs to Runtime/application revision semantics.
+
+A TranslationArtifact may remain semantically valid even if it is no longer active/current.
+
+Therefore:
 
 ```text
-PARTIAL → PARTIAL
-PARTIAL → FINALIZING
-PARTIAL → NON_AUTHORITATIVE
-PARTIAL → INVALIDATED
+not current
+    ≠
+invalid artifact
 ```
 
-`PARTIAL → PARTIAL` represents a new immutable result revision, not mutation of the previously published revision.
+---
+
+# 73. Translation Variant State
+
+Immutable Translation Variant does not require lifecycle states:
+
+```text
+CREATED
+AVAILABLE
+ACTIVE
+INACTIVE
+INVALIDATED
+```
+
+Variant is semantic identity/provenance.
 
 Example:
 
 ```text
-Result revision 1
-    3 of 10 segments
+TranslationArtifact A
+    variant = NATURAL
 
-Result revision 2
-    7 of 10 segments
+TranslationArtifact B
+    variant = LITERAL
 ```
+
+Both can coexist.
 
 ---
 
-## 43. Result FINALIZING
+# 74. Active Variant Boundary
 
-All required execution work has ended and the result is undergoing final checks.
-
-Checks include:
-
-* selected segment coverage;
-* result ordering;
-* duplicate alignment;
-* source identity;
-* content revision;
-* job authority;
-* cancellation status;
-* supersession status;
-* variant creation;
-* publication policy.
-
-Valid outgoing transitions:
+Current selection:
 
 ```text
-FINALIZING → AVAILABLE
-FINALIZING → AVAILABLE_WITH_WARNINGS
-FINALIZING → NON_AUTHORITATIVE
-FINALIZING → INVALIDATED
+ACTIVE / INACTIVE
 ```
+
+belongs to:
+
+* Reading Session
+* User Preference
+* Presentation/Application projection
+
+not Translation execution.
 
 ---
 
-## 44. Result AVAILABLE
+# 75. Correction State Boundary
 
-The result is valid and eligible for authoritative use.
-
-Expected associated event:
+Correction creates:
 
 ```text
-TranslationCompleted
-```
-
-At this point:
-
-* final alignment passed;
-* result is retrievable;
-* it is eligible for Reading Session authority acceptance;
-* Presentation may use it only after the relevant Reading Session or equivalent authority accepts the matching translation snapshot;
-* an active variant may reference it.
-
-Valid outgoing transitions:
-
-```text
-AVAILABLE → NON_AUTHORITATIVE
-AVAILABLE → INVALIDATED
-```
-
-It may become non-authoritative when a newer result or variant is activated.
-
----
-
-## 45. Result AVAILABLE_WITH_WARNINGS
-
-The result is usable and eligible for authority, but significant warnings remain.
-
-Expected associated event:
-
-```text
-TranslationCompletedWithWarnings
-```
-
-Valid outgoing transitions:
-
-```text
-AVAILABLE_WITH_WARNINGS → NON_AUTHORITATIVE
-AVAILABLE_WITH_WARNINGS → INVALIDATED
-```
-
-Warnings do not make the result structurally invalid.
-
----
-
-## 46. Result NON_AUTHORITATIVE
-
-The result exists but cannot be used as the current authoritative translation.
-
-Possible reasons:
-
-* job cancelled;
-* job superseded;
-* newer result revision exists;
-* newer variant activated;
-* stale source revision;
-* result preserved after final job failure;
-* partial output retained for diagnostics.
-
-This state does not necessarily mean the content is linguistically incorrect.
-
-Valid outgoing transitions:
-
-```text
-NON_AUTHORITATIVE → INVALIDATED
-```
-
-Reactivation should generally occur through variant activation rules, not by changing this result state back to `AVAILABLE`.
-
----
-
-## 47. Result INVALIDATED
-
-The result is no longer considered valid.
-
-Possible causes:
-
-* structural alignment defect;
-* source revision corruption;
-* administrative quality rejection;
-* security or privacy issue;
-* contract incompatibility;
-* invalid glossary application.
-
-`INVALIDATED` is terminal.
-
----
-
-## 48. Result State Diagram
-
-```text
-ASSEMBLING
-    ├──► PARTIAL ──► PARTIAL
-    │                  │
-    │                  ▼
-    └────────────► FINALIZING
-                       ├──► AVAILABLE
-                       ├──► AVAILABLE_WITH_WARNINGS
-                       ├──► NON_AUTHORITATIVE
-                       └──► INVALIDATED
-```
-
-Post-publication:
-
-```text
-AVAILABLE
-AVAILABLE_WITH_WARNINGS
-        │
-        ├──► NON_AUTHORITATIVE
-        └──► INVALIDATED
-
-NON_AUTHORITATIVE
-        └──► INVALIDATED
-```
-
----
-
-# Part V — Translation Variant State Machine
-
-## 49. TranslationVariantState
-
-Canonical variant states:
-
-```text
-CREATED
-AVAILABLE
-ACTIVE
-INACTIVE
-INVALIDATED
-```
-
----
-
-## 50. Variant CREATED
-
-The immutable variant has been constructed but is not yet available for selection.
-
-At this point:
-
-* translated segments are assigned;
-* parent variant lineage may exist;
-* validation or result linkage may still be pending.
-
-Expected event:
-
-```text
-TranslationVariantCreated
-```
-
-Valid outgoing transitions:
-
-```text
-CREATED → AVAILABLE
-CREATED → ACTIVE
-CREATED → INVALIDATED
-```
-
-Direct activation is allowed when creation and activation are committed atomically.
-
----
-
-## 51. Variant AVAILABLE
-
-The variant is valid and may be selected.
-
-It is not currently active for the relevant reading context.
-
-Valid outgoing transitions:
-
-```text
-AVAILABLE → ACTIVE
-AVAILABLE → INVALIDATED
-```
-
----
-
-## 52. Variant ACTIVE
-
-The variant is currently selected for a compatible reading context.
-
-Expected event:
-
-```text
-TranslationVariantActivated
-```
-
-At this point:
-
-* Presentation may render it;
-* it must match source revision and target language;
-* only one compatible variant should normally be active in one reading context.
-
-Valid outgoing transitions:
-
-```text
-ACTIVE → INACTIVE
-ACTIVE → INVALIDATED
-```
-
----
-
-## 53. Variant INACTIVE
-
-The variant remains valid but another variant is active.
-
-Possible causes:
-
-* user selected another variant;
-* new retranslation completed;
-* corrected variant replaced it;
-* literal or natural alternative became active.
-
-Valid outgoing transitions:
-
-```text
-INACTIVE → ACTIVE
-INACTIVE → INVALIDATED
-```
-
-Unlike result authority, variant activation may be reversible when the source revision remains compatible.
-
----
-
-## 54. Variant INVALIDATED
-
-The variant is no longer eligible for activation.
-
-Expected event:
-
-```text
-TranslationVariantInvalidated
-```
-
-Possible causes:
-
-* result invalidated;
-* source alignment changed;
-* correction was rejected;
-* security or policy issue;
-* source revision became incompatible.
-
-`INVALIDATED` is terminal.
-
----
-
-## 55. Variant State Diagram
-
-```text
-CREATED
-    ↓
-AVAILABLE
-    ↓
-ACTIVE
-    ↓
-INACTIVE
-    └────────► ACTIVE
-```
-
-Invalidation path:
-
-```text
-CREATED
-AVAILABLE
-ACTIVE
-INACTIVE
-    │
-    └──► INVALIDATED
-```
-
----
-
-# Part VI — Entity State Relationships
-
-## 56. Job and Attempt Relationship
-
-A running batch attempt normally requires an active parent job and an active parent batch.
-
-Allowed parent states:
-
-```text
-TranslationAttempt.RUNNING
-    requires TranslationJob in:
-
-RUNNING
-PARTIALLY_COMPLETED
-```
-
-An attempt must not enter `RUNNING` when the parent job is:
-
-```text
-COMPLETED
-COMPLETED_WITH_WARNINGS
-FAILED
-CANCELLED
-SUPERSEDED
-INVALIDATED
-```
-
----
-
-## 57. Batch and Attempt Relationship
-
-A running attempt belongs to exactly one batch and requires that batch to remain eligible for execution.
-
-```text
-TranslationAttempt.RUNNING
-    requires TranslationBatch in:
-
-READY
-RUNNING
-VALIDATING
-```
-
-A batch may have multiple immutable attempts over time. A failed, cancelled, or superseded attempt never returns to `RUNNING`; retry creates a new `TranslationAttemptId` under the same logical batch or under a replacement batch when membership changes.
-
----
-
-## 58. Batch and Result Relationship
-
-Only accepted batch output may contribute to public results.
-
-```text
-TranslationBatch.COMPLETED
+Old TranslationArtifact
         ↓
-TranslatedSegment accepted
+Correction
         ↓
-TranslationResult ASSEMBLING or PARTIAL
+New Candidate
+        ↓
+New TranslationArtifact Variant
 ```
 
-Output from batches in these states must not become authoritative:
-
-```text
-FAILED
-CANCELLED
-SUPERSEDED
-```
+Old Artifact remains immutable.
 
 ---
 
-## 59. Job and Result Relationship
+# 76. Cancellation Observation
 
-Typical mappings:
+Runtime owns canonical CancellationContext.
 
-```text
-Job RUNNING
-    → Result ASSEMBLING
-
-Job PARTIALLY_COMPLETED
-    → Result PARTIAL
-
-Job COMPLETED
-    → Result AVAILABLE
-
-Job COMPLETED_WITH_WARNINGS
-    → Result AVAILABLE_WITH_WARNINGS
-
-Job CANCELLED
-    → Result NON_AUTHORITATIVE
-
-Job SUPERSEDED
-    → Result NON_AUTHORITATIVE
-
-Job INVALIDATED
-    → Result INVALIDATED
-```
-
-A failed job may still have:
+Translation may observe:
 
 ```text
-Result PARTIAL
+NOT_REQUESTED
+
+REQUESTED
+
+ACKNOWLEDGED_BY_MODULE
+
+PROVIDER_CANCEL_REQUESTED
+
+LOCAL_WORK_STOPPING
+
+LOCAL_WORK_STOPPED
 ```
 
-or:
-
-```text
-Result NON_AUTHORITATIVE
-```
-
-depending on retention and publication policy.
+These are observations only.
 
 ---
 
-## 60. Result and Variant Relationship
-
-A variant may become `AVAILABLE` or `ACTIVE` only when its underlying result is:
+# 77. Cancellation Flow
 
 ```text
-AVAILABLE
-AVAILABLE_WITH_WARNINGS
-```
-
-A partial progressive variant may be supported in the future, but the MVP should avoid activating incomplete whole-document variants unless Presentation explicitly supports segment-subset authority.
-
----
-
-## 61. Job and Variant Relationship
-
-A completed job should have at least one valid variant.
-
-```text
-TranslationJob.COMPLETED
-    requires TranslationVariant AVAILABLE or ACTIVE
-```
-
-A job should not publish completion before its referenced variant is retrievable.
-
-Recommended event order:
-
-```text
-TranslationVariantCreated
+Current Translation Operation
         ↓
-TranslationCompleted
+Cancellation Requested
         ↓
-TranslationVariantActivated
-```
-
----
-
-# Part VII — Command-to-State Mapping
-
-## 62. StartTranslation
-
-Accepted `StartTranslation` normally creates:
-
-```text
-TranslationJob = CREATED
-```
-
-Then:
-
-```text
-CREATED → QUEUED
-```
-
-or for immediate execution:
-
-```text
-CREATED → RUNNING
-```
-
-Cache reuse may produce:
-
-```text
-CREATED → COMPLETED
-```
-
-or reuse an existing completed job without creating a new one.
-
----
-
-## 63. CancelTranslation
-
-Valid cancellation targets active job states:
-
-```text
-CREATED
-QUEUED
-RUNNING
-PARTIALLY_COMPLETED
-RETRY_SCHEDULED
-```
-
-Preferred transition:
-
-```text
-active state
-    ↓
-CANCELLATION_REQUESTED
-    ↓
-CANCELLED
-```
-
-For jobs with no active resources:
-
-```text
-CREATED → CANCELLED
-QUEUED → CANCELLED
-```
-
-may occur atomically.
-
----
-
-## 64. RetryTranslation
-
-Automatic or command-driven retry within the same logical intent produces:
-
-```text
-Job RUNNING or PARTIALLY_COMPLETED
+Stop Creating New Batches
         ↓
-RETRY_SCHEDULED
+Request Provider Cancellation
         ↓
-new Attempt CREATED
+Ignore Unsafe Late Output
         ↓
-Attempt PREPARING
+Cleanup
         ↓
-Job RUNNING
+Return Runtime
 ```
 
-The previous attempt remains terminal.
-
----
-
-## 65. RequestRetranslation
-
-Retranslation does not reopen the old job.
-
-It creates:
+Runtime decides:
 
 ```text
-New TranslationJob = CREATED
-```
+CANCELED
 
-The previous job may remain:
+ABANDONED
 
-```text
-COMPLETED
-COMPLETED_WITH_WARNINGS
 FAILED
 ```
 
-or transition to:
+---
 
-```text
-SUPERSEDED
-```
+# 78. Cancellation Checkpoints
 
-when the new job is intended to replace its authority.
+Check:
+
+* before Plan building
+* before Unit planning
+* before context expansion
+* before Batch construction
+* before each provider request
+* between provider requests
+* before Candidate assembly
+* before Candidate submission
 
 ---
 
-## 66. InvalidateTranslation
-
-Invalidation may affect different scopes.
-
-### Job scope
-
-```text
-Job terminal state → INVALIDATED
-```
-
-### Result scope
-
-```text
-Result AVAILABLE → INVALIDATED
-```
-
-### Variant scope
-
-```text
-Variant ACTIVE / AVAILABLE / INACTIVE → INVALIDATED
-```
-
-Invalidating one variant does not necessarily invalidate the whole job.
-
----
-
-## 67. SelectTranslationVariant
-
-Selecting an available variant causes:
-
-```text
-Current ACTIVE variant → INACTIVE
-Selected AVAILABLE or INACTIVE variant → ACTIVE
-```
-
-Both changes should be committed atomically for the same reading context.
-
----
-
-## 68. SubmitTranslationCorrection
-
-Correction produces a new immutable variant.
-
-```text
-Base variant ACTIVE or INACTIVE
-        ↓
-Corrected variant CREATED
-        ↓
-Corrected variant AVAILABLE
-```
-
-When activation is requested:
-
-```text
-Base variant ACTIVE → INACTIVE
-Corrected variant AVAILABLE → ACTIVE
-```
-
-The base variant is not mutated.
-
----
-
-# Part VIII — Event-to-State Mapping
-
-## 69. Job Events
-
-| Event                               | Expected state after event                        |
-| ----------------------------------- | ------------------------------------------------- |
-| `TranslationJobCreated`             | `CREATED`                                         |
-| `TranslationJobQueued`              | `QUEUED`                                          |
-| `TranslationJobStarted`             | `RUNNING`                                         |
-| `TranslationPartialResultAvailable` | `PARTIALLY_COMPLETED` or active progressive state |
-| `TranslationRetryScheduled`         | `RETRY_SCHEDULED`                                 |
-| `TranslationCancellationRequested`  | `CANCELLATION_REQUESTED`                          |
-| `TranslationCompleted`              | `COMPLETED`                                       |
-| `TranslationCompletedWithWarnings`  | `COMPLETED_WITH_WARNINGS`                         |
-| `TranslationFailed`                 | `FAILED`                                          |
-| `TranslationCancelled`              | `CANCELLED`                                       |
-| `TranslationSuperseded`             | `SUPERSEDED`                                      |
-| `TranslationInvalidated`            | `INVALIDATED` where job scope applies             |
-
----
-
-## 70. Attempt Events
-
-| Event                         | Expected state after event |
-| ----------------------------- | -------------------------- |
-| `TranslationAttemptStarted`   | `RUNNING`                  |
-| `TranslationAttemptCompleted` | `COMPLETED`                |
-| `TranslationAttemptFailed`    | `FAILED`                   |
-
-Attempt creation and preparation may remain internal state transitions without public events.
-
----
-
-## 71. Batch Events
-
-| Event                       | Expected state after event |
-| --------------------------- | -------------------------- |
-| `TranslationBatchStarted`   | `RUNNING`                  |
-| `TranslationBatchCompleted` | `COMPLETED`                |
-| `TranslationBatchFailed`    | `FAILED`                   |
-
-The intermediate `VALIDATING` state may remain internal.
-
----
-
-## 72. Variant Events
-
-| Event                           | Expected state after event                |
-| ------------------------------- | ----------------------------------------- |
-| `TranslationVariantCreated`     | `CREATED` or `AVAILABLE`                  |
-| `TranslationVariantActivated`   | `ACTIVE`                                  |
-| `TranslationVariantInvalidated` | `INVALIDATED`                             |
-| `TranslationCorrectionApplied`  | corrected variant `AVAILABLE` or `ACTIVE` |
-
-The exact state associated with `TranslationVariantCreated` depends on whether creation includes completed validation.
-
-Recommended MVP behavior:
-
-```text
-TranslationVariantCreated
-    means variant is AVAILABLE
-```
-
-This avoids publishing events for inaccessible intermediate variants.
-
----
-
-# Part IX — Retry State Rules
-
-## 73. Retry Eligibility
-
-An attempt failure is retryable only when:
-
-* the normalized error category permits retry;
-* retry budget remains;
-* the job has not been cancelled;
-* the job has not been superseded;
-* provider policy has an eligible execution path;
-* the source revision remains valid;
-* retry would not violate privacy or cost policy.
-
----
-
-## 74. Retry Transition
-
-```text
-Attempt RUNNING
-    ↓ failure
-Attempt FAILED
-    ↓ retry approved
-Job RETRY_SCHEDULED
-    ↓
-New Attempt CREATED
-```
-
-The failed attempt remains immutable.
-
----
-
-## 75. Batch-Only Retry
-
-When only selected batches fail:
-
-```text
-Attempt 1
-    Batch A COMPLETED
-    Batch B FAILED
-    Batch C COMPLETED
-```
-
-The next attempt may contain only replacement work for Batch B:
-
-```text
-Attempt 2
-    Batch D
-        contains segments previously assigned to Batch B
-```
-
-The new batch receives a new `TranslationBatchId`.
-
-Previously completed batches are not moved back to `RUNNING`.
-
----
-
-## 76. Provider Fallback
-
-Fallback is represented as a new attempt.
-
-```text
-Attempt 1
-    provider = A
-    state = FAILED
-
-Attempt 2
-    provider = B
-    state = CREATED → RUNNING
-```
-
-The job transitions through:
-
-```text
-RUNNING
-    ↓
-RETRY_SCHEDULED
-    ↓
-RUNNING
-```
-
-Expected event:
-
-```text
-TranslationProviderFallbackSelected
-```
-
----
-
-## 77. Retry Exhaustion
-
-When no further retry is allowed:
-
-```text
-Attempt FAILED
-    ↓
-Job FAILED
-```
-
-When accepted partial output exists, the result may remain:
-
-```text
-PARTIAL
-```
-
-or become:
-
-```text
-NON_AUTHORITATIVE
-```
-
-depending on publication policy.
-
----
-
-# Part X — Partial Completion Rules
-
-## 78. Partial Job Qualification
-
-A job may enter `PARTIALLY_COMPLETED` only when:
-
-* at least one selected segment has accepted output;
-* at least one selected segment is incomplete or failed;
-* an assembled partial result exists;
-* segment identities are explicit.
-
----
-
-## 79. Progressive Publication
-
-For `publicationMode = PROGRESSIVE`:
-
-```text
-Job RUNNING
-    ↓ accepted subset
-Job PARTIALLY_COMPLETED
-```
-
-Presentation may use completed segment subsets.
-
-However:
-
-* incomplete segments remain explicit;
-* later revisions must not duplicate completed overlays;
-* cancellation prevents newly arriving segments from becoming authoritative;
-* source revision changes supersede the job.
-
----
-
-## 80. Atomic Publication
-
-For `publicationMode = ATOMIC`:
-
-* internal result state may become `PARTIAL`;
-* the job may remain `RUNNING`;
-* Presentation must not treat partial output as authoritative;
-* the final result is published only after complete assembly.
-
-The job-level `PARTIALLY_COMPLETED` state may still be used operationally, but it does not imply public authority.
-
----
-
-## 81. Finalizing Partial Results
-
-A partial job may finish as:
-
-```text
-PARTIALLY_COMPLETED → COMPLETED
-```
-
-when all remaining segments succeed.
-
-It may finish as:
-
-```text
-PARTIALLY_COMPLETED → COMPLETED_WITH_WARNINGS
-```
-
-when complete usable output includes significant warnings.
-
-It may finish as:
-
-```text
-PARTIALLY_COMPLETED → FAILED
-```
-
-when required content cannot be completed and partial completion is not accepted as successful.
-
----
-
-# Part XI — Cancellation Rules
-
-## 82. Logical Cancellation
-
-Logical cancellation takes precedence over provider execution state.
-
-Once the job enters:
-
-```text
-CANCELLATION_REQUESTED
-```
-
-the module must prevent:
-
-* new attempts;
-* new batches;
-* authoritative result publication;
-* automatic retries;
-* active variant creation from late output.
-
----
-
-## 83. Physical Cancellation
+# 79. Physical Cancellation
 
 Provider cancellation may be:
 
 ```text
 SUPPORTED
+
 BEST_EFFORT
+
 UNSUPPORTED
 ```
 
-Physical cancellation outcome does not change logical authority.
-
-Even when provider cancellation is unsupported:
-
-```text
-Job CANCELLATION_REQUESTED
-    ↓
-Job CANCELLED
-```
-
-remains valid after local cleanup and authority blocking.
+Physical cancellation result never determines Runtime authority.
 
 ---
 
-## 84. Partial Data on Cancellation
-
-Cancellation policy may choose:
-
-```text
-DISCARD
-RETAIN_NON_AUTHORITATIVE
-RETAIN_ALREADY_PUBLISHED_SEGMENTS
-```
-
-For MVP, recommended behavior:
-
-```text
-Progressive result already displayed
-    → retain completed immutable segments temporarily
-
-Unpublished partial result
-    → retain as NON_AUTHORITATIVE only when cache or diagnostics require it
-```
-
----
-
-## 85. Cancellation Race
-
-Possible race:
-
-```text
-Batch validation completes
-        ↕
-Cancellation request arrives
-```
-
-Before publication, the module must atomically verify:
-
-```text
-Job is not CANCELLATION_REQUESTED
-Job is not CANCELLED
-Job is not SUPERSEDED
-```
-
-If cancellation wins, batch output cannot become authoritative.
-
----
-
-# Part XII — Supersession Rules
-
-## 86. Supersession Triggers
-
-A job may become superseded when:
-
-* prepared document revision changes;
-* a newer job replaces it;
-* target language changes;
-* profile changes;
-* terminology snapshot changes under strict policy;
-* reading context no longer permits old work;
-* manual retranslation becomes authoritative.
-
----
-
-## 87. Active Supersession
-
-For active jobs:
-
-```text
-RUNNING → SUPERSEDED
-PARTIALLY_COMPLETED → SUPERSEDED
-RETRY_SCHEDULED → SUPERSEDED
-```
-
-All active attempts and batches should also transition to:
-
-```text
-SUPERSEDED
-```
-
-where practical.
-
----
-
-## 88. Completed Supersession
-
-A completed job may later become superseded:
-
-```text
-COMPLETED → SUPERSEDED
-COMPLETED_WITH_WARNINGS → SUPERSEDED
-```
-
-Its result normally becomes:
-
-```text
-NON_AUTHORITATIVE
-```
-
-Its variant normally becomes:
-
-```text
-INACTIVE
-```
-
-unless it is incompatible, in which case it may become `INVALIDATED`.
-
----
-
-## 89. Supersession Is Not Invalidation
-
-Superseded output may still be valid for its original source revision.
-
-Invalidated output is no longer trusted even for that original identity.
-
-```text
-SUPERSEDED
-    = no longer current
-
-INVALIDATED
-    = no longer valid
-```
-
----
-
-# Part XIII — Invalidation Rules
-
-## 90. Invalidation Scope
-
-Invalidation may target:
-
-```text
-JOB
-RESULT
-VARIANT
-SEGMENTS
-CACHE_ENTRY
-```
-
-The scope determines which state machines transition.
-
----
-
-## 91. Job Invalidation
-
-Job invalidation causes:
-
-```text
-Job → INVALIDATED
-```
-
-Associated active results and variants should normally also be invalidated or made non-authoritative.
-
----
-
-## 92. Result Invalidation
-
-Result invalidation causes:
-
-```text
-Result → INVALIDATED
-```
-
-The parent job may remain historically completed, but it cannot expose the invalidated result as authoritative.
-
-If no valid result remains, job-level invalidation should be considered.
-
----
-
-## 93. Variant Invalidation
-
-Variant invalidation causes:
-
-```text
-Variant → INVALIDATED
-```
-
-If it was active:
-
-* it must be deactivated;
-* a compatible replacement may be activated;
-* otherwise no active translation remains.
-
----
-
-## 94. Segment Invalidation
-
-When only selected translated segments are invalid:
-
-* a new corrected or partial result revision should be created;
-* the original immutable result remains historical;
-* affected variants may become invalid;
-* unaffected segments may remain reusable.
-
-The system must not mutate published segment text in place.
-
----
-
-# Part XIV — Stale Result Rules
-
-## 95. Stale Result Check
-
-Before result publication, Translation must verify at least:
-
-```text
-TranslationJobId
-TranslationAttemptId
-PreparedDocumentId
-ContentRevision
-TranslationIntentId
-TranslationRevision
-```
-
-Where relevant:
-
-```text
-ReadingSessionId
-TargetLanguage
-ContextRevision
-GlossaryRevision
-Active replacement job
-```
-
----
-
-## 96. Stale Attempt Output
-
-Attempt output is stale when:
-
-* a newer attempt replaced it;
-* the attempt was superseded;
-* the parent job is cancelled;
-* the parent job is superseded;
-* source revision changed.
-
-Stale attempt output must not advance:
-
-```text
-Batch → COMPLETED
-Result → AVAILABLE
-Job → COMPLETED
-Variant → ACTIVE
-```
-
-It may be recorded diagnostically.
-
----
-
-## 97. Stale Event Handling
-
-Consumers receiving completion events must verify:
-
-```text
-preparedDocumentId
-contentRevision
-translationJobId
-translationVariantId
-```
-
-before updating visible state.
-
-Event arrival alone does not prove current authority.
-
----
-
-# Part XV — State Persistence
-
-## 98. Durable Transition Rule
-
-A public event must be emitted only after its corresponding state transition is durable enough to be queried.
+# 80. Late Provider Result
 
 Example:
 
 ```text
-persist Job = COMPLETED
-persist Result = AVAILABLE
-persist Variant = AVAILABLE
-        ↓
-publish TranslationCompleted
+Provider running
+      ↓
+Runtime cancellation/authority loss
+      ↓
+provider finishes late
+      ↓
+output arrives
+```
+
+Translation must:
+
+* avoid unsafe Candidate submission
+* discard or clean output
+* optionally record bounded diagnostics
+
+Late completion does not restore authority.
+
+---
+
+# 81. Supersession Boundary
+
+There is no Translation-owned:
+
+```text
+SUPERSEDED
+```
+
+state.
+
+Runtime owns Revision/authority.
+
+Example:
+
+```text
+SourceDocument A
+    ↓
+Translation running
+
+SourceDocument B becomes current
+    ↓
+Runtime revokes authority for A
+    ↓
+late Candidate A
+    ↓
+REJECTED_STALE
 ```
 
 ---
 
-## 99. Transactional Consistency
+# 82. Retranslation
 
-Preferred mechanisms include:
+Changing:
 
-* transactional outbox;
-* event sourcing;
-* atomic aggregate persistence;
-* equivalent reliable state-and-event storage.
+* target language
+* Translation Profile
+* Knowledge Snapshot
+* Context Identity
+* semantic Provider constraints
 
-The system must avoid:
+creates new semantic Translation Intent and Runtime work.
+
+Old Translation state is not mutated to `SUPERSEDED`.
+
+---
+
+# 83. Retry Boundary
+
+No Translation state:
 
 ```text
-event published
-state persistence failed
+RETRY_SCHEDULED
+```
+
+exists.
+
+Translation may return:
+
+```text
+RetryHint
+```
+
+Runtime decides:
+
+```text
+new Attempt?
+backoff?
+provider fallback?
+no retry?
 ```
 
 ---
 
-## 100. Optimistic Concurrency
+# 84. Provider Fallback
 
-State transitions should verify the expected current state.
-
-Conceptual operation:
+Example:
 
 ```text
-transition(
-    entityId,
-    expectedState,
-    nextState,
-    expectedRevision
-)
+Attempt N
+    ↓
+Provider A failure
+    ↓
+Translation RetryHint:
+ALTERNATIVE_PROVIDER
+    ↓
+Runtime chooses retry
+    ↓
+Attempt N+1
+    ↓
+Provider B
 ```
 
-This prevents races such as:
-
-* completion after cancellation;
-* two variants becoming active;
-* duplicate retry scheduling;
-* older attempts overwriting newer attempts.
+Translation does not reopen the old Attempt.
 
 ---
 
-## 101. State Revision
+# 85. Batch Retry Semantics
 
-Each stateful entity should maintain an internal monotonic revision.
+A Batch object belongs to one Plan/Attempt-local execution context.
 
-Examples:
+When retry semantics require different:
+
+* provider constraints
+* batch membership
+* batch size
+* context size
+
+a new Batch identity should be constructed.
+
+Do not reset:
 
 ```text
-jobStateRevision
-batchStateRevision
-attemptStateRevision
-translationRevision
-variantStateRevision
-```
-
-State revision supports:
-
-* optimistic locking;
-* event ordering;
-* duplicate command handling;
-* read-model synchronization.
-
----
-
-# Part XVI — Invalid Transitions
-
-## 102. Job Invalid Transitions
-
-The following transitions are forbidden:
-
-```text
-COMPLETED → RUNNING
-COMPLETED_WITH_WARNINGS → RUNNING
-FAILED → RUNNING
-CANCELLED → RUNNING
-SUPERSEDED → RUNNING
-INVALIDATED → any normal state
-
-CANCELLATION_REQUESTED → COMPLETED
-CANCELLATION_REQUESTED → RETRY_SCHEDULED
-```
-
-Recovery requires a new logical job.
-
----
-
-## 103. Attempt Invalid Transitions
-
-Forbidden:
-
-```text
-COMPLETED → RUNNING
-FAILED → RUNNING
-CANCELLED → RUNNING
-SUPERSEDED → RUNNING
-```
-
-Retry creates a new attempt.
-
----
-
-## 104. Batch Invalid Transitions
-
-Forbidden:
-
-```text
-COMPLETED → RUNNING
-FAILED → RUNNING
-CANCELLED → RUNNING
-SUPERSEDED → RUNNING
-```
-
-Batch retry creates a new batch identity.
-
----
-
-## 105. Result Invalid Transitions
-
-Forbidden:
-
-```text
-INVALIDATED → AVAILABLE
-INVALIDATED → PARTIAL
-NON_AUTHORITATIVE → AVAILABLE
-```
-
-Reusing historical content requires creation or activation of a compatible variant/result model, not direct state rollback.
-
----
-
-## 106. Variant Invalid Transitions
-
-Forbidden:
-
-```text
-INVALIDATED → ACTIVE
-INVALIDATED → AVAILABLE
-```
-
-A corrected replacement must be a new variant.
-
----
-
-# Part XVII — State Transition Tables
-
-## 107. Translation Job Transition Table
-
-| Current state             | Trigger                          | Next state                               |
-| ------------------------- | -------------------------------- | ---------------------------------------- |
-| `CREATED`                 | execution queued                 | `QUEUED`                                 |
-| `CREATED`                 | immediate execution begins       | `RUNNING`                                |
-| `CREATED`                 | compatible cache result accepted | `COMPLETED` or `COMPLETED_WITH_WARNINGS` |
-| `CREATED`                 | cancellation accepted            | `CANCELLATION_REQUESTED` or `CANCELLED`  |
-| `CREATED`                 | newer work replaces job          | `SUPERSEDED`                             |
-| `CREATED`                 | unrecoverable setup failure      | `FAILED`                                 |
-| `QUEUED`                  | scheduler starts execution       | `RUNNING`                                |
-| `QUEUED`                  | cancellation accepted            | `CANCELLATION_REQUESTED` or `CANCELLED`  |
-| `QUEUED`                  | newer work replaces job          | `SUPERSEDED`                             |
-| `RUNNING`                 | validated subset available       | `PARTIALLY_COMPLETED`                    |
-| `RUNNING`                 | retry approved                   | `RETRY_SCHEDULED`                        |
-| `RUNNING`                 | all work succeeds                | `COMPLETED`                              |
-| `RUNNING`                 | all work succeeds with warnings  | `COMPLETED_WITH_WARNINGS`                |
-| `RUNNING`                 | no recovery remains              | `FAILED`                                 |
-| `RUNNING`                 | cancellation accepted            | `CANCELLATION_REQUESTED`                 |
-| `RUNNING`                 | newer work replaces job          | `SUPERSEDED`                             |
-| `PARTIALLY_COMPLETED`     | more execution begins            | `RUNNING`                                |
-| `PARTIALLY_COMPLETED`     | retry approved                   | `RETRY_SCHEDULED`                        |
-| `PARTIALLY_COMPLETED`     | all work succeeds                | `COMPLETED`                              |
-| `PARTIALLY_COMPLETED`     | complete with warnings           | `COMPLETED_WITH_WARNINGS`                |
-| `PARTIALLY_COMPLETED`     | no recovery remains              | `FAILED`                                 |
-| `PARTIALLY_COMPLETED`     | cancellation accepted            | `CANCELLATION_REQUESTED`                 |
-| `PARTIALLY_COMPLETED`     | newer work replaces job          | `SUPERSEDED`                             |
-| `RETRY_SCHEDULED`         | new attempt starts               | `RUNNING`                                |
-| `RETRY_SCHEDULED`         | retry no longer possible         | `FAILED`                                 |
-| `RETRY_SCHEDULED`         | cancellation accepted            | `CANCELLATION_REQUESTED`                 |
-| `RETRY_SCHEDULED`         | newer work replaces job          | `SUPERSEDED`                             |
-| `CANCELLATION_REQUESTED`  | cancellation finalized           | `CANCELLED`                              |
-| `CANCELLATION_REQUESTED`  | replacement authority recorded   | `SUPERSEDED`                             |
-| `COMPLETED`               | newer work replaces authority    | `SUPERSEDED`                             |
-| `COMPLETED`               | result rejected                  | `INVALIDATED`                            |
-| `COMPLETED_WITH_WARNINGS` | newer work replaces authority    | `SUPERSEDED`                             |
-| `COMPLETED_WITH_WARNINGS` | result rejected                  | `INVALIDATED`                            |
-| `FAILED`                  | administrative invalidation      | `INVALIDATED`                            |
-| `CANCELLED`               | administrative invalidation      | `INVALIDATED`                            |
-| `SUPERSEDED`              | historical result rejected       | `INVALIDATED`                            |
-
----
-
-## 108. Translation Attempt Transition Table
-
-| Current state         | Trigger                   | Next state            |
-| --------------------- | ------------------------- | --------------------- |
-| `CREATED`             | preparation starts        | `PREPARING`           |
-| `CREATED`             | cancelled                 | `CANCELLED`           |
-| `CREATED`             | replaced                  | `SUPERSEDED`          |
-| `PREPARING`           | preparation succeeds      | `RUNNING`             |
-| `PREPARING`           | preparation fails         | `FAILED`              |
-| `PREPARING`           | cancelled                 | `CANCELLED`           |
-| `PREPARING`           | replaced                  | `SUPERSEDED`          |
-| `RUNNING`             | accepted subset exists    | `PARTIALLY_COMPLETED` |
-| `RUNNING`             | assigned work completes   | `COMPLETED`           |
-| `RUNNING`             | execution fails           | `FAILED`              |
-| `RUNNING`             | cancellation finalized    | `CANCELLED`           |
-| `RUNNING`             | replaced by newer attempt | `SUPERSEDED`          |
-| `PARTIALLY_COMPLETED` | more batches execute      | `RUNNING`             |
-| `PARTIALLY_COMPLETED` | assigned work completes   | `COMPLETED`           |
-| `PARTIALLY_COMPLETED` | remaining work fails      | `FAILED`              |
-| `PARTIALLY_COMPLETED` | cancelled                 | `CANCELLED`           |
-| `PARTIALLY_COMPLETED` | replaced                  | `SUPERSEDED`          |
-
----
-
-## 109. Translation Batch Transition Table
-
-| Current state | Trigger                    | Next state   |
-| ------------- | -------------------------- | ------------ |
-| `CREATED`     | batch preparation succeeds | `READY`      |
-| `CREATED`     | preparation fails          | `FAILED`     |
-| `CREATED`     | cancelled                  | `CANCELLED`  |
-| `CREATED`     | replaced                   | `SUPERSEDED` |
-| `READY`       | provider execution starts  | `RUNNING`    |
-| `READY`       | execution cannot start     | `FAILED`     |
-| `READY`       | cancelled                  | `CANCELLED`  |
-| `READY`       | replaced                   | `SUPERSEDED` |
-| `RUNNING`     | provider output received   | `VALIDATING` |
-| `RUNNING`     | provider execution fails   | `FAILED`     |
-| `RUNNING`     | cancelled                  | `CANCELLED`  |
-| `RUNNING`     | replaced                   | `SUPERSEDED` |
-| `VALIDATING`  | validation succeeds        | `COMPLETED`  |
-| `VALIDATING`  | validation fails           | `FAILED`     |
-| `VALIDATING`  | cancellation wins race     | `CANCELLED`  |
-| `VALIDATING`  | source becomes obsolete    | `SUPERSEDED` |
-
----
-
-## 110. Translation Result Transition Table
-
-| Current state             | Trigger                      | Next state                  |
-| ------------------------- | ---------------------------- | --------------------------- |
-| `ASSEMBLING`              | validated subset assembled   | `PARTIAL`                   |
-| `ASSEMBLING`              | complete candidate assembled | `FINALIZING`                |
-| `ASSEMBLING`              | job loses authority          | `NON_AUTHORITATIVE`         |
-| `PARTIAL`                 | additional subset assembled  | `PARTIAL` with new revision |
-| `PARTIAL`                 | complete candidate assembled | `FINALIZING`                |
-| `PARTIAL`                 | job cancelled or superseded  | `NON_AUTHORITATIVE`         |
-| `FINALIZING`              | final checks pass            | `AVAILABLE`                 |
-| `FINALIZING`              | checks pass with warnings    | `AVAILABLE_WITH_WARNINGS`   |
-| `FINALIZING`              | authority check fails        | `NON_AUTHORITATIVE`         |
-| `FINALIZING`              | validity check fails         | `INVALIDATED`               |
-| `AVAILABLE`               | newer result becomes active  | `NON_AUTHORITATIVE`         |
-| `AVAILABLE`               | result rejected              | `INVALIDATED`               |
-| `AVAILABLE_WITH_WARNINGS` | newer result becomes active  | `NON_AUTHORITATIVE`         |
-| `AVAILABLE_WITH_WARNINGS` | result rejected              | `INVALIDATED`               |
-| `NON_AUTHORITATIVE`       | result rejected permanently  | `INVALIDATED`               |
-
----
-
-## 111. Translation Variant Transition Table
-
-| Current state | Trigger                        | Next state    |
-| ------------- | ------------------------------ | ------------- |
-| `CREATED`     | variant validation succeeds    | `AVAILABLE`   |
-| `CREATED`     | atomic creation and activation | `ACTIVE`      |
-| `CREATED`     | validation fails               | `INVALIDATED` |
-| `AVAILABLE`   | variant selected               | `ACTIVE`      |
-| `AVAILABLE`   | variant rejected               | `INVALIDATED` |
-| `ACTIVE`      | another variant selected       | `INACTIVE`    |
-| `ACTIVE`      | active variant rejected        | `INVALIDATED` |
-| `INACTIVE`    | variant selected again         | `ACTIVE`      |
-| `INACTIVE`    | variant rejected               | `INVALIDATED` |
-
----
-
-# Part XVIII — Derived Status and UI Guidance
-
-## 112. Public State Versus UI State
-
-Presentation may derive simpler user-facing states such as:
-
-```text
-WAITING
-TRANSLATING
-PARTIAL
-READY
-ERROR
-CANCELLED
-```
-
-These are UI projections.
-
-They are not canonical Translation domain states.
-
-Example mapping:
-
-```text
-CREATED / QUEUED
-    → WAITING
-
-RUNNING / RETRY_SCHEDULED
-    → TRANSLATING
-
-PARTIALLY_COMPLETED
-    → PARTIAL
-
-COMPLETED / COMPLETED_WITH_WARNINGS
+Batch INVALID
     → READY
-
-FAILED
-    → ERROR
-
-CANCELLED / SUPERSEDED
-    → CANCELLED or hidden
 ```
 
 ---
 
-## 113. Progress Is Not State
+# 86. Same Batch Semantic Retry
 
-Values such as:
+If architecture allows reusing identical Batch semantics in a new Runtime Attempt:
 
 ```text
-30%
-7 of 20 segments
-2 of 4 batches
+BatchSemanticIdentity
 ```
 
-are progress data, not lifecycle states.
+may remain equivalent.
 
-Do not create states such as:
+But Attempt-local Batch state is recreated.
+
+No mutable long-lived Batch lifecycle is resumed.
+
+---
+
+# 87. Deadline Observation
+
+Runtime owns deadline.
+
+Translation observes:
 
 ```text
-THIRTY_PERCENT_COMPLETE
-HALF_TRANSLATED
+DeadlineAvailable
+
+RemainingBudget
+
+DeadlineExceeded
+```
+
+Possible local behavior:
+
+* stop optional context expansion
+* avoid starting new Batch
+* request Provider cancellation
+* assemble PARTIAL Candidate if allowed
+* cleanup
+
+Runtime decides terminal outcome.
+
+---
+
+# 88. Partial Candidate on Deadline
+
+If:
+
+```text
+some Units VALID
++
+PartialResultPolicy = ALLOW_PARTIAL
+```
+
+Translation may assemble:
+
+```text
+Completeness = PARTIAL
+```
+
+before returning.
+
+This does not imply Runtime will accept it.
+
+---
+
+# 89. Streaming Observation
+
+Provider token streaming state:
+
+```text
+ProviderExecutionObservation = STREAMING
+```
+
+does not mean Translation completeness changed.
+
+Only structurally validated translated Units affect Candidate completeness.
+
+---
+
+# 90. Incremental Unit Completion
+
+Translation may internally observe:
+
+```text
+TranslationUnitResultObservation
+├── PENDING
+├── OUTPUT_RECEIVED
+├── VALID
+├── VALID_WITH_WARNINGS
+├── MISSING
+└── INVALID
+```
+
+This is optional Attempt-local diagnostic state.
+
+---
+
+# 91. Unit Result State Is Not Persistent Business State
+
+Do not persist a global registry of:
+
+```text
+TranslationUnitResultObservation
+```
+
+for core lifecycle.
+
+Published Artifact ultimately carries semantic translated results.
+
+---
+
+# 92. Cleanup Observation
+
+```text
+CleanupObservation
+├── NOT_REQUIRED
+├── PENDING
+├── RUNNING
+├── COMPLETED
+└── FAILED
+```
+
+Observation only.
+
+Physical resource lifecycle belongs to Runtime/Resource Manager.
+
+---
+
+# 93. Cleanup Scope
+
+May include:
+
+* Provider handle release
+* temporary source/context buffers
+* Batch buffers
+* streaming buffers
+* output parser state
+* Candidate assembly buffers
+* Artifact leases
+
+---
+
+# 94. Runtime Disposition Observation
+
+Translation may observe:
+
+```text
+AttemptDisposition
+├── ACCEPTED
+├── FAILED
+├── CANCELED
+├── ABANDONED
+├── REJECTED_STALE
+└── REJECTED_DUPLICATE
+```
+
+for:
+
+* diagnostics
+* cleanup
+* late-result handling
+
+It does not mutate disposition.
+
+---
+
+# 95. No QUEUED State
+
+Translation does not own:
+
+```text
+QUEUED
+```
+
+Queue belongs to Runtime Work Queue/Scheduler.
+
+---
+
+# 96. No RUNNING Attempt State
+
+Translation may have an Operation Phase or Provider Execution Observation.
+
+It does not own:
+
+```text
+TranslationAttempt.RUNNING
+```
+
+Runtime Attempt does.
+
+---
+
+# 97. No FAILED Translation Job State
+
+Translation returns:
+
+```text
+TranslationModuleError
+```
+
+Runtime chooses Attempt terminal state.
+
+---
+
+# 98. No COMPLETED Translation Job State
+
+Translation local work may finish.
+
+That only means:
+
+```text
+Translation execution returned
+```
+
+not:
+
+```text
+WorkItem completed
+Artifact published
+Reading Session updated
 ```
 
 ---
 
-## 114. Warning Is Not State by Default
+# 99. No CANCELLED Translation Job State
 
-Warnings are attached to results, segments or execution.
+Cancellation is Runtime-owned.
 
-Only final job success distinguishes:
-
-```text
-COMPLETED
-COMPLETED_WITH_WARNINGS
-```
-
-Individual warning categories must not become separate lifecycle states.
+Translation only cooperates.
 
 ---
 
-# Part XIX — Recovery and Restart
+# 100. No SUPERSEDED Translation Job State
 
-## 115. Process Restart
+Staleness/authority is Runtime-owned.
 
-After process restart, Translation must restore durable entities to their last known states.
+Translation Candidate may remain semantically valid but no longer relevant.
 
-Entities left in transient states may require reconciliation.
+---
+
+# 101. No INVALIDATED Translation Job State
+
+Immutable Artifact/result should not be mutated into lifecycle invalidation.
+
+Administrative validity belongs to Artifact/application policy.
+
+---
+
+# 102. Local Operation Phase
+
+Recommended diagnostic phase:
+
+```text
+TranslationOperationPhase
+├── NOT_STARTED
+├── VALIDATING
+├── BUILDING_PLAN
+├── BUILDING_UNITS
+├── BUILDING_CONTEXT
+├── RESOLVING_TERMINOLOGY
+├── BUILDING_BATCHES
+├── EXECUTING_PROVIDER
+├── NORMALIZING_OUTPUT
+├── VALIDATING_OUTPUT
+├── ASSEMBLING_CANDIDATE
+├── VALIDATING_CANDIDATE
+├── FINALIZING
+└── FINISHED
+```
+
+---
+
+# 103. Operation Phase Rule
+
+Operation Phase is:
+
+* Attempt-local
+* diagnostic
+* useful for cancellation checkpoints
+* useful for latency metrics
+* useful for error localization
+
+It is not Runtime execution lifecycle.
+
+---
+
+# 104. FINISHED
+
+```text
+TranslationOperationPhase = FINISHED
+```
+
+means local Translation execution ended.
+
+It does not mean:
+
+```text
+Runtime Attempt = SUCCEEDED
+```
+
+---
+
+# 105. Invalid Availability Transitions
+
+Forbidden:
+
+```text
+STOPPED
+    → AVAILABLE
+without INITIALIZING
+```
+
+```text
+DRAINING
+    → AVAILABLE
+```
+
+---
+
+# 106. Invalid Plan Transitions
+
+Forbidden:
+
+```text
+READY
+    → BUILDING
+```
+
+```text
+INVALID
+    → READY
+```
+
+---
+
+# 107. Invalid Unit Planning Transitions
+
+Forbidden:
+
+```text
+READY
+    → BUILDING_UNITS
+```
+
+```text
+INVALID
+    → READY
+```
+
+within same planning instance.
+
+---
+
+# 108. Invalid Batch Transitions
+
+Forbidden:
+
+```text
+VALID
+    → EXECUTION_REQUESTED
+```
+
+```text
+INVALID
+    → READY
+```
+
+```text
+OUTPUT_RECEIVED
+    → EXECUTION_REQUESTED
+```
+
+Retry requires new Attempt-local execution context or new Batch instance.
+
+---
+
+# 109. Invalid Candidate Transitions
+
+Forbidden:
+
+```text
+VALID
+    → ASSEMBLING
+```
+
+```text
+INVALID
+    → VALID
+```
+
+```text
+SUBMITTED_TO_RUNTIME
+    → VALIDATING
+```
+
+---
+
+# 110. Invalid Transition Handling
+
+When invalid transition occurs:
+
+1. reject transition
+2. preserve current state
+3. record invariant violation
+4. do not infer Runtime state
+5. avoid duplicate Provider execution
+6. cleanup duplicate resources
+7. return normalized Translation error when necessary
+
+---
+
+# 111. Concurrency Rules
+
+1. One Runtime Attempt owns one Translation execution context.
+2. One active immutable Translation Plan per Attempt.
+3. Unit planning transitions logically serialized.
+4. Multiple independent Batches may execute concurrently.
+5. Batch completion order does not determine semantic Unit order.
+6. Candidate assembly is logically serialized.
+7. Candidate submission occurs at most once.
+8. Provider request identity remains unique.
+9. Cancellation may race with Provider response.
+10. Runtime authority always wins against late Translation output.
+11. Cleanup is idempotent.
+12. Provider limits must be respected.
+
+---
+
+# 112. Safe Parallelism
+
+Usually safe:
+
+* independent Batch execution
+* context preprocessing
+* terminology lookup
+* output validation per Batch
+* usage aggregation
+
+Needs deterministic coordination:
+
+* Translation Unit construction
+* final Unit sequence
+* Candidate assembly
+* missing Unit calculation
+* source alignment merge
+* variant identity
+
+---
+
+# 113. Concurrent Batches
+
+Example:
+
+```text
+Batch A
+    ProviderExecution = RUNNING
+
+Batch B
+    ProviderExecution = OUTPUT_RECEIVED
+
+Batch C
+    State = VALID
+```
+
+Runtime Attempt remains the only canonical execution lifecycle.
+
+---
+
+# 114. Provider Limit Concurrency
+
+Concurrency must not bypass:
+
+* rate limit
+* max connection
+* local model capacity
+* Provider Management lease budget
+* privacy restrictions
+
+---
+
+# 115. Candidate Assembly Concurrency
+
+Candidate must be assembled from a stable snapshot of:
+
+```text
+VALID Batch results
++
+known missing Units
++
+known failed Units
+```
+
+No concurrent mutation after Candidate validation starts.
+
+---
+
+# 116. Deterministic Planning
+
+Equivalent:
+
+```text
+SourceDocument
+
+Translation Intent
+
+Translation Profile
+
+Knowledge Snapshot
+
+Context Snapshot
+
+Provider Policy
+
+Configuration Snapshot
+```
+
+should create semantically equivalent:
+
+```text
+Translation Plan
+
+Translation Unit boundaries
+
+Batch planning
+```
+
+subject to explicitly allowed provider/runtime variation.
+
+---
+
+# 117. Provider Nondeterminism
+
+Provider output may differ between equivalent calls.
+
+This does not invalidate deterministic planning.
+
+Record differences through:
+
+```text
+ProviderProvenance
+
+Candidate identity
+
+Artifact identity
+```
+
+not mutable state.
+
+---
+
+# 118. Recovery
+
+Translation active state is Attempt-local.
+
+After crash do not restore directly:
+
+```text
+Translation Plan active state
+
+Unit Planning state
+
+Batch execution state
+
+Provider execution observation
+
+Candidate assembly state
+
+Cleanup observation
+```
+
+Runtime decides whether to create a new Attempt.
+
+---
+
+# 119. Recovery Flow
+
+```text
+Runtime Attempt interrupted
+        ↓
+Runtime records interruption
+        ↓
+Retry policy evaluates
+        ↓
+new Attempt if allowed
+        ↓
+reacquire SourceDocument Artifact
+        ↓
+new Translation Plan
+        ↓
+new provider execution
+```
+
+---
+
+# 120. Candidate Recovery
+
+Unaccepted Candidate:
+
+* is non-authoritative
+* is not automatically resurrected
+* should be cleaned if abandoned
+
+Published TranslationArtifact recovery belongs to Artifact Store/Storage.
+
+---
+
+# 121. State Persistence
+
+Core active Translation states are ephemeral.
+
+Do not persist as canonical business lifecycle:
+
+```text
+Translation Plan active state
+
+Unit Planning state
+
+Batch state
+
+Provider Execution observation
+
+Candidate Validation state
+
+Operation Phase
+```
+
+Persistent semantic output may include:
+
+```text
+TranslationArtifact
+```
+
+through Artifact Store/Storage.
+
+---
+
+# 122. No Event-Sourced Translation Job
+
+Text Processing/Translation events must not be replayed to reconstruct:
+
+```text
+TranslationJob
+
+TranslationAttempt
+
+active Translation execution lifecycle
+```
+
+because these entities no longer exist as Translation-owned lifecycle.
+
+---
+
+# 123. Event Relationship
+
+Optional observations may map to local state:
+
+```text
+Plan READY
+    → translation.plan_created
+```
+
+```text
+Batch READY
+    → translation.batch_planned
+```
+
+```text
+Provider OUTPUT_RECEIVED
+    → translation.provider_output_received
+```
+
+```text
+Candidate VALID
+    → translation.candidate_validated
+```
+
+```text
+Candidate SUBMITTED
+    → translation.candidate_submitted
+```
+
+Events do not grant authority.
+
+---
+
+# 124. Events Must Not Create State Authority
+
+Receiving:
+
+```text
+translation.candidate_validated
+```
+
+does not mean:
+
+```text
+Artifact published
+```
+
+Receiving:
+
+```text
+translation.provider_output_received
+```
+
+does not mean:
+
+```text
+Batch valid
+```
+
+---
+
+# 125. Partial Result Event Semantics
+
+If Translation emits:
+
+```text
+translation.partial_candidate_validated
+```
+
+it means:
+
+```text
+Candidate.Completeness = PARTIAL
+and
+Candidate satisfies Translation contract
+```
+
+It does not mean Presentation may display it.
+
+Runtime/application policy still decides.
+
+---
+
+# 126. Variant Events
+
+Translation may emit immutable variant creation facts.
+
+Example:
+
+```text
+translation.variant_created
+```
+
+But it should not emit:
+
+```text
+variant_activated
+variant_deactivated
+```
+
+unless active-selection ownership is explicitly moved into Translation.
+
+---
+
+# 127. Error Relationship
+
+Any local state may produce:
+
+```text
+TranslationModuleError
+```
 
 Examples:
 
 ```text
-Attempt RUNNING
-Batch RUNNING
-Result FINALIZING
+BUILDING_PLAN
+    → configuration error
+
+BUILDING_UNITS
+    → alignment error
+
+EXECUTING_PROVIDER
+    → provider failure
+
+VALIDATING_OUTPUT
+    → malformed output
+
+VALIDATING_CANDIDATE
+    → Candidate contract failure
+```
+
+Runtime maps these to execution disposition.
+
+---
+
+# 128. Retry Hint Relationship
+
+Error may include:
+
+```text
+RetryHint
+```
+
+Examples:
+
+```text
+provider unavailable
+    → ALTERNATIVE_PROVIDER
+```
+
+```text
+batch too large
+    → SMALLER_BATCH
+```
+
+```text
+context too large
+    → REDUCE_CONTEXT
+```
+
+No state transition to `RETRY_SCHEDULED`.
+
+---
+
+# 129. MVP Availability States
+
+Required:
+
+```text
+UNINITIALIZED
+
+INITIALIZING
+
+AVAILABLE
+
+DEGRADED
+
+UNAVAILABLE
+
+DRAINING
+
+STOPPED
 ```
 
 ---
 
-## 116. Reconciliation
+# 130. MVP Plan States
 
-A recovery process may determine:
-
-* provider execution definitely completed;
-* provider execution status is unknown;
-* timeout should be applied;
-* batch should fail;
-* job should retry;
-* job should be cancelled;
-* result should resume finalization.
-
-Recovery must use explicit transitions.
-
-It must not silently mark work completed without accepted validated output.
-
----
-
-## 117. Orphaned RUNNING State
-
-A batch or attempt found in `RUNNING` after a lease or timeout expires may transition to:
+Required:
 
 ```text
-FAILED
-```
+NOT_CREATED
 
-with a retryable infrastructure failure.
+BUILDING
 
-The parent job may then enter:
+VALIDATING
 
-```text
-RETRY_SCHEDULED
+READY
+
+INVALID
 ```
 
 ---
 
-## 118. Finalization Recovery
+# 131. MVP Unit Planning States
 
-If a result is durable in `FINALIZING`, recovery may rerun idempotent final checks.
-
-It must not create duplicate variants or duplicate completion events.
-
----
-
-# Part XX — Timeouts
-
-## 119. Queue Timeout
-
-A job waiting too long in `QUEUED` may:
+Required:
 
 ```text
-QUEUED → FAILED
-```
+NOT_STARTED
 
-or remain queued according to policy.
+SELECTING_SOURCE
 
-Interactive requests should normally have bounded queue wait.
+BUILDING_UNITS
 
----
+VALIDATING_UNITS
 
-## 120. Attempt Timeout
+READY
 
-An attempt timeout causes:
-
-```text
-Attempt RUNNING → FAILED
-```
-
-The job may then:
-
-```text
-RUNNING → RETRY_SCHEDULED
-```
-
-or:
-
-```text
-RUNNING → FAILED
+INVALID
 ```
 
 ---
 
-## 121. Batch Timeout
-
-A batch timeout causes:
-
-```text
-Batch RUNNING → FAILED
-```
-
-Other successful batches remain completed.
-
----
-
-## 122. Job Timeout
-
-A job-level timeout may cause:
-
-```text
-RUNNING → FAILED
-PARTIALLY_COMPLETED → FAILED
-RETRY_SCHEDULED → FAILED
-```
-
-or cancellation according to the configured semantic policy.
-
-Recommended distinction:
-
-```text
-timeout caused by system execution failure
-    → FAILED
-
-timeout caused by caller cancellation deadline
-    → CANCELLED
-```
-
----
-
-# Part XXI — Concurrency Rules
-
-## 123. One Active Attempt Policy
-
-The default policy should allow only one active attempt for the same job.
-
-Active means:
-
-```text
-CREATED
-PREPARING
-RUNNING
-PARTIALLY_COMPLETED
-```
-
-Multiple active attempts may be allowed only for explicit speculative provider comparison.
-
-That capability is deferred beyond MVP.
-
----
-
-## 124. Concurrent Batches
-
-Multiple batches under one attempt may be `RUNNING` concurrently.
-
-This does not change parent state semantics.
-
-```text
-Attempt RUNNING
-    ├── Batch A RUNNING
-    ├── Batch B COMPLETED
-    └── Batch C VALIDATING
-```
-
----
-
-## 125. Variant Activation Concurrency
-
-For one compatible reading context, activation must ensure:
-
-```text
-at most one ACTIVE variant
-```
-
-The transition:
-
-```text
-Old ACTIVE → INACTIVE
-New AVAILABLE → ACTIVE
-```
-
-must be atomic.
-
----
-
-## 126. Completion Versus Supersession Race
-
-Possible race:
-
-```text
-Job completion
-        ↕
-New job supersedes old job
-```
-
-Authority selection must use optimistic state revision or equivalent locking.
-
-Only one may win:
-
-```text
-Old job COMPLETED and authoritative
-```
-
-or:
-
-```text
-Old job SUPERSEDED
-```
-
-If completion persists first but replacement activates immediately afterward:
-
-```text
-Old job COMPLETED → SUPERSEDED
-```
-
-is valid.
-
----
-
-# Part XXII — Core State Invariants
-
-## 127. Invariant 1 — One initial job state
-
-Every new Translation job begins in `CREATED`.
-
-## 128. Invariant 2 — Terminal attempts never restart
-
-A completed, failed, cancelled or superseded attempt never returns to active execution.
-
-## 129. Invariant 3 — Terminal batches never restart
-
-A completed, failed, cancelled or superseded batch never returns to active execution.
-
-## 130. Invariant 4 — Retry creates a new attempt
-
-Retry does not mutate a failed attempt back to `RUNNING`.
-
-## 131. Invariant 5 — Batch retry creates a new batch
-
-A failed batch instance is immutable.
-
-## 132. Invariant 6 — Cancellation blocks publication
-
-A job in `CANCELLATION_REQUESTED` or `CANCELLED` cannot publish an authoritative result.
-
-## 133. Invariant 7 — Supersession blocks publication
-
-A superseded job cannot become authoritative.
-
-## 134. Invariant 8 — Batch completion requires validation
-
-Provider response receipt alone cannot produce `Batch.COMPLETED`.
-
-## 135. Invariant 9 — Partial means aligned output exists
-
-A partial state requires at least one validated translated segment.
-
-## 136. Invariant 10 — Missing segments remain explicit
-
-Partial and failed results cannot silently omit selected segments.
-
-## 137. Invariant 11 — Result authority is separate from existence
-
-A result may exist while remaining `NON_AUTHORITATIVE`.
-
-## 138. Invariant 12 — Variants are immutable
-
-Correction or retranslation creates a new variant.
-
-## 139. Invariant 13 — At most one active compatible variant
-
-One reading context cannot have multiple active variants for the same source revision and target language.
-
-## 140. Invariant 14 — Invalidation is terminal
-
-Invalidated entities cannot return to valid active states.
-
-## 141. Invariant 15 — Source revision remains fixed
-
-A Translation job never changes its `PreparedDocumentId` or `ContentRevision`.
-
-## 142. Invariant 16 — Attempt belongs to one job
-
-A `TranslationAttempt` cannot move between jobs.
-
-## 143. Invariant 17 — Batch belongs to one attempt
-
-A `TranslationBatch` cannot move between attempts.
-
-## 144. Invariant 18 — State events follow persistence
-
-Events must not announce transitions that cannot be queried afterward.
-
----
-
-# Part XXIII — MVP Decisions
-
-## 145. MVP Job States
-
-The MVP should implement all canonical job states:
-
-```text
-CREATED
-QUEUED
-RUNNING
-PARTIALLY_COMPLETED
-RETRY_SCHEDULED
-CANCELLATION_REQUESTED
-COMPLETED
-COMPLETED_WITH_WARNINGS
-FAILED
-CANCELLED
-SUPERSEDED
-INVALIDATED
-```
-
-Some deployments may skip persistence of brief states such as `QUEUED`, but their semantic transition must remain supported.
-
----
-
-## 146. MVP Attempt States
+# 132. MVP Batch States
 
 Required:
 
 ```text
 CREATED
-PREPARING
-RUNNING
-COMPLETED
-FAILED
-CANCELLED
-SUPERSEDED
+
+READY
+
+EXECUTION_REQUESTED
+
+OUTPUT_RECEIVED
+
+VALIDATING_OUTPUT
+
+VALID
+
+INVALID
 ```
 
-`PARTIALLY_COMPLETED` is recommended but may be derived from batch progress initially.
-
----
-
-## 147. MVP Batch States
-
-Required:
+This replaces legacy:
 
 ```text
 CREATED
@@ -3199,306 +2640,885 @@ CANCELLED
 SUPERSEDED
 ```
 
-`VALIDATING` should remain explicit because provider success is not equivalent to accepted translation success.
+---
+
+# 133. MVP Provider Observations
+
+Recommended:
+
+```text
+NOT_REQUESTED
+
+REQUESTED
+
+RUNNING
+
+OUTPUT_RECEIVED
+
+ERROR_RECEIVED
+
+CANCEL_REQUESTED
+
+PHYSICALLY_FINISHED
+
+UNKNOWN
+```
+
+`ACCEPTED` and `STREAMING` may be optional.
 
 ---
 
-## 148. MVP Result States
+# 134. MVP Candidate States
 
 Required:
 
 ```text
+NOT_CREATED
+
 ASSEMBLING
-PARTIAL
-FINALIZING
-AVAILABLE
-AVAILABLE_WITH_WARNINGS
-NON_AUTHORITATIVE
-INVALIDATED
+
+VALIDATING
+
+VALID
+
+INVALID
+
+SUBMITTED_TO_RUNTIME
 ```
 
 ---
 
-## 149. MVP Variant States
+# 135. MVP Completeness
 
 Required:
 
 ```text
-AVAILABLE
-ACTIVE
-INACTIVE
-INVALIDATED
-```
+COMPLETE
 
-`CREATED` may remain an internal transient state if variant construction and availability are committed atomically.
+PARTIAL
 
----
+EMPTY_VALID
 
-# Part XXIV — Open Decisions
-
-## 150. Failed Job Reopening
-
-The project must decide whether explicit `RetryTranslation` may reopen a terminal failed job.
-
-Recommended decision:
-
-```text
-Automatic retry
-    → same job, before FAILED
-
-Manual retry after final FAILED
-    → new derived TranslationJob
-```
-
-This keeps terminal state semantics simple.
-
----
-
-## 151. Partial Job State in Atomic Mode
-
-The project must decide whether an atomically published job should expose `PARTIALLY_COMPLETED` externally.
-
-Recommended approach:
-
-* persist partial result progress internally;
-* allow job state `PARTIALLY_COMPLETED`;
-* expose that state to monitoring and progress UI;
-* do not expose partial content to Presentation.
-
----
-
-## 152. Completed-to-Superseded Transition
-
-This document permits:
-
-```text
-COMPLETED → SUPERSEDED
-```
-
-because newer translation work may replace an old completed result.
-
-An alternative is to keep the job completed and only mark its result or variant non-authoritative.
-
-Recommended CRAI approach:
-
-```text
-Job remains historically COMPLETED
-Variant becomes INACTIVE
-Result becomes NON_AUTHORITATIVE
-```
-
-However, when job-level authority needs direct representation, `SUPERSEDED` is useful.
-
-This should be finalized before implementation.
-
----
-
-## 153. Recommended Supersession Model
-
-To avoid losing historical execution outcome, the implementation may separate:
-
-```text
-executionState
-authorityState
-```
-
-For example:
-
-```text
-executionState = COMPLETED
-authorityState = SUPERSEDED
-```
-
-This is more precise than replacing `COMPLETED` with `SUPERSEDED`.
-
-For the current architecture document, `SUPERSEDED` remains a job lifecycle state for simplicity.
-
-Before code implementation, the team should decide whether to split these dimensions.
-
----
-
-## 154. Cancellation of Already Published Progressive Segments
-
-The project must decide whether already displayed progressive segments remain visible after cancellation.
-
-Recommended behavior:
-
-```text
-User manually cancels translation
-    → preserve already displayed completed segments until navigation changes
-
-Source revision changes
-    → remove or replace stale displayed segments immediately
-```
-
-Presentation owns visual removal.
-
-Translation provides authority status.
-
----
-
-## 155. Variant Availability Event
-
-The project must decide whether:
-
-```text
-TranslationVariantCreated
-```
-
-means:
-
-```text
-state = CREATED
-```
-
-or:
-
-```text
-state = AVAILABLE
-```
-
-Recommended behavior:
-
-```text
-TranslationVariantCreated
-    means the variant is valid and AVAILABLE
-```
-
-Internal `CREATED` need not be publicly observable.
-
----
-
-# Part XXV — Related Documents
-
-```text
-modules/translation/MODULE.md
-modules/translation/CONTRACT.md
-modules/translation/EVENTS.md
-modules/translation/ERRORS.md
-modules/translation/README.md
-```
-
-Architecture references:
-
-```text
-docs/architecture/STATE_MACHINE.md
-docs/architecture/EVENT_BUS.md
-docs/architecture/MODULE_DEPENDENCY.md
-docs/architecture/DATA_FLOW.md
-```
-
-Upstream references:
-
-```text
-modules/text-processing/MODULE.md
-modules/text-processing/CONTRACTS.md
-modules/text-processing/EVENTS.md
-modules/text-processing/STATES.md
-```
-
-Future integration references:
-
-```text
-modules/reading-session/STATES.md
-modules/presentation/STATES.md
-modules/knowledge/STATES.md
-modules/provider-management/STATES.md
+UNKNOWN
 ```
 
 ---
 
-# 156. Summary
-
-Translation uses separate state machines for:
+# 136. MVP Operation Flow
 
 ```text
-TranslationJob
-TranslationAttempt
-TranslationBatch
-TranslationResult
-TranslationVariant
+Build Translation Plan
+        ↓
+Build Translation Units
+        ↓
+Build Context
+        ↓
+Resolve Terminology
+        ↓
+Build Batches
+        ↓
+Execute Providers
+        ↓
+Validate Outputs
+        ↓
+Assemble Candidate
+        ↓
+Validate Candidate
+        ↓
+Submit Runtime
+        ↓
+Cleanup
 ```
 
-The primary job lifecycle is:
+No second execution lifecycle is created.
+
+---
+
+# 137. Removed Legacy Job States
+
+Removed:
 
 ```text
 CREATED
-    ↓
+
 QUEUED
+
+RUNNING
+
+PARTIALLY_COMPLETED
+
+RETRY_SCHEDULED
+
+CANCELLATION_REQUESTED
+
+COMPLETED
+
+COMPLETED_WITH_WARNINGS
+
+FAILED
+
+CANCELLED
+
+SUPERSEDED
+
+INVALIDATED
+```
+
+as `TranslationJobState`.
+
+Reasons:
+
+* WorkItem lifecycle belongs to Runtime
+* retry belongs to Runtime
+* cancellation belongs to Runtime
+* authority belongs to Runtime
+* invalidation belongs to Artifact/application policy
+* completeness belongs to Candidate metadata
+
+---
+
+# 138. Removed Translation Attempt States
+
+Removed:
+
+```text
+TranslationAttempt.CREATED
+
+PREPARING
+
+RUNNING
+
+PARTIALLY_COMPLETED
+
+COMPLETED
+
+FAILED
+
+CANCELLED
+
+SUPERSEDED
+```
+
+Runtime Attempt replaces them.
+
+---
+
+# 139. Removed Translation Result States
+
+Removed:
+
+```text
+ASSEMBLING
+
+PARTIAL
+
+FINALIZING
+
+AVAILABLE
+
+AVAILABLE_WITH_WARNINGS
+
+NON_AUTHORITATIVE
+
+INVALIDATED
+```
+
+Replacement responsibilities:
+
+```text
+ASSEMBLING / FINALIZING
+    → Candidate local phase
+
+PARTIAL
+    → TranslationCompleteness
+
+AVAILABLE
+    → published Artifact existence
+
+AVAILABLE_WITH_WARNINGS
+    → Artifact warnings
+
+NON_AUTHORITATIVE
+    → Runtime/application authority
+
+INVALIDATED
+    → Artifact/application policy
+```
+
+---
+
+# 140. Removed Variant Lifecycle
+
+Removed:
+
+```text
+CREATED
+
+AVAILABLE
+
+ACTIVE
+
+INACTIVE
+
+INVALIDATED
+```
+
+from Translation execution.
+
+Translation Variant is immutable semantic identity.
+
+Reading Session/application owns selection.
+
+---
+
+# 141. Removed Retry State Rules
+
+Legacy model:
+
+```text
+Attempt FAILED
     ↓
+Job RETRY_SCHEDULED
+    ↓
+Attempt CREATED
+```
+
+Current:
+
+```text
+TranslationModuleError
+    +
+RetryHint
+        ↓
+Runtime Retry Policy
+        ↓
+new Runtime Attempt
+```
+
+---
+
+# 142. Removed Progressive Publication State Machine
+
+Legacy:
+
+```text
 RUNNING
     ↓
 PARTIALLY_COMPLETED
     ↓
-COMPLETED
+progressive publication
 ```
 
-Retry path:
+Current:
+
+```text
+Validated TranslatedUnits
+        ↓
+Candidate
+Completeness = PARTIAL
+        ↓
+Runtime
+        ↓
+Artifact policy
+```
+
+---
+
+# 143. Removed Stale Result Transition
+
+Legacy Translation checked:
+
+```text
+Job / Attempt / Revision / active replacement
+```
+
+and moved output to `NON_AUTHORITATIVE`.
+
+Current:
+
+```text
+Candidate
+    ↓
+Runtime authority check
+    ↓
+ACCEPT / REJECT_STALE
+```
+
+---
+
+# 144. Removed Durable Job State Persistence
+
+Legacy required durable state/event consistency for TranslationJob/Result/Variant.
+
+Current state persistence authority lives with:
+
+```text
+Runtime
+    → execution lifecycle
+
+Artifact Store
+    → published Artifact
+
+Reading Session
+    → current selection
+```
+
+Translation-local state remains ephemeral.
+
+---
+
+# 145. State Invariants — Availability
+
+1. AVAILABLE means required Translation components ready.
+2. DRAINING accepts no new work.
+3. STOPPED has no active Translation execution.
+4. DEGRADED cannot violate hard privacy constraints.
+5. UNAVAILABLE cannot create executable Plan.
+
+---
+
+# 146. State Invariants — Plan
+
+1. One active Plan per Runtime Attempt.
+2. READY Plan immutable.
+3. INVALID Plan never executes.
+4. Target language fixed.
+5. Translation Profile fixed.
+6. Source semantic identity fixed.
+7. Knowledge/Context identity fixed when material.
+8. Privacy constraints cannot weaken.
+9. Plan has no Runtime lifecycle state.
+10. Plan cannot publish.
+
+---
+
+# 147. State Invariants — Translation Units
+
+1. Unit IDs unique.
+2. Every Unit maps to SourceBlock evidence.
+3. Unit order remains deterministic.
+4. Context-only content is not a TranslationUnit target.
+5. Units become immutable after READY.
+6. SourceBlock splitting preserves range lineage.
+7. SourceBlock merging preserves all refs.
+8. No source content silently omitted.
+
+---
+
+# 148. State Invariants — Batch
+
+1. Batch contains at least one TranslationUnit.
+2. Unit IDs not duplicated in one Batch.
+3. Batch target language consistent.
+4. Batch membership immutable after READY.
+5. OUTPUT_RECEIVED is not VALID.
+6. Provider response receipt is not success.
+7. VALID requires output validation.
+8. INVALID does not transition back to READY.
+9. Batch state is Attempt-local.
+10. Batch identity is not source alignment identity.
+
+---
+
+# 149. State Invariants — Provider Observation
+
+1. Provider observation is best effort.
+2. Provider state may be UNKNOWN.
+3. Translation correctness does not require provider RUNNING observation.
+4. PHYSICALLY_FINISHED does not imply Candidate success.
+5. CANCEL_REQUESTED does not imply physical cancellation succeeded.
+6. Provider late output never restores Runtime authority.
+
+---
+
+# 150. State Invariants — Candidate
+
+1. One Candidate has one validation state.
+2. Candidate ID unique.
+3. Candidate immutable after VALID.
+4. INVALID Candidate cannot be validly submitted.
+5. SUBMITTED Candidate cannot be mutated.
+6. Candidate maps all TranslatedUnits to TranslationUnits.
+7. Candidate preserves SourceBlock lineage.
+8. Candidate contains no credentials.
+9. Candidate contains no Runtime terminal state.
+10. Candidate submission does not equal publication.
+
+---
+
+# 151. State Invariants — Completeness
+
+1. COMPLETE requires all required Units accounted for.
+2. PARTIAL has explicit missing/failed Units.
+3. EMPTY_VALID is valid.
+4. UNKNOWN remains explicit.
+5. Completeness does not determine Runtime outcome.
+6. Warning count does not automatically change completeness.
+
+---
+
+# 152. External Ownership Invariants
+
+1. Runtime owns WorkItem.
+2. Runtime owns Attempt.
+3. Runtime owns queueing.
+4. Runtime owns retry.
+5. Runtime owns cancellation.
+6. Runtime owns deadline.
+7. Runtime owns stale-result authority.
+8. Artifact Store owns publication.
+9. Provider Management owns Provider lifecycle.
+10. Reading Session/application owns active variant selection.
+11. Storage owns durable persistence.
+12. Translation maintains no parallel lifecycle registry.
+
+---
+
+# 153. Testing — Availability
+
+Test:
+
+* initialization success
+* degraded provider availability
+* no eligible provider
+* DRAINING rejects new work
+* STOPPED clears local resources
+* restart requires INITIALIZING
+
+---
+
+# 154. Testing — Translation Plan
+
+Test:
+
+* valid Plan
+* incompatible SourceDocument
+* invalid Translation Profile
+* missing target language
+* impossible Provider Policy
+* Local-only with no local provider
+* required Knowledge missing
+* invalid terminology constraints
+* READY immutable
+
+---
+
+# 155. Testing — Unit Planning
+
+Test:
+
+* 1 SourceBlock → 1 Unit
+* N SourceBlocks → 1 Unit
+* 1 SourceBlock → N Units
+* invalid SourceBlock reference
+* duplicate Unit ID
+* source order
+* context-only exclusion
+* traceability
+* no silent omissions
+
+---
+
+# 156. Testing — Batch
+
+Test:
+
+* single Unit Batch
+* multiple Unit Batch
+* duplicate Unit
+* oversized Batch
+* output received then VALID
+* output received then INVALID
+* invalid provider Unit IDs
+* wrong target language
+* locked terminology violation
+* batch immutable after READY
+
+---
+
+# 157. Testing — Provider Observation
+
+Test:
+
+```text
+REQUESTED
+    → OUTPUT_RECEIVED
+without RUNNING
+```
 
 ```text
 RUNNING
-    ↓
-RETRY_SCHEDULED
-    ↓
-RUNNING
+    → CANCEL_REQUESTED
+    → PHYSICALLY_FINISHED
 ```
-
-Cancellation path:
 
 ```text
 RUNNING
-    ↓
-CANCELLATION_REQUESTED
-    ↓
-CANCELLED
+    → ERROR_RECEIVED
 ```
-
-Failure path:
 
 ```text
-RUNNING
-    ↓
-FAILED
+UNKNOWN
+    → OUTPUT_RECEIVED
 ```
 
-Replacement path:
+---
+
+# 158. Testing — Partial Translation
+
+Test:
 
 ```text
-RUNNING or COMPLETED
-    ↓
-SUPERSEDED
+10 TranslationUnits
+
+7 VALID
+2 FAILED
+1 MISSING
 ```
 
-Validity path:
+with:
 
 ```text
-COMPLETED
-    ↓
-INVALIDATED
+Completeness = PARTIAL
 ```
 
-Execution hierarchy:
+and explicit failed/missing IDs.
+
+---
+
+# 159. Testing — EMPTY_VALID
+
+Test:
 
 ```text
-TranslationJob
-      ↓
-TranslationAttempt
-      ↓
-TranslationBatch
-      ↓
-TranslationResult
-      ↓
-TranslationVariant
+no translatable SourceBlocks
 ```
 
-The key rules are:
+produces valid Candidate:
 
-* retry creates a new attempt;
-* batch retry creates a new batch;
-* provider output must pass validation before completion;
-* partial results remain explicitly incomplete;
-* cancellation and supersession block authority;
-* results may exist without being authoritative;
-* variants are immutable;
-* invalidated entities never return to active states;
-* state transitions must be durable before events are published.
+```text
+Completeness = EMPTY_VALID
+```
+
+not ModuleError.
+
+---
+
+# 160. Testing — Candidate
+
+Test:
+
+* COMPLETE Candidate
+* PARTIAL Candidate
+* EMPTY_VALID Candidate
+* duplicate TranslatedUnit
+* missing TranslationUnit ref
+* missing SourceBlock lineage
+* provider credential leakage
+* missing Compatibility metadata
+* missing Traceability metadata
+* immutable after VALID
+* submit once
+
+---
+
+# 161. Testing — Runtime Boundary
+
+Test:
+
+```text
+Candidate VALID
+    ↓
+Runtime accepts
+```
+
+```text
+Candidate VALID
+    ↓
+Runtime rejects stale
+```
+
+```text
+Candidate VALID
+    ↓
+Runtime rejects canceled
+```
+
+```text
+Module error
+    ↓
+RetryHint
+    ↓
+Runtime creates new Attempt
+```
+
+---
+
+# 162. Testing — Cancellation
+
+Test cancellation:
+
+* before Plan
+* during Unit planning
+* before Provider request
+* during Provider execution
+* during output validation
+* before Candidate submission
+* after Candidate submission
+
+Verify Translation never owns final cancellation disposition.
+
+---
+
+# 163. Testing — Late Provider Output
+
+Test:
+
+```text
+provider request active
+    ↓
+Runtime authority revoked
+    ↓
+provider response arrives
+```
+
+Verify:
+
+* no authority restoration
+* no unsafe Candidate publication
+* cleanup succeeds
+
+---
+
+# 164. Testing — Variants
+
+Test:
+
+* Natural Artifact
+* Literal Artifact
+* corrected Artifact
+* alternative-provider Artifact
+* parent lineage
+* no mutable ACTIVE/INACTIVE state inside Translation Artifact
+
+---
+
+# 165. Property Tests
+
+```text
+candidate_submission_count <= 1
+```
+
+```text
+READY plan never returns to BUILDING
+```
+
+```text
+VALID candidate never returns to ASSEMBLING
+```
+
+```text
+Batch VALID requires output validation
+```
+
+```text
+all TranslatedUnits
+map to TranslationUnits
+```
+
+```text
+all TranslationUnits
+map to SourceBlocks
+```
+
+```text
+PARTIAL Candidate
+lists all missing/failed Units
+```
+
+```text
+Provider physical completion
+does not imply Runtime success
+```
+
+```text
+Translation never changes
+Runtime Attempt state
+```
+
+---
+
+# 166. Recommended MVP Decisions
+
+```text
+Keep Module Availability explicit.
+
+Keep Translation Plan explicit.
+
+Keep Translation Unit planning explicit.
+
+Keep Translation Batch as semantic/provider planning state.
+
+Keep Provider Execution as observation only.
+
+Keep Candidate validation explicit.
+
+Keep Translation completeness as metadata.
+
+Remove TranslationJob lifecycle.
+
+Remove TranslationAttempt lifecycle.
+
+Remove TranslationResult lifecycle.
+
+Remove mutable TranslationRevision.
+
+Remove ACTIVE/INACTIVE variant lifecycle.
+
+Remove RETRY_SCHEDULED.
+
+Remove CANCELLATION_REQUESTED as Translation state.
+
+Remove SUPERSEDED as Translation state.
+
+Remove publication lifecycle.
+
+Runtime owns every execution terminal outcome.
+
+Artifact Store owns accepted Artifact lifecycle.
+
+Reading Session/application owns active variant selection.
+```
+
+---
+
+# 167. Related Documents
+
+```text
+02-modules/translation/README.md
+02-modules/translation/MODULE.md
+02-modules/translation/CONTRACT.md
+02-modules/translation/EVENTS.md
+02-modules/translation/ERRORS.md
+
+02-modules/text-processing/README.md
+02-modules/text-processing/CONTRACT.md
+
+02-modules/provider-management/
+02-modules/knowledge/
+02-modules/reading-session/
+02-modules/presentation/
+
+01-architecture/runtime/CANCELLATION.md
+01-architecture/runtime/RETRY_POLICY.md
+01-architecture/runtime/CACHE_POLICY.md
+01-architecture/runtime/RESOURCE_LIFECYCLE.md
+
+03-infrastructure/artifact-store/
+03-infrastructure/resource-manager/
+```
+
+---
+
+# 168. Summary
+
+Translation state model now focuses only on Translation-owned semantic/local state:
+
+```text
+Module Availability
+        ↓
+Translation Plan
+        ↓
+Translation Unit Planning
+        ↓
+Translation Batch
+        ↓
+Provider Execution Observation
+        ↓
+Provider Output Validation
+        ↓
+Candidate Validation
+        ↓
+Submitted to Runtime
+```
+
+Semantic data flow:
+
+```text
+SourceDocumentArtifact
+        ↓
+TranslationUnit[]
+        ↓
+TranslationBatch[]
+        ↓
+TranslatedUnit[]
+        ↓
+CandidateTranslationArtifact
+```
+
+Runtime owns:
+
+```text
+WorkItem
+
+Attempt
+
+Queue
+
+Scheduling
+
+Retry
+
+Cancellation
+
+Deadline
+
+Authority
+
+Terminal Outcome
+```
+
+Provider Management owns:
+
+```text
+Provider lifecycle
+
+Provider health
+
+Provider availability
+
+Credentials
+
+Reusable provider resources
+```
+
+Artifact Store owns:
+
+```text
+accepted TranslationArtifact lifecycle
+```
+
+Reading Session/Application owns:
+
+```text
+active Translation variant selection
+```
+
+Core rule:
+
+```text
+Translation owns
+how source content becomes translated semantic output.
+
+Runtime owns
+whether execution still matters.
+
+Provider Management owns
+provider resources and lifecycle.
+
+Artifact Store owns
+what becomes a published Artifact.
+
+Reading Session owns
+what the reader is currently using.
+```

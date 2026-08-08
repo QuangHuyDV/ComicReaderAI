@@ -1,1075 +1,922 @@
-# Translation Contracts
+# Translation Module Contract
 
 > **Project:** CRAI
 > **Module:** Translation
-> **Document:** Public Contracts
-> **Path:** `modules/translation/CONTRACT.md`
-> **Version:** 0.2
+> **Path:** `02-modules/translation/CONTRACT.md`
+> **Version:** 1.0.0
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-08-03
-> **Source of Truth:** `modules/translation/MODULE.md`
+> **Source of Truth:** `MODULE.md`
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-This document defines the public contracts of the Translation module.
+Tài liệu này định nghĩa public contract của Translation Module.
 
-It specifies:
+Contract bao phủ:
 
-* public commands;
-* command responses;
-* identifiers;
-* input references;
-* translation configuration;
-* translation jobs;
-* translation attempts;
-* translation batches;
-* translated segments;
-* translation variants;
-* partial results;
-* warnings;
-* normalized provider metadata;
-* query models;
-* contract-level invariants.
+* Runtime-facing Attempt Input
+* Runtime-facing Attempt Output
+* Translation Intent
+* SourceDocument selection
+* Translation Profile
+* Translation Unit
+* Translation Plan
+* Translation Batch
+* Context Snapshot
+* Knowledge / Terminology references
+* Provider Policy
+* provider-neutral execution contracts
+* normalized provider output
+* Translated Unit
+* Candidate Translation Artifact
+* Published Translation Artifact
+* partial output
+* translation variants
+* warnings
+* module errors
+* RetryHint
+* provider provenance
+* semantic compatibility
+* privacy/security
+* producer obligations
+* consumer obligations
+* Runtime obligations
+* contract evolution
 
-This document does not define:
+Contract này không định nghĩa:
 
-* provider-specific requests;
-* provider-specific responses;
-* event envelopes;
-* detailed error catalogs;
-* lifecycle transition tables;
-* persistence schemas;
-* implementation classes;
-* database tables.
-
-Those concerns belong to other documents or internal implementations.
+* Runtime WorkItem lifecycle
+* Runtime Attempt lifecycle
+* queue admission
+* Scheduler behavior
+* retry scheduling
+* cancellation lifecycle
+* stale-result authority
+* Artifact publication lifecycle
+* Provider SDK requests/responses
+* Provider credentials
+* persistent Knowledge schema
+* Presentation layout
 
 ---
 
-## 2. Contract Boundary
+# 2. Contract Boundary
 
-The Translation module accepts prepared content and produces aligned translated content.
+Canonical flow:
 
 ```text
-PreparedDocument
-      ↓
-StartTranslation
-      ↓
-TranslationJob
-      ↓
+SourceDocumentArtifact
+        ↓
+TranslationAttemptInput
+        ↓
+Translation Module
+        ↓
+TranslationPlan
+        ↓
+TranslationUnit[]
+        ↓
 TranslationBatch[]
-      ↓
-TranslationAttempt[]
-      ↓
-TranslatedSegment[]
-      ↓
-TranslationResultSnapshot
+        ↓
+Provider Execution
+        ↓
+TranslatedUnit[]
+        ↓
+CandidateTranslationArtifact
+        ↓
+TranslationAttemptOutput
+        ↓
+Runtime Authority Validation
+        ↓
+Artifact Store
+        ↓
+TranslationArtifact
 ```
-
-The module does not accept raw OCR output as its canonical input.
-
-The canonical input must already have passed through Text Processing.
 
 ---
 
-## 3. Contract Design Principles
+# 3. Contract Design Principles
 
-All public contracts defined here must follow these principles.
+## 3.1 Provider Neutrality
 
-### 3.1 Provider neutrality
-
-Public contracts must not expose provider-native models such as:
+Public contracts must not expose:
 
 ```text
 OpenAIMessage
 GeminiContent
 ClaudeMessage
 DeepLRequest
+provider-native response objects
+provider SDK enums
 ```
 
-Provider-specific data remains inside provider adapters.
-
-### 3.2 Immutable source identity
-
-Every translation job targets one immutable prepared content revision.
-
-### 3.3 Segment-level alignment
-
-Every published translated segment must map to one prepared source segment.
-
-### 3.4 Batch-oriented execution
-
-A provider request may translate multiple prepared segments together.
-
-### 3.5 Attempt history preservation
-
-Retries and provider fallbacks create new attempts within the same logical job.
-
-### 3.6 Revision-safe publication
-
-Cancelled, superseded, or stale work must never become authoritative.
-
-### 3.7 Optional partial completion
-
-A job may expose validated partial results when its publication policy permits.
-
-### 3.8 Stable public contracts
-
-Changing translation providers must not require changes to calling modules.
-
-### 3.9 Runtime separation
-
-Translation contracts describe domain intent, semantic constraints, and publication requirements.
-
-They do not assign queue admission, worker scheduling, backoff execution, resource admission, or physical cancellation ownership to Translation.
-
-Those execution mechanics belong to Runtime Architecture.
-
-### 3.10 Immutable publication snapshots
-
-Public consumers receive immutable `TranslationResultSnapshot` values or stable references to them.
-
-Consumers must not reconstruct current Translation state from mutable provider streams.
+Provider-specific types remain inside Adapter boundary.
 
 ---
 
-## 4. Contract Categories
+## 3.2 Stable Source Boundary
 
-The public contract surface is divided into:
+Translation begins from:
 
 ```text
-Identifiers and Revisions
-Contract Ownership
-Commands
-Command Results
-Source References
-Configuration
-Job Models
-Attempt Models
-Batch Models
-Result Models
-Variant Models
-Warning Models
-Query Models
-Shared Metadata
+SourceDocumentArtifact
+```
+
+not:
+
+```text
+raw OCR output
+PreparedDocument
+PreparedSegment
 ```
 
 ---
 
-# Part I — Identifiers
+## 3.3 Translation Owns Translation Units
 
-## 5. Identifier Rules
+```text
+SourceBlock
+    ≠
+TranslationUnit
+```
 
-Identifiers must:
-
-* be opaque to callers;
-* remain stable for the lifetime of the represented entity;
-* not encode provider credentials;
-* not depend on display ordering;
-* not be reused for unrelated entities;
-* support distributed generation where necessary.
-
-The concrete string format is an implementation decision.
-
-Examples in this document are conceptual.
+Translation decides Translation Unit boundaries.
 
 ---
 
-## 6. TranslationIntentId
+## 3.4 Explicit Alignment
 
-Identifies one immutable semantic translation intent.
+Every TranslatedUnit must remain traceable through:
+
+```text
+TranslatedUnit
+    ↓
+TranslationUnit
+    ↓
+SourceBlockRef[]
+    ↓
+SourceDocumentArtifact
+```
+
+---
+
+## 3.5 Batch Is Not Alignment
+
+Batch membership must never become source/translation identity.
+
+---
+
+## 3.6 Runtime Separation
+
+Translation does not own:
+
+```text
+Job lifecycle
+Attempt lifecycle
+Retry lifecycle
+Cancellation lifecycle
+Publication lifecycle
+```
+
+---
+
+## 3.7 Immutable Candidate / Artifact
+
+Candidate becomes immutable after module validation.
+
+Published Artifact is immutable.
+
+---
+
+## 3.8 Explicit Partiality
+
+Missing or failed Units are explicit.
+
+No silent omission.
+
+---
+
+## 3.9 Source Content Is Untrusted
+
+Source, context and glossary notes are data.
+
+They are not trusted provider instructions.
+
+---
+
+# 4. Contract Version
+
+```text
+TranslationContractVersion
+├── Major
+├── Minor
+└── Patch
+```
+
+Initial:
+
+```text
+1.0.0
+```
+
+Breaking semantic changes require new major version.
+
+---
+
+# 5. Shared Identifiers
+
+Translation consumes shared IDs:
+
+```text
+SessionId?
+RevisionId
+WorkItemId
+AttemptId
+
+ArtifactId
+CandidateArtifactId
+
+ConfigurationSnapshotId
+KnowledgeSnapshotId?
+TraceId
+```
+
+Translation does not redefine their ownership.
+
+---
+
+# 6. Translation-Owned Identifiers
+
+Translation owns semantic IDs:
 
 ```text
 TranslationIntentId
-```
 
-The identity is derived from or associated with material semantic inputs such as:
+TranslationPlanId
 
-* prepared source identity;
-* selected segment identity;
-* source and target languages;
-* translation profile revision;
-* terminology and knowledge identity;
-* context identity;
-* provider locality or hard provider constraints;
-* publication semantics that affect the produced result.
+TranslationUnitId
 
-Equivalent execution retries preserve the same intent identity.
-
-A material semantic change creates a new intent identity.
-
----
-
-## 7. TranslationJobId
-
-Identifies one logical translation request.
-
-```text
-TranslationJobId
-```
-
-A job remains the same across:
-
-* automatic retries;
-* provider fallback;
-* retryable provider failures;
-* batch-level re-execution.
-
-A new job is required when the logical translation intent changes materially.
-
-Examples include:
-
-* a different target language;
-* a different source revision;
-* a different translation profile;
-* a manual retranslation request;
-* a different terminology snapshot;
-* a newly requested translation variant.
-
----
-
-## 8. TranslationAttemptId
-
-Identifies one execution attempt within a translation job.
-
-```text
-TranslationAttemptId
-```
-
-Each attempt belongs to exactly one `TranslationBatchId` and one parent `TranslationJobId`.
-
-```text
-TranslationJob
-      └── TranslationBatch
-              ├── Attempt 1
-              ├── Attempt 2
-              └── Attempt 3
-```
-
-A new attempt may be created when:
-
-* execution of that batch times out;
-* a retryable batch failure occurs;
-* output validation for that batch fails;
-* a fallback provider is selected for that batch;
-* the same batch is re-executed under an allowed retry policy.
-
----
-
-## 9. TranslationBatchId
-
-Identifies one provider execution batch.
-
-```text
 TranslationBatchId
-```
 
-Each batch belongs to exactly one translation job.
+TranslatedUnitId
 
-A batch contains one or more prepared segments and may have one or more execution attempts.
-
-```text
-TranslationBatch
-      ├── Attempt 1
-      └── Attempt 2
-```
-
-Batch identity remains stable across retries that preserve the same batch membership and semantic constraints.
-
-If batch membership or semantic construction changes materially, a new batch identity is required.
-
----
-
-## 10. TranslationResultId
-
-Identifies one assembled translation result.
-
-```text
-TranslationResultId
-```
-
-A job may produce:
-
-* partial result revisions;
-* one final result;
-* multiple immutable variants over time.
-
-A result identifier must not be reused after the result content changes.
-
----
-
-## 11. TranslationRevision
-
-Represents the monotonic published Translation state for one translation intent and reading context.
-
-```text
-TranslationRevision
-- value: non-negative monotonic integer
-```
-
-Rules:
-
-* it increases whenever the published Translation snapshot changes;
-* it must not decrease;
-* an older revision must not replace a newer revision;
-* progressive segment completion may increase the revision;
-* selecting another active variant may increase the revision without changing `ContentRevision`;
-* retry execution that produces no published change does not need to increase the revision.
-
-`TranslationRevision` is owned by Translation.
-
----
-
-## 12. TranslationVariantId
-
-Identifies one immutable translation variant.
-
-```text
 TranslationVariantId
 ```
 
-Examples:
+No:
 
-* natural translation;
-* literal translation;
-* alternate provider result;
-* glossary-updated translation;
-* user-corrected translation.
+```text
+TranslationJobId
+TranslationAttemptId
+```
+
+is required in the core contract.
 
 ---
 
-## 12. TranslatedSegmentId
+# 7. Translation Intent Identity
 
-Identifies one translated segment instance.
+`TranslationIntentId` identifies immutable semantic translation intent.
+
+Material dependencies may include:
 
 ```text
-TranslatedSegmentId
+SourceDocument semantic identity
+
+selected source scope
+
+source language policy
+
+target language
+
+Translation Profile version
+
+Knowledge Snapshot identity
+
+Context Snapshot identity
+
+Provider Policy semantic constraints
+
+Translation Strategy version
+
+Privacy Partition
 ```
 
-A translated segment must reference one source `PreparedSegmentId`.
+Equivalent retries may preserve intent identity.
 
-Different variants may contain different translated segment identifiers for the same source segment.
+Material semantic change produces new intent identity.
 
 ---
 
-## 14. External Identifiers
-
-Translation consumes identifiers owned by other modules.
-
-Expected external identifiers include:
+# 8. Runtime Context
 
 ```text
-ReadingSessionId
-PreparedDocumentId
-PreparedSegmentId
-ContentRevision
-KnowledgeSnapshotId
-GlossaryRevision
-ContextRevision
-TraceId
-CorrelationId
+TranslationRuntimeContext
+├── ContractVersion
+├── ApplicationInstanceId
+├── SessionId?
+├── RevisionId
+├── WorkItemId
+├── AttemptId
+├── ConfigurationSnapshotId
+├── TraceContext
+└── CreatedAt
 ```
 
-Translation must not redefine their ownership.
+Runtime identity is trace/control context.
+
+It does not become Translation domain lifecycle.
 
 ---
 
-# Part II — Contract Ownership
+# 9. SourceDocument Artifact Reference
 
-## 15. Contract Ownership Table
-
-| Contract or identity | Owner |
-|---|---|
-| `PreparedDocument` | Text Processing |
-| `PreparedSegment` | Text Processing |
-| `PreparedDocumentId` | Text Processing |
-| `PreparedSegmentId` | Text Processing |
-| `ContentRevision` | Reading Session |
-| `ReadingSessionId` | Reading Session |
-| `TranslationIntentId` | Translation |
-| `TranslationJob` | Translation |
-| `TranslationBatch` | Translation |
-| `TranslationAttempt` | Translation |
-| `TranslationVariant` | Translation |
-| `TranslationRevision` | Translation |
-| `TranslationResultSnapshot` | Translation |
-| provider registry and provider lifetime | Provider Management |
-| provider credentials and secret resolution | approved secure configuration boundary |
-| queue admission and execution scheduling | Runtime |
-| retry-budget and backoff execution | Runtime |
-| logical current-content acceptance | Reading Session |
-| `PresentationRevision` and `RenderPlan` | Presentation |
-
-Ownership means the named module defines canonical semantics and lifecycle.
-
-A consuming module may reference the contract but must not redefine its meaning.
-
----
-
-# Part III — Public Commands
-
-## 13. Public Command Set
-
-The initial public command set is:
+Primary input:
 
 ```text
-StartTranslation
-CancelTranslation
-RetryTranslation
-RequestRetranslation
-InvalidateTranslation
-SelectTranslationVariant
-SubmitTranslationCorrection
+SourceDocumentArtifactRef
+├── ArtifactId
+├── ArtifactType
+├── ContractVersion
+├── ContentIdentity
+├── PrivacyPartition
+└── Metadata?
 ```
 
-Not every deployment must expose every command through a public API.
-
-The contracts define module-level intent.
-
----
-
-## 14. Common Command Metadata
-
-Every mutating command should include:
+Expected:
 
 ```text
-CommandId
-RequestedAt
-RequestedBy
-CorrelationId
-TraceContext
-IdempotencyKey
-```
-
-Conceptual model:
-
-```text
-CommandMetadata {
-    commandId
-    requestedAt
-    requestedBy
-    correlationId
-    traceContext
-    idempotencyKey
-}
-```
-
-### 14.1 CommandId
-
-Uniquely identifies the command submission.
-
-### 14.2 RequestedAt
-
-Timestamp at which the caller issued the command.
-
-### 14.3 RequestedBy
-
-Opaque actor reference.
-
-Possible actor types:
-
-```text
-USER
-SYSTEM
-READING_SESSION
-PREFETCH_SCHEDULER
-ADMINISTRATOR
-```
-
-### 14.4 CorrelationId
-
-Associates work across module boundaries.
-
-### 14.5 TraceContext
-
-Supports distributed tracing.
-
-### 14.6 IdempotencyKey
-
-Allows equivalent repeated submissions to resolve to the same logical operation where applicable.
-
----
-
-# Part III — Start Translation
-
-## 15. StartTranslationCommand
-
-Requests a new logical translation job.
-
-```text
-StartTranslationCommand {
-    metadata
-
-    source
-    intentHint?
-    authorityContext
-    configuration
-    context
-    knowledge
-    executionPolicy
-    publicationPolicy
-    priority
-}
+ArtifactType = SOURCE_DOCUMENT_ARTIFACT
 ```
 
 ---
 
-## 16. TranslationSource
+# 10. SourceDocument Consumption Rules
 
-Identifies the prepared source content to translate.
+Translation assumes SourceDocument contract defines:
 
-```text
-TranslationSource {
-    readingSessionId
+* SourceBlock IDs
+* source structure
+* Raw/Normalized source semantics
+* SourceBlockSequence
+* excluded blocks
+* language hints
+* traceability
+* completeness
 
-    preparedDocumentId
-    contentRevision
-
-    segmentSelection
-
-    sourceLanguage
-
-    contentProfile
-}
-```
-
-### Required fields
-
-```text
-preparedDocumentId
-contentRevision
-segmentSelection
-```
-
-### Optional fields
-
-```text
-readingSessionId
-sourceLanguage
-contentProfile
-```
-
-The module may resolve full prepared content through an approved Text Processing query contract.
+Translation must not redefine them.
 
 ---
 
-## 17. TranslationAuthorityContext
-
-Carries the minimum authority information required to evaluate whether work may still become current.
+# 11. Translation Source Selection
 
 ```text
-TranslationAuthorityContext {
-    readingSessionId?
-    sessionEpoch?
-
-    preparedDocumentId
-    contentRevision
-
-    expectedTranslationRevision?
-    requestedAt
-}
+TranslationSourceSelection
+├── Mode
+├── SourceBlockIds[]
+├── IncludeExcludedBlocks
+└── SelectionMetadata?
 ```
 
-Rules:
+Modes:
 
-* `ContentRevision` authority belongs to Reading Session;
-* Translation performs defensive compatibility checks;
-* Reading Session makes the final decision that a Translation snapshot is current for the active reading context;
-* absence of `readingSessionId` is allowed for detached, offline, or imported translation work;
-* a session-bound result must never become current after its authority context is superseded.
+```text
+ALL_TRANSLATABLE
+
+EXPLICIT_BLOCKS
+
+SEQUENCE_RANGE
+
+VISIBLE_SCOPE
+
+PROFILE_DEFAULT
+```
+
+`EXPLICIT_BLOCKS` requires valid `SourceBlockIds`.
 
 ---
 
-## 18. Prepared Document Reference
+# 12. Source Ordering
 
-The preferred inter-module contract is reference-based:
+Translation follows:
 
 ```text
-PreparedDocumentReference {
-    preparedDocumentId
-    contentRevision
-}
+SourceDocument.BlockSequence
 ```
 
-Translation should not require callers to copy the entire prepared document into every command.
+It must not infer comic Reading Order from geometry.
 
-However, an embedded immutable snapshot may be supported for:
+Command/request array order is not authoritative source order.
 
-* offline execution;
-* isolated testing;
-* cross-process transport;
-* deployments without shared prepared-content storage.
+---
 
-The command must use one source mode unambiguously:
+# 13. Translation Attempt Input
 
 ```text
-REFERENCE
-SNAPSHOT
+TranslationAttemptInput
+├── RuntimeContext
+├── SourceDocumentArtifactRef
+├── SourceSelection
+├── TranslationIntent
+├── ExecutionContextRef
+├── CancellationContextRef
+├── PrivacyContextRef
+└── DiagnosticsContextRef?
 ```
 
 ---
 
-## 18. Prepared Document Snapshot
-
-When snapshot mode is used:
+# 14. Translation Intent
 
 ```text
-PreparedDocumentSnapshot {
-    preparedDocumentId
-    contentRevision
-
-    sourceLanguage
-    contentProfile
-
-    segments[]
-
-    structureMetadata
-    sourceMetadata
-    upstreamLineage?
-}
+TranslationIntent
+├── TranslationIntentId
+├── SourceLanguagePolicy
+├── TargetLanguage
+├── TranslationProfileRef
+├── ProviderPolicy
+├── TerminologyPolicy
+├── ContextPolicy
+├── PartialResultPolicy
+├── VariantPolicy
+└── Metadata?
 ```
 
-The snapshot must be immutable for the lifetime of the job.
-
-`upstreamLineage` may carry optional opaque references such as recognition result identity, recognition revision, observation revision, or source artifact identity.
-
-Translation may preserve this lineage but must not redefine upstream semantics.
+Intent contains semantic requirements, not Runtime state.
 
 ---
 
-## 19. Prepared Segment Contract
-
-Translation consumes a prepared segment contract owned primarily by Text Processing.
-
-Minimum expected shape:
+# 15. Source Language Policy
 
 ```text
-PreparedSegment {
-    preparedSegmentId
-
-    sequence
-    sourceText
-
-    segmentType
-
-    paragraphId
-    dialogueGroupId
-    regionId
-
-    languageHint
-    contextReferences[]
-
-    flags[]
-}
+SourceLanguagePolicy
+├── Mode
+├── LanguageTag?
+└── DetectionPolicy?
 ```
 
-### 19.1 preparedSegmentId
-
-Stable alignment identity.
-
-### 19.2 sequence
-
-Source ordering established upstream.
-
-Translation must not infer comic reading order from visual coordinates.
-
-### 19.3 sourceText
-
-Normalized text ready for translation.
-
-### 19.4 segmentType
-
-Possible values may include:
-
-```text
-PARAGRAPH
-DIALOGUE
-NARRATION
-CAPTION
-TITLE
-SOUND_EFFECT
-FOOTNOTE
-UNKNOWN
-```
-
-### 19.5 structural references
-
-Optional values:
-
-```text
-paragraphId
-dialogueGroupId
-regionId
-```
-
-### 19.6 languageHint
-
-Optional per-segment language hint.
-
-### 19.7 flags
-
-Possible upstream flags:
-
-```text
-OCR_DERIVED
-LOW_EXTRACTION_CONFIDENCE
-POSSIBLY_INCOMPLETE
-PRESERVE_WHITESPACE
-PRESERVE_LINE_BREAKS
-DO_NOT_TRANSLATE
-```
-
-Exact upstream definitions remain owned by Text Processing.
-
----
-
-## 20. SegmentSelection
-
-Specifies which prepared segments are active translation targets.
-
-```text
-SegmentSelection {
-    mode
-    preparedSegmentIds[]
-}
-```
-
-Possible modes:
-
-```text
-ALL
-EXPLICIT
-VISIBLE_ONLY
-RANGE
-```
-
-For `EXPLICIT`, `preparedSegmentIds` is required.
-
-Selection ordering follows the prepared document sequence, not command array order.
-
----
-
-## 21. StartTranslationResult
-
-The command returns an acknowledgement, not necessarily the completed translation.
-
-```text
-StartTranslationResult {
-    commandId
-
-    translationIntentId
-    translationJobId
-
-    disposition
-    acceptedAt
-
-    existingJobId
-
-    initialStatus
-}
-```
-
-Possible dispositions:
-
-```text
-CREATED
-REUSED_ACTIVE_JOB
-REUSED_COMPLETED_RESULT
-REJECTED
-```
-
-### CREATED
-
-A new logical translation job was created.
-
-### REUSED_ACTIVE_JOB
-
-An equivalent active job already exists.
-
-### REUSED_COMPLETED_RESULT
-
-A compatible completed result or cache entry was reused.
-
-### REJECTED
-
-The command failed validation before job creation.
-
-Detailed failures belong in `ERRORS.md`.
-
----
-
-# Part IV — Translation Configuration
-
-## 22. TranslationConfiguration
-
-Represents the semantic translation intent.
-
-```text
-TranslationConfiguration {
-    sourceLanguage
-    targetLanguage
-
-    translationProfile
-
-    providerPolicy
-    terminologyPolicy
-    contextPolicy
-    outputPolicy
-
-    configurationVersion
-}
-```
-
-A configuration snapshot is immutable after job creation.
-
----
-
-## 23. LanguageTag
-
-Languages should use application-approved BCP 47 compatible tags.
-
-Examples:
-
-```text
-zh
-zh-Hans
-zh-Hant
-en
-vi
-ja
-```
-
-The architecture must support both:
-
-* document-level language;
-* optional segment-level hints.
-
----
-
-## 24. Source Language
-
-Possible source-language modes:
+Modes:
 
 ```text
 EXPLICIT
-UPSTREAM_DETECTED
+
+UPSTREAM_HINT
+
 AUTO_DETECT
 ```
 
-Conceptual contract:
-
-```text
-SourceLanguageConfiguration {
-    mode
-    languageTag
-    detectionPolicy
-}
-```
-
-When `mode = EXPLICIT`, `languageTag` is required.
+When `EXPLICIT`, `LanguageTag` is required.
 
 ---
 
-## 25. Target Language
+# 16. Target Language
 
-Target language must be explicit.
-
-```text
-TargetLanguageConfiguration {
-    languageTag
-    localePreferences
-}
-```
-
-Initial CRAI priority:
+Target language is explicit.
 
 ```text
-zh-Hans → vi
-en → vi
+TargetLanguage
+├── LanguageTag
+└── LocalePreferences?
 ```
 
-These pairs must not be hardcoded into the contract.
+Recommended language-tag format:
+
+```text
+BCP-47 compatible
+```
+
+Architecture is language-pair independent.
 
 ---
 
-## 26. TranslationProfile
+# 17. Translation Profile Reference
 
-Initial profile identifiers:
+```text
+TranslationProfileRef
+├── ProfileId
+├── ProfileVersion
+└── CustomProfileRef?
+```
+
+Initial profiles:
 
 ```text
 NOVEL_NATURAL
+
 COMIC_NATURAL
+
 GENERAL_NATURAL
+
 LITERAL
+
 CUSTOM
 ```
 
-Conceptual model:
+---
+
+# 18. Profile Boundary
+
+Translation Profile may affect:
+
+* naturalness
+* literalness
+* dialogue style
+* pronouns
+* honorifics
+* terminology behavior
+* compactness
+* sound-effect behavior
+* punctuation
+* output style
+
+It must not expose raw provider prompts as core contract.
+
+---
+
+# 19. Translation Plan
 
 ```text
-TranslationProfile {
-    profileId
-    profileRevision
-    customInstructionsReference
-}
+TranslationPlan
+├── PlanId
+├── TranslationIntentId
+├── SourceDocumentArtifactRef
+├── SourceSelection
+├── TranslationProfileRef
+├── TranslationUnitRefs[]
+├── TranslationBatchRefs[]
+├── ContextSnapshotRef?
+├── KnowledgeSnapshotRef?
+├── ProviderRequirements
+├── ValidationPolicy
+├── PartialResultPolicy
+├── CompatibilityPolicy
+├── ConfigurationSnapshotId
+└── PrivacyConstraints
 ```
 
-Public contracts should reference profile intent or a stored profile.
-
-They must not expose provider prompt templates.
+Plan is immutable once `READY`.
 
 ---
 
-## 27. Profile Semantics
-
-### NOVEL_NATURAL
-
-Prioritizes:
-
-* narrative continuity;
-* natural Vietnamese;
-* paragraph flow;
-* consistent names;
-* context-sensitive pronouns.
-
-### COMIC_NATURAL
-
-Prioritizes:
-
-* short natural dialogue;
-* speaker consistency;
-* bubble-level alignment;
-* concise output;
-* neighboring-dialogue context.
-
-### GENERAL_NATURAL
-
-Provides general readable translation without genre-specific behavior.
-
-### LITERAL
-
-Prioritizes source structure and direct meaning over natural phrasing.
-
-### CUSTOM
-
-Uses an application-managed custom profile.
-
----
-
-# Part V — Provider Policy
-
-## 28. ProviderPolicy
-
-Expresses provider-selection intent.
+# 20. Translation Unit
 
 ```text
-ProviderPolicy {
-    mode
-
-    preferredProviderId
-    allowedProviderIds[]
-    excludedProviderIds[]
-
-    fallbackPolicy
-
-    localityRequirement
-    costPreference
-    latencyPreference
-    qualityPreference
-
-    modelPolicy
-}
+TranslationUnit
+├── TranslationUnitId
+├── SourceBlockRefs[]
+├── SourceTextView
+├── SourceSequence
+├── SourceLanguageHint?
+├── TargetLanguage
+├── StructuralType?
+├── ContextRequirementRefs[]
+├── TerminologyConstraintRefs[]
+├── AlignmentMetadata
+├── TranslationProfileRef
+└── Metadata?
 ```
 
 ---
 
-## 29. Provider Selection Mode
+# 21. Translation Unit Rules
 
-Possible values:
+A Translation Unit must:
+
+1. reference at least one SourceBlock
+2. preserve SourceBlock identity
+3. preserve deterministic source order
+4. belong to one Translation Plan
+5. have exactly one target language
+6. remain traceable to SourceDocument
+7. not include context-only blocks as target content unless selected
+8. not contain provider-native schema
+
+---
+
+# 22. Translation Unit Mapping
+
+Allowed:
+
+```text
+1 SourceBlock → 1 TranslationUnit
+```
+
+```text
+N SourceBlocks → 1 TranslationUnit
+```
+
+Potentially:
+
+```text
+1 SourceBlock → N TranslationUnits
+```
+
+when required by size or semantic policy.
+
+In split case, alignment metadata must preserve source ranges/identity.
+
+---
+
+# 23. Source Text View
+
+```text
+TranslationSourceTextView
+├── TranslationUnitId
+├── Text
+├── SourceBlockRefs[]
+├── SourceRanges?
+├── PreserveMarkers[]
+└── Metadata?
+```
+
+The source view is Translation-owned derived input.
+
+It must not mutate SourceDocument.
+
+---
+
+# 24. Context Snapshot
+
+```text
+TranslationContextSnapshot
+├── ContextSnapshotId
+├── SourceDocumentArtifactRef
+├── PreviousSourceRefs[]
+├── FollowingSourceRefs[]
+├── PreviousTranslationRefs[]
+├── DialogueContextRefs[]
+├── ParagraphContextRefs[]
+├── ChapterSummaryRef?
+├── CharacterContextRefs[]
+├── AdditionalContextRefs[]
+└── CreatedAt
+```
+
+Context may be embedded or referenced according to privacy/runtime architecture.
+
+---
+
+# 25. Context-Only Entry
+
+```text
+ContextEntry
+├── ContextEntryId
+├── Relationship
+├── SourceRef?
+├── TranslationRef?
+├── ContentView?
+└── Metadata?
+```
+
+Relationships:
+
+```text
+PREVIOUS
+
+FOLLOWING
+
+SAME_DIALOGUE_GROUP
+
+SAME_PARAGRAPH
+
+CHAPTER_CONTEXT
+
+CHARACTER_CONTEXT
+
+RELATED_REFERENCE
+```
+
+Context-only entries do not create TranslatedUnits.
+
+---
+
+# 26. Context Policy
+
+```text
+ContextPolicy
+├── PreviousUnitLimit
+├── FollowingUnitLimit
+├── IncludeDialogueContext
+├── IncludeParagraphContext
+├── IncludeChapterSummary
+├── IncludePriorTranslations
+├── IncludeCharacterKnowledge
+├── MaximumContextCharacters
+├── MaximumEstimatedTokens
+└── MissingContextBehavior
+```
+
+---
+
+# 27. Missing Context Behavior
+
+```text
+USE_AVAILABLE_CONTEXT
+
+CONTINUE_WITH_WARNING
+
+FAIL
+```
+
+Interactive default recommendation:
+
+```text
+USE_AVAILABLE_CONTEXT
+```
+
+---
+
+# 28. Knowledge Snapshot Reference
+
+```text
+KnowledgeSnapshotRef
+├── KnowledgeSnapshotId
+├── Revision?
+├── ContentIdentity?
+└── Metadata?
+```
+
+Translation does not own Knowledge persistence.
+
+---
+
+# 29. Terminology Policy
+
+```text
+TerminologyPolicy
+├── KnowledgeSnapshotRef?
+├── TermConstraints[]
+├── NamePolicy
+├── HonorificPolicy
+├── TransliterationPolicy
+└── ConflictPolicy
+```
+
+---
+
+# 30. Term Constraint
+
+```text
+TermConstraint
+├── ConstraintId
+├── SourceTerm
+├── TargetTerm
+├── Strength
+├── Scope
+├── ScopeRefs[]
+├── CaseSensitive?
+└── Metadata?
+```
+
+Strength:
+
+```text
+LOCKED
+
+PREFERRED
+
+SUGGESTED
+
+CONTEXTUAL
+```
+
+---
+
+# 31. Terminology Scope
+
+Possible scopes:
+
+```text
+GLOBAL
+
+SERIES
+
+CHAPTER
+
+DOCUMENT
+
+SOURCE_BLOCK
+
+TRANSLATION_UNIT
+
+CHARACTER
+```
+
+---
+
+# 32. Conflict Policy
+
+```text
+FAIL
+
+WARN_AND_CONTINUE
+
+PREFER_LOCKED
+
+PREFER_MOST_SPECIFIC_SCOPE
+```
+
+`LOCKED` must take precedence over weaker constraints.
+
+---
+
+# 33. Name Policy
+
+```text
+USE_KNOWLEDGE_MAPPING
+
+PRESERVE_ORIGINAL
+
+SINO_VIETNAMESE
+
+PHONETIC_TRANSLITERATION
+
+PROVIDER_DEFAULT
+```
+
+Knowledge mapping takes precedence when required by policy.
+
+---
+
+# 34. Honorific Policy
+
+```text
+CONTEXTUAL_VIETNAMESE
+
+PRESERVE_SOURCE_STYLE
+
+NEUTRAL
+
+LITERAL
+
+CUSTOM
+```
+
+---
+
+# 35. Sound Effect Policy
+
+```text
+TRANSLATE
+
+TRANSLITERATE
+
+PRESERVE
+
+SKIP
+
+PRESENTATION_HANDLING
+```
+
+Applies when SourceBlock type indicates `SOUND_EFFECT`.
+
+---
+
+# 36. Provider Policy
+
+```text
+ProviderPolicy
+├── Mode
+├── PreferredProviderId?
+├── AllowedProviderIds[]
+├── ExcludedProviderIds[]
+├── FallbackPolicy
+├── LocalityRequirement
+├── CostPreference
+├── LatencyPreference
+├── QualityPreference
+└── ModelPolicy
+```
+
+---
+
+# 37. Provider Mode
 
 ```text
 AUTOMATIC
+
 PREFERRED
+
 REQUIRED
+
 LOCAL_ONLY
+
 REMOTE_ONLY
 ```
 
-### AUTOMATIC
-
-Translation selects an eligible provider.
-
-### PREFERRED
-
-Translation should prefer one provider but may use fallback.
-
-### REQUIRED
-
-Only the specified provider is allowed.
-
-### LOCAL_ONLY
-
-Remote transmission is prohibited.
-
-### REMOTE_ONLY
-
-Only configured remote providers are eligible.
+`REQUIRED` forbids fallback to another provider.
 
 ---
 
-## 30. FallbackPolicy
-
-```text
-FallbackPolicy {
-    enabled
-    maximumFallbacks
-    eligibleFailureCategories[]
-}
-```
-
-Fallback must not occur when:
-
-* the provider mode is `REQUIRED`;
-* privacy policy prohibits the fallback provider;
-* fallback is disabled;
-* no eligible provider exists.
-
----
-
-## 31. Provider Preferences
-
-Preference values express intent rather than strict scheduling algorithms.
-
-Possible values:
-
-```text
-LOW
-BALANCED
-HIGH
-```
-
-Applicable preferences:
-
-```text
-costPreference
-latencyPreference
-qualityPreference
-```
-
-The provider-selection algorithm remains internal.
-
----
-
-## 32. Locality Requirement
-
-Possible values:
+# 38. Locality Requirement
 
 ```text
 ANY
+
 PREFER_LOCAL
+
 LOCAL_REQUIRED
+
 REMOTE_ALLOWED
 ```
 
@@ -1077,2213 +924,2185 @@ REMOTE_ALLOWED
 
 ---
 
-## 33. ModelPolicy
+# 39. Provider Preferences
 
 ```text
-ModelPolicy {
-    preferredModelClass
-    requiredCapabilities[]
-    maximumContextSize
-    deterministicPreference
-}
+LOW
+
+BALANCED
+
+HIGH
 ```
 
-Public callers should use capability or class requirements where possible.
+Applicable to:
 
-Provider-native model names should be accepted only as opaque configuration values, never as core architecture dependencies.
+* cost
+* latency
+* quality
+
+These express intent, not scheduling algorithm.
 
 ---
 
-# Part VI — Terminology Policy
-
-## 34. TerminologyPolicy
+# 40. Model Policy
 
 ```text
-TerminologyPolicy {
-    knowledgeSnapshotId
-    glossaryRevision
-
-    termConstraints[]
-
-    namePolicy
-    honorificPolicy
-    transliterationPolicy
-
-    conflictPolicy
-}
+ModelPolicy
+├── PreferredModelClass?
+├── RequiredCapabilities[]
+├── MaximumContextSize?
+├── DeterministicPreference?
+└── OpaqueModelHint?
 ```
 
-Translation consumes terminology snapshots.
-
-It does not own glossary storage.
+Provider-native model names are opaque hints/configuration, not architecture dependencies.
 
 ---
 
-## 35. TermConstraint
+# 41. Provider Requirements
+
+Resolved Translation Plan may declare:
 
 ```text
-TermConstraint {
-    sourceTerm
-    targetTerm
-
-    strength
-    scope
-
-    caseSensitive
-    notes
-}
+TranslationProviderRequirements
+├── SourceLanguages[]
+├── TargetLanguage
+├── StructuredOutputRequired
+├── BatchRequired
+├── GlossarySupportRequired
+├── StreamingRequired
+├── LocalExecutionRequired
+├── CancellationSupportPreferred
+├── MaximumPayloadRequired?
+├── ContextWindowRequired?
+└── CapabilityTags[]
 ```
 
-Possible strengths:
-
-```text
-LOCKED
-PREFERRED
-SUGGESTED
-CONTEXTUAL
-```
-
-Possible scopes:
-
-```text
-GLOBAL
-SERIES
-CHAPTER
-DOCUMENT
-SEGMENT
-CHARACTER
-```
+Provider Management resolves availability.
 
 ---
 
-## 36. NamePolicy
-
-Possible values:
+# 42. Fallback Policy
 
 ```text
-USE_KNOWLEDGE_MAPPING
-PRESERVE_ORIGINAL
-SINO_VIETNAMESE
-PHONETIC_TRANSLITERATION
-PROVIDER_DEFAULT
+FallbackPolicy
+├── Enabled
+├── MaximumFallbacks
+└── EligibleFailureCategories[]
 ```
 
-Knowledge mappings take precedence when policy requires them.
+Fallback prohibited when:
+
+* Provider mode = REQUIRED
+* privacy disallows candidate provider
+* fallback disabled
+* no eligible provider
+* semantic constraints cannot be preserved
 
 ---
 
-## 37. HonorificPolicy
-
-Possible values:
+# 43. Translation Batch
 
 ```text
-CONTEXTUAL_VIETNAMESE
-PRESERVE_SOURCE_STYLE
-NEUTRAL
-LITERAL
-CUSTOM
+TranslationBatch
+├── TranslationBatchId
+├── Sequence
+├── TranslationUnitIds[]
+├── ContextEntryRefs[]
+├── TerminologyConstraintRefs[]
+├── EstimatedCharacters?
+├── EstimatedTokens?
+├── ProviderRequirements
+├── BatchPolicyMetadata
+└── Metadata?
 ```
+
+No Runtime Attempt IDs are stored as batch ownership.
 
 ---
 
-## 38. Terminology Conflict Policy
+# 44. Batch Rules
 
-Possible values:
+A valid Batch must:
 
-```text
-FAIL
-WARN_AND_CONTINUE
-PREFER_LOCKED
-PREFER_MOST_SPECIFIC_SCOPE
-```
-
-`LOCKED` terms must take precedence over weaker constraints.
-
----
-
-# Part VII — Context Policy
-
-## 39. TranslationContext
-
-Contains context supplied for translation quality.
-
-```text
-TranslationContext {
-    contextRevision
-
-    previousSegments[]
-    followingSegments[]
-
-    priorTranslations[]
-    chapterContext
-    characterContext[]
-
-    additionalContextReferences[]
-}
-```
-
-Context may be embedded as an immutable snapshot or referenced by revision.
+1. contain ≥1 translatable TranslationUnit
+2. contain no duplicate Unit IDs
+3. preserve Unit source order
+4. use one target language
+5. respect semantic/provider limits
+6. remain independently traceable
+7. not use Batch sequence as TranslationUnit alignment identity
 
 ---
 
-## 40. Context Policy
+# 45. Batching Policy
 
 ```text
-ContextPolicy {
-    previousSegmentLimit
-    followingSegmentLimit
-
-    includeDialogueGroup
-    includeParagraphContext
-    includeChapterSummary
-    includePriorTranslations
-    includeCharacterKnowledge
-
-    maximumContextCharacters
-    maximumEstimatedContextTokens
-
-    missingContextBehavior
-}
+BatchingPolicy
+├── Strategy
+├── MaximumUnits?
+├── MaximumCharacters?
+├── MaximumEstimatedTokens?
+├── PreserveDialogueGroups
+├── PreserveParagraphs
+├── PreserveDocumentBoundary
+└── AllowSingleUnitBatch
 ```
 
----
-
-## 41. Missing Context Behavior
-
-Possible values:
-
-```text
-CONTINUE_WITH_WARNING
-FAIL
-USE_AVAILABLE_CONTEXT
-```
-
-The default should normally be:
-
-```text
-USE_AVAILABLE_CONTEXT
-```
-
-for interactive reading.
-
----
-
-## 42. Context-Only Segments
-
-Context-only segments improve translation but do not produce new public translated segments.
-
-```text
-ContextSegment {
-    preparedSegmentId
-    sourceText
-
-    translatedText
-    relationship
-    sequence
-}
-```
-
-Possible relationships:
-
-```text
-PREVIOUS
-FOLLOWING
-SAME_DIALOGUE_GROUP
-SAME_PARAGRAPH
-RELATED_REFERENCE
-```
-
----
-
-# Part VIII — Execution Policy
-
-## 43. TranslationExecutionPolicy
-
-This contract expresses Translation-domain requirements and caller preferences.
-
-Runtime resolves them against global queue, resource, retry-budget, concurrency, and cancellation policies.
-
-```text
-TranslationExecutionPolicy {
-    timeoutRequirements
-    retryRequirements
-    batchingPolicy
-    cacheRequirements
-    parallelismPreference
-
-    allowPartialExecution
-}
-```
-
-The resolved Runtime configuration may be stricter than caller preferences but must not violate hard semantic or privacy requirements.
-
----
-
-## 44. TimeoutRequirements
-
-```text
-TimeoutRequirements {
-    maximumUsefulJobDuration?
-    maximumBatchAttemptDuration?
-    expirationBehavior
-}
-```
-
-Timeout values may be expressed as durations.
-
-Translation declares usefulness or semantic expiration boundaries.
-
-Runtime owns timer enforcement, worker interruption, abandonment handling, and timeout terminal outcomes.
-
----
-
-## 45. RetryRequirements
-
-```text
-RetryRequirements {
-    maximumAttemptsPerBatch
-    retryableCategories[]
-    retryFailedBatchesOnly
-    fallbackAllowed
-}
-```
-
-Translation decides whether a translation-specific failure is eligible for retry or provider fallback.
-
-Runtime owns retry-budget enforcement, backoff execution, admission, and scheduling.
-
-Retries create new `TranslationAttemptId` values under the affected batch.
-
-They do not create a new logical job unless translation intent changes.
-
----
-
-## 46. BatchingPolicy
-
-```text
-BatchingPolicy {
-    strategy
-
-    maximumSegments
-    maximumCharacters
-    maximumEstimatedTokens
-
-    preserveDialogueGroups
-    preserveParagraphs
-    preservePageBoundary
-
-    allowSingleSegmentBatch
-}
-```
-
-Possible strategies:
+Strategies:
 
 ```text
 AUTOMATIC
+
 LOW_LATENCY
+
 BALANCED
+
 MAXIMUM_CONTEXT
+
 CUSTOM
 ```
 
-Batching is an internal Translation responsibility.
+---
 
-Caller values are constraints or preferences, not exact batch construction instructions.
+# 46. Provider-Neutral Execution Request
+
+Internal/public Adapter-boundary model:
+
+```text
+TranslationProviderRequest
+├── RequestId
+├── TranslationBatchId
+├── TranslationUnits[]
+├── ContextEntries[]
+├── TerminologyConstraints[]
+├── TranslationProfileRef
+├── SourceLanguagePolicy
+├── TargetLanguage
+├── OutputSchemaRequirements
+├── ProviderExecutionOptions
+└── PrivacyConstraints
+```
+
+This model remains provider-neutral.
 
 ---
 
-## 47. CacheRequirements
+# 47. Provider Execution Options
 
 ```text
-CacheRequirements {
-    mode
-    maximumAge
-    allowProviderIndependentReuse
-    allowCrossSessionReuse
-}
+ProviderExecutionOptions
+├── StructuredOutput
+├── StreamingPreference
+├── DeterministicPreference
+├── MaximumOutputTokens?
+├── CancellationTokenRef?
+└── ExtensionOptions?
 ```
 
-Possible modes:
-
-```text
-DISABLED
-READ_ONLY
-READ_WRITE
-REFRESH
-```
-
-A cache hit must still satisfy revision and alignment safety.
-
-Translation owns semantic cache identity and eligibility.
-
-Runtime cache and artifact infrastructure own storage mechanics, eviction, budgets, and resource lifecycle.
+Runtime deadline remains external.
 
 ---
 
-## 48. ParallelismPreference
+# 48. Provider Output Envelope
+
+Normalized Adapter output:
 
 ```text
-ParallelismPreference {
-    desiredConcurrentBatches?
-    allowParallelBatchExecution
-}
-```
-
-Batch completion order must not alter final segment order.
-
-Runtime determines effective concurrency after provider limits, queue pressure, resource budgets, and current-revision priority are evaluated.
-
----
-
-# Part IX — Publication Policy
-
-## 49. TranslationPublicationPolicy
-
-```text
-TranslationPublicationPolicy {
-    mode
-
-    publishPartialSegments
-    minimumCompletedSegmentCount
-    requireSourceRevisionCurrent
-
-    allowWarnings
-    activateFinalVariant
-}
-```
-
-Possible modes:
-
-```text
-ATOMIC
-PROGRESSIVE
-FINAL_ONLY
-```
-
-### ATOMIC
-
-The result is published only when the selected source set is complete.
-
-### PROGRESSIVE
-
-Validated translated segments may be published incrementally.
-
-### FINAL_ONLY
-
-Internal partial results may exist, but only the final result is exposed as authoritative.
-
----
-
-## 50. Priority
-
-Possible priorities:
-
-```text
-INTERACTIVE
-VISIBLE
-PREFETCH
-BACKGROUND
-```
-
-Conceptual contract:
-
-```text
-TranslationPriority {
-    level
-    expiresAt
-}
-```
-
-Visible interactive requests should normally outrank prefetch work.
-
----
-
-# Part X — Translation Job
-
-## 51. TranslationJob
-
-```text
-TranslationJob {
-    translationIntentId
-    translationJobId
-
-    sourceIdentity
-    authorityContext
-    configurationSnapshot
-
-    contextIdentity
-    knowledgeIdentity
-
-    executionPolicy
-    publicationPolicy
-    priority
-
-    status
-
-    batchIds[]
-
-    activeResultId
-    activeVariantId
-    translationRevision
-
-    progress
-
-    createdAt
-    startedAt
-    completedAt
-
-    cancellation
-    supersession
-}
-```
-
-Exact lifecycle values belong in `STATES.md`.
-
----
-
-## 52. SourceIdentity
-
-```text
-TranslationSourceIdentity {
-    readingSessionId
-
-    preparedDocumentId
-    contentRevision
-
-    selectedPreparedSegmentIds[]
-    sourceContentHash
-}
-```
-
-`sourceContentHash` may be used for cache and integrity checks.
-
-It must not replace the canonical document and revision identity.
-
----
-
-## 53. Configuration Snapshot
-
-The job records an immutable configuration snapshot or stable snapshot identity.
-
-```text
-TranslationConfigurationSnapshot {
-    configuration
-    resolvedProfileRevision
-    resolvedPolicyRevision
-}
-```
-
-Changes to user settings after job creation do not mutate the existing job.
-
----
-
-## 54. Context Identity
-
-```text
-TranslationContextIdentity {
-    contextRevision
-    contextHash
-}
-```
-
-This allows delayed and cached results to be evaluated safely.
-
----
-
-## 55. Knowledge Identity
-
-```text
-TranslationKnowledgeIdentity {
-    knowledgeSnapshotId
-    glossaryRevision
-}
-```
-
-A changed glossary does not mutate an existing job.
-
-It may trigger invalidation or a new retranslation job.
-
----
-
-## 56. Job Progress
-
-```text
-TranslationProgress {
-    totalSegmentCount
-    completedSegmentCount
-    failedSegmentCount
-    pendingSegmentCount
-
-    totalBatchCount
-    completedBatchCount
-    failedBatchCount
-
-    percentage
-}
-```
-
-`percentage` is optional and informational.
-
-Counts are authoritative.
-
----
-
-# Part XI — Translation Attempt
-
-## 57. TranslationAttempt
-
-```text
-TranslationAttempt {
-    translationAttemptId
-    translationBatchId
-    translationJobId
-
-    attemptNumber
-    reason
-
-    providerSelection
-    executionSnapshotId
-    status
-
-    startedAt
-    completedAt
-
-    normalizedFailure
-    usage
-}
+NormalizedTranslationProviderOutput
+├── TranslationBatchId
+├── ProviderRequestId?
+├── UnitOutputs[]
+├── ProviderExecutionMetadata
+├── Usage?
+├── Warnings[]
+└── Metadata?
 ```
 
 ---
 
-## 58. Attempt Reason
-
-Possible values:
+# 49. Provider Unit Output
 
 ```text
-INITIAL
-AUTOMATIC_RETRY
-PROVIDER_FALLBACK
-BATCH_RETRY
-VALIDATION_RETRY
-MANUAL_RETRY
+ProviderUnitOutput
+├── TranslationUnitId
+├── TargetText
+├── ProviderConfidence?
+├── ProviderWarnings[]
+└── Metadata?
 ```
 
-A manual retry may remain in the same job only when it preserves the same translation intent.
-
-A manual request that changes profile, provider constraints, context, or terminology should create a new job.
+Unknown/missing Unit IDs are validation failures or degraded output according to policy.
 
 ---
 
-## 59. Provider Selection Metadata
+# 50. Provider Execution Metadata
 
 ```text
-ProviderSelectionMetadata {
-    providerId
-    providerClass
-    modelIdentifier
-
-    selectionReason
-    fallbackIndex
-}
+ProviderExecutionMetadata
+├── ProviderId
+├── ProviderClass?
+├── ModelIdentifier?
+├── ProviderRequestId?
+├── ExecutionRegion?
+├── LocalExecution
+├── RequestStartedAt?
+├── ResponseReceivedAt?
+├── Latency?
+├── CachedByProvider?
+├── StreamingUsed?
+└── Usage?
 ```
 
-Provider identifiers are opaque.
-
-Provider credentials and raw configuration must never appear here.
+No credentials or raw request/response.
 
 ---
 
-# Part XII — Translation Batch
-
-## 60. TranslationBatch
+# 51. Translation Usage
 
 ```text
-TranslationBatch {
-    translationBatchId
-    translationJobId
-
-    sequence
-
-    preparedSegmentIds[]
-    contextSegmentIds[]
-
-    status
-
-    attemptIds[]
-    activeAttemptId?
-
-    translatedSegmentIds[]
-    normalizedFailure
-}
+TranslationUsage
+├── InputCharacters?
+├── OutputCharacters?
+├── InputTokens?
+├── OutputTokens?
+├── TotalTokens?
+├── ProviderReported
+├── Estimated
+├── MonetaryCost?
+└── Currency?
 ```
 
----
-
-## 61. Batch Rules
-
-A valid batch must:
-
-* contain at least one translatable prepared segment;
-* contain no duplicate prepared segment IDs;
-* preserve upstream sequence information;
-* belong to one translation job;
-* not mix incompatible target languages;
-* not exceed resolved provider limits;
-* remain independently traceable.
+Provider-reported and estimated values must be distinguishable.
 
 ---
 
-## 62. Batch Sequence
-
-Batch sequence represents assembly order within a translation job.
-
-It must not be used as a substitute for prepared segment sequence.
-
----
-
-## 63. Batch Context
-
-A batch may contain:
+# 52. Translated Unit
 
 ```text
-translatable segments
-context-only segments
-terminology constraints
-profile instructions
-```
-
-Only translatable segments produce public translated segments.
-
----
-
-# Part XIII — Provider Execution Metadata
-
-## 64. ProviderExecutionMetadata
-
-Normalized provider execution information:
-
-```text
-ProviderExecutionMetadata {
-    providerId
-    modelIdentifier
-
-    providerRequestId
-
-    executionRegion
-    localExecution
-
-    requestStartedAt
-    responseReceivedAt
-    latency
-
-    cachedByProvider
-    streamingUsed
-
-    usage
-}
-```
-
-Raw provider request and response payloads are not public contracts.
-
-Provider execution metadata belongs to a specific `TranslationAttempt`.
-
-It must not be stored as mutable batch-level state shared across retries.
-
----
-
-## 65. TranslationUsage
-
-```text
-TranslationUsage {
-    inputCharacters
-    outputCharacters
-
-    inputTokens
-    outputTokens
-    totalTokens
-
-    providerReported
-    estimated
-
-    monetaryCost
-    currency
-}
-```
-
-All usage fields are optional except when required by deployment policy.
-
-Estimated usage must be distinguishable from provider-reported usage.
-
----
-
-# Part XIV — Translation Results
-
-## 66. TranslationResultSnapshot
-
-```text
-TranslationResultSnapshot {
-    translationResultId
-    translationIntentId
-    translationJobId
-
-    translationRevision
-
-    completion
-
-    translatedSegments[]
-
-    missingPreparedSegmentIds[]
-    failedPreparedSegmentIds[]
-
-    warnings[]
-
-    activeVariantId
-
-    sourceIdentity
-    configurationIdentity
-    contextIdentity
-    knowledgeIdentity
-
-    statistics
-
-    createdAt
-    finalizedAt
-}
+TranslatedUnit
+├── TranslatedUnitId
+├── TranslationUnitId
+├── SourceBlockRefs[]
+├── SourceSequence
+├── TargetLanguage
+├── TranslatedText
+├── Completion
+├── Warnings[]
+├── Confidence?
+├── ProviderContribution?
+├── AlignmentMetadata
+└── Metadata?
 ```
 
 ---
 
-## 67. Translation Revision
-
-Partial publication, finalization, warning changes, or active-variant changes may produce increasing Translation revisions.
-
-```text
-translationRevision = monotonically increasing
-```
-
-A later revision must not contain an older source identity or overwrite a newer revision.
-
-The revision follows the semantics defined by `TranslationRevision`.
-
----
-
-## 68. Translation Completion
-
-```text
-TranslationCompletion {
-    status
-    complete
-    authoritative
-}
-```
-
-Possible completion statuses:
-
-```text
-COMPLETED
-COMPLETED_WITH_WARNINGS
-PARTIAL
-FAILED
-CANCELLED
-SUPERSEDED
-INVALIDATED
-```
-
-Detailed lifecycle meaning belongs in `STATES.md`.
-
----
-
-## 69. Authoritative Result
-
-A result may be technically publishable by Translation only when:
-
-* its authority context remains compatible;
-* the job is not cancelled;
-* the job is not superseded;
-* required validation passed;
-* its variant is eligible for activation;
-* publication policy permits its completion level.
-
-For session-bound work, Reading Session owns the final current-content acceptance decision.
-
-Therefore, `authoritative = true` means accepted for the specified reading context, not merely completed by a provider.
-
----
-
-## 70. TranslatedSegment
-
-```text
-TranslatedSegment {
-    translatedSegmentId
-
-    preparedSegmentId
-    sourceSequence
-
-    translatedText
-    targetLanguage
-
-    variantId
-
-    completion
-    warnings[]
-
-    confidence
-
-    providerContribution
-
-    createdAt
-}
-```
-
----
-
-## 71. Segment Completion
-
-Possible values:
+# 53. Unit Completion
 
 ```text
 COMPLETE
+
 COMPLETE_WITH_WARNINGS
+
 MISSING
+
 FAILED
+```
+
+Do not include:
+
+```text
 CANCELLED
+
 SUPERSEDED
 ```
 
-Only complete or warning-bearing complete segments should normally be published to Presentation.
+as Translation-owned Unit semantic states.
+
+Those are Runtime execution concerns.
 
 ---
 
-## 72. Translated Text Rules
+# 54. Translated Text Rules
 
-`translatedText` must:
+`TranslatedText` must:
 
-* be valid Unicode text;
-* correspond to exactly one prepared segment;
-* not contain provider control syntax;
-* not contain internal structural wrappers;
-* preserve required source markers where policy demands;
-* be empty only when the source is intentionally non-translatable.
-
-An intentionally untranslated segment must include an explanatory flag or warning.
+1. be valid Unicode
+2. correspond to its TranslationUnit
+3. preserve required markers
+4. contain no provider control syntax
+5. contain no internal structured-output wrapper
+6. obey locked terminology when required
+7. be empty only when intentionally non-translatable or policy permits
 
 ---
 
-## 73. Segment Alignment
-
-The required relationship is:
+# 55. Alignment Metadata
 
 ```text
-TranslatedSegment.preparedSegmentId
-        →
-PreparedSegment.preparedSegmentId
+TranslationAlignmentMetadata
+├── TranslationUnitId
+├── SourceBlockRefs[]
+├── SourceRanges?
+├── SourceSequenceRange
+├── SplitGroupId?
+├── MergeGroupId?
+└── Metadata?
 ```
 
-Each active variant may contain at most one authoritative translated segment per prepared segment.
+Alignment must survive batching and provider fallback.
 
 ---
 
-## 74. Segment Confidence
+# 56. Translation Confidence
 
 ```text
-TranslationConfidence {
-    value
-    source
-    scale
-}
+TranslationConfidence
+├── Value?
+├── Source
+├── Scale?
+└── Synthetic
 ```
 
-Possible confidence sources:
+Sources:
 
 ```text
 PROVIDER
+
 VALIDATOR
+
 HEURISTIC
+
 COMBINED
 ```
 
 Confidence is optional.
 
-A missing confidence value does not make a translation invalid.
-
 ---
 
-## 75. Provider Contribution
+# 57. Provider Contribution
 
 ```text
-ProviderContribution {
-    providerId
-    modelIdentifier
-    translationAttemptId
-    translationBatchId
-}
+ProviderContribution
+├── ProviderId
+├── ModelIdentifier?
+├── TranslationBatchId
+├── ProviderRequestId?
+└── ExecutionMetadataRef?
 ```
 
-This supports diagnostics without exposing provider payloads.
+Runtime Attempt ID may appear in traceability metadata if useful, but it is not TranslationAttempt identity.
 
 ---
 
-# Part XV — Translation Variants
-
-## 76. TranslationVariant
+# 58. Translation Completeness
 
 ```text
-TranslationVariant {
-    translationVariantId
-    translationJobId
-
-    variantType
-
-    profileIdentity
-    providerIdentity
-
-    translatedSegmentIds[]
-
-    status
-
-    createdBy
-    createdAt
-
-    parentVariantId
-}
+TranslationCompleteness
+├── COMPLETE
+├── PARTIAL
+├── EMPTY_VALID
+└── UNKNOWN
 ```
 
 ---
 
-## 77. Variant Type
+# 59. COMPLETE
 
-Possible values:
+All required TranslationUnits have acceptable TranslatedUnits.
+
+---
+
+# 60. PARTIAL
+
+Some selected Units remain missing/failed but Candidate remains usable under policy.
+
+Missing Units must be explicit.
+
+---
+
+# 61. EMPTY_VALID
+
+Valid when no selected source content requires translation.
+
+Examples:
+
+* no translatable SourceBlocks
+* all selected blocks excluded
+* selected block policy = preserve without translation
+
+---
+
+# 62. UNKNOWN
+
+Completeness cannot safely be determined.
+
+No silent conversion.
+
+---
+
+# 63. Partial Result Policy
+
+```text
+PartialResultPolicy
+├── Mode
+├── MinimumCompletedUnits?
+├── AllowFailedUnits
+├── AllowMissingUnits
+└── RequireIndependentAlignment
+```
+
+Modes:
+
+```text
+ATOMIC
+
+ALLOW_PARTIAL
+
+STREAM_VALIDATED_UNITS
+```
+
+This policy determines Candidate validity semantics.
+
+It does not publish anything.
+
+---
+
+# 64. Streaming Boundary
+
+Provider token stream:
+
+```text
+internal provider detail
+```
+
+Public/module-safe streaming prefers:
+
+```text
+validated completed TranslationUnit
+```
+
+Raw token stream must not become authoritative TranslationArtifact state.
+
+---
+
+# 65. Candidate Translation Artifact
+
+```text
+CandidateTranslationArtifact
+├── CandidateArtifactId
+├── ArtifactType
+├── OwnerModule
+├── ContractVersion
+├── SourceDocumentArtifactRef
+├── TranslationIntentId
+├── TranslationProfileRef
+├── TargetLanguage
+├── TranslationUnits[]
+├── TranslatedUnits[]
+├── Completeness
+├── MissingTranslationUnitIds[]
+├── FailedTranslationUnitIds[]
+├── Warnings[]
+├── ProviderProvenance[]
+├── CompatibilityMetadata
+├── TraceabilityMetadata
+└── IntegrityMetadata
+```
+
+---
+
+# 66. Candidate Rules
+
+Candidate is:
+
+* non-authoritative
+* not published
+* immutable after validation
+* Runtime-submitted
+* source-traceable
+* provider-neutral at public boundary
+* cleaned if rejected
+
+---
+
+# 67. Candidate Validation
+
+Validate:
+
+* Candidate identity
+* Artifact type
+* owner module
+* SourceDocument reference
+* Translation Intent identity
+* target language
+* Translation Unit uniqueness
+* Translation Unit → SourceBlock alignment
+* TranslatedUnit uniqueness
+* TranslatedUnit → TranslationUnit mapping
+* Completeness
+* missing/failed-unit consistency
+* terminology constraints
+* privacy
+* provider provenance
+* compatibility metadata
+* traceability metadata
+* no credentials
+* no Runtime terminal state
+
+---
+
+# 68. Candidate Is Not Published Artifact
+
+```text
+Candidate VALID
+    ≠
+Runtime accepted
+```
+
+and:
+
+```text
+Runtime accepted
+    ≠
+active reading-session variant
+```
+
+These are separate concerns.
+
+---
+
+# 69. Translation Attempt Output
+
+```text
+TranslationAttemptOutput
+├── CandidateArtifact?
+├── ModuleWarnings[]
+├── ModuleError?
+├── RetryHint?
+├── DiagnosticsRef?
+└── CompletionMetadata
+```
+
+---
+
+# 70. Completion Metadata
+
+```text
+TranslationCompletionMetadata
+├── StartedAt
+├── CompletedAt
+├── OperationPhase
+├── ProviderExecutionSummary?
+├── CancellationObserved
+└── Metadata?
+```
+
+This metadata does not define Runtime terminal status.
+
+---
+
+# 71. Published Translation Artifact
+
+After Runtime acceptance and Artifact Store transfer:
+
+```text
+TranslationArtifact
+├── ArtifactId
+├── ArtifactType
+├── ContractVersion
+├── SourceDocumentArtifactRef
+├── TranslationIntentId
+├── TranslationProfileRef
+├── SourceLanguage?
+├── TargetLanguage
+├── TranslationUnits[]
+├── TranslatedUnits[]
+├── Completeness
+├── Warnings[]
+├── VariantMetadata
+├── ProviderProvenance[]
+├── CompatibilityMetadata
+├── TraceabilityMetadata
+└── IntegrityMetadata
+```
+
+---
+
+# 72. Artifact Type
+
+Recommended:
+
+```text
+TRANSLATION_ARTIFACT
+```
+
+---
+
+# 73. Translation Variant
+
+A Translation Artifact may represent one immutable variant.
+
+```text
+TranslationVariantMetadata
+├── TranslationVariantId
+├── VariantType
+├── ParentVariantRef?
+├── CreatedBy
+├── CreatedAt
+└── Metadata?
+```
+
+---
+
+# 74. Variant Types
 
 ```text
 PROVIDER_GENERATED
+
 RETRANSLATED
+
 LITERAL
+
 NATURAL
+
 USER_CORRECTED
+
 SYSTEM_CORRECTED
+
 IMPORTED
 ```
 
 ---
 
-## 78. Variant Immutability
+# 75. Variant Immutability
 
-A published variant must not be modified in place.
-
-Changes create a new variant.
+Published variant cannot be modified in place.
 
 ```text
 Variant A
-    ↓ correction
+    ↓ correction/retranslation
 Variant B
 ```
 
-`parentVariantId` may preserve lineage.
+Parent reference may preserve lineage.
 
 ---
 
-## 79. Active Variant
+# 76. Variant Activation Boundary
 
-Only one variant should normally be active for a given:
+Translation owns variant semantics.
+
+It does **not automatically own**:
 
 ```text
-ReadingSessionId or detached reading context
-+
-PreparedDocumentId
-+
-ContentRevision
-+
-target language
+which variant is currently active
+for a Reading Session
 ```
 
-Selecting a variant changes activation state.
-
-It does not delete other variants.
+Reading Session/User Preference/Application orchestration owns active selection unless architecture explicitly delegates it.
 
 ---
 
-# Part XVI — Cancellation
+# 77. User Correction Contract
 
-## 80. CancelTranslationCommand
-
-```text
-CancelTranslationCommand {
-    metadata
-
-    translationJobId
-
-    reason
-    scope
-    translationBatchId?
-    translationAttemptId?
-}
-```
-
-Possible scopes:
+Recommended future/adjacent semantic command:
 
 ```text
-ENTIRE_JOB
-BATCH
-BATCH_ATTEMPT
-PENDING_BATCHES
+CreateTranslationCorrection
+├── BaseTranslationArtifactRef
+├── Corrections[]
+├── TranslationProfileRef?
+├── ProposeKnowledgeUpdate
+└── Metadata
 ```
 
-Logical cancellation of the whole job prevents authoritative publication.
+Correction produces a new Candidate/Artifact variant.
+
+It does not mutate old Artifact.
 
 ---
 
-## 81. Cancellation Reason
-
-Possible values:
+# 78. Translation Correction
 
 ```text
-USER_REQUESTED
-SOURCE_CHANGED
-NAVIGATION_CHANGED
-SESSION_CLOSED
-TARGET_LANGUAGE_CHANGED
-NEW_JOB_REPLACED_OLD
-RESOURCE_LIMIT
-SYSTEM_SHUTDOWN
-OTHER
+TranslationCorrection
+├── TranslationUnitId
+├── SourceBlockRefs[]
+├── CorrectedText
+├── CorrectionReason?
+└── Notes?
 ```
+
+Knowledge updates remain explicit and external.
 
 ---
 
-## 82. CancelTranslationResult
+# 79. Warning Contract
 
 ```text
-CancelTranslationResult {
-    commandId
-    translationJobId
-
-    disposition
-    cancellationRequestedAt
-}
-```
-
-Possible dispositions:
-
-```text
-CANCELLATION_ACCEPTED
-ALREADY_TERMINAL
-JOB_NOT_FOUND
-REJECTED
+TranslationWarning
+├── WarningCode
+├── Severity
+├── OperationPhase
+├── TranslationUnitIds[]
+├── SourceBlockRefs[]
+├── TranslationBatchId?
+├── ProviderId?
+├── MessageKey
+├── Metadata?
+└── RecordedAt
 ```
 
 ---
 
-# Part XVII — Retry
-
-## 83. RetryTranslationCommand
-
-Requests another attempt for the same logical job.
+# 80. Warning Severity
 
 ```text
-RetryTranslationCommand {
-    metadata
+INFORMATION
 
-    translationJobId
-
-    scope
-    failedBatchIds[]
-
-    providerOverride
-    retryReason
-}
-```
-
-Possible scopes:
-
-```text
-FAILED_BATCHES
-SPECIFIC_BATCH
-ENTIRE_JOB
-```
-
-A provider override must remain compatible with the existing job configuration.
-
-If it changes translation intent materially, callers must use `RequestRetranslationCommand`.
-
----
-
-## 84. RetryTranslationResult
-
-```text
-RetryTranslationResult {
-    commandId
-    translationJobId
-
-    translationAttemptId
-
-    disposition
-}
-```
-
-Possible dispositions:
-
-```text
-ATTEMPT_CREATED
-RETRY_NOT_ALLOWED
-JOB_ALREADY_ACTIVE
-JOB_NOT_FOUND
-REJECTED
-```
-
----
-
-# Part XVIII — Retranslation
-
-## 85. RequestRetranslationCommand
-
-Creates a new logical translation job derived from prior work.
-
-```text
-RequestRetranslationCommand {
-    metadata
-
-    sourceTranslationJobId
-    sourceVariantId
-
-    source
-
-    newConfiguration
-    newContext
-    newKnowledge
-
-    reason
-
-    activateWhenCompleted
-}
-```
-
----
-
-## 86. Retranslation Reason
-
-Possible values:
-
-```text
-USER_DISSATISFIED
-CHANGE_PROFILE
-CHANGE_PROVIDER_POLICY
-CHANGE_TARGET_LANGUAGE
-GLOSSARY_UPDATED
-CONTEXT_UPDATED
-REQUEST_LITERAL_VARIANT
-REQUEST_NATURAL_VARIANT
-OTHER
-```
-
----
-
-## 87. RequestRetranslationResult
-
-```text
-RequestRetranslationResult {
-    commandId
-
-    sourceTranslationJobId
-    newTranslationJobId
-
-    disposition
-}
-```
-
----
-
-# Part XIX — Invalidation
-
-## 88. InvalidateTranslationCommand
-
-Marks existing translation output as no longer eligible for authoritative use.
-
-```text
-InvalidateTranslationCommand {
-    metadata
-
-    translationJobId
-    translationVariantId
-
-    reason
-    invalidationScope
-}
-```
-
-Possible scopes:
-
-```text
-JOB
-VARIANT
-SEGMENTS
-CACHE_ENTRY
-```
-
-For `SEGMENTS`, explicit segment IDs are required.
-
----
-
-## 89. Invalidation Reason
-
-Possible values:
-
-```text
-SOURCE_REVISION_CHANGED
-ALIGNMENT_CHANGED
-GLOSSARY_CHANGED
-CONTEXT_CHANGED
-QUALITY_REJECTED
-SECURITY_POLICY
-PRIVACY_POLICY
-MANUAL_ADMINISTRATIVE
-OTHER
-```
-
-Invalidation does not necessarily delete historical data.
-
----
-
-# Part XX — Variant Selection
-
-## 90. SelectTranslationVariantCommand
-
-```text
-SelectTranslationVariantCommand {
-    metadata
-
-    translationJobId
-    translationVariantId
-
-    readingSessionId
-}
-```
-
-The variant must be compatible with the active source revision and target language.
-
----
-
-## 91. SelectTranslationVariantResult
-
-```text
-SelectTranslationVariantResult {
-    commandId
-
-    translationJobId
-    translationVariantId
-
-    disposition
-    activatedAt
-}
-```
-
----
-
-# Part XXI — User Correction
-
-## 92. SubmitTranslationCorrectionCommand
-
-Creates a corrected translation variant.
-
-```text
-SubmitTranslationCorrectionCommand {
-    metadata
-
-    translationJobId
-    baseVariantId
-
-    corrections[]
-
-    activateWhenCreated
-    proposeKnowledgeUpdate
-}
-```
-
----
-
-## 93. SegmentCorrection
-
-```text
-SegmentCorrection {
-    preparedSegmentId
-
-    correctedText
-
-    correctionReason
-    notes
-}
-```
-
-A correction must target an existing prepared segment in the job source identity.
-
----
-
-## 94. Correction Result
-
-```text
-SubmitTranslationCorrectionResult {
-    commandId
-
-    translationJobId
-    translationVariantId
-
-    correctedPreparedSegmentIds[]
-
-    knowledgeProposalId
-
-    disposition
-}
-```
-
-A proposed Knowledge update is optional and belongs to the Knowledge workflow.
-
-Translation must not silently change global terminology.
-
----
-
-# Part XXII — Warnings
-
-## 95. TranslationWarning
-
-```text
-TranslationWarning {
-    code
-    category
-
-    severity
-    message
-
-    translationJobId
-    translationAttemptId
-    translationBatchId
-
-    preparedSegmentIds[]
-
-    metadata
-}
-```
-
-Warnings are structured machine-readable outcomes.
-
-The human-readable message is supplementary.
-
----
-
-## 96. Warning Severity
-
-Possible values:
-
-```text
-INFO
 NOTICE
+
 DEGRADED
 ```
 
-Fatal conditions are errors, not warnings.
+Fatal conditions are ModuleErrors.
 
 ---
 
-## 97. Initial Warning Categories
+# 81. Recommended Warning Codes
 
 ```text
-MISSING_CONTEXT
-LOW_CONFIDENCE
+MISSING_OPTIONAL_CONTEXT
+
+LOW_TRANSLATION_CONFIDENCE
+
 AMBIGUOUS_MEANING
+
 TERMINOLOGY_CONFLICT
+
 SOURCE_INCOMPLETE
+
 SOURCE_LANGUAGE_UNCERTAIN
+
 UNTRANSLATED_FRAGMENT
+
 OUTPUT_LENGTH_ANOMALY
+
 PROVIDER_FALLBACK_USED
-PARTIAL_RESULT
+
+PARTIAL_TRANSLATION
+
 SOUND_EFFECT_PRESERVED
+
 MIXED_LANGUAGE_CONTENT
+
 PRONOUN_AMBIGUITY
-CACHE_RESULT_REUSED
+
+AMBIGUOUS_SPEAKER_RELATIONSHIP
 ```
 
-The complete warning catalog belongs in `ERRORS.md`.
+Cache reuse is not inherently a translation warning.
 
 ---
 
-# Part XXIII — Statistics
-
-## 98. TranslationStatistics
+# 82. Module Error
 
 ```text
-TranslationStatistics {
-    selectedSegmentCount
-    translatedSegmentCount
-    missingSegmentCount
-    failedSegmentCount
-
-    sourceCharacterCount
-    translatedCharacterCount
-
-    attemptCount
-    batchCount
-    retryCount
-    fallbackCount
-
-    cacheHit
-
-    queueDuration
-    executionDuration
-    totalDuration
-
-    usage
-}
+TranslationModuleError
+├── ContractVersion
+├── ErrorCode
+├── Category
+├── Severity
+├── OperationPhase
+├── MessageKey
+├── RetryHint?
+├── ProviderErrorRef?
+├── AffectedTranslationUnitIds[]
+├── AffectedBatchId?
+├── DiagnosticsRef?
+├── Metadata?
+└── OccurredAt
 ```
 
-Statistics are informational and must not determine source alignment.
+Detailed taxonomy belongs in `ERRORS.md`.
 
 ---
 
-# Part XXIV — Queries
+# 83. Retry Hint
 
-## 99. Query Contract Set
+```text
+TranslationRetryHint
+├── Retryability
+├── SuggestedStrategies[]
+├── ProviderFallbackAllowed
+├── ReasonCode
+└── Metadata?
+```
 
-Recommended query contracts:
+Retryability:
+
+```text
+RETRYABLE
+
+CONDITIONALLY_RETRYABLE
+
+NON_RETRYABLE
+```
+
+---
+
+# 84. Retry Strategies
+
+```text
+SAME_PROVIDER
+
+ALTERNATIVE_PROVIDER
+
+SMALLER_BATCH
+
+REDUCE_CONTEXT
+
+ALTERNATIVE_CONTEXT_POLICY
+
+ALTERNATIVE_TRANSLATION_PROFILE
+
+RESOURCE_WAIT
+
+NO_RETRY
+```
+
+Runtime decides whether a new Attempt is created.
+
+---
+
+# 85. Provider Error Reference
+
+```text
+TranslationProviderErrorRef
+├── ProviderId
+├── ProviderErrorCode
+├── ProviderCategory
+├── Retryability
+├── ProviderRequestId?
+├── SanitizedMessageKey
+├── DiagnosticsRef?
+└── OccurredAt
+```
+
+No raw provider response or credential.
+
+---
+
+# 86. Operation Phase
+
+Diagnostic enum:
+
+```text
+VALIDATING
+
+PLANNING
+
+BUILDING_UNITS
+
+BUILDING_CONTEXT
+
+RESOLVING_TERMINOLOGY
+
+BUILDING_BATCHES
+
+EXECUTING_PROVIDER
+
+NORMALIZING_OUTPUT
+
+VALIDATING_OUTPUT
+
+ASSEMBLING_CANDIDATE
+
+VALIDATING_CANDIDATE
+
+FINALIZING
+```
+
+These are not Runtime Attempt states.
+
+---
+
+# 87. Provider Output Validation
+
+Provider output may be rejected/degraded when:
+
+* expected TranslationUnit ID missing
+* unexpected ID returned
+* duplicate output exists
+* structured output malformed
+* translated text unexpectedly empty
+* provider control syntax leaked
+* locked terminology violated
+* source text remains untranslated beyond policy
+* output length extreme
+* target language implausible
+* output belongs to wrong Batch/request
+* source alignment cannot be preserved
+
+---
+
+# 88. Result Assembly Rules
+
+Candidate assembly must:
+
+1. order results by source/TranslationUnit sequence
+2. preserve TranslationUnit identity
+3. preserve SourceBlock refs
+4. explicitly report missing Units
+5. explicitly report failed Units
+6. preserve warning associations
+7. exclude context-only entries from output
+8. preserve provider provenance
+9. not silently drop selected Units
+
+---
+
+# 89. Provider Provenance
+
+```text
+TranslationProviderProvenance
+├── ProviderId
+├── ProviderClass?
+├── ModelIdentifier?
+├── AdapterVersion?
+├── ExecutionLocation
+├── TranslationBatchIds[]
+├── UsageSummary?
+└── Metadata?
+```
+
+Credentials forbidden.
+
+---
+
+# 90. Traceability Metadata
+
+```text
+TranslationTraceabilityMetadata
+├── SourceDocumentArtifactRef
+├── TranslationIntentId
+├── TranslationPlanId
+├── TranslationProfileRef
+├── KnowledgeSnapshotRef?
+├── ContextSnapshotRef?
+├── ConfigurationSnapshotId
+├── ProviderPolicyVersion?
+└── TraceId?
+```
+
+---
+
+# 91. Compatibility Metadata
+
+```text
+TranslationCompatibilityMetadata
+├── SourceDocumentContentIdentity
+├── SourceDocumentContractVersion
+├── TranslationContractVersion
+├── TargetLanguage
+├── TranslationProfileVersion
+├── TranslationStrategyVersion
+├── SourceSelectionIdentity
+├── KnowledgeSnapshotIdentity?
+├── ContextIdentity?
+├── TerminologyPolicyVersion?
+├── ProviderPolicyVersion?
+├── PrivacyPartition
+└── SemanticDependencies[]
+```
+
+---
+
+# 92. Semantic Compatibility
+
+Two Translation Artifacts may be compatible only when relevant semantic dependencies match or are explicitly compatible.
+
+Important dependencies:
+
+* source semantic identity
+* selected source scope
+* target language
+* Translation Profile
+* terminology/Knowledge
+* context
+* source alignment
+* contract version
+* privacy partition
+
+---
+
+# 93. Provider Compatibility
+
+Provider identity itself does not always invalidate semantic reuse.
+
+Policy may allow:
+
+```text
+provider-independent reuse
+```
+
+when result semantics are compatible.
+
+If intent explicitly requires Provider A, Provider identity becomes semantic dependency.
+
+---
+
+# 94. Compatibility vs Cache
+
+Translation defines:
+
+```text
+semantic compatibility
+```
+
+Runtime Cache Policy decides:
+
+```text
+whether reuse occurs
+```
+
+Artifact Store decides:
+
+```text
+retention
+```
+
+Storage decides:
+
+```text
+durable persistence
+```
+
+---
+
+# 95. Translation Statistics
+
+Optional:
+
+```text
+TranslationStatistics
+├── SelectedSourceBlockCount
+├── TranslationUnitCount
+├── TranslatedUnitCount
+├── MissingUnitCount
+├── FailedUnitCount
+├── SourceCharacterCount
+├── TranslatedCharacterCount
+├── BatchCount
+├── ProviderFallbackCount
+├── ExecutionDuration?
+└── Usage?
+```
+
+Do not include Runtime queue duration as Translation-owned metric.
+
+---
+
+# 96. Cancellation Contract
+
+Translation consumes Runtime:
+
+```text
+CancellationContextRef
+```
+
+On cancellation observation:
+
+* stop new batches
+* request provider cancellation if supported
+* stop optional processing
+* avoid unauthorized Candidate submission
+* cleanup resources
+* return control to Runtime
+
+Translation does not return canonical `CANCELLED` Artifact state.
+
+---
+
+# 97. Deadline Contract
+
+Deadline belongs to Runtime ExecutionContext.
+
+Translation may:
+
+* observe remaining budget
+* stop optional context expansion
+* reduce new work when policy permits
+* return partial Candidate when valid
+* cleanup
+
+Runtime owns terminal deadline outcome.
+
+---
+
+# 98. Stale Result Contract
+
+Translation may perform defensive semantic consistency checks.
+
+Final authority is Runtime.
+
+```text
+Candidate valid
+    ↓
+Runtime detects stale Revision
+    ↓
+Candidate rejected
+```
+
+This is not a TranslationModuleError.
+
+---
+
+# 99. No TranslationRevision Publication State
+
+Legacy monotonic:
+
+```text
+TranslationRevision
+```
+
+used as mutable publication/current-result state is removed from core Translation contract.
+
+Reasons:
+
+* Artifact is immutable
+* Runtime controls authority
+* Reading Session/application controls active selection
+* new semantic result = new Artifact/Variant
+
+If UI needs a view revision, that revision belongs to its owning projection/session concern.
+
+---
+
+# 100. No Translation Job Query Contract
+
+Removed core queries:
 
 ```text
 GetTranslationJob
-GetTranslationResult
-GetActiveTranslation
-ListTranslationVariants
+
 GetTranslationProgress
+
+Get active TranslationAttempt
+```
+
+because Translation does not own a Job/Attempt lifecycle.
+
+Runtime provides execution-state queries if needed.
+
+---
+
+# 101. Recommended Translation Artifact Queries
+
+Artifact/read-model layer may expose:
+
+```text
+GetTranslationArtifact
+
+ListTranslationVariants
+
 GetTranslationVariant
-GetTranslationSnapshot
+
+FindCompatibleTranslation
 ```
 
-Queries do not change translation state.
+Ownership of concrete query API should follow Artifact Store / application read-model architecture.
 
 ---
 
-## 100. GetTranslationJobQuery
+# 102. Retranslation Semantics
+
+Retranslation means a new semantic Translation Intent.
+
+Examples:
+
+* change target language
+* change Translation Profile
+* change provider hard constraint
+* change Knowledge Snapshot
+* change Context Snapshot
+* request literal/natural variant
+
+This results in new Runtime work and eventually a new Candidate/Artifact.
+
+No `RequestRetranslation` job command is required inside Translation core.
+
+---
+
+# 103. Invalidation Semantics
+
+Existing immutable Artifact is not mutated because a newer result exists.
+
+Invalidation/eligibility may be represented by:
+
+* Runtime Cache Policy
+* Artifact metadata
+* Reading Session selection
+* policy projection
+* external administrative state
+
+Translation should not maintain mutable `INVALIDATED` lifecycle inside immutable Artifact.
+
+---
+
+# 104. Privacy Context
 
 ```text
-GetTranslationJobQuery {
-    translationJobId
-
-    includeAttempts
-    includeBatches
-}
+TranslationPrivacyContext
+├── PrivacyMode
+├── PrivacyPartition
+├── RemoteExecutionAllowed
+├── ProtectedDiagnosticsAllowed
+├── PersistenceAllowed
+└── ExportAllowed?
 ```
 
-Returns:
+---
+
+# 105. Privacy Modes
+
+Recommended:
 
 ```text
-GetTranslationJobResult {
-    job
-    attempts[]
-    batches[]
-}
+STANDARD
+
+LOCAL_ONLY
+
+EPHEMERAL
 ```
 
----
-
-## 101. GetTranslationResultQuery
-
-```text
-GetTranslationResultQuery {
-    translationJobId
-
-    translationRevision
-    variantId
-
-    includeWarnings
-    includeStatistics
-}
-```
-
-When no revision or variant is supplied, the newest accepted compatible `TranslationResultSnapshot` is returned.
+`LOCAL_ONLY` forbids remote provider execution.
 
 ---
 
-## 102. GetActiveTranslationQuery
+# 106. Sensitive Fields
 
-```text
-GetActiveTranslationQuery {
-    readingSessionId
+Public normal metadata must never contain:
 
-    preparedDocumentId
-    contentRevision
-
-    targetLanguage
-}
-```
-
-Returns the currently active compatible translation variant, when available.
+* provider API keys
+* bearer tokens
+* auth headers
+* raw provider prompts
+* provider secrets
+* unrelated session data
+* full raw provider responses
 
 ---
 
-## 103. ListTranslationVariantsQuery
+# 107. Source / Translation Content Handling
 
-```text
-ListTranslationVariantsQuery {
-    translationJobId
-
-    includeInvalidated
-}
-```
-
-Returns immutable variant summaries.
-
----
-
-## 104. GetTranslationVariantQuery
-
-```text
-GetTranslationVariantQuery {
-    translationVariantId
-    includeSegments
-    includeWarnings
-}
-```
-
-Returns one immutable variant or a stable variant reference.
-
----
-
-## 105. GetTranslationSnapshotQuery
-
-```text
-GetTranslationSnapshotQuery {
-    readingSessionId?
-    preparedDocumentId
-    contentRevision
-    targetLanguage
-    translationRevision?
-}
-```
-
-Returns one immutable `TranslationResultSnapshot`.
-
-When `translationRevision` is omitted, the newest accepted compatible snapshot is returned.
-
----
-
-## 106. GetTranslationProgressQuery
-
-```text
-GetTranslationProgressQuery {
-    translationJobId
-}
-```
-
-Returns:
-
-```text
-TranslationProgress
-Current job status
-Active attempt identity
-Partial-result availability
-```
-
----
-
-# Part XXV — Idempotency
-
-## 105. Start Command Idempotency
-
-Equivalent `StartTranslationCommand` submissions may resolve to the same active job when all relevant semantic inputs match.
-
-Relevant inputs may include:
-
-```text
-preparedDocumentId
-contentRevision
-selected segment identity
-source language
-target language
-translation profile revision
-terminology revision
-context revision
-provider policy
-publication policy
-```
-
-The caller-provided `IdempotencyKey` may additionally force deduplication within an implementation-defined time window.
-
----
-
-## 106. Retry Idempotency
-
-Repeated equivalent retry commands must not create uncontrolled concurrent attempts.
-
-A retry may be rejected or resolved to an already active attempt.
-
----
-
-## 107. Cancellation Idempotency
-
-Cancelling an already cancelled or terminal job must not recreate work or change historical results.
-
----
-
-# Part XXVI — Stale-Result Safety
-
-## 108. Publication Identity
-
-Before a result becomes authoritative, the module must verify at least:
-
-```text
-ReadingSessionId or detached authority context
-PreparedDocumentId
-ContentRevision
-TranslationIntentId
-TranslationJobId
-TranslationRevision
-TranslationBatchId
-TranslationAttemptId
-```
-
-Where relevant, it should also verify:
-
-```text
-TargetLanguage
-ContextRevision
-GlossaryRevision
-ActiveVariantId
-```
-
----
-
-## 109. Stale Result Rule
-
-A result is stale when it no longer matches the authoritative source or translation intent.
-
-A stale result may be retained for diagnostics.
-
-It must not overwrite current work.
-
-Translation performs defensive stale checks.
-
-Reading Session remains the final authority for whether a session-bound Translation snapshot is current.
-
----
-
-# Part XXVII — Validation Rules
-
-## 110. Command Validation
-
-`StartTranslationCommand` must be rejected when:
-
-* no prepared source is provided;
-* no target language is provided;
-* selected segments do not exist;
-* selected segments contain duplicate identities;
-* content revision is unavailable;
-* provider policy is impossible to satisfy;
-* local-only policy has no eligible local provider;
-* required terminology data is unavailable;
-* publication policy is internally inconsistent.
-
----
-
-## 111. Provider Output Validation
-
-Provider output must be rejected or degraded when:
-
-* required segment identities are missing;
-* unexpected segment identities are returned;
-* duplicate outputs exist for one source segment;
-* output cannot be structurally parsed;
-* segment order cannot be reconstructed;
-* target text is empty without justification;
-* provider control content leaks into output;
-* output violates locked terminology;
-* result belongs to another attempt or batch.
-
-Detailed handling belongs in `ERRORS.md`.
-
----
-
-## 112. Result Assembly Rules
-
-Final result assembly must:
-
-* order translated segments using source sequence;
-* preserve source identifiers;
-* report missing segments explicitly;
-* report failed segments explicitly;
-* preserve warning associations;
-* not silently drop selected segments;
-* not treat context-only segments as translated output.
-
----
-
-# Part XXVIII — Privacy and Security
-
-## 113. Sensitive Fields
-
-Public contracts must never contain:
-
-* provider API keys;
-* provider bearer tokens;
-* provider secret configuration;
-* raw authorization headers;
-* unredacted credential errors;
-* raw internal prompts;
-* unrelated reading-session data.
-
----
-
-## 114. Source Content Handling
-
-Raw source and translated text may appear in necessary result contracts.
+Source and translated text may appear in necessary Artifact/Provider request contracts.
 
 They should not appear by default in:
 
-* logs;
-* telemetry;
-* error metadata;
-* provider-selection metadata;
-* event diagnostics.
+* logs
+* metrics
+* event diagnostics
+* error metadata
+* provider-selection metadata
 
 ---
 
-## 115. Untrusted Source Rule
-
-Source text, context text, and glossary notes are untrusted data.
-
-They must not be interpreted as trusted system commands.
+# 108. Untrusted Source Rule
 
 ```text
-Source content
-    ≠
-Translation policy
+Source Content
+Context Content
+Glossary Notes
+        ≠
+Trusted Translation Instructions
 ```
 
-Provider adapters are responsible for preserving this separation.
-
----
-
-# Part XXIX — Compatibility
-
-## 116. Text Processing Compatibility
-
-Translation depends on stable definitions from:
+Provider Adapter must keep:
 
 ```text
-modules/text-processing/CONTRACT.md
+System Policy
+
+Translation Profile
+
+Terminology Policy
+
+Context
+
+Source Data
 ```
 
-or the corresponding canonical contract file.
-
-Translation must not redefine:
-
-* prepared document ownership;
-* prepared segment ownership;
-* source ordering;
-* extraction confidence semantics;
-* normalized source lifecycle.
+separated.
 
 ---
 
-## 117. Presentation Compatibility
+# 109. Prompt-Injection Safety
 
-Presentation may depend on:
+Source content must not be able to:
+
+* override system translation policy
+* request credentials
+* activate application tools
+* read unrelated session state
+* change privacy policy
+* alter Provider Policy
+* reinterpret context as commands
+
+---
+
+# 110. Producer Obligations
+
+Translation implementation must:
+
+1. validate Attempt Input
+2. resolve immutable SourceDocument Artifact
+3. preserve SourceDocument immutability
+4. create explicit Translation Intent
+5. build deterministic semantic Plan where possible
+6. create stable Translation Units
+7. preserve source alignment
+8. build provider-neutral Batches
+9. enforce terminology constraints
+10. enforce Privacy Context
+11. normalize provider output
+12. validate output
+13. explicitly report missing Units
+14. explicitly report partial output
+15. assemble immutable Candidate
+16. return RetryHint only
+17. never schedule retry itself
+18. never own terminal Runtime state
+19. never publish authoritative Artifact directly
+20. never leak provider credentials
+
+---
+
+# 111. Runtime Obligations
+
+Runtime must:
+
+1. create WorkItem/Attempt
+2. provide Revision/authority identity
+3. provide Execution Context
+4. provide Cancellation Context
+5. own deadline enforcement
+6. own queue/Scheduler
+7. own retry budget/backoff
+8. own stale-result validation
+9. own Attempt terminal state
+10. accept/reject Candidate
+11. coordinate cleanup
+12. invoke Artifact Store on acceptance
+
+---
+
+# 112. Provider Management Obligations
+
+Provider Management must:
+
+* maintain provider registry
+* manage lifecycle/health
+* protect credentials
+* expose capabilities
+* expose availability
+* provide safe execution handles
+* manage reusable Provider resources
+
+Translation does not duplicate these.
+
+---
+
+# 113. Artifact Store Obligations
+
+Artifact Store must:
+
+* receive accepted Candidate transfer
+* assign ArtifactId
+* publish atomically
+* expose immutable Artifact lookup
+* manage shared lifecycle
+* reject invalid duplicate publication
+* coordinate retention/leasing
+
+---
+
+# 114. Consumer Obligations
+
+Consumers must:
+
+1. treat TranslationArtifact immutable
+2. preserve SourceBlock/TranslationUnit alignment
+3. handle PARTIAL
+4. handle EMPTY_VALID
+5. not assume provider confidence exists
+6. not use Batch IDs as alignment IDs
+7. not depend on provider-native metadata
+8. not infer Runtime success from Candidate validation
+9. not mutate translated text in Artifact
+10. create new correction/variant for edits
+
+---
+
+# 115. Presentation Obligations
+
+Presentation may consume:
+
+* TranslatedUnits
+* SourceBlockRefs
+* Source ordering
+* target language
+* warnings
+* completeness
+* upstream geometry lineage through SourceBlock
+
+Presentation must not require:
+
+* provider prompt
+* Provider request
+* Runtime retry history
+* Translation Batch internals
+
+---
+
+# 116. Knowledge Compatibility
+
+Translation consumes Knowledge by stable snapshot/reference.
+
+It must not depend on Knowledge persistence tables/schema.
+
+Knowledge updates are never silently committed from translation execution.
+
+---
+
+# 117. Idempotency
+
+Semantic idempotency should derive from:
 
 ```text
-PreparedSegmentId
-TranslatedSegmentId
-TranslatedText
-SourceSequence
-TranslationVariantId
-TranslationRevision
-TranslationResultSnapshot
-Completion
-Warnings
-ContentRevision
+SourceDocument semantic identity
+
+SourceSelection
+
+TargetLanguage
+
+TranslationProfile
+
+Knowledge Snapshot
+
+Context Snapshot
+
+Provider hard constraints
+
+Translation Strategy version
+
+Privacy Partition
 ```
 
-Presentation must not need provider-specific metadata to display translated content.
+Equivalent Runtime retries should not create semantically divergent Intent identities solely because `AttemptId` differs.
 
 ---
 
-## 118. Knowledge Compatibility
+# 118. Contract Evolution
 
-Knowledge provides revisioned terminology and contextual knowledge.
+Backward-compatible:
 
-Translation consumes:
+* optional fields
+* new warning codes
+* new provider capability tags
+* new Translation Profile
+* new optional provenance
+* new optional Variant type
+* additive metadata
 
-```text
-KnowledgeSnapshotId
-GlossaryRevision
-TermConstraint[]
-CharacterContext[]
+Breaking:
+
+* changing TranslationUnit alignment semantics
+* changing SourceDocument boundary
+* removing required source lineage
+* changing Candidate authority semantics
+* changing Provider neutrality
+* changing privacy guarantees
+* moving Retry/Cancellation authority into Translation
+* changing TranslationArtifact immutability
+
+Requires major version.
+
+---
+
+# 119. Unknown Values
+
+Consumers should:
+
+* preserve unknown additive enum values when possible
+* safely fall back
+* not fabricate meaning
+* reject unsupported major contract version
+
+---
+
+# 120. Example Attempt Input
+
+```json
+{
+  "runtime_context": {
+    "contract_version": "1.0.0",
+    "revision_id": "revision_104",
+    "work_item_id": "work_translation_104",
+    "attempt_id": "attempt_01",
+    "configuration_snapshot_id": "config_42"
+  },
+  "source_document_artifact_ref": {
+    "artifact_id": "source_document_artifact_104",
+    "artifact_type": "SOURCE_DOCUMENT_ARTIFACT",
+    "contract_version": "1.0.0"
+  },
+  "source_selection": {
+    "mode": "ALL_TRANSLATABLE",
+    "include_excluded_blocks": false
+  },
+  "translation_intent": {
+    "translation_intent_id": "intent_104_vi",
+    "source_language_policy": {
+      "mode": "UPSTREAM_HINT"
+    },
+    "target_language": {
+      "language_tag": "vi"
+    },
+    "translation_profile_ref": {
+      "profile_id": "COMIC_NATURAL",
+      "profile_version": "1"
+    },
+    "partial_result_policy": {
+      "mode": "ALLOW_PARTIAL"
+    }
+  }
+}
 ```
 
-Translation must not depend on the Knowledge module’s persistence schema.
-
 ---
 
-## 119. Event Compatibility
+# 121. Example Translation Unit
 
-Events derived from these contracts must not expose larger mutable objects unnecessarily.
-
-`EVENTS.md` should prefer:
-
-* stable identifiers;
-* state snapshots;
-* result revision references;
-* compact progress;
-* normalized warnings.
-
----
-
-# Part XXX — Core Contract Invariants
-
-## 120. Invariant 1 — Prepared input only
-
-Translation starts from prepared content, not canonical raw OCR.
-
-## 121. Invariant 2 — Stable alignment
-
-Every published translated segment references one prepared segment.
-
-## 122. Invariant 3 — No duplicate active alignment
-
-One active variant cannot contain multiple authoritative translated segments for the same prepared segment.
-
-## 123. Invariant 4 — Batch is not alignment
-
-Batch membership must never replace segment identity.
-
-## 124. Invariant 5 — Job and attempt are distinct
-
-Retrying provider execution creates an attempt, not automatically a new logical job.
-
-## 125. Invariant 6 — Intent changes create new jobs
-
-Changes to source revision, target language, translation profile, or other material semantic input require a new job.
-
-## 126. Invariant 7 — Immutable variants
-
-Published translation variants are never changed in place.
-
-## 127. Invariant 8 — Provider isolation
-
-Provider-specific requests and responses remain internal.
-
-## 128. Invariant 9 — Cancellation blocks authority
-
-Cancelled work cannot become authoritative.
-
-## 129. Invariant 10 — Supersession blocks authority
-
-Superseded work cannot overwrite newer work.
-
-## 130. Invariant 11 — Missing segments are explicit
-
-A result must not silently omit selected source segments.
-
-## 131. Invariant 12 — Context is not output
-
-Context-only segments do not create public translated segments.
-
-## 132. Invariant 13 — Source order is upstream-owned
-
-Translation preserves upstream sequence and does not infer comic reading order.
-
-## 133. Invariant 14 — Credentials remain private
-
-Provider credentials never appear in public contracts, results, warnings, or events.
-
----
-
-# Part XXXI — Initial MVP Contract Surface
-
-## 134. Required MVP Commands
-
-```text
-StartTranslation
-CancelTranslation
-RetryTranslation
-RequestRetranslation
+```json
+{
+  "translation_unit_id": "unit_01",
+  "source_block_refs": [
+    "block_01"
+  ],
+  "source_text_view": {
+    "text": "你好！"
+  },
+  "source_sequence": 0,
+  "target_language": "vi",
+  "structural_type": "DIALOGUE",
+  "translation_profile_ref": {
+    "profile_id": "COMIC_NATURAL",
+    "profile_version": "1"
+  }
+}
 ```
 
-## 135. Required MVP Models
+---
+
+# 122. Example Translation Batch
+
+```json
+{
+  "translation_batch_id": "batch_01",
+  "sequence": 0,
+  "translation_unit_ids": [
+    "unit_01",
+    "unit_02"
+  ],
+  "context_entry_refs": [
+    "ctx_previous_01"
+  ],
+  "provider_requirements": {
+    "target_language": "vi",
+    "structured_output_required": true
+  }
+}
+```
+
+---
+
+# 123. Example Translated Unit
+
+```json
+{
+  "translated_unit_id": "translated_unit_01",
+  "translation_unit_id": "unit_01",
+  "source_block_refs": [
+    "block_01"
+  ],
+  "source_sequence": 0,
+  "target_language": "vi",
+  "translated_text": "Xin chào!",
+  "completion": "COMPLETE",
+  "warnings": []
+}
+```
+
+---
+
+# 124. Example Candidate
+
+```json
+{
+  "candidate_artifact_id": "candidate_translation_104",
+  "artifact_type": "TRANSLATION_ARTIFACT",
+  "owner_module": "translation",
+  "contract_version": "1.0.0",
+  "source_document_artifact_ref": {
+    "artifact_id": "source_document_artifact_104"
+  },
+  "translation_intent_id": "intent_104_vi",
+  "translation_profile_ref": {
+    "profile_id": "COMIC_NATURAL",
+    "profile_version": "1"
+  },
+  "target_language": "vi",
+  "completeness": "COMPLETE",
+  "missing_translation_unit_ids": [],
+  "failed_translation_unit_ids": [],
+  "warnings": []
+}
+```
+
+---
+
+# 125. Contract Testing — Input
+
+Test:
+
+* valid SourceDocument Artifact
+* missing SourceDocument Artifact
+* incompatible contract major
+* invalid source selection
+* missing target language
+* invalid Translation Profile
+* invalid Provider Policy
+* invalid Privacy Context
+* unavailable required Knowledge Snapshot
+* impossible provider constraints
+
+---
+
+# 126. Contract Testing — Translation Units
+
+Test:
+
+* one SourceBlock → one Unit
+* multiple SourceBlocks → one Unit
+* split SourceBlock → multiple Units
+* duplicate TranslationUnitId
+* invalid SourceBlockRef
+* source-order preservation
+* context-only data not treated as target Unit
+
+---
+
+# 127. Contract Testing — Batches
+
+Test:
+
+* one Unit
+* multiple Units
+* duplicate Unit ID
+* incompatible target languages
+* provider size limit exceeded
+* batch order differing from source alignment
+* context-only entries
+* fallback provider compatibility
+
+---
+
+# 128. Contract Testing — Provider Output
+
+Test:
+
+* valid structured output
+* missing Unit
+* duplicate Unit
+* unknown Unit
+* malformed provider output
+* locked terminology violation
+* source leakage
+* empty output
+* control syntax leakage
+* target-language mismatch
+
+---
+
+# 129. Contract Testing — Candidate
+
+Test:
+
+* COMPLETE Candidate
+* PARTIAL Candidate
+* EMPTY_VALID Candidate
+* missing Unit IDs explicit
+* failed Unit IDs explicit
+* invalid SourceBlock alignment
+* missing CompatibilityMetadata
+* missing TraceabilityMetadata
+* credentials leakage
+* Runtime-state leakage
+* immutable after validation
+
+---
+
+# 130. Contract Testing — Runtime Boundary
+
+Test:
 
 ```text
-TranslationSource
-TranslationConfiguration
+Candidate VALID
+    → Runtime accepts
+```
+
+```text
+Candidate VALID
+    → Runtime rejects stale
+```
+
+```text
+Cancellation observed
+    → module stops
+    → Runtime decides outcome
+```
+
+```text
+RetryHint returned
+    → Runtime creates new Attempt
+```
+
+---
+
+# 131. Contract Testing — Variant
+
+Test:
+
+* immutable variant
+* corrected variant creates new Artifact
+* literal/natural variants coexist
+* different provider variant
+* parent variant lineage
+* old Artifact remains unchanged
+* active selection external to core Translation execution
+
+---
+
+# 132. Contract Testing — Privacy
+
+Verify:
+
+* credentials absent
+* source text absent from normal errors
+* translated text absent from normal events/logs
+* remote provider blocked in LOCAL_ONLY
+* prompt-injection separation maintained
+* provider raw response does not cross boundary
+
+---
+
+# 133. Core Contract Invariants
+
+1. Translation starts from SourceDocumentArtifact.
+
+2. Translation does not consume raw OCR as canonical input.
+
+3. Translation does not redefine SourceBlock.
+
+4. Translation owns TranslationUnit.
+
+5. TranslationUnit is distinct from SourceBlock.
+
+6. TranslationUnit always preserves SourceBlock lineage.
+
+7. Translation owns TranslationBatch semantics.
+
+8. Batch is not alignment identity.
+
+9. Translation does not own TranslationJob lifecycle.
+
+10. Translation does not own TranslationAttempt lifecycle.
+
+11. Runtime WorkItem owns logical execution work.
+
+12. Runtime Attempt owns execution attempt identity.
+
+13. Runtime owns retry execution.
+
+14. Runtime owns cancellation authority.
+
+15. Runtime owns deadline terminal behavior.
+
+16. Runtime owns stale-result authority.
+
+17. Translation creates Candidate only.
+
+18. Candidate validation does not imply Runtime acceptance.
+
+19. Artifact Store owns published Artifact lifecycle.
+
+20. TranslationArtifact is immutable.
+
+21. Translation variants are immutable.
+
+22. Correction creates new variant.
+
+23. Every TranslatedUnit maps to a TranslationUnit.
+
+24. Every TranslationUnit maps to SourceBlock evidence.
+
+25. Missing TranslationUnits are explicit.
+
+26. Failed TranslationUnits are explicit.
+
+27. Context-only entries never silently create outputs.
+
+28. Translation follows SourceDocument order.
+
+29. Translation never infers OCR Reading Order.
+
+30. Provider-specific models remain inside adapters.
+
+31. Provider credentials never cross public boundary.
+
+32. Provider lifecycle belongs to Provider Management.
+
+33. Provider fallback must respect Privacy Policy.
+
+34. LOCAL_ONLY forbids remote providers.
+
+35. Source/context/glossary text is untrusted data.
+
+36. Source text cannot override system translation policy.
+
+37. Locked terminology is explicit.
+
+38. Mixed-language source is valid.
+
+39. Provider confidence is optional.
+
+40. Partial translation is explicit.
+
+41. EMPTY_VALID is valid.
+
+42. Translation defines semantic compatibility.
+
+43. Runtime Cache Policy owns reuse decision.
+
+44. Artifact Store owns retention.
+
+45. Storage owns durable persistence.
+
+46. Translation does not maintain monotonic publication revision state.
+
+47. Reading Session/application state may choose active variant.
+
+48. Translation does not mutate Knowledge silently.
+
+49. Translation does not visually fit translated text.
+
+50. Public contracts remain provider-neutral.
+
+---
+
+# 134. MVP Contract Surface
+
+Required:
+
+```text
+TranslationAttemptInput
+
+SourceDocumentArtifactRef
+
+TranslationIntent
+
+SourceSelection
+
+TranslationProfileRef
+
 ProviderPolicy
-TerminologyPolicy
-ContextPolicy
-TranslationExecutionPolicy
-TranslationAuthorityContext
-TranslationPublicationPolicy
 
-TranslationJob
-TranslationAttempt
+TerminologyPolicy
+
+ContextPolicy
+
+TranslationPlan
+
+TranslationUnit
+
 TranslationBatch
 
-TranslationResultSnapshot
-TranslationRevision
-TranslatedSegment
+NormalizedTranslationProviderOutput
+
+TranslatedUnit
+
+CandidateTranslationArtifact
+
+TranslationArtifact
+
 TranslationWarning
-TranslationStatistics
+
+TranslationModuleError
+
+TranslationRetryHint
 ```
-
-## 136. Required MVP Behaviors
-
-The contracts must support:
-
-* Chinese-to-Vietnamese translation;
-* English-to-Vietnamese translation;
-* prepared novel text;
-* OCR-derived prepared comic segments;
-* multi-segment batches;
-* at least one provider adapter;
-* basic terminology constraints;
-* retry attempts;
-* provider fallback;
-* cancellation;
-* partial completion;
-* stale-result rejection;
-* immutable variants;
-* cache-aware execution.
 
 ---
 
-# Part XXXII — Deferred Contract Extensions
-
-The following may be added later without changing core ownership:
+# 135. MVP Profiles
 
 ```text
-Translation quality evaluation
-Provider comparison results
-Automatic glossary proposals
-Speaker relationship inference
-Translation memory matches
-Distributed worker leases
-Long-running chapter translation
-User rating contracts
-Cost-budget contracts
-Advanced prefetch contracts
-Collaborative correction review
-```
+COMIC_NATURAL
 
-Extensions must preserve existing identifiers and alignment rules.
+NOVEL_NATURAL
+
+GENERAL_NATURAL
+
+LITERAL
+```
 
 ---
 
-# Part XXXIII — Example Conceptual Flow
+# 136. MVP Language Priority
 
-## 137. Starting a Comic Translation
+Initial implementations may prioritize:
 
 ```text
-StartTranslationCommand
-    source:
-        preparedDocumentId = comic-page-42
-        contentRevision = 7
-        segmentSelection = ALL
+zh-Hans → vi
 
-    configuration:
-        sourceLanguage = zh-Hans
-        targetLanguage = vi
-        translationProfile = COMIC_NATURAL
+zh-Hant → vi
 
-    publicationPolicy:
-        mode = PROGRESSIVE
-
-    priority:
-        VISIBLE
+en → vi
 ```
 
-Translation creates:
+but this is implementation priority, not hardcoded contract limitation.
+
+---
+
+# 137. MVP Provider Features
+
+Required minimum:
+
+* provider-neutral Adapter
+* batch execution
+* stable Unit IDs
+* structured/aligned output
+* provider provenance
+* retry/fallback hint support
+* local/remote policy
+* usage metadata where available
+
+---
+
+# 138. Deferred Extensions
+
+Potential:
 
 ```text
+AdvancedTranslationMemoryRef
+
+MultiProviderComparison
+
+EnsembleTranslationResult
+
+TranslationQualityReport
+
+IncrementalTranslationPatch
+
+CrossChapterContextSnapshot
+
+SpeakerIdentityRef
+
+UserStyleProfileRef
+
+TranslationEvaluationArtifact
+```
+
+Only add when concrete use cases require them.
+
+---
+
+# 139. Removed Legacy Contracts
+
+Removed/re-owned:
+
+```text
+PreparedDocument
+    → SourceDocumentArtifact
+
+PreparedSegment
+    → SourceBlock upstream
+      + TranslationUnit downstream
+
 TranslationJob
-    ├── TranslationBatch 1
-    │       ├── Bubble 1
-    │       ├── Bubble 2
-    │       ├── Bubble 3
-    │       └── TranslationAttempt 1
-    │
-    └── TranslationBatch 2
-            ├── Bubble 4
-            ├── Narration 1
-            └── TranslationAttempt 1
-```
+    → Runtime WorkItem
 
-The result preserves:
+TranslationAttempt
+    → Runtime Attempt
 
-```text
-Bubble 1 → TranslatedSegment 1
-Bubble 2 → TranslatedSegment 2
-Bubble 3 → TranslatedSegment 3
-Bubble 4 → TranslatedSegment 4
-Narration 1 → TranslatedSegment 5
-```
+TranslatedSegment
+    → TranslatedUnit
 
----
+TranslationResultSnapshot
+    → TranslationArtifact
 
-## 138. Provider Retry Example
+TranslationRevision
+    → removed from core publication lifecycle
 
-```text
-TranslationJob A
-      ↓
-TranslationBatch 1
-      ↓
-Attempt 1
-      ↓
-Provider timeout
-      ↓
-Attempt 2
-      ↓
-Fallback provider
-      ↓
-Completed batch result
-```
+CancelTranslationCommand
+    → Runtime cancellation
 
-The same `TranslationJobId` is preserved.
+RetryTranslationCommand
+    → Runtime retry
 
-Each execution receives a different `TranslationAttemptId`.
+GetTranslationJob
+    → Runtime execution query
 
----
+GetTranslationProgress
+    → Runtime/telemetry query
 
-## 139. Retranslation Example
+InvalidateTranslation job state
+    → Artifact/cache/session policy
 
-The user changes from natural translation to literal translation.
-
-```text
-TranslationJob A
-    profile = COMIC_NATURAL
-
-RequestRetranslation
-    profile = LITERAL
-
-TranslationJob B
-    profile = LITERAL
-```
-
-This creates a new logical job because the translation intent changed.
-
----
-
-## 140. Stale Result Example
-
-```text
-Document revision 7
-      ↓
-TranslationJob A starts
-
-Document changes to revision 8
-      ↓
-TranslationJob B starts
-
-TranslationJob A completes late
-      ↓
-Result retained as non-authoritative
-      ↓
-Must not replace TranslationJob B
+SelectTranslationVariant
+    → Reading Session / application selection concern
 ```
 
 ---
 
-# Part XXXIV — Related Documents
+# 140. Related Documents
 
 ```text
-modules/translation/MODULE.md
-modules/translation/EVENTS.md
-modules/translation/ERRORS.md
-modules/translation/STATES.md
-modules/translation/README.md
-```
+02-modules/translation/README.md
+02-modules/translation/MODULE.md
+02-modules/translation/STATES.md
+02-modules/translation/EVENTS.md
+02-modules/translation/ERRORS.md
 
-Architecture references:
+02-modules/text-processing/README.md
+02-modules/text-processing/MODULE.md
+02-modules/text-processing/CONTRACT.md
 
-```text
-docs/architecture/CAPABILITY_MAP.md
-docs/architecture/STATE_MACHINE.md
-docs/architecture/EVENT_BUS.md
-docs/architecture/MODULE_DEPENDENCY.md
-docs/architecture/DATA_FLOW.md
+02-modules/knowledge/
+02-modules/provider-management/
+02-modules/presentation/
+02-modules/reading-session/
 
-docs/architecture/runtime/PIPELINE_RUNTIME.md
-docs/architecture/runtime/WORK_QUEUE.md
-docs/architecture/runtime/SCHEDULER.md
-docs/architecture/runtime/CANCELLATION.md
-docs/architecture/runtime/RETRY_POLICY.md
-docs/architecture/runtime/CACHE_POLICY.md
-docs/architecture/runtime/RUNTIME_COMPONENTS.md
-```
+01-architecture/runtime/CANCELLATION.md
+01-architecture/runtime/RETRY_POLICY.md
+01-architecture/runtime/CACHE_POLICY.md
+01-architecture/runtime/RESOURCE_LIFECYCLE.md
 
-Upstream references:
-
-```text
-modules/text-processing/MODULE.md
-modules/text-processing/CONTRACT.md
-```
-
-Future integration references:
-
-```text
-modules/knowledge/MODULE.md
-modules/presentation/MODULE.md
-modules/provider-management/MODULE.md
-modules/reading-session/MODULE.md
+03-infrastructure/artifact-store/
+03-infrastructure/resource-manager/
 ```
 
 ---
 
 # 141. Summary
 
-The Translation public contract is centered on six distinct concepts:
+Translation public contract is centered on:
 
 ```text
-PreparedSegment
-    = source alignment unit
+SourceDocumentArtifact
+    = stable source input
+
+TranslationIntent
+    = requested semantic translation
+
+TranslationUnit
+    = translation alignment unit
 
 TranslationBatch
-    = provider execution unit
+    = provider-execution planning unit
 
-TranslationAttempt
-    = one execution attempt for one batch
+TranslatedUnit
+    = aligned target-language unit
 
-TranslationJob
-    = one logical translation request
+CandidateTranslationArtifact
+    = module-valid non-authoritative result
 
-TranslationIntentId
-    = immutable semantic intent identity
-
-TranslatedSegment
-    = aligned translated output
-
-TranslationVariant
-    = immutable translation version
+TranslationArtifact
+    = accepted immutable published result
 ```
 
-The primary flow is:
+Primary flow:
 
 ```text
-StartTranslationCommand
+SourceDocumentArtifact
         ↓
-TranslationJob
+TranslationIntent
+        ↓
+TranslationPlan
+        ↓
+TranslationUnit[]
         ↓
 TranslationBatch[]
         ↓
-TranslationAttempt[]
+Provider Adapter
         ↓
-Provider adapters
+TranslatedUnit[]
         ↓
-TranslatedSegment[]
+CandidateTranslationArtifact
         ↓
-TranslationResult
+Runtime
         ↓
-Active TranslationVariant
+TranslationArtifact
 ```
 
-These contracts ensure that CRAI can:
+Ownership:
 
-* translate novels and comics;
-* use multiple providers;
-* retry safely;
-* preserve contextual quality;
-* support progressive output;
-* reject stale results;
-* retain alternative translations;
-* remain independent from provider APIs;
-* preserve exact source-to-translation alignment.
+```text
+Text Processing
+    owns SourceDocument / SourceBlock.
+
+Translation
+    owns Translation Intent,
+    Translation Plan,
+    Translation Unit,
+    Translation Batch
+    and translated semantics.
+
+Runtime
+    owns WorkItem,
+    Attempt,
+    retry,
+    cancellation,
+    deadline
+    and authority.
+
+Provider Management
+    owns Provider lifecycle,
+    capabilities
+    and credentials.
+
+Artifact Store
+    owns accepted Artifact lifecycle.
+
+Knowledge
+    owns persistent terminology/knowledge.
+
+Reading Session / Application state
+    owns active-reading-context selection.
+
+Presentation
+    owns visual layout.
+```
+
+The core rule is:
+
+```text
+SourceBlock stabilizes source structure.
+
+TranslationUnit begins translation semantics.
+
+Runtime decides whether execution still matters.
+
+Artifact Store publishes the accepted immutable result.
+```

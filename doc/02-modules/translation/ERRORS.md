@@ -1,4587 +1,3605 @@
-# Translation Errors
+# Translation Module Errors
 
 > **Project:** CRAI
 > **Module:** Translation
-> **Document:** Errors and Warnings
-> **Path:** `modules/translation/ERRORS.md`
-> **Version:** 0.2
+> **Path:** `02-modules/translation/ERRORS.md`
+> **Version:** 1.0
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-08-03
-> **Source of Truth:**
->
-> * `modules/translation/MODULE.md`
-> * `modules/translation/CONTRACT.md`
-> * `modules/translation/EVENTS.md`
-> * `modules/translation/STATES.md`
+> **Related:** `MODULE.md`, `CONTRACT.md`, `STATES.md`, `EVENTS.md`
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-This document defines the normalized errors and warnings owned by the Translation module.
+Tài liệu này định nghĩa normalized errors và warnings mà Translation Module thực sự sở hữu.
 
-It specifies:
+Translation Error Model chịu trách nhiệm:
 
-* error structure;
-* error identifiers;
-* error categories;
-* error scopes;
-* error severity;
-* retryability;
-* provider error normalization;
-* command validation errors;
-* translation execution errors;
-* result validation errors;
-* alignment errors;
-* cancellation and supersession handling;
-* warnings;
-* partial-result behavior;
-* state transition implications;
-* public and internal error boundaries;
-* privacy and logging rules.
+* stable Translation error codes
+* error categories
+* error scopes
+* severity
+* module-level retry hints
+* recovery recommendations
+* SourceDocument input errors
+* Translation Plan errors
+* Translation Unit planning errors
+* context errors
+* Knowledge / terminology errors
+* Translation Batch errors
+* provider-boundary normalization
+* provider output errors
+* translated-output validation
+* alignment errors
+* Candidate errors
+* variant/correction semantic errors
+* privacy/security errors
+* internal invariant failures
+* warning model
+* partial-output error semantics
+* logging and diagnostics rules
+* compatibility
+* testing
 
-This document does not define:
+Translation Error Model không định nghĩa canonical failure semantics của:
 
-* provider-native error payloads;
-* UI design;
-* localized user-interface text;
-* HTTP status mappings for a specific API;
-* database schemas;
-* monitoring alert thresholds;
-* implementation exception classes.
+* Runtime WorkItem
+* Runtime Attempt
+* Scheduler
+* Work Queue
+* retry scheduling
+* deadline lifecycle
+* cancellation lifecycle
+* supersession
+* stale-result authority
+* Artifact publication
+* Artifact retention
+* Cache infrastructure
+* Provider Management lifecycle
+* Knowledge persistence
+* Reading Session
+* Presentation
 
 ---
 
-## 2. Error Design Goals
+# 2. Error Ownership
 
-Translation error handling must support the following goals:
+Translation owns:
 
-* keep public contracts provider-neutral;
-* distinguish retryable and non-retryable failures;
-* preserve successfully translated segments;
-* avoid retrying invalid requests;
-* avoid exposing credentials or private content;
-* prevent stale output from becoming authoritative;
-* support provider fallback;
-* support local and remote providers;
-* provide useful user-facing recovery actions;
-* preserve machine-readable diagnostics;
-* remain compatible with future providers.
+```text id="0uppvq"
+TranslationModuleError
+
+TranslationWarning
+
+TranslationRetryHint
+
+Input Errors
+
+Plan Errors
+
+Translation Unit Planning Errors
+
+Context Errors
+
+Terminology Errors
+
+Batch Planning Errors
+
+Provider Boundary Errors
+
+Provider Output Errors
+
+Output Validation Errors
+
+Alignment Errors
+
+Candidate Errors
+
+Translation Variant Semantic Errors
+
+Privacy Errors
+
+Security Errors
+
+Translation State Errors
+
+Internal Translation Errors
+```
+
+Translation does not own:
+
+```text id="bgctaf"
+QueueAdmissionError
+
+SchedulerError
+
+RuntimeAttemptError
+
+RuntimeDeadlineError
+
+RuntimeCancellationError
+
+RuntimeStaleResultError
+
+ArtifactPublicationError
+
+ArtifactRetentionError
+
+CacheInfrastructureError
+
+ProviderRegistryError
+
+ProviderCredentialLifecycleError
+
+KnowledgeStorageError
+
+ReadingSessionError
+
+PresentationError
+```
 
 ---
 
-## 3. Error Versus Warning
+# 3. Error Architecture
 
-An error prevents the affected operation from being accepted or completed as intended.
+```text id="ll5kk7"
+External / Provider Failure
+        ↓
+ExternalErrorRef
+        ↓
+Translation Context
+        ↓
+TranslationModuleError?
+        ↓
+TranslationRetryHint?
+        ↓
+Runtime
+        ↓
+Runtime Error Normalization
+        ↓
+Retry / Fail / Cancel / Abandon
+```
 
-A warning describes an imperfect but usable outcome.
+Translation may normalize how an external failure affects Translation semantics.
 
-```text
-Error
-    → work cannot continue or cannot be accepted
+Normalization does not transfer original ownership.
 
+---
+
+# 4. Error vs Warning
+
+```text id="1xe7my"
 Warning
-    → work remains usable with limitations
+    = translation remains contract-valid
+      but quality/completeness/capability degraded
+```
+
+```text id="8wwc2q"
+ModuleError
+    = Translation cannot produce
+      a contract-valid Candidate
+      under the current semantic execution path
 ```
 
 Examples:
 
-```text
-Provider returned no parseable segments
+```text id="r3nj1z"
+optional context missing
+    → Warning
+```
+
+```text id="og6ti7"
+provider output cannot be aligned
     → Error
+```
 
-Translation completed using a fallback provider
-    → Warning
-
-One selected segment is permanently missing
-    → Error or partial failure
-
-Output is longer than the source bubble
-    → Warning
+```text id="llh7uf"
+one Unit failed
++
+PartialResultPolicy allows PARTIAL
+    → Warning + PARTIAL Candidate
 ```
 
 ---
 
-## 4. Error Versus Lifecycle Control
+# 5. Lifecycle Control Is Not Translation Error
 
-The following lifecycle outcomes are not necessarily errors:
+These Runtime outcomes are not Translation-owned errors:
 
-```text
-CANCELLED
+```text id="5ei0v1"
+CANCELED
+
+ABANDONED
+
+STALE
+
 SUPERSEDED
-INVALIDATED
+
+RETRY_SCHEDULED
 ```
 
-### Cancellation
-
-The user or system intentionally stopped the work.
-
-### Supersession
-
-Newer work replaced the old work.
-
-### Invalidation
-
-Existing output was marked unusable after an administrative or consistency decision.
-
-These outcomes may carry a reason code but should not automatically be reported as system failures.
+A valid Candidate rejected as stale is not a Translation failure.
 
 ---
 
-## 5. Error Ownership
+# 6. Error Principles
 
-Translation owns normalized errors concerning:
-
-* translation command validation;
-* translation source resolution;
-* configuration validation;
-* context resolution;
-* terminology resolution;
-* translation-specific provider eligibility and fallback eligibility;
-* provider response normalization at the Translation boundary;
-* output validation;
-* segment alignment;
-* translation-specific retry eligibility;
-* result assembly;
-* publication validation;
-* variant compatibility and activation intent;
-* cache compatibility.
-
-Runtime owns original execution-control failures concerning:
-
-* queue admission and scheduling;
-* retry timing and backoff;
-* execution-attempt budgets;
-* worker execution and worker crashes;
-* generic timeout enforcement;
-* physical cancellation propagation;
-* resource admission and concurrency control;
-* Event Bus delivery retry.
-
-Provider Management owns original failures concerning:
-
-* provider registration and enablement;
-* provider instance lifecycle;
-* credential resolution and refresh;
-* provider health and capability discovery;
-* local-model residency.
-
-Translation does not own original errors concerning:
-
-* OCR execution;
-* DOM extraction;
-* image acquisition;
-* browser permissions;
-* Reading Session persistence;
-* Knowledge database internals;
-* Presentation rendering.
-
-Errors received from Runtime, Provider Management or other modules may be normalized at the Translation boundary when exposed as Translation failures. Normalization does not transfer ownership of the original failure.
-
-### 5.1 Error Ownership Matrix
-
-| Concern or original failure | Original owner | Translation responsibility |
-|---|---|---|
-| Prepared source cannot be resolved | Text Processing or source storage boundary | Normalize as a Translation source error |
-| Queue admission expires | Runtime | Normalize the execution outcome when it terminates Translation work |
-| Worker crashes | Runtime | Associate the failure with the affected batch attempt |
-| Provider disabled or unavailable | Provider Management | Normalize eligibility or execution impact |
-| Provider response is malformed | Provider adapter / Translation boundary | Normalize and validate provider-neutral output |
-| Retry eligibility | Translation | Decide whether the same semantic work may be attempted again |
-| Retry timing, backoff and budget enforcement | Runtime | Consume the resulting runtime outcome |
-| Result alignment or assembly fails | Translation | Own and publish the normalized Translation failure |
-| Reading authority rejects a result | Reading Session | Record a non-authoritative or stale Translation outcome |
-| Presentation rendering fails | Presentation | No Translation error ownership |
+1. Error codes are stable.
+2. Public errors are provider-neutral.
+3. Source alignment must never be guessed after failure.
+4. Missing Translation Units remain explicit.
+5. Partial valid output should be preserved.
+6. RetryHint is advisory.
+7. Runtime owns retry execution.
+8. Provider credentials never enter errors.
+9. Source/translated text are absent by default.
+10. Upstream ownership remains visible.
+11. Privacy violations fail closed.
+12. Untrusted provider/source content never controls error metadata.
 
 ---
 
-# Part I — Normalized Error Contract
+# 7. TranslationModuleError
 
-## 6. TranslationError
-
-The public normalized error model is:
-
-```text
-TranslationError {
-    errorId
-
-    code
-    category
-    scope
-    severity
-
-    message
-    userMessageKey
-
-    retryability
-    recoveryActions[]
-
-    translationJobId
-    translationAttemptId
-    translationBatchId
-    translationResultId
-    translationVariantId
-    translationIntentId
-    translationRevision
-
-    preparedDocumentId
-    contentRevision
-    affectedPreparedSegmentIds[]
-
-    provider
-    cause
-
-    occurredAt
-
-    metadata
-}
+```text id="lg6l03"
+TranslationModuleError
+├── ContractVersion
+├── ErrorId
+├── ErrorCode
+├── SymbolicName
+├── Category
+├── Scope
+├── Severity
+├── OperationPhase
+├── MessageKey
+├── RetryHint?
+├── RecoveryActions[]
+├── ProviderErrorRef?
+├── ExternalErrorRef?
+├── TranslationPlanId?
+├── TranslationBatchId?
+├── TranslationUnitIds[]
+├── SourceBlockRefs[]
+├── CandidateArtifactId?
+├── DiagnosticsRef?
+├── Metadata?
+└── OccurredAt
 ```
 
-Not every field is present for every error.
+Runtime IDs may be included through correlation context:
 
----
+```text id="l2teym"
+RevisionId
 
-## 7. errorId
+WorkItemId
 
-Uniquely identifies one normalized error occurrence.
+AttemptId
 
-```text
-errorId
+TraceId
 ```
 
-It supports:
+---
 
-* event correlation;
-* logs;
-* diagnostics;
-* support requests;
-* duplicate error handling.
+# 8. Removed Error Identities
 
-The same failure published through multiple channels should retain the same `errorId` where practical.
+Do not use:
+
+```text id="3uk8gd"
+TranslationJobId
+
+TranslationAttemptId
+
+TranslationResultRevision
+
+PreparedDocumentId
+
+PreparedSegmentId
+```
+
+as primary Translation error identity.
+
+Current semantic identities are:
+
+```text id="9mdd70"
+SourceDocumentArtifactId
+
+TranslationIntentId
+
+TranslationPlanId
+
+TranslationUnitId
+
+TranslationBatchId
+
+CandidateArtifactId
+
+TranslationVariantId
+```
 
 ---
 
-## 8. code
+# 9. Error Code Format
 
-A stable machine-readable error code.
+Canonical:
+
+```text id="vwja9r"
+TRN-<CATEGORY>-<NUMBER>
+```
 
 Examples:
 
-```text
-TRANSLATION_SOURCE_NOT_FOUND
-TRANSLATION_PROVIDER_TIMEOUT
-TRANSLATION_OUTPUT_ALIGNMENT_FAILED
+```text id="wqih9d"
+TRN-INPUT-001
+
+TRN-PLAN-001
+
+TRN-UNIT-001
+
+TRN-CTX-001
+
+TRN-TERM-001
+
+TRN-BATCH-001
+
+TRN-PROV-001
+
+TRN-OUT-001
+
+TRN-ALIGN-001
+
+TRN-CAND-001
+
+TRN-VAR-001
+
+TRN-PRIV-001
+
+TRN-SEC-001
+
+TRN-STATE-001
+
+TRN-INT-001
 ```
 
-Rules:
+Optional symbolic aliases may preserve readable names such as:
 
-* uppercase snake case;
-* stable after publication;
-* provider-neutral;
-* sufficiently specific;
-* not based on human-readable messages.
+```text id="5oyn55"
+TRANSLATION_PROVIDER_UNAVAILABLE
+```
+
+but numeric code is the stable canonical identifier.
 
 ---
 
-## 9. category
+# 10. Error Categories
 
-Groups related errors.
+| Prefix  | Category                                   |
+| ------- | ------------------------------------------ |
+| `INPUT` | Translation Attempt Input / SourceDocument |
+| `PLAN`  | Translation Plan                           |
+| `UNIT`  | Translation Unit planning                  |
+| `CTX`   | Translation Context                        |
+| `TERM`  | Knowledge / terminology                    |
+| `BATCH` | Translation Batch planning                 |
+| `PROV`  | provider boundary / execution              |
+| `OUT`   | normalized provider output validation      |
+| `ALIGN` | source ↔ translation alignment             |
+| `CAND`  | Candidate assembly / validation            |
+| `VAR`   | immutable variant/correction semantics     |
+| `PRIV`  | privacy                                    |
+| `SEC`   | security                                   |
+| `STATE` | Translation-owned state invariants         |
+| `INT`   | internal Translation failure               |
 
-Canonical categories:
+Removed Translation-owned categories:
 
-```text
-COMMAND_VALIDATION
-SOURCE
-CONFIGURATION
-CONTEXT
-KNOWLEDGE
-PROVIDER_SELECTION
-PROVIDER_AUTHENTICATION
-PROVIDER_AVAILABILITY
-PROVIDER_RATE_LIMIT
-PROVIDER_EXECUTION
-PROVIDER_RESPONSE
-OUTPUT_VALIDATION
-ALIGNMENT
+```text id="f2yag0"
 TIMEOUT
+
 CANCELLATION
+
 SUPERSESSION
+
 CACHE
-RESULT_ASSEMBLY
+
 PUBLICATION
-VARIANT
-CONCURRENCY
-SECURITY
-PRIVACY
-INTERNAL
 ```
 
 ---
 
-## 10. scope
+# 11. Error Scope
 
-Identifies the entity or operation primarily affected.
+```text id="0v2ekd"
+TranslationErrorScope
+├── MODULE
+├── INPUT
+├── PLAN
+├── TRANSLATION_UNIT
+├── TRANSLATION_BATCH
+├── PROVIDER_REQUEST
+├── PROVIDER_OUTPUT
+├── CANDIDATE
+└── VARIANT
+```
 
-Canonical scopes:
+Do not use:
 
-```text
-COMMAND
+```text id="dcksmh"
 JOB
-ATTEMPT
-BATCH
-RESULT
-VARIANT
-SEGMENT
-PROVIDER
+
+TRANSLATION_ATTEMPT
+
+RESULT_REVISION
+
 CACHE
-MODULE
 ```
 
-An error may affect several entities, but it must have one primary scope.
+as core Translation scopes.
 
 ---
 
-## 11. severity
+# 12. Severity
 
-Canonical error severity values:
-
-```text
+```text id="cr7jd6"
 NOTICE
+
 DEGRADED
+
 ERROR
+
 CRITICAL
 ```
 
-### NOTICE
+## NOTICE
 
-The operation was rejected safely with no corrupted state.
+Operation was rejected safely or non-fatal condition observed.
 
-Example:
+## DEGRADED
 
-```text
-Unsupported target language requested
-```
+Valid output may still exist but with reduced quality/completeness.
 
-### DEGRADED
+## ERROR
 
-Part of the operation failed, but partial usable output exists.
+Current semantic execution cannot produce required valid output.
 
-Example:
+## CRITICAL
 
-```text
-One batch failed while other batches succeeded
-```
-
-### ERROR
-
-The intended operation could not complete.
-
-Example:
-
-```text
-All translation attempts failed
-```
-
-### CRITICAL
-
-A severe module integrity, security or persistent consistency problem occurred.
-
-Example:
-
-```text
-Published result references missing persistent segments
-```
-
-`CRITICAL` should be rare.
+Translation invariant, security, privacy, or contract integrity violation.
 
 ---
 
-## 12. message
+# 13. Retry Hint
 
-A developer-facing normalized explanation.
+```text id="0256xv"
+TranslationRetryHint
+├── Retryability
+├── SuggestedStrategies[]
+├── ProviderFallbackAllowed
+├── ReasonCode
+└── Metadata?
+```
 
-The message must:
-
-* avoid provider credentials;
-* avoid full source text;
-* avoid full translated text;
-* avoid raw provider response bodies;
-* avoid unstable provider-native wording.
-
-Example:
-
-```text
-Provider execution exceeded the configured batch timeout.
+```text id="hq588c"
+Retryability
+├── RETRYABLE
+├── CONDITIONALLY_RETRYABLE
+└── NON_RETRYABLE
 ```
 
 ---
 
-## 13. userMessageKey
+# 14. Retry Strategies
 
-An optional localization key for user-facing presentation.
+```text id="o8v4pm"
+SAME_PROVIDER
 
-Example:
+ALTERNATIVE_PROVIDER
 
-```text
-translation.error.provider_timeout
+SMALLER_BATCH
+
+REDUCE_CONTEXT
+
+REDUCE_TERMINOLOGY_CONTEXT
+
+ALTERNATIVE_CONTEXT_POLICY
+
+ALTERNATIVE_TRANSLATION_PROFILE
+
+RESOURCE_WAIT
+
+USE_LOCAL_PROVIDER
+
+NO_RETRY
 ```
 
-Translation should not hardcode final localized UI wording into the domain error contract.
+No:
 
----
-
-## 14. retryability
-
-```text
-Retryability {
-    retryable
-    recommendedRetryScope
-    requiresConfigurationChange
-
-    advisoryRetryAfter
-    advisoryMaximumAdditionalAttempts
-}
-```
-
-Possible retry scopes:
-
-```text
-NONE
-SAME_BATCH
-FAILED_SEGMENTS
-NEW_ATTEMPT
-NEW_PROVIDER
+```text id="bm97jv"
 NEW_JOB
-MANUAL_ONLY
+
+NEW_TRANSLATION_ATTEMPT
 ```
 
-`advisoryRetryAfter` and `advisoryMaximumAdditionalAttempts` are Translation recommendations only. Runtime owns actual retry timing, backoff, admission and execution-budget enforcement.
+because Runtime creates new Attempt.
 
 ---
 
-## 15. recoveryActions
+# 15. Recovery Actions
 
-Machine-readable recovery suggestions.
+Possible recommendations:
 
-Canonical actions:
-
-```text
-RETRY
-RETRY_FAILED_BATCHES
+```text id="41ijki"
 USE_FALLBACK_PROVIDER
+
 SELECT_DIFFERENT_PROVIDER
-REDUCE_BATCH_SIZE
-REDUCE_CONTEXT_SIZE
-CHANGE_TRANSLATION_PROFILE
-CHANGE_TARGET_LANGUAGE
-REFRESH_SOURCE
-REBUILD_PREPARED_DOCUMENT
-UPDATE_CREDENTIALS
-WAIT_AND_RETRY
-CHECK_NETWORK
+
 USE_LOCAL_PROVIDER
-REQUEST_RETRANSLATION
+
+REDUCE_BATCH_SIZE
+
+REDUCE_CONTEXT_SIZE
+
+CHANGE_TRANSLATION_PROFILE
+
+CHANGE_TARGET_LANGUAGE
+
+REFRESH_SOURCE_DOCUMENT
+
 REVIEW_TERMINOLOGY
+
 REMOVE_CONFLICTING_TERM
-SELECT_ANOTHER_VARIANT
+
+CREATE_NEW_TRANSLATION_VARIANT
+
 CONTACT_SUPPORT
+
 NONE
 ```
 
-These actions are recommendations, not automatic commands.
+Recommendations are not automatic commands.
 
 ---
 
-## 16. ProviderErrorReference
+# 16. Provider Error Reference
 
-Normalized provider-related details:
-
-```text
-ProviderErrorReference {
-    providerId
-    modelIdentifier
-
-    providerRequestId
-
-    normalizedProviderCode
-    providerHttpStatus
-
-    providerRetryAfter
-}
+```text id="ckj2v6"
+TranslationProviderErrorRef
+├── ProviderId
+├── ModelIdentifier?
+├── ProviderRequestId?
+├── NormalizedProviderCode
+├── ProviderCategory
+├── HttpStatus?
+├── RetryAfter?
+├── DiagnosticsRef?
+└── OccurredAt
 ```
 
-It must not include:
+Must not contain:
 
-* API keys;
-* access tokens;
-* raw headers;
-* full raw body;
-* provider credentials;
-* private internal prompt.
+* API key
+* token
+* Authorization header
+* raw provider response
+* raw request
+* raw prompt
+* credential path
 
 ---
 
-## 17. ErrorCause
+# 17. External Error Reference
 
-Optional normalized cause chain:
-
-```text
-ErrorCause {
-    code
-    category
-    message
-}
+```text id="odflpy"
+ExternalErrorRef
+├── Owner
+├── ErrorCode
+├── ErrorContractVersion
+├── ScopeRef?
+├── Retryability?
+├── DiagnosticsRef?
+└── Metadata?
 ```
 
-The public cause chain should be shallow.
+Possible owners:
 
-Full exception stacks remain internal.
+```text id="uyyozx"
+RUNTIME
+
+PROVIDER_MANAGEMENT
+
+ARTIFACT_STORE
+
+RESOURCE_MANAGER
+
+TEXT_PROCESSING
+
+KNOWLEDGE
+```
 
 ---
 
-## 18. metadata
+# 18. Error Metadata
 
-Metadata contains bounded non-sensitive diagnostic values.
+Allowed:
 
-Allowed examples:
+```text id="xdp18v"
+unitCount
 
-```text
-segmentCount
 batchSize
-configuredTimeout
-elapsedTime
-attemptNumber
-providerLimit
+
 estimatedTokenCount
+
+providerLimit
+
+missingUnitCount
+
+failedUnitCount
+
+contextEntryCount
+
+terminologyConstraintCount
+
+elapsedMs
 ```
 
-Prohibited examples:
+Forbidden:
 
-```text
+```text id="yiqjpr"
 sourceText
+
 translatedText
+
 rawPrompt
+
+rawProviderResponse
+
 apiKey
+
 authorizationHeader
-fullProviderResponse
+
+credential
 ```
 
 ---
 
-# Part II — Error Code Naming
+# 19. Input Errors
 
-## 19. Naming Convention
+## TRN-INPUT-001 — TRANSLATION_INPUT_INVALID
 
-Translation error codes use:
-
-```text
-TRANSLATION_<CONCERN>_<CONDITION>
-```
+TranslationAttemptInput malformed or inconsistent.
 
 Examples:
 
-```text
-TRANSLATION_SOURCE_NOT_FOUND
-TRANSLATION_PROVIDER_UNAVAILABLE
-TRANSLATION_OUTPUT_SEGMENT_MISSING
+* missing SourceDocumentArtifactRef
+* missing TranslationIntent
+* missing Runtime context
+* invalid PrivacyContextRef
+* invalid SourceSelection
+
+Severity:
+
+```text id="q2nvs1"
+ERROR
 ```
 
-Warnings use:
+Retry:
 
-```text
-TRANSLATION_WARNING_<CONDITION>
+```text id="9pgn36"
+NON_RETRYABLE
 ```
+
+until input changes.
+
+---
+
+# 20. TRN-INPUT-002 — SOURCE_DOCUMENT_UNAVAILABLE
+
+SourceDocument Artifact cannot be resolved or leased.
+
+Retry:
+
+```text id="dzcpmg"
+CONDITIONALLY_RETRYABLE
+```
+
+Suggested:
+
+```text id="jeihrn"
+RESOURCE_WAIT
+```
+
+---
+
+# 21. TRN-INPUT-003 — SOURCE_DOCUMENT_INCOMPATIBLE
+
+SourceDocument exists but is incompatible with Translation contract.
 
 Examples:
 
-```text
-TRANSLATION_WARNING_PROVIDER_FALLBACK_USED
-TRANSLATION_WARNING_PRONOUN_AMBIGUITY
+* unsupported contract major
+* semantic content identity mismatch
+* incompatible privacy partition
+* missing required source structure
+
+Retry:
+
+```text id="7jetup"
+NON_RETRYABLE
 ```
+
+until compatible Artifact exists.
 
 ---
 
-## 20. Stability Rule
+# 22. TRN-INPUT-004 — SOURCE_SELECTION_INVALID
 
-Once an error code is used in:
-
-* public API responses;
-* integration events;
-* telemetry;
-* persisted job failures;
-
-its semantic meaning must not change.
-
-A new meaning requires a new code.
-
----
-
-## 21. Unknown Error Code
-
-Consumers must support:
-
-```text
-TRANSLATION_UNKNOWN_ERROR
-```
-
-Unknown provider or internal failures may temporarily normalize to this code.
-
-The implementation should still preserve internal diagnostic references.
-
----
-
-# Part III — Command Validation Errors
-
-## 22. TRANSLATION_COMMAND_INVALID
-
-The command contract is malformed or internally inconsistent.
-
-```text
-category: COMMAND_VALIDATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
+Selected SourceBlocks cannot be resolved consistently.
 
 Examples:
 
-* required fields missing;
-* mutually exclusive source modes supplied;
-* invalid publication policy combination;
-* invalid retry scope.
+* missing SourceBlock IDs
+* duplicated selections
+* invalid sequence range
+* selected block outside Artifact
 
-Recovery:
+Retry:
 
-```text
-Correct the command and submit again.
+```text id="knhj7u"
+NON_RETRYABLE
 ```
+
+until selection changes.
 
 ---
 
-## 23. TRANSLATION_IDEMPOTENCY_CONFLICT
+# 23. Empty Source Is Not Error
 
-The same idempotency key was used with different semantic input.
+If no selected content requires translation:
 
-```text
-category: COMMAND_VALIDATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
+```text id="rnwe9o"
+Completeness = EMPTY_VALID
 ```
 
-Recovery:
+Possible warning:
 
-```text
-Use a new idempotency key or resend the original equivalent command.
+```text id="didjgd"
+NO_TRANSLATABLE_CONTENT
 ```
+
+Do not return:
+
+```text id="givyfa"
+TRANSLATION_SOURCE_EMPTY
+```
+
+as fatal error.
 
 ---
 
-## 24. TRANSLATION_SEGMENT_SELECTION_EMPTY
+# 24. Source Language Errors
 
-No translatable segment was selected.
+## TRN-INPUT-005 — SOURCE_LANGUAGE_UNRESOLVED
 
-```text
-category: COMMAND_VALIDATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
+Source language required but cannot be determined.
 
-This may occur when:
+Retry:
 
-* explicit selection is empty;
-* every selected segment is marked `DO_NOT_TRANSLATE`;
-* selected range resolves to no prepared segments.
-
----
-
-## 25. TRANSLATION_SEGMENT_SELECTION_INVALID
-
-One or more selected prepared segment identifiers are invalid.
-
-```text
-category: COMMAND_VALIDATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
-
-Metadata may contain:
-
-```text
-invalidSegmentCount
-```
-
-It should not include unrelated source text.
-
----
-
-## 26. TRANSLATION_DUPLICATE_SEGMENT_SELECTION
-
-The command selected the same prepared segment more than once.
-
-```text
-category: COMMAND_VALIDATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
-
-Translation must not silently duplicate output for the segment.
-
----
-
-## 27. TRANSLATION_TARGET_LANGUAGE_REQUIRED
-
-No explicit target language was supplied.
-
-```text
-category: CONFIGURATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
-
-Recovery:
-
-```text
-Choose a target language and create a new command.
-```
-
----
-
-## 28. TRANSLATION_TARGET_LANGUAGE_UNSUPPORTED
-
-No eligible configured provider supports the target language.
-
-```text
-category: CONFIGURATION
-scope: COMMAND
-severity: NOTICE
-retryable: conditional
-```
-
-Retry becomes possible after:
-
-* selecting another provider;
-* installing a local model;
-* changing target language;
-* updating provider capabilities.
-
----
-
-## 29. TRANSLATION_LANGUAGE_PAIR_UNSUPPORTED
-
-The requested source and target language pair is unsupported.
-
-```text
-category: CONFIGURATION
-scope: COMMAND
-severity: NOTICE
-retryable: false without configuration change
-```
-
----
-
-## 30. TRANSLATION_PROFILE_NOT_FOUND
-
-The referenced translation profile does not exist.
-
-```text
-category: CONFIGURATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
-
----
-
-## 31. TRANSLATION_PROFILE_REVISION_NOT_FOUND
-
-The requested immutable profile revision is unavailable.
-
-```text
-category: CONFIGURATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
-
-Recovery may require using the current profile revision and starting a new job.
-
----
-
-## 32. TRANSLATION_PUBLICATION_POLICY_INVALID
-
-The publication configuration is inconsistent.
-
-Examples:
-
-* progressive output disabled but minimum progressive segments supplied;
-* atomic mode combined with segment-authority requirements;
-* partial output required while partial execution is prohibited.
-
-```text
-category: CONFIGURATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
-
----
-
-## 33. TRANSLATION_PROVIDER_POLICY_UNSATISFIABLE
-
-No provider can satisfy the requested policy.
-
-Examples:
-
-* `LOCAL_REQUIRED` with no local provider;
-* required provider excluded;
-* required capability unavailable;
-* remote provider required while remote use is disabled.
-
-```text
-category: PROVIDER_SELECTION
-scope: COMMAND
-severity: NOTICE
-retryable: false without policy change
-```
-
----
-
-# Part IV — Source Errors
-
-## 34. TRANSLATION_SOURCE_NOT_FOUND
-
-The referenced prepared document cannot be resolved.
-
-```text
-category: SOURCE
-scope: JOB
-severity: ERROR
-retryable: conditional
-```
-
-Possible causes:
-
-* document deleted;
-* incorrect identifier;
-* upstream storage unavailable;
-* source expired.
-
-Recovery actions:
-
-```text
-REFRESH_SOURCE
-REBUILD_PREPARED_DOCUMENT
-RETRY
-```
-
----
-
-## 35. TRANSLATION_SOURCE_REVISION_NOT_FOUND
-
-The document exists but the requested immutable revision is unavailable.
-
-```text
-category: SOURCE
-scope: JOB
-severity: ERROR
-retryable: false for the same revision
-```
-
-A new job may target the current revision.
-
----
-
-## 36. TRANSLATION_SOURCE_REVISION_MISMATCH
-
-The resolved document revision differs from the job source identity.
-
-```text
-category: SOURCE
-scope: JOB
-severity: ERROR
-retryable: false within the current job
-```
-
-State consequence:
-
-```text
-Job → SUPERSEDED
-```
-
-or:
-
-```text
-Job → FAILED
-```
-
-depending on whether a newer revision exists.
-
----
-
-## 37. TRANSLATION_SOURCE_NOT_PREPARED
-
-The supplied source is raw or has not passed through Text Processing.
-
-```text
-category: SOURCE
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
-
-Recovery:
-
-```text
-Process the source through Text Processing first.
-```
-
----
-
-## 38. TRANSLATION_SOURCE_EMPTY
-
-The prepared source contains no usable translatable text.
-
-```text
-category: SOURCE
-scope: JOB
-severity: NOTICE
-retryable: false
-```
-
-This may be a valid no-op in some workflows.
-
-The caller should not treat it as an infrastructure failure.
-
----
-
-## 39. TRANSLATION_SOURCE_SEGMENT_NOT_FOUND
-
-A selected segment no longer exists in the resolved prepared document revision.
-
-```text
-category: SOURCE
-scope: SEGMENT
-severity: ERROR
-retryable: false within the current job
-```
-
----
-
-## 40. TRANSLATION_SOURCE_SEGMENT_EMPTY
-
-A selected segment has no source text and is not intentionally non-translatable.
-
-```text
-category: SOURCE
-scope: SEGMENT
-severity: DEGRADED
-retryable: false
-```
-
-Possible job outcome:
-
-```text
-PARTIALLY_COMPLETED
-COMPLETED_WITH_WARNINGS
-FAILED
-```
-
-depending on publication policy.
-
----
-
-## 41. TRANSLATION_SOURCE_LANGUAGE_UNKNOWN
-
-The source language could not be determined and no explicit language was supplied.
-
-```text
-category: SOURCE
-scope: JOB
-severity: ERROR
-retryable: conditional
-```
-
-Recovery:
-
-```text
-Provide an explicit source language or select a provider with detection support.
-```
-
----
-
-## 42. TRANSLATION_SOURCE_LANGUAGE_CONFLICT
-
-Document-level and segment-level language information conflict materially.
-
-```text
-category: SOURCE
-scope: SEGMENT or JOB
-severity: DEGRADED
-retryable: conditional
-```
-
-Possible handling:
-
-* use explicit segment hint;
-* use document language;
-* perform provider detection;
-* fail strict mode;
-* continue with warning.
-
----
-
-## 43. TRANSLATION_SOURCE_CONTENT_TOO_LARGE
-
-The selected source exceeds job-level limits.
-
-```text
-category: SOURCE
-scope: JOB
-severity: ERROR
-retryable: false without input change
-```
-
-Recovery:
-
-```text
-REDUCE_BATCH_SIZE
-Reduce selected segment range
-Split the prepared document
-```
-
----
-
-# Part V — Context Errors
-
-## 44. TRANSLATION_CONTEXT_NOT_FOUND
-
-A required context snapshot cannot be resolved.
-
-```text
-category: CONTEXT
-scope: JOB
-severity: ERROR
-retryable: conditional
-```
-
-Behavior depends on `missingContextBehavior`.
-
-### Strict context
-
-```text
-Job may fail.
-```
-
-### Best-effort context
-
-```text
-Continue with warning.
-```
-
----
-
-## 45. TRANSLATION_CONTEXT_REVISION_MISMATCH
-
-Resolved context does not match the job’s immutable context revision.
-
-```text
-category: CONTEXT
-scope: JOB
-severity: ERROR
-retryable: false within current job
-```
-
-A new job should use the new context revision.
-
----
-
-## 46. TRANSLATION_CONTEXT_TOO_LARGE
-
-Context exceeds configured or provider limits.
-
-```text
-category: CONTEXT
-scope: ATTEMPT or BATCH
-severity: ERROR
-retryable: true with reduced context
-```
-
-Recovery actions:
-
-```text
-REDUCE_CONTEXT_SIZE
-RETRY
-```
-
----
-
-## 47. TRANSLATION_CONTEXT_CONSTRUCTION_FAILED
-
-The module could not assemble valid translation context.
-
-```text
-category: CONTEXT
-scope: ATTEMPT
-severity: ERROR
-retryable: conditional
-```
-
-Examples:
-
-* unresolved context references;
-* invalid context ordering;
-* context serialization failure;
-* incompatible context type.
-
----
-
-## 48. TRANSLATION_CONTEXT_PRIVACY_RESTRICTED
-
-Requested context cannot be sent to the selected provider due to privacy policy.
-
-```text
-category: PRIVACY
-scope: ATTEMPT
-severity: ERROR
-retryable: true with another provider
-```
-
-Recovery:
-
-```text
-USE_LOCAL_PROVIDER
-SELECT_DIFFERENT_PROVIDER
-Reduce context
-```
-
----
-
-# Part VI — Knowledge and Terminology Errors
-
-## 49. TRANSLATION_KNOWLEDGE_SNAPSHOT_NOT_FOUND
-
-The referenced Knowledge snapshot is unavailable.
-
-```text
-category: KNOWLEDGE
-scope: JOB
-severity: ERROR
-retryable: conditional
-```
-
-Strict terminology policy may fail the job.
-
-Best-effort policy may continue with warning.
-
----
-
-## 50. TRANSLATION_GLOSSARY_REVISION_NOT_FOUND
-
-The requested glossary revision cannot be resolved.
-
-```text
-category: KNOWLEDGE
-scope: JOB
-severity: ERROR
-retryable: false within current job
-```
-
----
-
-## 51. TRANSLATION_TERMINOLOGY_CONFLICT
-
-Two or more terminology constraints conflict.
-
-Example:
-
-```text
-Same source term
-    → two different LOCKED target terms
-```
-
-```text
-category: KNOWLEDGE
-scope: JOB or SEGMENT
-severity: ERROR or DEGRADED
-retryable: false without terminology change
-```
-
-Behavior depends on conflict policy:
-
-```text
-FAIL
-WARN_AND_CONTINUE
-PREFER_LOCKED
-PREFER_MOST_SPECIFIC_SCOPE
-```
-
----
-
-## 52. TRANSLATION_LOCKED_TERM_VIOLATED
-
-Provider output violates a locked terminology constraint.
-
-```text
-category: OUTPUT_VALIDATION
-scope: BATCH or SEGMENT
-severity: ERROR
-retryable: true
+```text id="u5iwkf"
+CONDITIONALLY_RETRYABLE
 ```
 
 Possible recovery:
 
-* retry with stronger provider instructions;
-* retry with another provider;
-* split affected segments;
-* fail after retry exhaustion.
+* explicit source language
+* compatible language-detection provider
+* alternate Translation Profile
 
 ---
 
-## 53. TRANSLATION_TERMINOLOGY_LIMIT_EXCEEDED
+# 25. TRN-INPUT-006 — TARGET_LANGUAGE_INVALID
 
-Terminology constraints exceed provider or request limits.
+Target language missing or invalid.
 
-```text
-category: KNOWLEDGE
-scope: ATTEMPT
-severity: ERROR
-retryable: true with reduced terminology context
+Retry:
+
+```text id="9751wr"
+NON_RETRYABLE
 ```
 
-Translation must not silently discard locked terms.
+until Intent changes.
 
 ---
 
-## 54. TRANSLATION_CHARACTER_CONTEXT_INVALID
+# 26. TRN-INPUT-007 — LANGUAGE_PAIR_UNSUPPORTED
 
-Character relationship or name context is malformed or contradictory.
+No valid semantic/provider path supports requested pair.
 
-```text
-category: KNOWLEDGE
-scope: JOB
-severity: DEGRADED
-retryable: conditional
+Retry:
+
+```text id="c8elxq"
+CONDITIONALLY_RETRYABLE
 ```
 
-Best-effort translation may continue with warnings.
+when provider/configuration changes.
 
 ---
 
-# Part VII — Provider Selection Errors
+# 27. Plan Errors
 
-## 55. TRANSLATION_PROVIDER_NOT_FOUND
+## TRN-PLAN-001 — TRANSLATION_PLAN_INVALID
 
-The required or preferred provider does not exist in Provider Management.
-
-```text
-category: PROVIDER_SELECTION
-scope: JOB
-severity: ERROR
-retryable: false without configuration change
-```
-
----
-
-## 56. TRANSLATION_PROVIDER_DISABLED
-
-The selected provider is disabled.
-
-```text
-category: PROVIDER_SELECTION
-scope: ATTEMPT
-severity: ERROR
-retryable: true with fallback
-```
-
----
-
-## 57. TRANSLATION_PROVIDER_UNAVAILABLE
-
-The provider is temporarily unavailable.
-
-```text
-category: PROVIDER_AVAILABILITY
-scope: ATTEMPT
-severity: ERROR
-retryable: true
-```
-
-Recovery:
-
-```text
-RETRY
-USE_FALLBACK_PROVIDER
-WAIT_AND_RETRY
-```
-
----
-
-## 58. TRANSLATION_PROVIDER_CAPABILITY_MISSING
-
-The provider lacks a required capability.
+Plan cannot become READY.
 
 Examples:
 
-* unsupported language pair;
-* no local execution;
-* no structured output;
-* insufficient context size;
-* glossary support required but unavailable.
-
-```text
-category: PROVIDER_SELECTION
-scope: ATTEMPT
-severity: ERROR
-retryable: true with another provider
-```
+* contradictory Translation Intent
+* impossible Provider Policy
+* invalid PartialResultPolicy
+* incompatible source/profile
+* invalid terminology/context combination
 
 ---
 
-## 59. TRANSLATION_NO_ELIGIBLE_PROVIDER
+# 28. TRN-PLAN-002 — TRANSLATION_PROFILE_UNSUPPORTED
 
-Provider selection found no eligible provider.
+Requested profile unsupported.
 
-```text
-category: PROVIDER_SELECTION
-scope: JOB
-severity: ERROR
-retryable: conditional
+Retry:
+
+```text id="th4wzs"
+NON_RETRYABLE
 ```
 
-Possible state consequence:
-
-```text
-Job → FAILED
-```
-
-unless provider availability is expected to change and queue waiting is permitted.
+until profile changes.
 
 ---
 
-## 60. TRANSLATION_PROVIDER_POLICY_VIOLATION
+# 29. TRN-PLAN-003 — PROVIDER_POLICY_UNSATISFIABLE
 
-Execution attempted to use a provider prohibited by the job policy.
-
-```text
-category: SECURITY
-scope: ATTEMPT
-severity: CRITICAL
-retryable: false until corrected
-```
+No eligible execution path satisfies Provider Policy.
 
 Examples:
 
-* remote provider used under `LOCAL_REQUIRED`;
-* excluded provider selected;
-* unapproved data region selected.
-
-This indicates an orchestration defect rather than a normal provider failure.
-
----
-
-# Part VIII — Provider Authentication Errors
-
-## 61. TRANSLATION_PROVIDER_CREDENTIALS_MISSING
-
-Required credentials are unavailable.
-
-```text
-category: PROVIDER_AUTHENTICATION
-scope: PROVIDER
-severity: ERROR
-retryable: false until credentials are configured
+```text id="a76vao"
+LOCAL_REQUIRED
++
+no local provider
 ```
 
-Recovery:
+or:
 
-```text
-UPDATE_CREDENTIALS
-SELECT_DIFFERENT_PROVIDER
-USE_LOCAL_PROVIDER
+```text id="yk498p"
+required provider excluded
+```
+
+Retry:
+
+```text id="31s699"
+CONDITIONALLY_RETRYABLE
 ```
 
 ---
 
-## 62. TRANSLATION_PROVIDER_AUTHENTICATION_FAILED
+# 30. TRN-PLAN-004 — PRIVACY_PROVIDER_POLICY_CONFLICT
 
-The provider rejected configured credentials.
+Provider Policy conflicts with Privacy Context.
 
-```text
-category: PROVIDER_AUTHENTICATION
-scope: PROVIDER
-severity: ERROR
-retryable: false without credential change
+Example:
+
+```text id="u4xsgh"
+remote provider required
++
+Privacy = LOCAL_ONLY
 ```
 
-The public error must not include the credential value or authorization header.
+Severity:
+
+```text id="f4fa58"
+ERROR
+```
+
+Retry only after semantic policy change.
 
 ---
 
-## 63. TRANSLATION_PROVIDER_AUTHORIZATION_FAILED
+# 31. Translation Unit Errors
 
-Credentials are valid but lack permission for the requested resource or model.
+## TRN-UNIT-001 — TRANSLATION_UNIT_PLANNING_FAILED
 
-```text
-category: PROVIDER_AUTHENTICATION
-scope: PROVIDER
-severity: ERROR
-retryable: false without permission or provider change
-```
+Translation cannot construct valid Translation Units.
 
----
+Retry:
 
-## 64. TRANSLATION_PROVIDER_CREDENTIALS_EXPIRED
-
-Configured credentials have expired.
-
-```text
-category: PROVIDER_AUTHENTICATION
-scope: PROVIDER
-severity: ERROR
-retryable: conditional
-```
-
-Automated credential refresh may occur within Provider Management.
-
-Translation should not own long-term credential refresh logic.
-
----
-
-# Part IX — Provider Rate and Quota Errors
-
-## 65. TRANSLATION_PROVIDER_RATE_LIMITED
-
-The provider temporarily rejected execution due to request-rate limits.
-
-```text
-category: PROVIDER_RATE_LIMIT
-scope: ATTEMPT or BATCH
-severity: ERROR
-retryable: true
-```
-
-Required normalized information where available:
-
-```text
-retryAfter
-providerId
-providerRequestId
-```
-
-Recovery:
-
-```text
-WAIT_AND_RETRY
-USE_FALLBACK_PROVIDER
+```text id="o5uj0d"
+CONDITIONALLY_RETRYABLE
 ```
 
 ---
 
-## 66. TRANSLATION_PROVIDER_QUOTA_EXCEEDED
+# 32. TRN-UNIT-002 — TRANSLATION_UNIT_SOURCE_MISSING
 
-Provider usage quota or account balance is exhausted.
+TranslationUnit references unavailable SourceBlock.
 
-```text
-category: PROVIDER_RATE_LIMIT
-scope: PROVIDER
-severity: ERROR
-retryable: false without quota change
+Severity:
+
+```text id="ddbs6s"
+CRITICAL
 ```
 
-Fallback may still be possible.
+Retry:
+
+```text id="phcfpl"
+NON_RETRYABLE
+```
+
+for unchanged source/plan.
 
 ---
 
-## 67. TRANSLATION_PROVIDER_REQUEST_TOO_LARGE
+# 33. TRN-UNIT-003 — TRANSLATION_UNIT_DUPLICATE_SOURCE_MAPPING
 
-The provider rejected the request because it exceeded size or context limits.
+Unit construction creates prohibited duplicate mapping.
 
-```text
-category: PROVIDER_EXECUTION
-scope: BATCH
-severity: ERROR
-retryable: true
+Severity:
+
+```text id="m77b5g"
+ERROR
 ```
 
-Recovery:
-
-```text
-REDUCE_BATCH_SIZE
-REDUCE_CONTEXT_SIZE
-RETRY_FAILED_BATCHES
-```
+or `CRITICAL` for invariant defects.
 
 ---
 
-## 68. TRANSLATION_PROVIDER_OUTPUT_LIMIT_EXCEEDED
+# 34. TRN-UNIT-004 — TRANSLATION_UNIT_SPLIT_UNTRACEABLE
 
-Provider generation stopped because output limits were reached.
+One SourceBlock was split into multiple Units without valid source-range traceability.
 
-```text
-category: PROVIDER_RESPONSE
-scope: BATCH
-severity: DEGRADED or ERROR
-retryable: true
-```
+Severity:
 
-If complete aligned segments exist, they may be retained.
-
-Missing segments must be explicit.
-
----
-
-# Part X — Network and Timeout Errors
-
-## 69. TRANSLATION_NETWORK_UNAVAILABLE
-
-No network path is available for a remote provider.
-
-```text
-category: PROVIDER_AVAILABILITY
-scope: ATTEMPT
-severity: ERROR
-retryable: true
-```
-
-Recovery:
-
-```text
-CHECK_NETWORK
-USE_LOCAL_PROVIDER
-WAIT_AND_RETRY
+```text id="qnstc5"
+CRITICAL
 ```
 
 ---
 
-## 70. TRANSLATION_PROVIDER_CONNECTION_FAILED
+# 35. TRN-UNIT-005 — TRANSLATION_UNIT_ORDER_INVALID
 
-A connection to the provider could not be established.
+Unit order cannot be deterministically derived from SourceDocument sequence.
 
-```text
-category: PROVIDER_EXECUTION
-scope: BATCH or ATTEMPT
-severity: ERROR
-retryable: true
+Retry:
+
+```text id="ro143g"
+NON_RETRYABLE
+```
+
+until source/plan changes.
+
+Translation must not reconstruct OCR Reading Order.
+
+---
+
+# 36. Context Errors
+
+## TRN-CTX-001 — REQUIRED_CONTEXT_UNAVAILABLE
+
+A required context snapshot/reference cannot be resolved.
+
+Strict policy:
+
+```text id="yfb34r"
+ERROR
+```
+
+Best-effort policy should instead emit warning.
+
+---
+
+# 37. TRN-CTX-002 — CONTEXT_IDENTITY_MISMATCH
+
+Resolved context does not match immutable Plan identity.
+
+Retry:
+
+```text id="1cocf5"
+NON_RETRYABLE
+```
+
+within current Plan.
+
+---
+
+# 38. TRN-CTX-003 — CONTEXT_TOO_LARGE
+
+Context exceeds Provider/Plan limit.
+
+Retry:
+
+```text id="78ha76"
+RETRYABLE
+```
+
+Suggested:
+
+```text id="w29tzu"
+REDUCE_CONTEXT
 ```
 
 ---
 
-## 71. TRANSLATION_PROVIDER_CONNECTION_INTERRUPTED
+# 39. TRN-CTX-004 — CONTEXT_CONSTRUCTION_FAILED
 
-The connection was lost during provider execution.
-
-```text
-category: PROVIDER_EXECUTION
-scope: BATCH
-severity: ERROR
-retryable: true
-```
-
-Partial provider output must not be accepted unless it passes normal structural validation.
-
----
-
-## 72. TRANSLATION_QUEUE_TIMEOUT
-
-Runtime reported that execution admission or queue waiting exceeded the permitted deadline for this Translation job. Translation does not own the queue implementation.
-
-```text
-category: TIMEOUT
-scope: JOB
-severity: ERROR
-retryable: conditional
-```
-
-State consequence:
-
-```text
-QUEUED → FAILED
-```
-
-or a new runtime admission request according to policy. Runtime owns whether and when execution is admitted again.
-
----
-
-## 73. TRANSLATION_ATTEMPT_TIMEOUT
-
-An attempt exceeded its allowed execution duration.
-
-```text
-category: TIMEOUT
-scope: ATTEMPT
-severity: ERROR
-retryable: true
-```
-
-State consequence:
-
-```text
-Attempt RUNNING → FAILED
-Job RUNNING → RETRY_SCHEDULED or FAILED
-```
-
----
-
-## 74. TRANSLATION_BATCH_TIMEOUT
-
-A batch exceeded its allowed execution duration.
-
-```text
-category: TIMEOUT
-scope: BATCH
-severity: ERROR
-retryable: true
-```
-
-Successful sibling batches remain completed.
-
----
-
-## 75. TRANSLATION_JOB_TIMEOUT
-
-The total job deadline was exceeded.
-
-```text
-category: TIMEOUT
-scope: JOB
-severity: ERROR
-retryable: false within the same job
-```
-
-State consequence:
-
-```text
-Job → FAILED
-```
-
-A caller deadline cancellation may instead produce `CANCELLED`.
-
----
-
-# Part XI — Provider Execution Errors
-
-## 76. TRANSLATION_PROVIDER_REQUEST_REJECTED
-
-The provider rejected a syntactically valid request for a non-authentication reason.
-
-```text
-category: PROVIDER_EXECUTION
-scope: BATCH
-severity: ERROR
-retryable: conditional
-```
+Context entries cannot be safely assembled.
 
 Examples:
 
-* unsupported parameter combination;
-* content rejected;
-* model unavailable for account;
-* unsupported language pair.
+* unresolved refs
+* invalid relationship
+* source/context ordering conflict
+* unsupported context type
 
 ---
 
-## 77. TRANSLATION_PROVIDER_CONTENT_REJECTED
+# 40. Missing Optional Context
 
-The provider refused to process the supplied content.
+Use warning:
 
-```text
-category: PROVIDER_EXECUTION
-scope: BATCH
-severity: ERROR
-retryable: conditional
+```text id="bxb6p4"
+MISSING_OPTIONAL_CONTEXT
 ```
 
-Recovery may include:
-
-* using another eligible provider;
-* using a local provider;
-* reducing context;
-* informing the user.
-
-Translation must not falsely report content rejection as a network error.
+not ModuleError.
 
 ---
 
-## 78. TRANSLATION_PROVIDER_INTERNAL_ERROR
+# 41. Terminology Errors
 
-The provider reported an internal server failure.
+## TRN-TERM-001 — KNOWLEDGE_SNAPSHOT_UNAVAILABLE
 
-```text
-category: PROVIDER_EXECUTION
-scope: BATCH or ATTEMPT
-severity: ERROR
-retryable: true
+Required Knowledge Snapshot unavailable.
+
+Strict policy:
+
+```text id="43uwbz"
+ERROR
+```
+
+Best-effort:
+
+```text id="zs2j8l"
+warning
 ```
 
 ---
 
-## 79. TRANSLATION_PROVIDER_MODEL_UNAVAILABLE
+# 42. TRN-TERM-002 — TERMINOLOGY_CONFLICT
 
-The selected model is temporarily or permanently unavailable.
+Conflicting constraints cannot be resolved according to policy.
 
-```text
-category: PROVIDER_AVAILABILITY
-scope: ATTEMPT
-severity: ERROR
-retryable: true with fallback
+Example:
+
+```text id="n3pqn3"
+same SourceTerm
++
+two LOCKED target mappings
+```
+
+Retry:
+
+```text id="2bzhzm"
+NON_RETRYABLE
+```
+
+until terminology changes.
+
+---
+
+# 43. TRN-TERM-003 — LOCKED_TERMINOLOGY_VIOLATED
+
+Validated provider output violates a LOCKED constraint.
+
+Retry:
+
+```text id="ma1lgc"
+RETRYABLE
+```
+
+Suggested:
+
+```text id="0ztqa7"
+SAME_PROVIDER
+or
+ALTERNATIVE_PROVIDER
+```
+
+depending policy.
+
+---
+
+# 44. TRN-TERM-004 — TERMINOLOGY_LIMIT_EXCEEDED
+
+Required terminology constraints cannot fit execution limits.
+
+Translation must not silently discard LOCKED constraints.
+
+Suggested:
+
+```text id="k5wch7"
+REDUCE_TERMINOLOGY_CONTEXT
+
+ALTERNATIVE_PROVIDER
 ```
 
 ---
 
-## 80. TRANSLATION_PROVIDER_CANCELLED
+# 45. Character / Pronoun Ambiguity
 
-The provider acknowledged cancellation.
+Ambiguous:
 
-```text
-category: CANCELLATION
-scope: BATCH or ATTEMPT
-severity: NOTICE
-retryable: false
+* speaker relationship
+* pronoun
+* honorific
+* character identity
+
+should normally produce warning:
+
+```text id="m1shml"
+PRONOUN_AMBIGUITY
+
+SPEAKER_RELATIONSHIP_AMBIGUITY
 ```
 
-This is normally recorded as lifecycle information rather than surfaced as a user-facing failure.
+not fatal error.
 
 ---
 
-## 81. TRANSLATION_LOCAL_MODEL_LOAD_FAILED
+# 46. Batch Errors
 
-A local translation model could not be loaded.
+## TRN-BATCH-001 — TRANSLATION_BATCH_EMPTY
 
-```text
-category: PROVIDER_EXECUTION
-scope: PROVIDER
-severity: ERROR
-retryable: conditional
+Batch created with no Translation Units.
+
+Severity:
+
+```text id="aioc26"
+CRITICAL
 ```
 
-Possible causes:
-
-* model files missing;
-* insufficient memory;
-* incompatible runtime;
-* corrupted model;
-* initialization timeout.
+This is usually a planning/invariant defect.
 
 ---
 
-## 82. TRANSLATION_LOCAL_RESOURCE_EXHAUSTED
+# 47. TRN-BATCH-002 — TRANSLATION_BATCH_DUPLICATE_UNIT
 
-Local execution lacks required CPU, GPU or memory resources.
+Same Unit appears more than once within Batch.
 
-```text
-category: PROVIDER_EXECUTION
-scope: ATTEMPT
-severity: ERROR
-retryable: conditional
-```
+Severity:
 
-Recovery:
-
-```text
-REDUCE_BATCH_SIZE
-WAIT_AND_RETRY
-USE_FALLBACK_PROVIDER
+```text id="q26jaq"
+CRITICAL
 ```
 
 ---
 
-# Part XII — Provider Response Errors
+# 48. TRN-BATCH-003 — TRANSLATION_BATCH_LIMIT_EXCEEDED
 
-## 83. TRANSLATION_PROVIDER_RESPONSE_EMPTY
+Batch exceeds resolved execution/provider limits.
 
-The provider returned no usable output.
+Retry:
 
-```text
-category: PROVIDER_RESPONSE
-scope: BATCH
-severity: ERROR
-retryable: true
+```text id="4eymeq"
+RETRYABLE
+```
+
+Suggested:
+
+```text id="cqzakq"
+SMALLER_BATCH
 ```
 
 ---
 
-## 84. TRANSLATION_PROVIDER_RESPONSE_MALFORMED
+# 49. TRN-BATCH-004 — TRANSLATION_BATCH_CONSTRUCTION_FAILED
 
-The provider response could not be parsed according to the adapter contract.
+No valid Batch layout can satisfy:
 
-```text
-category: PROVIDER_RESPONSE
-scope: BATCH
-severity: ERROR
-retryable: true
-```
+* grouping constraints
+* provider limits
+* context requirements
+* terminology requirements
 
-Raw response content must not be exposed publicly.
+Retry:
 
----
-
-## 85. TRANSLATION_PROVIDER_RESPONSE_TRUNCATED
-
-The provider response ended before the expected structured output completed.
-
-```text
-category: PROVIDER_RESPONSE
-scope: BATCH
-severity: ERROR or DEGRADED
-retryable: true
-```
-
-Accepted complete segments may be preserved.
-
----
-
-## 86. TRANSLATION_PROVIDER_RESPONSE_UNEXPECTED_FORMAT
-
-The response is syntactically parseable but does not match the requested output structure.
-
-```text
-category: PROVIDER_RESPONSE
-scope: BATCH
-severity: ERROR
-retryable: true
+```text id="exl2tw"
+CONDITIONALLY_RETRYABLE
 ```
 
 ---
 
-## 87. TRANSLATION_PROVIDER_SEGMENT_ID_UNKNOWN
+# 50. Provider Ownership Boundary
 
-The provider returned an identifier that was not included in the batch.
+Provider Management owns:
 
-```text
-category: ALIGNMENT
-scope: BATCH
-severity: ERROR
-retryable: true
-```
+* registration
+* enabled/disabled state
+* credentials
+* credential refresh
+* provider lifecycle
+* health
+* availability
+* local model residency
 
-Unknown output must never be silently attached to another segment.
-
----
-
-## 88. TRANSLATION_PROVIDER_SEGMENT_ID_DUPLICATED
-
-The provider returned multiple output items for one expected segment without an allowed variant structure.
-
-```text
-category: ALIGNMENT
-scope: BATCH
-severity: ERROR
-retryable: true
-```
+Translation may normalize provider failures only when they affect current translation execution.
 
 ---
 
-## 89. TRANSLATION_PROVIDER_SEGMENT_MISSING
+# 51. Provider Errors
 
-The provider omitted one or more required segments.
+## TRN-PROV-001 — PROVIDER_UNAVAILABLE
 
-```text
-category: ALIGNMENT
-scope: BATCH
-severity: DEGRADED or ERROR
-retryable: true
+Chosen execution provider unavailable.
+
+Original owner may be Provider Management.
+
+Retry:
+
+```text id="l6glfn"
+RETRYABLE
 ```
 
-Missing segment IDs must be explicit.
+Suggested:
 
----
+```text id="3z84qs"
+ALTERNATIVE_PROVIDER
 
-# Part XIII — Output Validation Errors
-
-## 90. TRANSLATION_OUTPUT_VALIDATION_FAILED
-
-A general normalized error when translated output fails one or more required validators.
-
-```text
-category: OUTPUT_VALIDATION
-scope: BATCH or RESULT
-severity: ERROR
-retryable: conditional
-```
-
-A more specific error code should be preferred where possible.
-
----
-
-## 91. TRANSLATION_OUTPUT_EMPTY
-
-A translatable source segment produced empty output.
-
-```text
-category: OUTPUT_VALIDATION
-scope: SEGMENT
-severity: ERROR
-retryable: true
-```
-
-An intentionally preserved empty output must be represented explicitly and should not use this error.
-
----
-
-## 92. TRANSLATION_OUTPUT_SOURCE_LEAKAGE
-
-The output appears to contain excessive untranslated source text.
-
-```text
-category: OUTPUT_VALIDATION
-scope: SEGMENT or BATCH
-severity: DEGRADED or ERROR
-retryable: true
-```
-
-Mixed-language names and locked source terms must not automatically trigger this error.
-
----
-
-## 93. TRANSLATION_OUTPUT_TARGET_LANGUAGE_MISMATCH
-
-The output is not primarily in the configured target language.
-
-```text
-category: OUTPUT_VALIDATION
-scope: SEGMENT or BATCH
-severity: ERROR
-retryable: true
+RESOURCE_WAIT
 ```
 
 ---
 
-## 94. TRANSLATION_OUTPUT_CONTROL_TEXT_LEAKED
+# 52. TRN-PROV-002 — NO_ELIGIBLE_PROVIDER
 
-Provider instructions, structural markers or internal control syntax appeared in public translated text.
+No provider satisfies resolved Plan requirements.
 
-```text
-category: OUTPUT_VALIDATION
-scope: BATCH
-severity: ERROR
-retryable: true
+Retry:
+
+```text id="xigh0w"
+CONDITIONALLY_RETRYABLE
 ```
+
+---
+
+# 53. TRN-PROV-003 — PROVIDER_CAPABILITY_MISSING
+
+Provider lacks required capability.
 
 Examples:
 
-```text
+* language pair
+* context size
+* structured output
+* local execution
+* required glossary semantics
+
+Retry:
+
+```text id="6il28q"
+RETRYABLE
+```
+
+with another provider.
+
+---
+
+# 54. Provider Credentials
+
+Original credential failures belong to Provider Management.
+
+Translation should prefer:
+
+```text id="0srq0t"
+ExternalErrorRef.Owner = PROVIDER_MANAGEMENT
+```
+
+rather than duplicating credential lifecycle errors.
+
+If current translation cannot execute:
+
+```text id="821v09"
+TRN-PROV-001
+```
+
+may reference the canonical external error.
+
+---
+
+# 55. TRN-PROV-004 — PROVIDER_REQUEST_REJECTED
+
+Provider rejected a structurally valid Translation request.
+
+Examples:
+
+* unsupported provider parameters
+* content rejected
+* unavailable model
+* account restrictions
+
+Retry depends on normalized reason.
+
+---
+
+# 56. TRN-PROV-005 — PROVIDER_RATE_LIMITED
+
+Provider rejected execution because of rate limit.
+
+Retry:
+
+```text id="ojc0zq"
+RETRYABLE
+```
+
+`RetryAfter` may be advisory.
+
+Runtime decides actual wait/backoff.
+
+---
+
+# 57. TRN-PROV-006 — PROVIDER_QUOTA_EXCEEDED
+
+Provider/account execution quota unavailable.
+
+Retry:
+
+```text id="du9vxw"
+CONDITIONALLY_RETRYABLE
+```
+
+Fallback may be possible.
+
+---
+
+# 58. TRN-PROV-007 — PROVIDER_REQUEST_TOO_LARGE
+
+Provider rejects Batch/context size.
+
+Retry:
+
+```text id="ij0o3j"
+RETRYABLE
+```
+
+Suggested:
+
+```text id="j6xe84"
+SMALLER_BATCH
+
+REDUCE_CONTEXT
+```
+
+---
+
+# 59. TRN-PROV-008 — PROVIDER_CONNECTION_FAILED
+
+Provider request cannot establish/maintain connection.
+
+Retry:
+
+```text id="a7tyao"
+RETRYABLE
+```
+
+---
+
+# 60. Provider Timeout Boundary
+
+Provider request timeout may be normalized as:
+
+```text id="df9px0"
+TRN-PROV-009
+PROVIDER_REQUEST_TIMEOUT
+```
+
+when it specifically means:
+
+```text id="6wtsqf"
+one Translation provider call
+failed to return within its provider/request limit
+```
+
+This is distinct from Runtime Attempt deadline.
+
+---
+
+# 61. No Queue / Attempt / Job Timeout Errors
+
+Remove Translation-owned:
+
+```text id="dvob9b"
+TRANSLATION_QUEUE_TIMEOUT
+
+TRANSLATION_ATTEMPT_TIMEOUT
+
+TRANSLATION_JOB_TIMEOUT
+
+TRANSLATION_BATCH_TIMEOUT
+```
+
+when those represent Runtime execution deadlines.
+
+Runtime owns canonical deadline outcome.
+
+---
+
+# 62. TRN-PROV-010 — PROVIDER_INTERNAL_FAILURE
+
+Provider reports transient internal error.
+
+Retry:
+
+```text id="39xyis"
+RETRYABLE
+```
+
+---
+
+# 63. TRN-PROV-011 — PROVIDER_OUTPUT_LIMIT_REACHED
+
+Provider generation stopped because output limit reached.
+
+May result in:
+
+```text id="yo24vq"
+PARTIAL
+```
+
+if valid aligned Units exist and policy permits.
+
+Otherwise error.
+
+---
+
+# 64. Provider Cancellation Is Not Error
+
+Provider acknowledgement of cancellation is:
+
+```text id="3w7ihw"
+ProviderExecutionObservation
+```
+
+not:
+
+```text id="bd2zdn"
+TranslationModuleError
+```
+
+Runtime owns cancellation.
+
+---
+
+# 65. Local Provider Resource Errors
+
+Provider/local-model resource exhaustion should normally reference:
+
+```text id="fg0h0h"
+Provider Management
+
+Resource Manager
+```
+
+Translation may return:
+
+```text id="xdhxhc"
+TRN-PROV-001 PROVIDER_UNAVAILABLE
+```
+
+with external cause.
+
+Do not duplicate infrastructure resource ownership unless the buffer/resource is Translation-local.
+
+---
+
+# 66. Provider Output Errors
+
+## TRN-OUT-001 — PROVIDER_OUTPUT_EMPTY
+
+Provider returned no usable Translation Unit outputs.
+
+Retry:
+
+```text id="3zsyrm"
+RETRYABLE
+```
+
+---
+
+# 67. TRN-OUT-002 — PROVIDER_OUTPUT_MALFORMED
+
+Adapter cannot parse provider result into provider-neutral output.
+
+Retry:
+
+```text id="8cfco4"
+RETRYABLE
+```
+
+Raw provider response must not appear in public error.
+
+---
+
+# 68. TRN-OUT-003 — PROVIDER_OUTPUT_TRUNCATED
+
+Structured output ended prematurely.
+
+Complete validated Units may be preserved.
+
+Severity:
+
+```text id="t27yi9"
+DEGRADED
+or
+ERROR
+```
+
+depending PartialResultPolicy.
+
+---
+
+# 69. TRN-OUT-004 — PROVIDER_OUTPUT_UNEXPECTED_FORMAT
+
+Provider output parses syntactically but violates requested structure.
+
+Retry:
+
+```text id="1hmi6r"
+RETRYABLE
+```
+
+---
+
+# 70. TRN-OUT-005 — PROVIDER_OUTPUT_UNKNOWN_UNIT
+
+Provider returned TranslationUnitId not present in Batch.
+
+Severity:
+
+```text id="hx6spc"
+ERROR
+```
+
+Never attach unknown output heuristically.
+
+---
+
+# 71. TRN-OUT-006 — PROVIDER_OUTPUT_DUPLICATE_UNIT
+
+Provider returned incompatible multiple outputs for same Unit.
+
+Retry:
+
+```text id="3ztwn6"
+RETRYABLE
+```
+
+---
+
+# 72. TRN-OUT-007 — PROVIDER_OUTPUT_UNIT_MISSING
+
+Provider omitted required Units.
+
+If policy allows partial:
+
+```text id="n1cn1d"
+PARTIAL Candidate
++
+warning
+```
+
+Otherwise ModuleError.
+
+---
+
+# 73. Output Validation Errors
+
+## TRN-OUT-008 — OUTPUT_VALIDATION_FAILED
+
+Generic validator failure when no more specific code applies.
+
+Prefer precise codes.
+
+---
+
+# 74. TRN-OUT-009 — OUTPUT_EMPTY
+
+A Unit requiring translation produced empty result.
+
+Retry:
+
+```text id="xb1new"
+RETRYABLE
+```
+
+Intentionally preserved/empty Units must be explicitly modeled and must not use this error.
+
+---
+
+# 75. TRN-OUT-010 — TARGET_LANGUAGE_MISMATCH
+
+Output is not primarily in required target language.
+
+Retry:
+
+```text id="76kbzs"
+RETRYABLE
+```
+
+Names, proper nouns and locked source terms must not automatically trigger this.
+
+---
+
+# 76. TRN-OUT-011 — EXCESSIVE_SOURCE_LEAKAGE
+
+Output retains excessive untranslated source content beyond allowed policy.
+
+Severity:
+
+```text id="5hv7nb"
+DEGRADED
+or
+ERROR
+```
+
+---
+
+# 77. TRN-OUT-012 — CONTROL_CONTENT_LEAKED
+
+Provider/system control text leaked into translated output.
+
+Examples:
+
+```text id="txu66i"
 SYSTEM:
+
 TRANSLATION:
-JSON wrapper
-internal segment markers
-provider refusal preamble
+
+JSON wrappers
+
+internal Unit markers
+
+provider refusal prefix
+```
+
+Candidate must not accept unsafe output.
+
+---
+
+# 78. TRN-OUT-013 — OUTPUT_LENGTH_INVALID
+
+Output violates a hard semantic/configured limit.
+
+A merely long translation should use warning:
+
+```text id="3fa20u"
+OUTPUT_LENGTH_ANOMALY
+```
+
+not error.
+
+---
+
+# 79. TRN-OUT-014 — OUTPUT_DUPLICATED
+
+Suspicious repeated outputs indicate provider/assembly failure.
+
+Retry:
+
+```text id="rdsgyn"
+RETRYABLE
 ```
 
 ---
 
-## 95. TRANSLATION_OUTPUT_LENGTH_INVALID
+# 80. TRN-OUT-015 — OUTPUT_INCOMPLETE
 
-Output length violates hard configured limits.
-
-```text
-category: OUTPUT_VALIDATION
-scope: SEGMENT
-severity: ERROR
-retryable: conditional
-```
-
-A merely long output should normally produce a warning rather than an error.
-
----
-
-## 96. TRANSLATION_OUTPUT_DUPLICATED
-
-Multiple segments contain suspicious duplicated output caused by provider failure.
-
-```text
-category: OUTPUT_VALIDATION
-scope: BATCH
-severity: ERROR
-retryable: true
-```
-
----
-
-## 97. TRANSLATION_OUTPUT_INCOMPLETE
-
-Output is syntactically valid but semantically or structurally incomplete.
-
-```text
-category: OUTPUT_VALIDATION
-scope: SEGMENT or BATCH
-severity: DEGRADED or ERROR
-retryable: true
-```
+Output is structurally/semantically incomplete.
 
 Examples:
 
-* sentence cut off;
-* dialogue ends mid-clause;
-* only part of source translated;
-* provider stopped before completing the segment.
+* sentence truncated
+* incomplete clause
+* only subset translated
+* Unit partially generated
+
+May become PARTIAL if alignment is safe.
 
 ---
 
-## 98. TRANSLATION_OUTPUT_UNSAFE_STRUCTURE
+# 81. Alignment Errors
 
-Output contains structural content that cannot safely be passed to Presentation.
+## TRN-ALIGN-001 — TRANSLATION_ALIGNMENT_FAILED
 
-```text
-category: OUTPUT_VALIDATION
-scope: SEGMENT
-severity: ERROR
-retryable: true
+Provider outputs cannot be safely mapped to Translation Units.
+
+Severity:
+
+```text id="ni9ye9"
+ERROR
 ```
 
-This concerns contract safety, not general content moderation.
+No ambiguous attachment allowed.
 
 ---
 
-# Part XIV — Alignment Errors
+# 82. TRN-ALIGN-002 — TRANSLATED_UNIT_SOURCE_MISSING
 
-## 99. TRANSLATION_ALIGNMENT_FAILED
+TranslatedUnit references missing TranslationUnit or SourceBlock lineage.
 
-The module cannot reliably map provider output to prepared segments.
+Severity:
 
-```text
-category: ALIGNMENT
-scope: BATCH or RESULT
-severity: ERROR
-retryable: conditional
-```
-
-No ambiguous output may become authoritative.
-
----
-
-## 100. TRANSLATION_ALIGNMENT_SEGMENT_MISSING
-
-A selected prepared segment has no corresponding translated segment in final assembly.
-
-```text
-category: ALIGNMENT
-scope: RESULT
-severity: ERROR or DEGRADED
-retryable: true
+```text id="580aea"
+CRITICAL
 ```
 
 ---
 
-## 101. TRANSLATION_ALIGNMENT_DUPLICATE_TARGET
+# 83. TRN-ALIGN-003 — DUPLICATE_TRANSLATED_UNIT
 
-More than one authoritative translated segment maps to the same prepared segment within one variant.
+More than one authoritative TranslatedUnit exists for one Unit within Candidate without explicit variant semantics.
 
-```text
-category: ALIGNMENT
-scope: RESULT
-severity: CRITICAL
-retryable: false through normal provider retry
-```
+Severity:
 
-This indicates an assembly or persistence defect.
-
----
-
-## 102. TRANSLATION_ALIGNMENT_UNKNOWN_SOURCE
-
-A translated segment references a prepared segment outside the job source identity.
-
-```text
-category: ALIGNMENT
-scope: RESULT
-severity: CRITICAL
-retryable: false
-```
-
-The result must be invalidated.
-
----
-
-## 103. TRANSLATION_ALIGNMENT_ORDER_UNRESOLVABLE
-
-Source sequence information is missing or contradictory, preventing deterministic result assembly.
-
-```text
-category: ALIGNMENT
-scope: RESULT
-severity: ERROR
-retryable: false without source repair
-```
-
-Recovery:
-
-```text
-REBUILD_PREPARED_DOCUMENT
+```text id="xc4dah"
+CRITICAL
 ```
 
 ---
 
-## 104. TRANSLATION_ALIGNMENT_REVISION_MISMATCH
+# 84. TRN-ALIGN-004 — UNKNOWN_SOURCE_REFERENCE
 
-Translated output references a different prepared content revision.
+Translated output references source outside current SourceDocument identity.
 
-```text
-category: ALIGNMENT
-scope: RESULT
-severity: ERROR
-retryable: false within current job
+Severity:
+
+```text id="8g434q"
+CRITICAL
 ```
 
-State consequence:
-
-```text
-Result → NON_AUTHORITATIVE or INVALIDATED
-Job → SUPERSEDED or FAILED
-```
+Candidate invalid.
 
 ---
 
-# Part XV — Batch Construction Errors
+# 85. TRN-ALIGN-005 — TRANSLATION_SEQUENCE_INVALID
 
-## 105. TRANSLATION_BATCH_EMPTY
+Translated Unit ordering cannot be reconciled with TranslationUnit source sequence.
 
-A batch was created without translatable segments.
-
-```text
-category: INTERNAL
-scope: BATCH
-severity: ERROR
-retryable: false without reconstruction
-```
-
-This is an orchestration defect.
+Translation must not infer a replacement source Reading Order.
 
 ---
 
-## 106. TRANSLATION_BATCH_DUPLICATE_SEGMENT
+# 86. TRN-ALIGN-006 — SOURCE_IDENTITY_MISMATCH
 
-The same prepared segment was assigned more than once within one batch.
+Translated output/Unit belongs to incompatible SourceDocument semantic identity.
 
-```text
-category: INTERNAL
-scope: BATCH
-severity: ERROR
-retryable: false without reconstruction
+Retry:
+
+```text id="dvgyyv"
+NON_RETRYABLE
 ```
+
+within current Plan.
 
 ---
 
-## 107. TRANSLATION_BATCH_SEGMENT_CONFLICT
+# 87. Candidate Errors
 
-A segment was assigned to incompatible active batches within the same attempt.
+## TRN-CAND-001 — CANDIDATE_ASSEMBLY_FAILED
 
-```text
-category: CONCURRENCY
-scope: ATTEMPT
-severity: ERROR
-retryable: false until attempt reconstruction
-```
-
----
-
-## 108. TRANSLATION_BATCH_LIMIT_EXCEEDED
-
-The constructed batch exceeds resolved provider or execution limits.
-
-```text
-category: CONFIGURATION
-scope: BATCH
-severity: ERROR
-retryable: true after reconstruction
-```
-
-Recovery:
-
-```text
-REDUCE_BATCH_SIZE
-REDUCE_CONTEXT_SIZE
-```
-
----
-
-## 109. TRANSLATION_BATCH_CONSTRUCTION_FAILED
-
-The module could not form valid batches.
-
-```text
-category: INTERNAL
-scope: ATTEMPT
-severity: ERROR
-retryable: conditional
-```
+Validated Translation outputs cannot be assembled into Candidate.
 
 Possible causes:
 
-* invalid segment grouping;
-* impossible locked group size;
-* provider limit conflict;
-* context boundary conflict.
+* conflicting mappings
+* missing required Unit metadata
+* invalid completeness calculation
+* incompatible provenance
 
 ---
 
-# Part XVI — Retry and Fallback Errors
+# 88. TRN-CAND-002 — CANDIDATE_INVALID
 
-## 110. TRANSLATION_RETRY_NOT_ALLOWED
-
-A retry was requested for a non-retryable failure or terminal job.
-
-```text
-category: COMMAND_VALIDATION
-scope: JOB
-severity: NOTICE
-retryable: false
-```
-
----
-
-## 111. TRANSLATION_RETRY_LIMIT_EXCEEDED
-
-The job exhausted its configured attempt budget.
-
-```text
-category: PROVIDER_EXECUTION
-scope: JOB
-severity: ERROR
-retryable: false within current job
-```
-
-State consequence:
-
-```text
-Job → FAILED
-```
-
----
-
-## 112. TRANSLATION_RETRY_ALREADY_ACTIVE
-
-A retry command was received while an equivalent attempt is already active.
-
-```text
-category: CONCURRENCY
-scope: JOB
-severity: NOTICE
-retryable: false immediately
-```
-
-The command may return the active attempt reference.
-
----
-
-## 113. TRANSLATION_FALLBACK_NOT_AVAILABLE
-
-No eligible fallback provider exists.
-
-```text
-category: PROVIDER_SELECTION
-scope: JOB
-severity: ERROR
-retryable: conditional
-```
-
----
-
-## 114. TRANSLATION_FALLBACK_LIMIT_EXCEEDED
-
-The configured maximum number of provider fallbacks was reached.
-
-```text
-category: PROVIDER_SELECTION
-scope: JOB
-severity: ERROR
-retryable: false within current job
-```
-
----
-
-## 115. TRANSLATION_FALLBACK_POLICY_BLOCKED
-
-Fallback was possible technically but prohibited by policy.
-
-```text
-category: PROVIDER_SELECTION
-scope: JOB
-severity: NOTICE or ERROR
-retryable: false without policy change
-```
-
----
-
-# Part XVII — Cancellation and Supersession Outcomes
-
-## 116. TRANSLATION_CANCELLED
-
-Normalized lifecycle reason representing intentional cancellation.
-
-```text
-category: CANCELLATION
-scope: JOB
-severity: NOTICE
-retryable: false
-```
-
-This should normally map to:
-
-```text
-Job → CANCELLED
-```
-
-It is not treated as provider failure.
-
----
-
-## 117. TRANSLATION_CANCELLATION_NOT_ALLOWED
-
-Cancellation was requested for an entity that cannot be cancelled.
+Candidate fails Translation contract validation.
 
 Examples:
 
-* invalid identifier;
-* already invalidated entity;
-* unsupported cancellation scope.
-
-```text
-category: COMMAND_VALIDATION
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
+* duplicate TranslatedUnit
+* invalid TranslationUnit mapping
+* invalid completeness
+* missing SourceDocumentRef
+* missing TraceabilityMetadata
+* invalid target language
+* Runtime state leaked into Candidate
 
 ---
 
-## 118. TRANSLATION_ALREADY_TERMINAL
+# 89. TRN-CAND-003 — CANDIDATE_COMPLETENESS_INVALID
 
-A state-changing command targeted an already terminal job.
-
-```text
-category: COMMAND_VALIDATION
-scope: JOB
-severity: NOTICE
-retryable: false
-```
-
-The response should include current terminal state where safe.
-
----
-
-## 119. TRANSLATION_SUPERSEDED
-
-The job became obsolete because newer work replaced it.
-
-```text
-category: SUPERSESSION
-scope: JOB
-severity: NOTICE
-retryable: false
-```
-
-State consequence:
-
-```text
-Job → SUPERSEDED
-```
-
-This is not a system failure.
-
----
-
-## 120. TRANSLATION_STALE_RESULT_REJECTED
-
-A completed provider result was rejected because it no longer matched current authority. Reading Session may be the authority that rejects the result when the active content revision or reading context has changed.
-
-```text
-category: SUPERSESSION
-scope: RESULT
-severity: NOTICE
-retryable: false
-```
-
-Possible causes:
-
-* newer job active;
-* source revision changed;
-* cancellation completed;
-* attempt replaced;
-* target language changed;
-* Translation intent changed;
-* an older Translation revision lost authority.
-
-This outcome is lifecycle control, not necessarily a technical failure.
-
----
-
-## 121. TRANSLATION_STALE_ATTEMPT_REJECTED
-
-Output arrived from an attempt that was no longer active.
-
-```text
-category: SUPERSESSION
-scope: ATTEMPT
-severity: NOTICE
-retryable: false
-```
-
-This should normally remain an internal or observability error.
-
----
-
-# Part XVIII — Result Assembly and Publication Errors
-
-## 122. TRANSLATION_RESULT_ASSEMBLY_FAILED
-
-Accepted batch outputs could not be assembled into a coherent result.
-
-```text
-category: RESULT_ASSEMBLY
-scope: RESULT
-severity: ERROR
-retryable: conditional
-```
-
-Possible causes:
-
-* conflicting segment mappings;
-* missing source sequence;
-* incompatible result revisions;
-* duplicate translated segments.
-
----
-
-## 123. TRANSLATION_RESULT_INCOMPLETE
-
-Final assembly is missing required segments.
-
-```text
-category: RESULT_ASSEMBLY
-scope: RESULT
-severity: DEGRADED or ERROR
-retryable: conditional
-```
-
-Behavior depends on publication policy.
-
----
-
-## 124. TRANSLATION_RESULT_REVISION_CONFLICT
-
-Concurrent result assembly attempted to publish incompatible revisions.
-
-```text
-category: CONCURRENCY
-scope: RESULT
-severity: ERROR
-retryable: true
-```
-
-Older revision must not overwrite newer revision.
-
----
-
-## 125. TRANSLATION_RESULT_NOT_FOUND
-
-A referenced result does not exist.
-
-```text
-category: RESULT_ASSEMBLY
-scope: RESULT
-severity: NOTICE or ERROR
-retryable: conditional
-```
-
----
-
-## 126. TRANSLATION_RESULT_NOT_AUTHORITATIVE
-
-The requested result exists but is not eligible for active use.
-
-```text
-category: PUBLICATION
-scope: RESULT
-severity: NOTICE
-retryable: false
-```
-
-Possible reasons:
-
-* superseded;
-* cancelled;
-* stale;
-* historical;
-* partial and not publishable.
-
----
-
-## 127. TRANSLATION_RESULT_PUBLICATION_FAILED
-
-The result was valid but could not be published or activated.
-
-```text
-category: PUBLICATION
-scope: RESULT
-severity: ERROR
-retryable: true
-```
-
-Possible causes:
-
-* event publication failure;
-* projection persistence failure;
-* variant activation failure;
-* transactional outbox failure.
-
-The result may already exist durably even when publication fails. The system must avoid reporting completion before the result becomes retrievable and the corresponding durable state can be queried.
-
----
-
-## 128. TRANSLATION_RESULT_PERSISTENCE_FAILED
-
-The result could not be durably stored.
-
-```text
-category: INTERNAL
-scope: RESULT
-severity: CRITICAL
-retryable: true
-```
-
-No `TranslationCompleted` or `TranslationCompletedWithWarnings` event may be published until durable storage succeeds.
-
----
-
-# Part XIX — Variant Errors
-
-## 129. TRANSLATION_VARIANT_NOT_FOUND
-
-The requested translation variant does not exist.
-
-```text
-category: VARIANT
-scope: VARIANT
-severity: NOTICE
-retryable: false
-```
-
----
-
-## 130. TRANSLATION_VARIANT_INCOMPATIBLE
-
-The variant does not match the active:
-
-* prepared document;
-* content revision;
-* target language;
-* reading context;
-* Translation intent.
-
-```text
-category: VARIANT
-scope: VARIANT
-severity: NOTICE
-retryable: false
-```
-
----
-
-## 131. TRANSLATION_VARIANT_INVALIDATED
-
-The selected variant has been invalidated.
-
-```text
-category: VARIANT
-scope: VARIANT
-severity: NOTICE
-retryable: false
-```
-
-Recovery:
-
-```text
-SELECT_ANOTHER_VARIANT
-REQUEST_RETRANSLATION
-```
-
----
-
-## 132. TRANSLATION_VARIANT_ACTIVATION_CONFLICT
-
-Concurrent activation produced a conflict between variants.
-
-```text
-category: CONCURRENCY
-scope: VARIANT
-severity: ERROR
-retryable: true
-```
-
-The invariant remains:
-
-```text
-At most one ACTIVE variant per:
-
-ReadingSessionId
-PreparedDocumentId
-ContentRevision
-TargetLanguage
-TranslationIntentId
-```
-
----
-
-## 133. TRANSLATION_VARIANT_CREATION_FAILED
-
-A result could not be converted into an immutable translation variant.
-
-```text
-category: VARIANT
-scope: VARIANT
-severity: ERROR
-retryable: conditional
-```
-
-The job must not publish successful completion if its required variant cannot be retrieved.
-
----
-
-## 134. TRANSLATION_CORRECTION_INVALID
-
-A submitted correction is malformed or targets incompatible segments.
-
-```text
-category: VARIANT
-scope: COMMAND
-severity: NOTICE
-retryable: false
-```
-
----
-
-## 135. TRANSLATION_CORRECTION_BASE_MISMATCH
-
-The correction targets a base variant or source revision that no longer matches.
-
-```text
-category: VARIANT
-scope: VARIANT
-severity: NOTICE
-retryable: false
-```
-
-A new correction should be based on the current compatible variant.
-
----
-
-# Part XX — Cache Errors
-
-## 136. TRANSLATION_CACHE_READ_FAILED
-
-The cache could not be queried.
-
-```text
-category: CACHE
-scope: CACHE
-severity: DEGRADED
-retryable: true
-```
-
-Default behavior:
-
-```text
-Continue without cache when execution policy permits.
-```
-
-Cache failure must not automatically fail translation.
-
----
-
-## 137. TRANSLATION_CACHE_WRITE_FAILED
-
-A completed result could not be written to cache.
-
-```text
-category: CACHE
-scope: CACHE
-severity: DEGRADED
-retryable: true
-```
-
-The translation result may still complete successfully.
-
----
-
-## 138. TRANSLATION_CACHE_ENTRY_INCOMPATIBLE
-
-A cache entry exists but does not match the required semantic input identity.
-
-```text
-category: CACHE
-scope: CACHE
-severity: NOTICE
-retryable: false
-```
-
-The entry must not be reused.
-
-Normal provider execution may continue.
-
----
-
-## 139. TRANSLATION_CACHE_ENTRY_CORRUPTED
-
-The cache entry cannot be parsed or fails integrity validation.
-
-```text
-category: CACHE
-scope: CACHE
-severity: DEGRADED
-retryable: false for that entry
-```
-
-Recovery:
-
-```text
-Invalidate cache entry and execute translation normally.
-```
-
----
-
-## 140. TRANSLATION_CACHE_ALIGNMENT_MISMATCH
-
-Cached translated segments do not align with the current prepared segments.
-
-```text
-category: CACHE
-scope: CACHE
-severity: ERROR
-retryable: false for that entry
-```
-
-The cache entry must be invalidated.
-
----
-
-# Part XXI — Concurrency and Persistence Errors
-
-## 141. TRANSLATION_STATE_CONFLICT
-
-A state transition failed because the entity was no longer in the expected state.
-
-```text
-category: CONCURRENCY
-scope: JOB, ATTEMPT, BATCH, RESULT or VARIANT
-severity: NOTICE or ERROR
-retryable: conditional
-```
+Candidate claims completeness inconsistent with Units.
 
 Examples:
 
-* completion lost race to cancellation;
-* retry lost race to supersession;
-* activation lost race to another variant.
-
----
-
-## 142. TRANSLATION_STATE_REVISION_CONFLICT
-
-The expected entity revision differed from the stored revision.
-
-```text
-category: CONCURRENCY
-scope: MODULE ENTITY
-severity: NOTICE
-retryable: true
+```text id="ed4nkc"
+COMPLETE
++
+missing TranslationUnits
 ```
 
-The caller should reload authoritative state before retrying.
+or:
 
----
+```text id="nc67t3"
+PARTIAL
++
+no missing/failed Units
+```
 
-## 143. TRANSLATION_DUPLICATE_ACTIVE_ATTEMPT
+Severity:
 
-More than one active attempt exists for the same Translation batch where policy permits only one active execution attempt.
-
-```text
-category: CONCURRENCY
-scope: BATCH
-severity: CRITICAL
-retryable: false until reconciliation
+```text id="i0my63"
+CRITICAL
 ```
 
 ---
 
-## 144. TRANSLATION_DUPLICATE_ACTIVE_VARIANT
+# 90. TRN-CAND-004 — CANDIDATE_SUBMISSION_FAILED
 
-More than one compatible variant is active for the same reading context.
+Valid Candidate cannot cross Translation → Runtime boundary due to Translation-local transfer/serialization failure.
 
-```text
-category: CONCURRENCY
-scope: VARIANT
-severity: CRITICAL
-retryable: false until reconciliation
+Not used for:
+
+* Runtime stale rejection
+* Runtime cancellation rejection
+* Runtime authority rejection
+* Artifact Store publication failure
+
+---
+
+# 91. Candidate Stale Rejection Is Not Error
+
+Example:
+
+```text id="bo1eoc"
+Candidate VALID
+    ↓
+Runtime detects stale Revision
+    ↓
+REJECTED_STALE
+```
+
+No TranslationModuleError.
+
+---
+
+# 92. Partial Candidate Semantics
+
+If required Unit fails but policy permits partial:
+
+```text id="o79cdl"
+Completeness = PARTIAL
+```
+
+with:
+
+* MissingTranslationUnitIds
+* FailedTranslationUnitIds
+* warnings
+
+Do not silently drop failure.
+
+---
+
+# 93. Variant Errors
+
+Translation owns only immutable variant semantic construction.
+
+It does not own active variant selection.
+
+---
+
+# 94. TRN-VAR-001 — VARIANT_CREATION_FAILED
+
+Valid translated semantic result cannot be represented as immutable variant.
+
+Retry:
+
+```text id="ux0kmi"
+CONDITIONALLY_RETRYABLE
 ```
 
 ---
 
-## 145. TRANSLATION_EVENT_PUBLICATION_FAILED
+# 95. TRN-VAR-002 — CORRECTION_INVALID
 
-A committed transition could not be published to the Event Bus.
+Correction is malformed or references incompatible Translation Units.
 
-```text
-category: PUBLICATION
-scope: MODULE
-severity: ERROR
-retryable: true
+Retry:
+
+```text id="12p10x"
+NON_RETRYABLE
 ```
 
-A transactional outbox or equivalent mechanism should retry publication.
-
-The state transition must not be repeated as a new business action.
+until correction changes.
 
 ---
 
-## 146. TRANSLATION_EVENT_SEQUENCE_CONFLICT
+# 96. TRN-VAR-003 — CORRECTION_BASE_MISMATCH
 
-An event could not receive a valid monotonic job sequence.
+Correction references incompatible SourceDocument/TranslationArtifact variant.
 
-```text
-category: CONCURRENCY
-scope: JOB
-severity: ERROR
-retryable: true
-```
+Requires new compatible correction base.
 
 ---
 
-# Part XXII — Security and Privacy Errors
+# 97. Removed Variant Errors
 
-## 147. TRANSLATION_REMOTE_EXECUTION_PROHIBITED
+Remove Translation-owned:
 
-The selected execution path would transmit content remotely against policy.
+```text id="ac5ceu"
+VARIANT_ACTIVATION_CONFLICT
 
-```text
-category: PRIVACY
-scope: ATTEMPT
-severity: ERROR
-retryable: true with local provider
+VARIANT_INVALIDATED
+
+DUPLICATE_ACTIVE_VARIANT
 ```
+
+because active variant belongs to Reading Session/application projection.
 
 ---
 
-## 148. TRANSLATION_DATA_REGION_PROHIBITED
+# 98. Privacy Errors
 
-The selected provider region is not allowed.
+## TRN-PRIV-001 — REMOTE_EXECUTION_PROHIBITED
 
-```text
-category: PRIVACY
-scope: ATTEMPT
-severity: ERROR
-retryable: true with another region or provider
+Resolved execution path would send content remotely against Privacy Context.
+
+Retry:
+
+```text id="nk3fme"
+RETRYABLE
 ```
+
+with compatible local provider if available.
 
 ---
 
-## 149. TRANSLATION_SENSITIVE_CONTENT_LOGGING_BLOCKED
+# 99. TRN-PRIV-002 — DATA_REGION_PROHIBITED
 
-An operation attempted to write raw source or translated content into a restricted log channel.
+Selected provider region violates privacy requirements.
 
-```text
-category: SECURITY
-scope: MODULE
-severity: CRITICAL
-retryable: false until corrected
-```
-
-The content must not be logged.
+Retry with compatible provider/region.
 
 ---
 
-## 150. TRANSLATION_CREDENTIAL_EXPOSURE_BLOCKED
+# 100. TRN-PRIV-003 — CONTEXT_PRIVACY_CONFLICT
 
-An operation attempted to include provider credentials in a public error, event or result.
+Required context cannot be transmitted under selected provider/privacy combination.
 
-```text
-category: SECURITY
-scope: MODULE
-severity: CRITICAL
-retryable: false until corrected
-```
+Possible handling:
 
----
-
-## 151. TRANSLATION_UNTRUSTED_INSTRUCTION_DETECTED
-
-Source content appears to contain instructions intended to manipulate an LLM provider.
-
-```text
-category: SECURITY
-scope: BATCH
-severity: DEGRADED
-retryable: conditional
-```
-
-The source remains data.
-
-Possible behavior:
-
-* continue using hardened provider instructions;
-* add a warning;
-* reject output if structural control was compromised;
-* retry using another provider.
-
-The presence of instruction-like text alone must not automatically block legitimate translation.
+* reduce optional context
+* use local provider
+* choose compliant provider
+* fail if context is mandatory
 
 ---
 
-## 152. TRANSLATION_PROVIDER_INSTRUCTION_LEAKAGE
+# 101. TRN-PRIV-004 — CANDIDATE_PRIVACY_VIOLATION
 
-Provider output reveals internal translation instructions or prompt fragments.
+Candidate contains content/metadata forbidden by Privacy Context.
 
-```text
-category: SECURITY
-scope: BATCH
-severity: ERROR
-retryable: true
+Severity:
+
+```text id="vwyw9a"
+CRITICAL
 ```
 
-The output must not become public.
+Candidate must not be submitted.
 
 ---
 
-# Part XXIII — Internal Errors
+# 102. Security Errors
 
-## 153. TRANSLATION_INTERNAL_ERROR
+## TRN-SEC-001 — CREDENTIAL_EXPOSURE_DETECTED
 
-An unexpected internal failure occurred.
+Translation is about to expose credential through:
 
-```text
-category: INTERNAL
-scope: MODULE
-severity: ERROR
-retryable: conditional
+* Candidate
+* Event
+* Error
+* Log
+* diagnostics
+
+Severity:
+
+```text id="2wlgha"
+CRITICAL
 ```
 
-This is the fallback code when no more specific normalized error applies.
+Operation must fail closed.
 
 ---
 
-## 154. TRANSLATION_CONFIGURATION_RESOLUTION_FAILED
+# 103. TRN-SEC-002 — SENSITIVE_CONTENT_LOGGING_DETECTED
 
-The module could not resolve an immutable configuration snapshot.
+Raw source/translated content attempted to enter prohibited logging channel.
 
-```text
-category: INTERNAL
-scope: JOB
-severity: ERROR
-retryable: conditional
+Severity:
+
+```text id="v5r6cj"
+CRITICAL
 ```
+
+Content must not be logged.
 
 ---
 
-## 155. TRANSLATION_PROVIDER_ADAPTER_ERROR
+# 104. Untrusted Instructions
 
-A provider adapter failed outside a recognized provider response category.
+Instruction-like source text alone is not an error.
 
-```text
-category: INTERNAL
-scope: PROVIDER
-severity: ERROR
-retryable: conditional
+Source remains untrusted data.
+
+Possible warning:
+
+```text id="k2xe14"
+UNTRUSTED_INSTRUCTION_PATTERN
 ```
 
-The public contract must still avoid adapter stack traces and raw payloads.
+Translation should continue through hardened provider boundary unless actual contract safety is compromised.
 
 ---
 
-## 156. TRANSLATION_SERIALIZATION_FAILED
+# 105. TRN-SEC-003 — PROVIDER_INSTRUCTION_LEAKAGE
 
-An internal provider-neutral request, result or event could not be serialized.
+Provider output reveals:
 
-```text
-category: INTERNAL
-scope: MODULE
-severity: ERROR
-retryable: conditional
+* system instructions
+* prompt fragments
+* control metadata
+* structured internal markers
+
+Severity:
+
+```text id="n5n4zr"
+ERROR
 ```
+
+Output must not become Candidate content.
 
 ---
 
-## 157. TRANSLATION_DESERIALIZATION_FAILED
+# 106. State Errors
 
-Stored or transmitted Translation data could not be deserialized.
+## TRN-STATE-001 — STATE_INVARIANT_VIOLATION
 
-```text
-category: INTERNAL
-scope: MODULE
-severity: ERROR
-retryable: conditional
-```
-
----
-
-## 158. TRANSLATION_INVARIANT_VIOLATED
-
-A core Translation invariant was violated.
-
-```text
-category: INTERNAL
-scope: MODULE
-severity: CRITICAL
-retryable: false until reconciliation
-```
+Translation-owned local state violates `STATES.md`.
 
 Examples:
 
-* translated segment without source segment;
-* cancelled job publishing authoritative result;
-* invalidated variant becoming active;
-* failed batch returning to running;
-* one batch belonging to multiple attempts.
+```text id="7nks2k"
+Plan READY → BUILDING
 
----
+Batch INVALID → READY
 
-# Part XXIV — Warning Contract
+Candidate VALID → ASSEMBLING
+```
 
-## 159. TranslationWarning
+Severity:
 
-The normalized warning model is:
-
-```text
-TranslationWarning {
-    warningId
-
-    code
-    category
-    severity
-
-    message
-    userMessageKey
-
-    translationJobId
-    translationAttemptId
-    translationBatchId
-    translationResultId
-    translationVariantId
-
-    affectedPreparedSegmentIds[]
-
-    suggestedActions[]
-
-    metadata
-}
+```text id="shxepl"
+CRITICAL
 ```
 
 ---
 
-## 160. Warning Severity
+# 107. TRN-STATE-002 — DUPLICATE_CANDIDATE_SUBMISSION
 
-Canonical warning severities:
+Translation logic semantically submits same Candidate more than once.
 
-```text
-INFO
+Severity:
+
+```text id="m5eppp"
+CRITICAL
+```
+
+---
+
+# 108. TRN-STATE-003 — BATCH_STATE_CONFLICT
+
+Concurrent local operations violate Batch state contract.
+
+Example:
+
+```text id="pzb7qh"
+Batch VALID
++
+new provider output mutation
+```
+
+---
+
+# 109. Removed State Errors
+
+Remove lifecycle-specific errors such as:
+
+```text id="sw19yv"
+RETRY_ALREADY_ACTIVE
+
+ALREADY_TERMINAL
+
+CANCELLATION_NOT_ALLOWED
+
+STALE_ATTEMPT_REJECTED
+
+DUPLICATE_ACTIVE_ATTEMPT
+```
+
+Runtime owns those concerns.
+
+---
+
+# 110. Internal Errors
+
+## TRN-INT-001 — INTERNAL_FAILURE
+
+Unexpected Translation implementation failure.
+
+Retry:
+
+```text id="hloecj"
+CONDITIONALLY_RETRYABLE
+```
+
+Runtime decides if a new Attempt is useful.
+
+---
+
+# 111. TRN-INT-002 — CONFIGURATION_RESOLUTION_FAILED
+
+Translation cannot resolve immutable required configuration snapshot.
+
+Retry may become possible after configuration/runtime recovery.
+
+---
+
+# 112. TRN-INT-003 — PROVIDER_ADAPTER_FAILURE
+
+Provider Adapter fails outside recognized provider categories.
+
+Public contract must still hide:
+
+* stack traces
+* provider-native objects
+* raw payload
+
+---
+
+# 113. TRN-INT-004 — SERIALIZATION_FAILED
+
+Translation-owned provider-neutral object cannot be serialized.
+
+Examples:
+
+* provider-neutral request
+* Candidate transfer
+* diagnostics metadata
+
+---
+
+# 114. TRN-INT-005 — DESERIALIZATION_FAILED
+
+Translation-owned object cannot be decoded according to expected contract.
+
+---
+
+# 115. TRN-INT-006 — ARCHITECTURE_INVARIANT_VIOLATION
+
+Core architecture invariant violated.
+
+Examples:
+
+* TranslatedUnit without TranslationUnit
+* TranslationUnit without SourceBlock lineage
+* Translation mutates SourceDocument
+* Translation publishes Artifact directly
+* Provider credential reaches Candidate
+* provider-specific SDK type crosses public boundary
+* Candidate mutated after VALID
+* Translation assumes Runtime authority
+
+Severity:
+
+```text id="guwonl"
+CRITICAL
+```
+
+---
+
+# 116. Errors Not Owned by Translation
+
+Do not create Translation aliases for:
+
+```text id="9xif7a"
+QUEUE_ADMISSION_FAILED
+
+QUEUE_TIMEOUT
+
+RUNTIME_ATTEMPT_TIMEOUT
+
+RUNTIME_CANCELLATION
+
+RUNTIME_STALE_RESULT
+
+RUNTIME_RETRY_LIMIT
+
+WORKER_CRASH
+
+ARTIFACT_PUBLICATION_FAILED
+
+ARTIFACT_RETENTION_FAILED
+
+CACHE_READ_FAILED
+
+CACHE_WRITE_FAILED
+
+PROVIDER_REGISTRY_FAILED
+
+PROVIDER_HEALTH_CHECK_FAILED
+
+PROVIDER_CREDENTIAL_REFRESH_FAILED
+
+READING_SESSION_ACTIVATION_CONFLICT
+```
+
+Reference owner error instead.
+
+---
+
+# 117. Publication Errors Removed
+
+Legacy:
+
+```text id="mgbi7t"
+TRANSLATION_RESULT_PUBLICATION_FAILED
+
+TRANSLATION_RESULT_PERSISTENCE_FAILED
+```
+
+are removed from Translation ownership.
+
+Current:
+
+```text id="466iol"
+Candidate
+    ↓
+Runtime
+    ↓
+Artifact Store
+```
+
+Artifact publication/persistence failures belong downstream.
+
+---
+
+# 118. Cache Errors Removed
+
+Legacy:
+
+```text id="totp3m"
+TRANSLATION_CACHE_READ_FAILED
+
+TRANSLATION_CACHE_WRITE_FAILED
+
+TRANSLATION_CACHE_ENTRY_CORRUPTED
+
+TRANSLATION_CACHE_ALIGNMENT_MISMATCH
+```
+
+are no longer Translation-owned.
+
+Translation owns:
+
+```text id="arvxmd"
+semantic compatibility
+```
+
+Runtime Cache Policy/Artifact Store own actual reuse/storage mechanics.
+
+---
+
+# 119. Retry Errors Removed
+
+Remove:
+
+```text id="rpteie"
+TRANSLATION_RETRY_NOT_ALLOWED
+
+TRANSLATION_RETRY_LIMIT_EXCEEDED
+
+TRANSLATION_RETRY_ALREADY_ACTIVE
+
+TRANSLATION_FALLBACK_LIMIT_EXCEEDED
+```
+
+when they describe Runtime retry budget/lifecycle.
+
+Translation only returns RetryHint.
+
+---
+
+# 120. Cancellation / Supersession Errors Removed
+
+Remove:
+
+```text id="ov9hiw"
+TRANSLATION_CANCELLED
+
+TRANSLATION_SUPERSEDED
+
+TRANSLATION_STALE_RESULT_REJECTED
+
+TRANSLATION_STALE_ATTEMPT_REJECTED
+```
+
+These are Runtime authority/lifecycle outcomes.
+
+---
+
+# 121. Warning Contract
+
+```text id="uyfsq0"
+TranslationWarning
+├── WarningCode
+├── Severity
+├── OperationPhase
+├── TranslationUnitIds[]
+├── SourceBlockRefs[]
+├── TranslationBatchId?
+├── ProviderId?
+├── CandidateArtifactId?
+├── MessageKey
+├── SuggestedActions[]
+├── Metadata?
+└── RecordedAt
+```
+
+---
+
+# 122. Warning Severity
+
+```text id="15iqwf"
+INFORMATION
+
 NOTICE
+
 DEGRADED
 ```
 
-### INFO
+---
 
-Informational behavior worth recording.
+# 123. Recommended Warning Codes
 
-Example:
+```text id="2oefzm"
+NO_TRANSLATABLE_CONTENT
 
-```text
-Cache result reused.
-```
+MISSING_OPTIONAL_CONTEXT
 
-### NOTICE
+CONTEXT_TRUNCATED
 
-A limitation exists but the translation remains normally usable.
+LOW_TRANSLATION_CONFIDENCE
 
-Example:
+AMBIGUOUS_MEANING
 
-```text
-Sound effect preserved in source language.
-```
+TERMINOLOGY_CONFLICT
 
-### DEGRADED
+SOURCE_INCOMPLETE
 
-Translation is usable but quality or completeness may be materially reduced.
+SOURCE_LANGUAGE_UNCERTAIN
 
-Example:
+UNTRANSLATED_FRAGMENT
 
-```text
-Required context was unavailable.
+OUTPUT_LENGTH_ANOMALY
+
+PROVIDER_FALLBACK_USED
+
+PARTIAL_TRANSLATION
+
+SOUND_EFFECT_PRESERVED
+
+MIXED_LANGUAGE_CONTENT
+
+PRONOUN_AMBIGUITY
+
+SPEAKER_RELATIONSHIP_AMBIGUITY
+
+KNOWLEDGE_UNAVAILABLE
+
+UNTRUSTED_INSTRUCTION_PATTERN
 ```
 
 ---
 
-# Part XXV — Warning Catalog
+# 124. NO_TRANSLATABLE_CONTENT
 
-## 161. TRANSLATION_WARNING_MISSING_CONTEXT
+Used when:
 
-Some desired context could not be supplied.
-
-```text
-category: CONTEXT
-severity: DEGRADED
+```text id="605810"
+Completeness = EMPTY_VALID
 ```
 
-Translation continued under best-effort policy.
+No ModuleError required.
 
 ---
 
-## 162. TRANSLATION_WARNING_CONTEXT_TRUNCATED
+# 125. MISSING_OPTIONAL_CONTEXT
 
-Context was reduced to fit configured or provider limits.
+Context unavailable but policy permits best-effort translation.
 
-```text
-category: CONTEXT
-severity: NOTICE
-```
+Candidate may remain valid.
 
 ---
 
-## 163. TRANSLATION_WARNING_LOW_CONFIDENCE
+# 126. CONTEXT_TRUNCATED
 
-One or more translated segments have low normalized confidence.
+Context reduced to meet limits.
 
-```text
-category: OUTPUT_VALIDATION
-severity: DEGRADED
-```
-
-Confidence must not be presented as objective truth.
+Requires deterministic/defined truncation policy.
 
 ---
 
-## 164. TRANSLATION_WARNING_AMBIGUOUS_MEANING
+# 127. LOW_TRANSLATION_CONFIDENCE
 
-The source allows multiple plausible interpretations.
+Confidence is advisory.
 
-```text
-category: OUTPUT_VALIDATION
-severity: NOTICE
-```
+Must not be presented as objective truth.
 
 ---
 
-## 165. TRANSLATION_WARNING_PRONOUN_AMBIGUITY
+# 128. TERMINOLOGY_CONFLICT Warning
 
-The relationship, gender, rank or formality required for Vietnamese pronouns was unclear.
+Use only when conflict policy allows continuation.
 
-```text
-category: KNOWLEDGE
-severity: NOTICE
+If policy requires failure:
+
+```text id="jtxjcm"
+TRN-TERM-002
 ```
 
 ---
 
-## 166. TRANSLATION_WARNING_TERMINOLOGY_CONFLICT_RESOLVED
+# 129. PROVIDER_FALLBACK_USED
 
-Conflicting non-fatal terminology constraints were resolved using configured policy.
+Describes provenance degradation/variation.
 
-```text
-category: KNOWLEDGE
-severity: NOTICE
-```
-
-The chosen resolution should be recorded in bounded metadata.
+It is not itself failure.
 
 ---
 
-## 167. TRANSLATION_WARNING_PROVIDER_FALLBACK_USED
+# 130. PARTIAL_TRANSLATION
 
-The preferred provider failed or was unavailable, and a fallback provider completed the work.
+Candidate:
 
-```text
-category: PROVIDER_SELECTION
-severity: NOTICE
+```text id="z13vz7"
+Completeness = PARTIAL
 ```
+
+may include warning.
+
+Missing/failed Unit IDs remain explicit.
 
 ---
 
-## 168. TRANSLATION_WARNING_RETRY_USED
+# 131. OUTPUT_LENGTH_ANOMALY
 
-Translation required one or more retry attempts.
+Use warning when output is unusually long/short but still valid.
 
-```text
-category: PROVIDER_EXECUTION
-severity: INFO
-```
+Presentation may later use length information for layout decisions.
 
-This warning need not be shown to the user unless latency or quality was affected.
+Translation does not own visual fit.
 
 ---
 
-## 169. TRANSLATION_WARNING_PARTIAL_RESULT
+# 132. Sound Effect Warning
 
-Only a subset of selected segments is currently available.
-
-```text
-category: RESULT_ASSEMBLY
-severity: DEGRADED
+```text id="f5cbu9"
+SOUND_EFFECT_PRESERVED
 ```
 
-Missing and failed segment IDs must be explicit.
+may describe intentional source-language preservation.
+
+Not an error.
 
 ---
 
-## 170. TRANSLATION_WARNING_SOURCE_INCOMPLETE
+# 133. Logging Contract
 
-The prepared source appears incomplete.
+Safe fields:
 
-```text
-category: SOURCE
-severity: DEGRADED
-```
+```text id="qnnfvj"
+ErrorCode
 
-Examples:
+SymbolicName
 
-* OCR text cut off;
-* sentence fragment;
-* missing dialogue continuation.
+Category
 
-Translation must not repair the upstream source silently.
+Scope
 
----
+Severity
 
-## 171. TRANSLATION_WARNING_SOURCE_LANGUAGE_UNCERTAIN
+OperationPhase
 
-Source language detection confidence was insufficient for certainty.
+RevisionId
 
-```text
-category: SOURCE
-severity: NOTICE
-```
+WorkItemId
 
----
+AttemptId
 
-## 172. TRANSLATION_WARNING_MIXED_LANGUAGE_CONTENT
+SourceDocumentArtifactId
 
-The source contains multiple languages.
+TranslationIntentId
 
-```text
-category: SOURCE
-severity: INFO or NOTICE
-```
+TranslationPlanId?
 
-This is not automatically a failure.
+TranslationBatchId?
 
----
+CandidateArtifactId?
 
-## 173. TRANSLATION_WARNING_UNTRANSLATED_FRAGMENT
+ProviderId?
 
-A bounded source fragment remained untranslated.
+Retryability
 
-```text
-category: OUTPUT_VALIDATION
-severity: DEGRADED
-```
+ConfigurationSnapshotId
 
-Locked names, symbols and intentional preservation must be excluded.
+TraceId
 
----
-
-## 174. TRANSLATION_WARNING_OUTPUT_LONGER_THAN_SOURCE
-
-Translated output is significantly longer than its source segment.
-
-```text
-category: OUTPUT_VALIDATION
-severity: NOTICE
-```
-
-This is especially relevant to comic presentation.
-
-Presentation decides how to fit the text.
-
----
-
-## 175. TRANSLATION_WARNING_OUTPUT_SHORTER_THAN_EXPECTED
-
-Output is suspiciously short but still passed minimum validation.
-
-```text
-category: OUTPUT_VALIDATION
-severity: DEGRADED
+OccurredAt
 ```
 
 ---
 
-## 176. TRANSLATION_WARNING_SOUND_EFFECT_PRESERVED
+# 134. Forbidden Logging Fields
 
-A comic sound effect was preserved instead of translated.
+Normal logs must not contain:
 
-```text
-category: OUTPUT_VALIDATION
-severity: INFO
-```
-
----
-
-## 177. TRANSLATION_WARNING_SOUND_EFFECT_TRANSLITERATED
-
-A sound effect was transliterated rather than semantically translated.
-
-```text
-category: OUTPUT_VALIDATION
-severity: INFO
-```
-
----
-
-## 178. TRANSLATION_WARNING_CACHE_RESULT_REUSED
-
-A compatible cached translation result was reused.
-
-```text
-category: CACHE
-severity: INFO
-```
-
-This normally does not need user display.
-
----
-
-## 179. TRANSLATION_WARNING_PROVIDER_USAGE_ESTIMATED
-
-Provider usage values are estimated rather than provider-reported.
-
-```text
-category: PROVIDER_RESPONSE
-severity: INFO
-```
-
----
-
-## 180. TRANSLATION_WARNING_PROVIDER_METADATA_INCOMPLETE
-
-Optional provider usage or request metadata was unavailable.
-
-```text
-category: PROVIDER_RESPONSE
-severity: INFO
-```
-
-Translation output remains valid.
-
----
-
-## 181. TRANSLATION_WARNING_GLOSSARY_NOT_APPLIED
-
-Optional glossary data could not be applied.
-
-```text
-category: KNOWLEDGE
-severity: DEGRADED
-```
-
-Locked glossary failure must be an error, not this warning.
-
----
-
-## 182. TRANSLATION_WARNING_NAME_MAPPING_UNCERTAIN
-
-A proper name could not be mapped confidently.
-
-```text
-category: KNOWLEDGE
-severity: NOTICE
-```
-
----
-
-## 183. TRANSLATION_WARNING_HONORIFIC_NORMALIZED
-
-Source honorifics were adapted according to the selected Vietnamese profile.
-
-```text
-category: KNOWLEDGE
-severity: INFO
-```
-
----
-
-# Part XXVI — Error-to-State Mapping
-
-## 184. Command Errors
-
-Command validation errors normally produce no Translation job.
-
-```text
-Command rejected
-    ↓
-No job state created
-```
-
-Examples:
-
-```text
-TRANSLATION_COMMAND_INVALID
-TRANSLATION_TARGET_LANGUAGE_REQUIRED
-TRANSLATION_PROVIDER_POLICY_UNSATISFIABLE
-```
-
----
-
-## 185. Source Errors
-
-| Error                                   | Typical state consequence                              |
-| --------------------------------------- | ------------------------------------------------------ |
-| `TRANSLATION_SOURCE_NOT_FOUND`          | Job `FAILED`                                           |
-| `TRANSLATION_SOURCE_REVISION_NOT_FOUND` | Job `FAILED`                                           |
-| `TRANSLATION_SOURCE_REVISION_MISMATCH`  | Job `SUPERSEDED` or `FAILED`                           |
-| `TRANSLATION_SOURCE_EMPTY`              | Job `FAILED` or successful no-op                       |
-| `TRANSLATION_SOURCE_SEGMENT_EMPTY`      | Job `PARTIALLY_COMPLETED` or `COMPLETED_WITH_WARNINGS` |
-| `TRANSLATION_SOURCE_CONTENT_TOO_LARGE`  | Job `FAILED`                                           |
-
----
-
-## 186. Attempt Errors
-
-Retryable attempt errors produce:
-
-```text
-Attempt RUNNING
-    ↓
-Attempt FAILED
-    ↓
-Job RETRY_SCHEDULED
-```
-
-Non-retryable or exhausted failures produce:
-
-```text
-Attempt FAILED
-    ↓
-Job FAILED
-```
-
----
-
-## 187. Batch Errors
-
-A batch failure produces:
-
-```text
-Batch RUNNING or VALIDATING
-    ↓
-Batch FAILED
-```
-
-The attempt may become:
-
-```text
-PARTIALLY_COMPLETED
-FAILED
-```
-
-The job may remain:
-
-```text
-RUNNING
-PARTIALLY_COMPLETED
-RETRY_SCHEDULED
-```
-
----
-
-## 188. Alignment Errors
-
-Batch-level alignment errors usually produce:
-
-```text
-Batch VALIDATING → FAILED
-```
-
-Final result alignment errors produce:
-
-```text
-Result FINALIZING → INVALIDATED
-Job RUNNING → FAILED
-```
-
-Severe alignment defects discovered after publication produce:
-
-```text
-Result AVAILABLE → INVALIDATED
-Variant ACTIVE → INVALIDATED
-Job COMPLETED → INVALIDATED
-```
-
----
-
-## 189. Cancellation Outcomes
-
-```text
-TRANSLATION_CANCELLED
-    ↓
-Job CANCELLATION_REQUESTED → CANCELLED
-```
-
-Cancellation must not become `FAILED` unless a separate cleanup failure affects module integrity.
-
----
-
-## 190. Supersession Outcomes
-
-```text
-TRANSLATION_SUPERSEDED
-    ↓
-Job → SUPERSEDED
-Result → NON_AUTHORITATIVE
-Variant → INACTIVE
-```
-
----
-
-## 191. Cache Errors
-
-Cache errors should normally degrade rather than fail the job.
-
-```text
-Cache read failed
-    ↓
-Continue provider execution
-    ↓
-Attach warning or operational error
-```
-
-Strict offline cache-only mode may treat cache failure as fatal.
-
----
-
-# Part XXVII — Retry Classification
-
-## 192. Always Retryable Examples
-
-Subject to retry budget:
-
-```text
-TRANSLATION_PROVIDER_TIMEOUT
-TRANSLATION_BATCH_TIMEOUT
-TRANSLATION_PROVIDER_RATE_LIMITED
-TRANSLATION_PROVIDER_INTERNAL_ERROR
-TRANSLATION_PROVIDER_CONNECTION_FAILED
-TRANSLATION_PROVIDER_RESPONSE_MALFORMED
-TRANSLATION_PROVIDER_RESPONSE_EMPTY
-```
-
----
-
-## 193. Retryable After Request Adjustment
-
-```text
-TRANSLATION_PROVIDER_REQUEST_TOO_LARGE
-TRANSLATION_CONTEXT_TOO_LARGE
-TRANSLATION_BATCH_LIMIT_EXCEEDED
-TRANSLATION_PROVIDER_OUTPUT_LIMIT_EXCEEDED
-```
-
-Required adjustment may include:
-
-* smaller batches;
-* reduced context;
-* fewer glossary entries;
-* different provider.
-
----
-
-## 194. Retryable With Another Provider
-
-```text
-TRANSLATION_PROVIDER_UNAVAILABLE
-TRANSLATION_PROVIDER_CAPABILITY_MISSING
-TRANSLATION_PROVIDER_MODEL_UNAVAILABLE
-TRANSLATION_PROVIDER_CONTENT_REJECTED
-TRANSLATION_REMOTE_EXECUTION_PROHIBITED
-```
-
-Provider policy must permit fallback.
-
----
-
-## 195. Not Retryable Within the Same Job
-
-```text
-TRANSLATION_SOURCE_REVISION_MISMATCH
-TRANSLATION_TARGET_LANGUAGE_REQUIRED
-TRANSLATION_PROFILE_NOT_FOUND
-TRANSLATION_GLOSSARY_REVISION_NOT_FOUND
-TRANSLATION_PROVIDER_POLICY_UNSATISFIABLE
-TRANSLATION_RESULT_NOT_AUTHORITATIVE
-TRANSLATION_VARIANT_INCOMPATIBLE
-TRANSLATION_CANCELLED
-TRANSLATION_SUPERSEDED
-```
-
-A new job or corrected command may be required.
-
----
-
-## 196. Never Automatically Retry
-
-```text
-TRANSLATION_PROVIDER_AUTHENTICATION_FAILED
-TRANSLATION_PROVIDER_AUTHORIZATION_FAILED
-TRANSLATION_PROVIDER_QUOTA_EXCEEDED
-TRANSLATION_INVARIANT_VIOLATED
-TRANSLATION_CREDENTIAL_EXPOSURE_BLOCKED
-TRANSLATION_DUPLICATE_ACTIVE_VARIANT
-```
-
-These require intervention or reconciliation.
-
----
-
-# Part XXVIII — Provider Error Normalization
-
-## 197. Normalization Boundary
-
-Provider adapters convert provider-native failures into normalized Translation errors.
-
-```text
-Provider-native error
-        ↓
-Provider adapter
-        ↓
-Normalized TranslationError
-```
-
-Translation core must not switch logic directly on provider-native error types.
-
----
-
-## 198. Normalization Priority
-
-Adapters should classify failures in this order:
-
-```text
-Cancellation
-Authentication or authorization
-Rate limit or quota
-Request limit
-Timeout
-Connection
-Provider availability
-Content rejection
-Response parsing
-Unknown provider failure
-```
-
-Specific classifications should take precedence over generic HTTP status mappings.
-
----
-
-## 199. HTTP Status Guidance
-
-Indicative mapping only:
-
-| Provider response | Normalized category                          |
-| ----------------- | -------------------------------------------- |
-| `400`             | request rejected or invalid provider request |
-| `401`             | authentication failed                        |
-| `403`             | authorization failed or content rejected     |
-| `404`             | provider model or endpoint unavailable       |
-| `408`             | provider timeout                             |
-| `413`             | request too large                            |
-| `429`             | rate limited or quota exceeded               |
-| `5xx`             | provider unavailable or internal error       |
-
-Provider documentation and response semantics take precedence over generic HTTP interpretation.
-
----
-
-## 200. Unknown Provider Error
-
-When an adapter cannot classify a failure:
-
-```text
-code: TRANSLATION_PROVIDER_UNKNOWN_ERROR
-category: PROVIDER_EXECUTION
-scope: ATTEMPT or BATCH
-retryable: conditional
-```
-
-Internal diagnostics may preserve:
-
-* provider-native error type;
-* redacted status;
-* provider request ID;
-* safe response metadata.
-
----
-
-## 201. Raw Error Retention
-
-Raw provider errors may be retained only in restricted diagnostic storage when:
-
-* credentials are redacted;
-* private source and translated content are removed or protected;
-* retention policy permits it;
-* access is controlled.
-
-Raw provider errors must not be placed in public events.
-
----
-
-# Part XXIX — Partial Failure Behavior
-
-## 202. Partial Failure Definition
-
-Partial failure occurs when:
-
-* at least one selected segment completed;
-* at least one selected segment failed or remains missing.
-
-```text
-completed subset
-+
-failed or missing subset
-=
-partial result
-```
-
----
-
-## 203. Partial Failure Representation
-
-A partial result must include:
-
-```text
-completedPreparedSegmentIds[]
-failedPreparedSegmentIds[]
-missingPreparedSegmentIds[]
-warnings[]
-failure summaries
-```
-
-No selected segment may disappear silently.
-
----
-
-## 204. Partial Failure Outcomes
-
-Depending on policy, a partial failure may produce:
-
-```text
-Job PARTIALLY_COMPLETED
-```
-
-followed by retry.
-
-After retry exhaustion:
-
-```text
-Job FAILED
-```
-
-or, when partial success is accepted:
-
-```text
-Job COMPLETED_WITH_WARNINGS
-```
-
-The latter should be used only when application semantics explicitly permit incomplete success.
-
----
-
-## 205. Comic Partial Failure
-
-For comics, progressive publication may preserve successfully translated bubbles.
-
-Example:
-
-```text
-Bubble 1 completed
-Bubble 2 failed
-Bubble 3 completed
-```
-
-Presentation may show Bubbles 1 and 3 while Bubble 2 remains untranslated or displays a retry indicator.
-
-Translation must preserve exact region alignment.
-
----
-
-## 206. Novel Partial Failure
-
-For novels, publishing non-contiguous translated paragraphs may disrupt reading.
-
-The default novel profile may therefore prefer:
-
-```text
-retry before publishing incomplete paragraph groups
-```
-
-The policy belongs to Translation publication configuration.
-
----
-
-# Part XXX — User-Facing Error Guidance
-
-## 207. User-Facing Error Principles
-
-User-facing messages should:
-
-* explain what failed;
-* avoid technical provider internals;
-* suggest a meaningful next action;
-* distinguish temporary failures from configuration problems;
-* avoid blaming the user;
-* not expose credentials or private content.
-
----
-
-## 208. Temporary Failure Example
-
-Developer error:
-
-```text
-TRANSLATION_PROVIDER_TIMEOUT
-```
-
-Possible UI meaning:
-
-```text
-The translation service took too long to respond.
-```
-
-Suggested action:
-
-```text
-Retry or use another translation provider.
-```
-
----
-
-## 209. Configuration Failure Example
-
-Developer error:
-
-```text
-TRANSLATION_PROVIDER_CREDENTIALS_MISSING
-```
-
-Possible UI meaning:
-
-```text
-This translation provider has not been configured.
-```
-
-Suggested action:
-
-```text
-Configure the provider or choose another one.
-```
-
----
-
-## 210. Partial Failure Example
-
-Developer error:
-
-```text
-TRANSLATION_PROVIDER_SEGMENT_MISSING
-```
-
-Possible UI meaning:
-
-```text
-Some text regions could not be translated.
-```
-
-Suggested action:
-
-```text
-Retry the untranslated regions.
-```
-
----
-
-## 211. Supersession Example
-
-Developer outcome:
-
-```text
-TRANSLATION_SUPERSEDED
-```
-
-Normal UI behavior:
-
-```text
-Do not show an error.
-Discard the outdated result and continue with newer work.
-```
-
----
-
-# Part XXXI — Logging and Observability
-
-## 212. Required Error Metrics
-
-Translation observability should track:
-
-```text
-error count by code
-error count by category
-error count by provider
-retry count
-fallback count
-timeout count
-alignment failure count
-validation failure count
-final job failure rate
-partial completion rate
-```
-
----
-
-## 213. Log Fields
-
-Recommended safe fields:
-
-```text
-errorId
-errorCode
-category
-scope
-severity
-
-translationJobId
-translationAttemptId
-translationBatchId
-
-preparedDocumentId
-contentRevision
-
-providerId
-providerRequestId
-
-attemptNumber
-batchSegmentCount
-elapsedTime
-retryable
-```
-
----
-
-## 214. Prohibited Log Fields
-
-Do not log by default:
-
-```text
+```text id="ydb93c"
 full source text
+
 full translated text
-raw prompts
-provider credentials
-authorization headers
-complete provider response
-private glossary data
-complete character context
+
+raw provider prompt
+
+provider raw response
+
+credential
+
+Authorization header
+
+API key
+
+refresh token
 ```
 
 ---
 
-## 215. Error Sampling
+# 135. Diagnostics Reference
 
-High-volume transient errors may be sampled in logs.
+Protected detailed diagnostics should use:
 
-Metrics must remain complete enough to detect:
-
-* provider outages;
-* rising timeout rates;
-* repeated malformed responses;
-* alignment regressions;
-* retry storms.
-
-Critical invariant and security errors must not be sampled away.
-
----
-
-## 216. Alert Candidates
-
-Possible alerts:
-
-```text
-High final job failure rate
-Provider authentication failures
-Persistent provider rate limiting
-Alignment failure spike
-Duplicate active variants
-Invariant violations
-Result persistence failure
-Credential exposure attempt
-Event publication backlog
+```text id="4g0wp5"
+DiagnosticsRef
 ```
 
-Exact thresholds belong to operational documentation.
+rather than embedding content.
+
+Protected diagnostics require:
+
+* explicit authorization
+* redaction
+* bounded retention
+* secure storage
+* Privacy Context compliance
 
 ---
 
-# Part XXXII — Event Integration
+# 136. Metrics
 
-## 217. Attempt Failure Event
+Useful Translation-owned error metrics:
 
-`TranslationAttemptFailed` should carry:
+```text id="nfqh4y"
+translation.error.total
 
-```text
-errorId
-code
-category
-retryable
-affectedBatchIds
-```
+translation.error.by_code
 
-It should not carry the complete internal exception.
+translation.error.by_category
 
----
+translation.error.by_phase
 
-## 218. Batch Failure Event
+translation.warning.total
 
-`TranslationBatchFailed` should carry:
+translation.warning.by_code
 
-```text
-errorId
-code
-category
-retryable
-preparedSegmentIds
+translation.provider_output_invalid_total
+
+translation.alignment_failure_total
+
+translation.candidate_invalid_total
+
+translation.partial_total
+
+translation.provider_fallback_total
+
+translation.privacy_violation_total
+
+translation.invariant_violation_total
 ```
 
 ---
 
-## 219. Final Job Failure Event
+# 137. Metrics Not Owned by Translation
 
-`TranslationFailed` should include:
+Do not redefine:
 
-```text
-final error summary
-completed segment IDs
-missing segment IDs
-failed segment IDs
-partial result reference
-retryAllowed
+```text id="4l7pds"
+runtime.queue_failure_total
+
+runtime.attempt_timeout_total
+
+runtime.retry_exhausted_total
+
+runtime.cancellation_total
+
+artifact.publication_failure_total
+
+cache.read_failure_total
+
+provider.health_failure_total
 ```
 
 ---
 
-## 220. Warning Events
+# 138. Error and Runtime Relationship
 
-Warnings normally travel with:
-
-```text
-TranslationBatchCompleted
-TranslationPartialResultAvailable
-TranslationCompletedWithWarnings
+```text id="grb3f4"
+TranslationModuleError
+        ↓
+Runtime
+        ↓
+Retry Policy
+Cancellation Policy
+Authority Policy
+        ↓
+Attempt Disposition
 ```
 
-A separate event per warning should not be introduced unless a concrete consumer requires it.
+No fixed one-to-one mapping from Translation error to Runtime terminal state.
 
 ---
 
-# Part XXXIII — HTTP or Transport Mapping Guidance
+# 139. Error and Candidate Relationship
 
-## 221. Transport Independence
+```text id="0npqlb"
+Valid Candidate
+    → no fatal ModuleError
+    → warnings allowed
+```
 
-Translation domain error codes must remain independent from HTTP.
+```text id="4nr12y"
+Invalid Candidate
+    → ModuleError
+    → no valid Candidate submission
+```
 
-The same errors may be used over:
-
-* in-process calls;
-* message bus;
-* HTTP;
-* RPC;
-* desktop application boundaries;
-* browser extension communication.
-
----
-
-## 222. Indicative HTTP Mapping
-
-When Translation is exposed over HTTP, an adapter may use:
-
-| Error category                   |                          Possible HTTP status |
-| -------------------------------- | --------------------------------------------: |
-| command validation               |                                         `400` |
-| authentication configuration     | `401` or `503`, depending on caller ownership |
-| authorization policy             |                                         `403` |
-| entity not found                 |                                         `404` |
-| state or idempotency conflict    |                                         `409` |
-| request or content too large     |                                         `413` |
-| rate limited                     |                                         `429` |
-| provider temporarily unavailable |                                `502` or `503` |
-| timeout                          |                                         `504` |
-| internal failure                 |                                         `500` |
-
-This table is guidance only.
-
-Transport adapters own exact mappings.
-
----
-
-# Part XXXIV — MVP Error Set
-
-## 223. Required MVP Command Errors
-
-```text
-TRANSLATION_COMMAND_INVALID
-TRANSLATION_IDEMPOTENCY_CONFLICT
-TRANSLATION_SEGMENT_SELECTION_EMPTY
-TRANSLATION_SEGMENT_SELECTION_INVALID
-TRANSLATION_TARGET_LANGUAGE_REQUIRED
-TRANSLATION_LANGUAGE_PAIR_UNSUPPORTED
-TRANSLATION_PROVIDER_POLICY_UNSATISFIABLE
+```text id="vn5bxb"
+Valid Candidate
+    → Runtime rejects stale
+    → no Translation error
 ```
 
 ---
 
-## 224. Required MVP Source Errors
+# 140. Provider Failure and Partial Candidate
 
-```text
-TRANSLATION_SOURCE_NOT_FOUND
-TRANSLATION_SOURCE_REVISION_MISMATCH
-TRANSLATION_SOURCE_NOT_PREPARED
-TRANSLATION_SOURCE_EMPTY
-TRANSLATION_SOURCE_SEGMENT_EMPTY
-TRANSLATION_SOURCE_LANGUAGE_UNKNOWN
+Example:
+
+```text id="4rdwrp"
+Batch A VALID
+
+Batch B VALID
+
+Batch C provider failed
+```
+
+If policy permits:
+
+```text id="derk96"
+Candidate
+Completeness = PARTIAL
+```
+
+with:
+
+```text id="5s1sn5"
+FailedTranslationUnitIds
+```
+
+and warnings.
+
+Translation does not have to discard successful Units.
+
+---
+
+# 141. Retry Classification
+
+Typically retryable:
+
+```text id="09ni84"
+TRN-PROV-001 PROVIDER_UNAVAILABLE
+
+TRN-PROV-005 PROVIDER_RATE_LIMITED
+
+TRN-PROV-008 PROVIDER_CONNECTION_FAILED
+
+TRN-PROV-009 PROVIDER_REQUEST_TIMEOUT
+
+TRN-PROV-010 PROVIDER_INTERNAL_FAILURE
+
+TRN-OUT-001 PROVIDER_OUTPUT_EMPTY
+
+TRN-OUT-002 PROVIDER_OUTPUT_MALFORMED
 ```
 
 ---
 
-## 225. Required MVP Provider Errors
+# 142. Retryable After Adjustment
 
-```text
-TRANSLATION_PROVIDER_NOT_FOUND
-TRANSLATION_PROVIDER_UNAVAILABLE
-TRANSLATION_PROVIDER_CREDENTIALS_MISSING
-TRANSLATION_PROVIDER_AUTHENTICATION_FAILED
-TRANSLATION_PROVIDER_RATE_LIMITED
-TRANSLATION_PROVIDER_QUOTA_EXCEEDED
-TRANSLATION_PROVIDER_REQUEST_TOO_LARGE
-TRANSLATION_PROVIDER_TIMEOUT
-TRANSLATION_PROVIDER_CONNECTION_FAILED
-TRANSLATION_PROVIDER_INTERNAL_ERROR
-TRANSLATION_PROVIDER_RESPONSE_EMPTY
-TRANSLATION_PROVIDER_RESPONSE_MALFORMED
+```text id="0bb92v"
+TRN-CTX-003 CONTEXT_TOO_LARGE
+
+TRN-TERM-004 TERMINOLOGY_LIMIT_EXCEEDED
+
+TRN-BATCH-003 TRANSLATION_BATCH_LIMIT_EXCEEDED
+
+TRN-PROV-007 PROVIDER_REQUEST_TOO_LARGE
 ```
 
-The canonical timeout code should be unified during implementation.
+Requires:
 
-Recommended final code:
+```text id="g3l0j2"
+SMALLER_BATCH
 
-```text
-TRANSLATION_PROVIDER_TIMEOUT
+REDUCE_CONTEXT
+
+REDUCE_TERMINOLOGY_CONTEXT
+
+ALTERNATIVE_PROVIDER
 ```
-
-rather than separate adapter-specific timeout names.
 
 ---
 
-## 226. Required MVP Validation and Alignment Errors
+# 143. Typically Non-Retryable Without Semantic Change
 
-```text
-TRANSLATION_OUTPUT_VALIDATION_FAILED
-TRANSLATION_OUTPUT_EMPTY
-TRANSLATION_OUTPUT_TARGET_LANGUAGE_MISMATCH
-TRANSLATION_OUTPUT_CONTROL_TEXT_LEAKED
-TRANSLATION_PROVIDER_SEGMENT_MISSING
+```text id="j8v5l7"
+TRN-INPUT-004 SOURCE_SELECTION_INVALID
+
+TRN-INPUT-006 TARGET_LANGUAGE_INVALID
+
+TRN-PLAN-002 TRANSLATION_PROFILE_UNSUPPORTED
+
+TRN-TERM-002 TERMINOLOGY_CONFLICT
+
+TRN-UNIT-004 TRANSLATION_UNIT_SPLIT_UNTRACEABLE
+
+TRN-ALIGN-004 UNKNOWN_SOURCE_REFERENCE
+
+TRN-PRIV-004 CANDIDATE_PRIVACY_VIOLATION
+
+TRN-SEC-001 CREDENTIAL_EXPOSURE_DETECTED
+```
+
+---
+
+# 144. Retry Does Not Mutate Failed State
+
+A retry creates a new Runtime Attempt.
+
+Do not reset:
+
+```text id="oh4j2j"
+Batch INVALID
+    → READY
+```
+
+or:
+
+```text id="v37hvx"
+Candidate INVALID
+    → VALID
+```
+
+within same instance.
+
+---
+
+# 145. Error Contract Evolution
+
+Backward-compatible:
+
+* new ErrorCode
+* new WarningCode
+* optional metadata
+* optional DiagnosticsRef
+* new RetryStrategy
+* new provider normalized category
+
+Breaking:
+
+* changing code meaning
+* changing original owner
+* weakening privacy
+* changing Candidate acceptance semantics
+* making provider-native type public
+* changing retry authority
+* changing SourceBlock/TranslationUnit alignment guarantees
+
+Breaking change requires major contract version.
+
+---
+
+# 146. Unknown Codes
+
+Consumers must:
+
+* preserve unknown ErrorCode
+* use known category when possible
+* not crash
+* not fabricate retry behavior
+* reject unsupported contract major if required
+
+Fallback:
+
+```text id="axfgls"
+TRN-INT-001
+INTERNAL_FAILURE
+```
+
+may be used only when no specific code is possible.
+
+---
+
+# 147. Testing — Error Contract
+
+Verify:
+
+* every ErrorCode unique
+* one semantic meaning per code
+* valid category
+* valid scope
+* valid severity
+* RetryHint advisory
+* no Runtime terminal state
+* no TranslationJob identity
+* no TranslationAttempt identity
+* no credentials
+* no source/translated text by default
+
+---
+
+# 148. Testing — Input
+
+Test:
+
+* missing SourceDocumentArtifactRef
+* unavailable Artifact
+* incompatible Artifact
+* invalid SourceBlock selection
+* unsupported target language
+* unsupported language pair
+* EMPTY_VALID source
+* Privacy Context conflict
+
+---
+
+# 149. Testing — Unit Planning
+
+Test:
+
+* missing SourceBlock
+* duplicate source mapping
+* valid N→1 Unit
+* valid 1→N Unit
+* untraceable split
+* invalid order
+* source lineage preserved
+
+---
+
+# 150. Testing — Context
+
+Test:
+
+* required context available
+* optional context missing
+* required context missing
+* context too large
+* context identity mismatch
+* privacy-restricted context
+* deterministic context reduction
+
+---
+
+# 151. Testing — Terminology
+
+Test:
+
+* LOCKED term honored
+* conflicting LOCKED terms
+* PREFERRED conflict
+* optional Knowledge unavailable
+* terminology limit exceeded
+* locked-term provider violation
+
+---
+
+# 152. Testing — Batch
+
+Test:
+
+* empty Batch
+* duplicate Unit
+* oversized Batch
+* valid multi-Unit Batch
+* context-limit conflict
+* immutable after READY
+
+---
+
+# 153. Testing — Provider Boundary
+
+Test:
+
+* unavailable provider
+* rate limit
+* quota exhausted
+* request too large
+* connection failure
+* provider timeout
+* provider internal error
+* malformed provider output
+* raw provider failure sanitization
+
+---
+
+# 154. Testing — Output
+
+Test:
+
+* valid output
+* empty output
+* missing Unit
+* unknown Unit
+* duplicate Unit
+* wrong target language
+* source leakage
+* control leakage
+* truncated output
+* length anomaly
+* incomplete translation
+
+---
+
+# 155. Testing — Alignment
+
+Test:
+
+* valid Unit alignment
+* unknown source ref
+* duplicate target
+* missing TranslationUnit
+* invalid source sequence
+* SourceDocument identity mismatch
+
+No ambiguous auto-realignment.
+
+---
+
+# 156. Testing — Candidate
+
+Test:
+
+* COMPLETE Candidate
+* PARTIAL Candidate
+* EMPTY_VALID Candidate
+* invalid completeness
+* missing lineage
+* duplicate translated Unit
+* provider credential leakage
+* Runtime state leakage
+* immutable after VALID
+* submit once
+
+---
+
+# 157. Testing — Runtime Boundary
+
+Test:
+
+```text id="xj3ezs"
+Candidate VALID
+    ↓
+Runtime rejects stale
+```
+
+Expect:
+
+```text id="r3138p"
+no TranslationModuleError
+```
+
+Test:
+
+```text id="8ad9p7"
+Cancellation observed
+```
+
+Expect:
+
+```text id="n0seya"
+no TRANSLATION_CANCELLED error
+```
+
+Test:
+
+```text id="08n65l"
+RetryHint
+    ↓
+Runtime creates new Attempt
+```
+
+---
+
+# 158. Testing — Privacy / Security
+
+Verify:
+
+* LOCAL_ONLY blocks remote execution
+* region restrictions enforced
+* credential leakage blocked
+* source content not logged
+* translated content not logged
+* prompt fragments rejected from output
+* source instruction-like text remains data
+* provider output cannot control metadata
+
+---
+
+# 159. Testing — Partial Output
+
+Example:
+
+```text id="84inuc"
+10 TranslationUnits
+
+7 valid
+2 provider failed
+1 missing
+```
+
+When allowed:
+
+```text id="qjthbg"
+Completeness = PARTIAL
+```
+
+with all failed/missing IDs explicit.
+
+No silent omission.
+
+---
+
+# 160. Property Tests
+
+```text id="66mc2e"
+every TranslatedUnit
+maps to valid TranslationUnit
+```
+
+```text id="av0jip"
+every TranslationUnit
+maps to SourceBlock evidence
+```
+
+```text id="csy166"
+Candidate COMPLETE
+implies no required Unit missing
+```
+
+```text id="msxl5h"
+Candidate PARTIAL
+lists every missing/failed required Unit
+```
+
+```text id="kpmkz7"
+Candidate INVALID
+cannot be submitted as VALID
+```
+
+```text id="db5f5p"
+RetryHint
+never creates Runtime Attempt
+```
+
+```text id="3953mf"
+Runtime stale rejection
+does not create Translation error
+```
+
+```text id="uwnfnd"
+public error
+contains no credentials
+```
+
+```text id="qne0fw"
+public error
+contains no full source or translated content
+```
+
+---
+
+# 161. Core Error Invariants
+
+1. Translation errors remain provider-neutral.
+2. ErrorCode semantics are stable.
+3. Retryability is explicit.
+4. RetryHint is advisory.
+5. Runtime owns retry execution.
+6. Runtime owns cancellation.
+7. Runtime owns deadline outcome.
+8. Runtime owns stale authority.
+9. Translation does not own Queue errors.
+10. Translation does not own Scheduler errors.
+11. Translation does not own Artifact publication errors.
+12. Translation does not own Cache infrastructure errors.
+13. Provider Management retains Provider lifecycle ownership.
+14. Knowledge retains Knowledge persistence ownership.
+15. Reading Session owns active variant selection.
+16. SourceDocument is immutable.
+17. TranslationUnit always preserves SourceBlock lineage.
+18. Provider output is never trusted before validation.
+19. Unknown Provider Unit IDs are never guessed.
+20. Invalid alignment never becomes Candidate output.
+21. Missing Units are explicit.
+22. Failed Units are explicit.
+23. PARTIAL is explicit.
+24. EMPTY_VALID is valid.
+25. Warnings do not masquerade as failures.
+26. Fallback provider usage may be warning.
+27. Provider credentials never enter errors.
+28. Raw prompts never enter errors.
+29. Raw provider responses never enter errors.
+30. Source/translated content is minimized.
+31. LOCKED terminology is not silently discarded.
+32. Context privacy constraints cannot be weakened.
+33. Remote execution cannot bypass LOCAL_ONLY.
+34. Source instruction-like content remains untrusted data.
+35. Provider control leakage invalidates affected output.
+36. Candidate privacy violations fail closed.
+37. Candidate validation failure prevents valid submission.
+38. Candidate submission does not imply publication.
+39. Runtime stale rejection is not Translation failure.
+40. Active variant conflicts are not Translation execution errors.
+41. Immutable variants are not mutated.
+42. Translation does not maintain Job failure lifecycle.
+43. Translation does not maintain Attempt failure lifecycle.
+44. Translation-local failed state is not reset for retry.
+45. External errors preserve original ownership.
+
+---
+
+# 162. MVP Error Set
+
+Required MVP:
+
+```text id="76244n"
+TRN-INPUT-001
+TRANSLATION_INPUT_INVALID
+
+TRN-INPUT-002
+SOURCE_DOCUMENT_UNAVAILABLE
+
+TRN-INPUT-003
+SOURCE_DOCUMENT_INCOMPATIBLE
+
+TRN-INPUT-004
+SOURCE_SELECTION_INVALID
+
+TRN-INPUT-006
+TARGET_LANGUAGE_INVALID
+
+
+TRN-PLAN-001
+TRANSLATION_PLAN_INVALID
+
+TRN-PLAN-002
+TRANSLATION_PROFILE_UNSUPPORTED
+
+TRN-PLAN-003
+PROVIDER_POLICY_UNSATISFIABLE
+
+
+TRN-UNIT-001
+TRANSLATION_UNIT_PLANNING_FAILED
+
+TRN-UNIT-002
+TRANSLATION_UNIT_SOURCE_MISSING
+
+
+TRN-CTX-001
+REQUIRED_CONTEXT_UNAVAILABLE
+
+TRN-CTX-003
+CONTEXT_TOO_LARGE
+
+
+TRN-TERM-002
+TERMINOLOGY_CONFLICT
+
+TRN-TERM-003
+LOCKED_TERMINOLOGY_VIOLATED
+
+
+TRN-BATCH-003
+TRANSLATION_BATCH_LIMIT_EXCEEDED
+
+TRN-BATCH-004
+TRANSLATION_BATCH_CONSTRUCTION_FAILED
+
+
+TRN-PROV-001
+PROVIDER_UNAVAILABLE
+
+TRN-PROV-002
+NO_ELIGIBLE_PROVIDER
+
+TRN-PROV-005
+PROVIDER_RATE_LIMITED
+
+TRN-PROV-007
+PROVIDER_REQUEST_TOO_LARGE
+
+TRN-PROV-008
+PROVIDER_CONNECTION_FAILED
+
+TRN-PROV-009
+PROVIDER_REQUEST_TIMEOUT
+
+TRN-PROV-010
+PROVIDER_INTERNAL_FAILURE
+
+
+TRN-OUT-001
+PROVIDER_OUTPUT_EMPTY
+
+TRN-OUT-002
+PROVIDER_OUTPUT_MALFORMED
+
+TRN-OUT-005
+PROVIDER_OUTPUT_UNKNOWN_UNIT
+
+TRN-OUT-007
+PROVIDER_OUTPUT_UNIT_MISSING
+
+TRN-OUT-010
+TARGET_LANGUAGE_MISMATCH
+
+TRN-OUT-012
+CONTROL_CONTENT_LEAKED
+
+
+TRN-ALIGN-001
 TRANSLATION_ALIGNMENT_FAILED
-TRANSLATION_ALIGNMENT_DUPLICATE_TARGET
-TRANSLATION_ALIGNMENT_REVISION_MISMATCH
+
+TRN-ALIGN-002
+TRANSLATED_UNIT_SOURCE_MISSING
+
+
+TRN-CAND-001
+CANDIDATE_ASSEMBLY_FAILED
+
+TRN-CAND-002
+CANDIDATE_INVALID
+
+
+TRN-PRIV-001
+REMOTE_EXECUTION_PROHIBITED
+
+TRN-SEC-001
+CREDENTIAL_EXPOSURE_DETECTED
+
+
+TRN-STATE-001
+STATE_INVARIANT_VIOLATION
+
+
+TRN-INT-001
+INTERNAL_FAILURE
+
+TRN-INT-006
+ARCHITECTURE_INVARIANT_VIOLATION
 ```
 
 ---
 
-## 227. Required MVP Lifecycle Errors
+# 163. MVP Warning Set
 
-```text
-TRANSLATION_RETRY_NOT_ALLOWED
-TRANSLATION_RETRY_LIMIT_EXCEEDED
-TRANSLATION_CANCELLED
-TRANSLATION_ALREADY_TERMINAL
-TRANSLATION_SUPERSEDED
-TRANSLATION_STALE_RESULT_REJECTED
-TRANSLATION_STATE_CONFLICT
+Required:
+
+```text id="xbdklg"
+NO_TRANSLATABLE_CONTENT
+
+MISSING_OPTIONAL_CONTEXT
+
+CONTEXT_TRUNCATED
+
+LOW_TRANSLATION_CONFIDENCE
+
+TERMINOLOGY_CONFLICT
+
+SOURCE_LANGUAGE_UNCERTAIN
+
+UNTRANSLATED_FRAGMENT
+
+OUTPUT_LENGTH_ANOMALY
+
+PROVIDER_FALLBACK_USED
+
+PARTIAL_TRANSLATION
+
+PRONOUN_AMBIGUITY
+
+SPEAKER_RELATIONSHIP_AMBIGUITY
 ```
 
 ---
 
-## 228. Required MVP Warnings
+# 164. Removed Legacy Error Families
 
-```text
-TRANSLATION_WARNING_MISSING_CONTEXT
-TRANSLATION_WARNING_LOW_CONFIDENCE
-TRANSLATION_WARNING_AMBIGUOUS_MEANING
-TRANSLATION_WARNING_PRONOUN_AMBIGUITY
-TRANSLATION_WARNING_PROVIDER_FALLBACK_USED
-TRANSLATION_WARNING_PARTIAL_RESULT
-TRANSLATION_WARNING_SOURCE_INCOMPLETE
-TRANSLATION_WARNING_UNTRANSLATED_FRAGMENT
-TRANSLATION_WARNING_OUTPUT_LONGER_THAN_SOURCE
-TRANSLATION_WARNING_SOUND_EFFECT_PRESERVED
-TRANSLATION_WARNING_CACHE_RESULT_REUSED
-```
+The following old concerns are intentionally removed or re-owned:
 
----
+```text id="3s2d6a"
+Translation command/job lifecycle validation
+    → Runtime/API validation where lifecycle-specific
 
-# Part XXXV — Error Classification Matrix
+PreparedDocument errors
+    → SourceDocumentArtifact input errors
 
-## 229. Common Error Matrix
+PreparedSegment errors
+    → TranslationUnit / SourceBlock errors
 
-| Error                                        | Scope         |             Retryable | Typical job consequence   |
-| -------------------------------------------- | ------------- | --------------------: | ------------------------- |
-| `TRANSLATION_COMMAND_INVALID`                | Command       |                    No | No job created            |
-| `TRANSLATION_SOURCE_NOT_FOUND`               | Job           |           Conditional | `FAILED`                  |
-| `TRANSLATION_SOURCE_REVISION_MISMATCH`       | Job           |                    No | `SUPERSEDED` or `FAILED`  |
-| `TRANSLATION_CONTEXT_TOO_LARGE`              | Attempt       | Yes, after adjustment | `RETRY_SCHEDULED`         |
-| `TRANSLATION_TERMINOLOGY_CONFLICT`           | Job/Segment   |           Conditional | `FAILED` or warning       |
-| `TRANSLATION_PROVIDER_UNAVAILABLE`           | Attempt       |                   Yes | `RETRY_SCHEDULED`         |
-| `TRANSLATION_PROVIDER_AUTHENTICATION_FAILED` | Provider      |                    No | `FAILED` or fallback      |
-| `TRANSLATION_PROVIDER_RATE_LIMITED`          | Batch/Attempt |                   Yes | `RETRY_SCHEDULED`         |
-| `TRANSLATION_PROVIDER_QUOTA_EXCEEDED`        | Provider      |                    No | `FAILED` or fallback      |
-| `TRANSLATION_PROVIDER_REQUEST_TOO_LARGE`     | Batch         |     Yes, after resize | `RETRY_SCHEDULED`         |
-| `TRANSLATION_BATCH_TIMEOUT`                  | Batch         |                   Yes | retry failed batch        |
-| `TRANSLATION_PROVIDER_RESPONSE_MALFORMED`    | Batch         |                   Yes | batch `FAILED`            |
-| `TRANSLATION_PROVIDER_SEGMENT_MISSING`       | Batch         |                   Yes | partial or retry          |
-| `TRANSLATION_OUTPUT_EMPTY`                   | Segment       |                   Yes | partial or retry          |
-| `TRANSLATION_ALIGNMENT_FAILED`               | Batch/Result  |           Conditional | retry or `FAILED`         |
-| `TRANSLATION_RETRY_LIMIT_EXCEEDED`           | Job           |                    No | `FAILED`                  |
-| `TRANSLATION_CANCELLED`                      | Job           |                    No | `CANCELLED`               |
-| `TRANSLATION_SUPERSEDED`                     | Job           |                    No | `SUPERSEDED`              |
-| `TRANSLATION_STALE_RESULT_REJECTED`          | Result        |                    No | `NON_AUTHORITATIVE`       |
-| `TRANSLATION_CACHE_READ_FAILED`              | Cache         |                   Yes | continue without cache    |
-| `TRANSLATION_RESULT_PERSISTENCE_FAILED`      | Result        |                   Yes | no completion publication |
-| `TRANSLATION_INVARIANT_VIOLATED`             | Module        |    No automatic retry | reconciliation required   |
+TranslationJob errors
+    → Runtime WorkItem concerns
 
----
+TranslationAttempt errors
+    → Runtime Attempt concerns
 
-# Part XXXVI — Core Error Invariants
+Queue timeout
+    → Runtime
 
-## 230. Invariant 1 — Provider neutrality
+Attempt timeout
+    → Runtime
 
-Public error codes never depend on provider-native exception classes.
+Job timeout
+    → Runtime
 
-## 231. Invariant 2 — Stable codes
+Batch lifecycle timeout
+    → Runtime unless specifically Provider request timeout
 
-Published error-code semantics do not change.
+Retry limit exceeded
+    → Runtime Retry Policy
 
-## 232. Invariant 3 — Explicit retryability
+Retry already active
+    → Runtime concurrency
 
-Every execution error defines retry behavior.
-
-## 233. Invariant 4 — Retry does not erase history
-
-A failed attempt or batch remains failed after retry.
-
-## 234. Invariant 5 — Partial failures remain explicit
-
-Missing and failed segments are never silently omitted.
-
-## 235. Invariant 6 — Warnings do not masquerade as failures
-
-Usable degraded output uses warnings or a warning completion state.
-
-## 236. Invariant 7 — Cancellation is not failure
-
-Intentional cancellation maps to cancellation lifecycle semantics.
-
-## 237. Invariant 8 — Supersession is not failure
-
-Outdated work is rejected without presenting a provider failure.
-
-## 238. Invariant 9 — Invalid provider output never becomes authoritative
-
-Parsing, validation and alignment happen before batch completion.
-
-## 239. Invariant 10 — Credentials never enter public errors
-
-No public error contains authentication secrets.
-
-## 240. Invariant 11 — Content minimization
-
-Source and translated text are omitted from errors and logs by default.
-
-## 241. Invariant 12 — Cache failure is normally non-fatal
-
-Translation continues without cache when policy permits.
-
-## 242. Invariant 13 — Terminal jobs do not automatically retry
-
-Manual recovery after final failure normally creates a new derived job.
-
-## 243. Invariant 14 — State transition consequences are consistent
-
-Error handling must obey `modules/translation/STATES.md`.
-
-## 244. Invariant 15 — Result references remain trustworthy
-
-A completion event is never published for an unavailable result or variant.
-
----
-
-# Part XXXVII — Open Decisions
-
-## 245. Canonical Timeout Codes
-
-This document currently distinguishes:
-
-```text
-TRANSLATION_QUEUE_TIMEOUT
-TRANSLATION_ATTEMPT_TIMEOUT
-TRANSLATION_BATCH_TIMEOUT
-TRANSLATION_JOB_TIMEOUT
-```
-
-Provider-specific execution timeout should use:
-
-```text
-TRANSLATION_PROVIDER_TIMEOUT
-```
-
-The implementation must avoid overlapping meanings between:
-
-```text
-PROVIDER_TIMEOUT
-BATCH_TIMEOUT
-```
-
-Recommended distinction:
-
-```text
-PROVIDER_TIMEOUT
-    = provider or network request exceeded its deadline
-
-BATCH_TIMEOUT
-    = complete batch lifecycle exceeded its Translation deadline
-```
-
----
-
-## 246. Incomplete Final Result
-
-The project must decide whether an incomplete result can produce:
-
-```text
-COMPLETED_WITH_WARNINGS
-```
-
-Recommended policy:
-
-* comic progressive mode may accept missing optional or non-critical segments;
-* novel atomic mode should normally end in `FAILED` when required paragraphs remain missing;
-* selected required segments must be explicitly classified.
-
-A future contract may add:
-
-```text
-segmentRequirement:
-    REQUIRED
-    OPTIONAL
-    CONTEXT_ONLY
-```
-
----
-
-## 247. User-Visible Provider Names
-
-The project must decide whether user-facing errors expose normalized provider names.
-
-Recommended behavior:
-
-* show provider name when the user explicitly selected it;
-* avoid provider details under automatic mode unless action is required;
-* never expose model IDs unnecessarily.
-
----
-
-## 248. Warning Persistence
-
-The project must define whether all informational warnings are persisted.
-
-Recommended approach:
-
-```text
-DEGRADED warnings
-    → persist
-
-NOTICE warnings
-    → persist with result when relevant
-
-INFO warnings
-    → metrics or optional metadata
-```
-
----
-
-## 249. Error Localization
-
-`userMessageKey` is defined, but localization ownership remains open.
-
-Recommended ownership:
-
-```text
-Translation
-    → owns machine-readable code and localization key
-
-Presentation
-    → resolves locale-specific user wording
-```
-
----
-
-## 250. Error Cause Depth
-
-Recommended public cause depth:
-
-```text
-maximum 1 normalized cause
-```
-
-Full nested exception chains remain internal.
-
-This prevents unstable implementation details from leaking into contracts.
-
----
-
-## 250. Cross-Architecture Error Invariants
-
-The following ownership and authority rules apply to every Translation error:
-
-1. Translation policy errors must not be confused with Runtime execution failures.
-2. Runtime may enforce retry timing, timeout, cancellation and execution budgets without owning Translation semantic intent.
-3. A normalized Translation error may reference an original Runtime or Provider Management failure without transferring ownership.
-4. `TranslationIntentId` and `translationRevision` should be included whenever the failure can affect result authority or visible output.
-5. Reading Session owns whether a compatible Translation result is accepted for the current content revision.
-6. Publication failure does not imply result persistence failure, and persistence failure must prevent completion events.
-7. Active-variant conflicts are scoped by reading session, prepared content revision, target language and Translation intent.
-8. Duplicate active-attempt detection is evaluated within the owning Translation batch unless an explicit broader execution policy exists.
-
----
-
-# Part XXXVIII — Related Documents
-
-```text
-modules/translation/MODULE.md
-modules/translation/CONTRACT.md
-modules/translation/EVENTS.md
-modules/translation/STATES.md
-modules/translation/README.md
-```
-
-Architecture references:
-
-```text
-docs/architecture/STATE_MACHINE.md
-docs/architecture/EVENT_BUS.md
-docs/architecture/MODULE_DEPENDENCY.md
-docs/architecture/DATA_FLOW.md
-docs/architecture/runtime/ERROR_MODEL.md
-docs/architecture/runtime/RETRY_POLICY.md
-docs/architecture/runtime/CANCELLATION.md
-docs/architecture/runtime/WORK_QUEUE.md
-docs/architecture/runtime/RUNTIME_OBSERVABILITY.md
-```
-
-Upstream references:
-
-```text
-modules/text-processing/MODULE.md
-modules/text-processing/CONTRACT.md
-modules/text-processing/EVENTS.md
-modules/text-processing/STATES.md
-modules/text-processing/ERRORS.md
-```
-
-Future integration references:
-
-```text
-modules/provider-management/ERRORS.md
-modules/knowledge/ERRORS.md
-modules/reading-session/ERRORS.md
-modules/presentation/ERRORS.md
-```
-
----
-
-# 251. Summary
-
-Translation errors are normalized around:
-
-```text
-code
-category
-scope
-severity
-retryability
-recovery actions
-affected entity identities
-```
-
-The primary error flow is:
-
-```text
-Provider or internal failure
-        ↓
-Normalize error
-        ↓
-Apply error to Batch or Attempt
-        ↓
-Evaluate retry and fallback policy
-        ↓
-Retry, complete partially or fail job
-```
-
-Retryable execution path:
-
-```text
-Batch FAILED
-    ↓
-Attempt FAILED
-    ↓
-Job RETRY_SCHEDULED
-    ↓
-New Attempt
-```
-
-Final failure path:
-
-```text
-Retry budget exhausted
-    ↓
-Job FAILED
-```
-
-Partial path:
-
-```text
-Some segments completed
-Some segments failed
-    ↓
-Result PARTIAL
-    ↓
-Retry or final policy decision
-```
-
-Lifecycle controls remain separate:
-
-```text
 Cancellation
-    → CANCELLED
+    → Runtime
 
-Newer work
-    → SUPERSEDED
+Supersession
+    → Runtime authority
 
-Administrative rejection
-    → INVALIDATED
+Stale result
+    → Runtime authority
+
+Result publication failure
+    → Artifact Store
+
+Result persistence failure
+    → Artifact Store / Storage
+
+Cache read/write failure
+    → Runtime Cache / Artifact infrastructure
+
+Variant activation conflict
+    → Reading Session/application
+
+Duplicate active variant
+    → Reading Session/application
 ```
 
-The most important rules are:
+---
 
-* provider errors are normalized before leaving adapters;
-* every execution error has explicit retry semantics;
-* retries create new attempts and batches;
-* partial results identify all missing and failed segments;
-* cancellation and supersession are not reported as provider failures;
-* invalid provider output never becomes authoritative;
-* public errors never expose credentials, raw prompts or full provider responses;
-* cache failures normally degrade rather than fail translation;
-* final state consequences must follow `STATES.md`.
+# 165. Completion Criteria
+
+This error contract is complete when:
+
+* all Translation-owned failures have stable codes
+* warning vs error distinction is explicit
+* TranslationUnit failures are explicit
+* Batch failures are explicit
+* Provider failures are normalized
+* provider output validation is explicit
+* alignment failures are explicit
+* Candidate failures are explicit
+* partial behavior is explicit
+* privacy/security failures are explicit
+* Runtime lifecycle failures are external
+* Provider lifecycle failures remain external
+* Artifact publication failures remain external
+* Cache infrastructure failures remain external
+* active variant conflicts remain external
+* RetryHint remains advisory
+* source alignment is never guessed
+* content/credential privacy is enforceable
+* contract evolution is defined
+
+---
+
+# 166. Related Documents
+
+```text id="6hikcs"
+02-modules/translation/README.md
+02-modules/translation/MODULE.md
+02-modules/translation/CONTRACT.md
+02-modules/translation/STATES.md
+02-modules/translation/EVENTS.md
+
+02-modules/text-processing/CONTRACT.md
+02-modules/text-processing/ERRORS.md
+
+02-modules/provider-management/
+02-modules/knowledge/
+02-modules/reading-session/
+02-modules/presentation/
+
+01-architecture/runtime/ERROR_MODEL.md
+01-architecture/runtime/CANCELLATION.md
+01-architecture/runtime/RETRY_POLICY.md
+01-architecture/runtime/CACHE_POLICY.md
+01-architecture/runtime/RESOURCE_LIFECYCLE.md
+
+03-infrastructure/artifact-store/
+03-infrastructure/resource-manager/
+```
+
+---
+
+# 167. Summary
+
+Translation Error Model covers failures inside:
+
+```text id="kaptpp"
+SourceDocumentArtifact
+        ↓
+Translation Plan
+        ↓
+Translation Units
+        ↓
+Context / Terminology
+        ↓
+Translation Batches
+        ↓
+Provider Boundary
+        ↓
+Provider Output Validation
+        ↓
+Alignment
+        ↓
+Candidate Assembly
+```
+
+Translation owns:
+
+```text id="5nfln8"
+translation semantic errors
+
+provider-boundary normalization
+
+provider output validation
+
+Translation Unit alignment
+
+Candidate validation
+
+translation warnings
+
+RetryHint
+```
+
+Runtime owns:
+
+```text id="p196ny"
+Queue
+
+WorkItem
+
+Attempt
+
+Deadline
+
+Retry execution
+
+Cancellation
+
+Supersession
+
+Stale authority
+
+Terminal outcome
+```
+
+Provider Management owns:
+
+```text id="c7phwk"
+Provider registry
+
+Provider lifecycle
+
+credentials
+
+health
+
+availability
+
+local model residency
+```
+
+Artifact infrastructure owns:
+
+```text id="u0zulu"
+publication
+
+retention
+
+durable persistence
+
+cache mechanics
+```
+
+Reading Session owns:
+
+```text id="0ggpqn"
+active translation selection
+```
+
+Core rule:
+
+```text id="nh8r4t"
+Translation owns errors
+while turning a stable SourceDocument
+into aligned translated semantic output.
+
+Runtime owns
+whether execution continues or still matters.
+
+Provider Management owns
+provider lifecycle failures.
+
+Artifact Store owns
+publication failures.
+
+Reading Session owns
+which translation is active for the reader.
+```

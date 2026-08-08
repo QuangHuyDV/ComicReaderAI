@@ -1,149 +1,242 @@
 # Recognition Module Errors
 
-> Project: CRAI  
-> Module: Recognition  
-> Path: `doc/02-modules/recognition/ERRORS.md`  
-> Version: 1.0  
-> Status: Architecture Draft
+> **Project:** CRAI
+> **Module:** Recognition
+> **Path:** `doc/02-modules/recognition/ERRORS.md`
+> **Version:** 1.1
+> **Status:** Architecture Draft
+> **Related:** `MODULE.md`, `CONTRACT.md`, `STATES.md`, `EVENTS.md`
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-Tài liệu này định nghĩa error và warning contract của Recognition Module theo Runtime v2.
+Tài liệu này định nghĩa error và warning contract mà Recognition Module thực sự sở hữu.
 
-Nó đặc tả:
+Recognition Error Model chịu trách nhiệm:
 
-- error ownership;
-- stable error-code format;
-- RecognitionModuleError;
-- Warning contract;
-- RetryHint;
-- ProviderErrorRef;
-- severity;
-- input/image/capability/preparation/detection/recognition/coordinate/ordering/candidate/resource/internal errors;
-- cancellation và deadline boundary;
-- Runtime disposition boundary;
-- logging;
-- metrics;
-- privacy;
-- compatibility;
-- testing;
-- invariants.
+* stable module error codes
+* RecognitionModuleError
+* RecognitionWarning
+* RetryHint
+* external error references
+* Candidate assembly/validation errors
+* capability/planning errors
+* Recognition-local resource errors
+* Recognition-owned state invariant errors
+* privacy violations
+* cancellation/deadline boundary
+* Runtime disposition boundary
+* logging and observability requirements
+* compatibility
+* testing
+* invariants
 
-Recognition chịu trách nhiệm nhận dạng text và spatial structure từ image-based input.
+Recognition Error Model không định nghĩa lại error semantics của:
 
-Recognition không chịu trách nhiệm:
+* Image Preprocessing
+* Detection
+* Text Recognition
+* Text Direction
+* Layout
+* OCR Postprocessing
+* OCR Quality
+* Reading Order
+* Provider lifecycle
+* Runtime
+* Scheduler
+* Work Queue
+* Artifact Store
+* Storage
 
-- Capture;
-- Observation;
-- WorkItem/Attempt lifecycle;
-- Scheduler;
-- Queue;
-- Runtime retry;
-- cancellation authority;
-- Provider lifecycle;
-- Artifact publication;
-- durable persistence;
-- Translation;
-- Presentation.
+Các errors từ những owner đó được giữ dưới dạng normalized reference.
 
 ---
 
-## 2. Error Ownership
+# 2. Error Ownership
 
 Recognition owns:
 
 ```text
 RecognitionModuleError
+
 RecognitionWarning
+
 RetryHint
-ProviderError normalization
-Candidate validation errors
-Recognition semantic error codes
+
+Candidate Assembly Errors
+
+Candidate Validation Errors
+
+Recognition Planning Errors
+
+Capability Requirement Errors
+
+Module Boundary Errors
+
+Recognition-Local Resource Errors
+
+Recognition State Invariant Errors
+
+Recognition Privacy Errors
 ```
 
 Recognition does not own:
 
 ```text
-Attempt terminal outcome
-Retry scheduling
-Cancellation terminal outcome
-Queue overflow policy
-Scheduler admission failure
-Provider lifecycle failure
-Model lifecycle ownership
-Artifact publication failure
-Artifact retention failure
-Storage failure
-Runtime shutdown failure
+PreprocessingError
+
+DetectionError
+
+TextRecognitionError
+
+TextDirectionError
+
+LayoutError
+
+OCRDocumentError
+
+QualityError
+
+ReadingOrderError
+
+ProviderLifecycleError
+
+RuntimeError
+
+SchedulerError
+
+QueueError
+
+ArtifactPublicationError
+
+StorageError
 ```
 
-Recognition may reference external errors through normalized references.
+---
+
+# 3. Error Architecture
+
+```text
+External / OCR Error
+        ↓
+Normalized Error Reference
+        ↓
+Recognition Module Context
+        ↓
+RecognitionModuleError?
+        ↓
+RetryHint?
+        ↓
+Runtime
+        ↓
+Runtime Error Normalization
+        ↓
+Retry / Fail / Cancel / Abandon
+```
+
+Không phải mọi external OCR error đều cần được đổi thành một Recognition-specific error code.
+
+Nếu owner error đã đủ semantic information:
+
+```text
+RecognitionModuleError
+    may reference
+ExternalErrorRef
+```
 
 ---
 
-## 3. Error Principles
+# 4. Error Principles
 
-### 3.1 Stable Error Codes
+## 4.1 Stable Codes
 
-Consumers rely on stable error codes, not implementation exceptions.
+Consumers dựa vào stable code.
 
-### 3.2 Recognition Never Guesses
+Không dựa vào:
 
-When output is uncertain:
-
-- preserve uncertainty;
-- emit warning;
-- lower quality state;
-- produce RetryHint when useful;
-- never silently fabricate text or geometry.
-
-### 3.3 Preserve Input
-
-Recognition failure never mutates source image or published input Artifact.
-
-### 3.4 Error Is Not Warning
-
-A warning describes degraded-but-usable output.
-
-An error means Recognition cannot produce a semantically valid Candidate for the requested operation.
-
-### 3.5 Runtime Owns Disposition
-
-Recognition identifies and normalizes failure.
-
-Runtime decides:
-
-- fail Attempt;
-- retry;
-- fallback;
-- cancel;
-- abandon;
-- reject stale output.
-
-### 3.6 Privacy
-
-Errors must never expose:
-
-- image bytes;
-- full recognized text;
-- browser content;
-- personal information;
-- credentials;
-- authorization header;
-- full provider response;
-- sensitive temporary path.
-
-### 3.7 Candidate Boundary
-
-Candidate assembly/validation errors belong to Recognition.
-
-Ownership-transfer/publication errors belong to Runtime/Artifact Store.
+* exception class
+* stack trace
+* provider text
+* localized message
 
 ---
 
-## 4. Recognition Module Error Contract
+## 4.2 Error vs Warning
+
+```text
+Warning
+    = degraded but usable module output
+
+ModuleError
+    = module cannot produce
+      contract-valid Candidate
+      under current Attempt
+```
+
+---
+
+## 4.3 Do Not Fabricate
+
+Khi OCR output không chắc chắn:
+
+* preserve uncertainty
+* preserve external Quality Report
+* add module warning if appropriate
+* return RetryHint if useful
+
+Recognition không tự sửa:
+
+* OCR text
+* Geometry
+* Reading Order
+* Quality
+
+---
+
+## 4.4 Preserve Input
+
+Failure không mutate:
+
+* Source Image
+* Input Artifact
+* OCR Artifact
+* published Artifact
+
+---
+
+## 4.5 Runtime Owns Disposition
+
+Recognition mô tả failure.
+
+Runtime quyết định:
+
+```text
+FAIL
+RETRY
+FALLBACK
+CANCEL
+ABANDON
+REJECT_STALE
+```
+
+---
+
+## 4.6 Privacy
+
+Error không chứa:
+
+* image bytes
+* full OCR text
+* translated text
+* Provider credential
+* authorization header
+* full Provider response
+* sensitive temporary path
+
+---
+
+# 5. RecognitionModuleError
 
 ```text
 RecognitionModuleError
@@ -155,82 +248,99 @@ RecognitionModuleError
 ├── OperationPhase
 ├── MessageKey
 ├── RetryHint?
-├── ProviderErrorRef?
-├── AffectedRegionId?
+├── ExternalErrorRef?
+├── AffectedScopeRef?
 ├── CandidateArtifactId?
 ├── DiagnosticsRef?
 ├── Metadata?
 └── OccurredAt
 ```
 
-### Rules
+---
 
-1. ErrorCode stable within major version.
-2. SymbolicName human-readable and stable.
-3. MessageKey suitable for localization.
-4. Provider SDK exception never crosses boundary.
-5. RetryHint advisory only.
-6. Metadata bounded and sanitized.
-7. Full text/image forbidden.
-8. OperationPhase identifies failure location.
-9. Error does not embed Runtime terminal state.
-10. Error does not publish Artifact.
+# 6. Error Contract Rules
+
+1. ErrorCode stable trong cùng major version.
+
+2. SymbolicName stable.
+
+3. MessageKey localization-friendly.
+
+4. Provider SDK exception không crossing boundary.
+
+5. OCR-stage native error không bị redefine.
+
+6. RetryHint chỉ advisory.
+
+7. Metadata bounded.
+
+8. Full content forbidden.
+
+9. OperationPhase dùng phase của Recognition Module.
+
+10. Error không chứa Runtime terminal state.
+
+11. Error không publish Artifact.
 
 ---
 
-## 5. Stable Error-Code Format
+# 7. Stable Error-Code Format
+
+Canonical format:
 
 ```text
 REC-<CATEGORY>-<NUMBER>
 ```
 
-Examples:
+Ví dụ:
 
 ```text
 REC-INPUT-001
-REC-IMAGE-002
-REC-DETECT-001
-REC-REC-001
-REC-CAND-002
+REC-PLAN-001
+REC-CAP-001
+REC-OCR-001
+REC-CAND-001
+REC-RES-001
+REC-STATE-001
+REC-PRIV-001
 REC-INT-001
 ```
 
-Each code maps to one symbolic name.
+Mỗi code map tới đúng một symbolic meaning.
 
-Example:
+---
+
+# 8. Error Categories
+
+| Prefix  | Category                                     |
+| ------- | -------------------------------------------- |
+| `INPUT` | Recognition Attempt input / module boundary  |
+| `PLAN`  | Recognition planning                         |
+| `CAP`   | Capability requirement resolution            |
+| `OCR`   | Aggregate OCR execution/reference failure    |
+| `CAND`  | Candidate assembly / validation / submission |
+| `RES`   | Recognition-local resource usage             |
+| `STATE` | Recognition-owned state invariant            |
+| `PRIV`  | Recognition privacy boundary                 |
+| `INT`   | Internal module invariant/failure            |
+
+Removed as Recognition-owned categories:
 
 ```text
-REC-REC-001
-    ↔ RECOGNITION_TEXT_FAILED
+IMAGE
+PREP
+DETECT
+REC
+COORD
+ORDER
+PROV
 ```
 
-Code meaning must not change silently.
+Những semantics này thuộc OCR Architecture hoặc Provider Integration.
 
 ---
 
-## 6. Error Categories
-
-| Prefix | Category |
-|---|---|
-| `INPUT` | Attempt input validation |
-| `IMAGE` | Image validation |
-| `CAP` | Capability resolution |
-| `PREP` | Image preparation |
-| `DETECT` | Region detection |
-| `REC` | Text recognition |
-| `COORD` | Coordinate mapping |
-| `ORDER` | Reading order |
-| `CAND` | Candidate assembly/validation |
-| `RES` | Recognition-local resource |
-| `PROV` | Provider-output normalization |
-| `STATE` | Recognition-owned state invariant |
-| `INT` | Internal invariant/failure |
-
-Queue, Scheduler, publication và Provider lifecycle không dùng Recognition category.
-
----
-
-## 7. Severity
+# 9. Severity
 
 ```text
 RecognitionErrorSeverity
@@ -240,39 +350,52 @@ RecognitionErrorSeverity
 └── CRITICAL
 ```
 
-### INFORMATION
+## INFORMATION
 
-Expected technical condition recorded as error-like diagnostic, rarely used for ModuleError.
+Diagnostic condition.
 
-### WARNING
-
-Recoverable/degraded condition only when no valid Candidate can be produced under current policy.
-
-Most degraded-but-usable conditions should use `RecognitionWarning`, not ModuleError.
-
-### ERROR
-
-Attempt cannot produce valid Candidate.
-
-### CRITICAL
-
-Recognition invariant/corruption boundary violated.
-
-Critical does not automatically mean whole module enters failed state.
-
-Runtime/Container decides degradation, drain or restart.
+Không thường dùng làm ModuleError.
 
 ---
 
-## 8. Retry Hint Contract
+## WARNING
+
+Degraded-but-usable situation.
+
+Phần lớn trường hợp này nên dùng:
+
+```text
+RecognitionWarning
+```
+
+thay vì ModuleError.
+
+---
+
+## ERROR
+
+Recognition không thể tạo valid Candidate cho Attempt hiện tại.
+
+---
+
+## CRITICAL
+
+Module invariant, security hoặc privacy boundary bị vi phạm.
+
+`CRITICAL` không tự động đưa module vào global failed state.
+
+Runtime/Container quyết định degradation/drain/restart.
+
+---
+
+# 10. RetryHint
 
 ```text
 RetryHint
 ├── Retryability
 ├── SuggestedStrategies[]
-├── SuggestedDelayMs?
 ├── AlternativeProviderAllowed
-├── AlternativePreparationAllowed
+├── AlternativeOCRProfileAllowed
 ├── RegionOnlyAllowed
 └── ReasonCode
 ```
@@ -284,27 +407,33 @@ Retryability
 └── NON_RETRYABLE
 ```
 
+Possible suggestions:
+
 ```text
-RetryStrategy
-├── SAME_PROVIDER
-├── ALTERNATIVE_PROVIDER
-├── ALTERNATIVE_PREPARATION
-├── REGION_ONLY
-├── RESOURCE_WAIT
-└── NO_RETRY
+SAME_EXECUTION_PATH
+
+ALTERNATIVE_PROVIDER
+
+ALTERNATIVE_OCR_PROFILE
+
+REGION_ONLY
+
+RESOURCE_WAIT
+
+NO_RETRY
 ```
 
-Recognition does not:
+Recognition không:
 
-- create retry Attempt;
-- choose retry time;
-- consume retry budget;
-- choose final fallback;
-- bypass authority validation.
+* create Attempt
+* choose retry delay
+* consume retry budget
+* select final fallback
+* bypass Runtime authority
 
 ---
 
-## 9. Warning Contract
+# 11. RecognitionWarning
 
 ```text
 RecognitionWarning
@@ -312,7 +441,8 @@ RecognitionWarning
 ├── Severity
 ├── OperationPhase
 ├── MessageKey
-├── RegionId?
+├── ScopeRef?
+├── ExternalWarningRef?
 ├── ProviderId?
 ├── Metadata?
 └── RecordedAt
@@ -320,96 +450,144 @@ RecognitionWarning
 
 Warnings:
 
-- can coexist with valid Candidate;
-- do not create failure state;
-- do not trigger retry automatically;
-- contribute to QualityMetadata;
-- remain separate from ModuleError.
+* có thể coexist với valid Candidate
+* không tạo terminal failure
+* không trigger retry tự động
+* không redefine Quality
+* không mutate OCR output
 
 ---
 
-## 10. Standard Warning Codes
+# 12. Module-Level Warning Codes
+
+Recommended Recognition-owned warnings:
 
 ```text
 NO_READABLE_TEXT_DETECTED
-LOW_IMAGE_QUALITY
-LOW_DETECTION_CONFIDENCE
-LOW_RECOGNITION_CONFIDENCE
-READING_ORDER_UNCERTAIN
-REGION_GEOMETRY_INFERRED
-LINE_GEOMETRY_UNAVAILABLE
-OVERLAPPING_REGIONS_SUPPRESSED
-DUPLICATE_REGION_SUPPRESSED
-PROVIDER_CONFIDENCE_UNAVAILABLE
-IMAGE_UPSCALED
-IMAGE_DOWNSCALED
-IMAGE_ROTATED
-REMOTE_PROVIDER_USED
-FALLBACK_PROVIDER_USED
+
 PARTIAL_RECOGNITION
-PREPARATION_FALLBACK_USED
-MIXED_ORIENTATION_DETECTED
-MIXED_LANGUAGE_DETECTED
+
+REMOTE_PROVIDER_USED
+
+FALLBACK_PROVIDER_USED
+
+OCR_RESULT_DEGRADED
+
+QUALITY_BELOW_PREFERRED_LEVEL
+
+OPTIONAL_READING_ORDER_UNAVAILABLE
+
+OPTIONAL_QUALITY_REPORT_UNAVAILABLE
+
+DIAGNOSTIC_DATA_LIMITED
+
 OUTPUT_TRUNCATED
 ```
 
 ---
 
-## 11. Warning vs Error Rules
+# 13. OCR-Owned Warnings
 
-### No readable text
+Các warning như:
+
+```text
+LOW_DETECTION_CONFIDENCE
+
+LOW_RECOGNITION_CONFIDENCE
+
+READING_ORDER_UNCERTAIN
+
+INVALID_DIRECTION_HINT
+
+AMBIGUOUS_LAYOUT
+```
+
+không được Recognition định nghĩa lại.
+
+Recognition có thể surface:
+
+```text
+ExternalWarningRef
+```
+
+hoặc tạo một higher-level module warning khi cần.
+
+---
+
+# 14. Warning vs Quality
+
+Recognition Warning không thay thế Quality Report.
+
+Ví dụ:
+
+```text
+QualityReport
+    Grade = Poor
+```
+
+Recognition có thể thêm:
+
+```text
+QUALITY_BELOW_PREFERRED_LEVEL
+```
+
+nhưng:
+
+* score semantics vẫn thuộc `QUALITY.md`
+* grade semantics vẫn thuộc `QUALITY.md`
+* Recognition không đổi Quality state
+
+---
+
+# 15. No Readable Text
+
+Canonical result:
 
 ```text
 Completeness = EMPTY_VALID
-Warning = NO_READABLE_TEXT_DETECTED
+
+Warning =
+NO_READABLE_TEXT_DETECTED
 ```
 
-Not error.
-
-### Low confidence
-
-```text
-Warning = LOW_RECOGNITION_CONFIDENCE
-Quality = DEGRADED
-```
-
-Error only when quality policy concludes no valid Candidate can be produced.
-
-### Reading order uncertain
-
-Normally warning.
-
-Error only when requested contract requires valid explicit order and no acceptable fallback exists.
-
-### Overlapping regions
-
-Normally normalize/suppress + warning.
-
-Error only when geometry becomes unusable.
-
-### Image too small
-
-May be warning when upscaling path exists.
-
-Error when no supported preparation can satisfy minimum input requirements.
+Không phải ModuleError.
 
 ---
 
-## 12. Input Errors
+# 16. Partial Result
 
-### `REC-INPUT-001 — RECOGNITION_INPUT_INVALID`
+Khi Plan cho phép partial Candidate:
 
-Meaning:
+```text
+Completeness = PARTIAL
 
-RecognitionAttemptInput is malformed or internally inconsistent.
+Warning =
+PARTIAL_RECOGNITION
+```
+
+Nếu partial không đáp ứng contract:
+
+```text
+ModuleError
+```
+
+mới được tạo.
+
+---
+
+# 17. Input Errors
+
+## REC-INPUT-001 — RECOGNITION_INPUT_INVALID
+
+RecognitionAttemptInput malformed hoặc internally inconsistent.
 
 Examples:
 
-- missing Runtime identity;
-- missing operation;
-- missing privacy context;
-- conflicting options;
-- impossible capability requirement.
+* missing Runtime identity
+* missing operation
+* missing InputArtifactRef
+* invalid options
+* invalid PrivacyContextRef
 
 Severity:
 
@@ -423,940 +601,13 @@ Retry:
 NON_RETRYABLE
 ```
 
-unless caller corrects input.
+cho tới khi caller sửa input.
 
 ---
 
-### `REC-INPUT-002 — RECOGNITION_ARTIFACT_UNAVAILABLE`
+## REC-INPUT-002 — RECOGNITION_ARTIFACT_UNAVAILABLE
 
-Meaning:
-
-Input ArtifactRef cannot be resolved or leased.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested strategies:
-
-```text
-RESOURCE_WAIT
-NO_RETRY
-```
-
-depending on reason.
-
----
-
-### `REC-INPUT-003 — RECOGNITION_ARTIFACT_TYPE_UNSUPPORTED`
-
-Meaning:
-
-Input Artifact type is not supported by Recognition.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-NON_RETRYABLE
-```
-
----
-
-### `REC-INPUT-004 — RECOGNITION_COORDINATE_SPACE_INVALID`
-
-Meaning:
-
-Source CoordinateSpace is malformed or inconsistent with image metadata.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-NON_RETRYABLE
-```
-
----
-
-### `REC-INPUT-005 — RECOGNITION_REGION_INVALID`
-
-Meaning:
-
-Requested RegionSelection is invalid or outside source coordinate space.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Correction required.
-
----
-
-### `REC-INPUT-006 — RECOGNITION_CONTRACT_VERSION_UNSUPPORTED`
-
-Meaning:
-
-Recognition Attempt uses unsupported major contract version.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-NON_RETRYABLE
-```
-
----
-
-## 13. Image Errors
-
-### `REC-IMAGE-001 — RECOGNITION_IMAGE_INVALID`
-
-Meaning:
-
-Image metadata or decoded content is invalid.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested strategy:
-
-```text
-ALTERNATIVE_PREPARATION
-```
-
-when decode/preparation path may differ.
-
----
-
-### `REC-IMAGE-002 — RECOGNITION_IMAGE_FORMAT_UNSUPPORTED`
-
-Meaning:
-
-Image format is unsupported by all eligible Recognition paths.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-NON_RETRYABLE
-```
-
-unless upstream converts format.
-
----
-
-### `REC-IMAGE-003 — RECOGNITION_IMAGE_TOO_LARGE`
-
-Meaning:
-
-Image exceeds safe Recognition processing limits.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested strategies:
-
-```text
-REGION_ONLY
-ALTERNATIVE_PREPARATION
-```
-
----
-
-### `REC-IMAGE-004 — RECOGNITION_IMAGE_TOO_SMALL`
-
-Meaning:
-
-Image does not contain enough resolution for requested quality and no acceptable upscale path exists.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Do not use this error when Candidate can still be produced with `LOW_IMAGE_QUALITY`.
-
----
-
-### `REC-IMAGE-005 — RECOGNITION_IMAGE_CONTENT_UNUSABLE`
-
-Meaning:
-
-Image is technically valid but unusable for Recognition.
-
-Examples:
-
-- fully transparent;
-- entirely blank under configured policy;
-- unrecoverably corrupted visual content.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-NON_RETRYABLE
-```
-
-Do not confuse with no readable text.
-
----
-
-## 14. Capability Errors
-
-### `REC-CAP-001 — RECOGNITION_CAPABILITY_UNAVAILABLE`
-
-Meaning:
-
-No eligible provider/capability path satisfies the Recognition requirements.
-
-Examples:
-
-- vertical text required but unavailable;
-- local-only required but only remote providers exist;
-- language unsupported;
-- required line geometry unavailable.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested strategies:
-
-```text
-ALTERNATIVE_PROVIDER
-RESOURCE_WAIT
-```
-
----
-
-### `REC-CAP-002 — RECOGNITION_LANGUAGE_UNSUPPORTED`
-
-Meaning:
-
-Required language cannot be processed by eligible providers.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-NON_RETRYABLE
-```
-
-unless requirements/config change.
-
----
-
-### `REC-CAP-003 — RECOGNITION_SCRIPT_UNSUPPORTED`
-
-Meaning:
-
-Required script capability unavailable.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-NON_RETRYABLE
-```
-
----
-
-### `REC-CAP-004 — RECOGNITION_ORIENTATION_UNSUPPORTED`
-
-Meaning:
-
-Required orientation cannot be processed under current capability policy.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-ALTERNATIVE_PREPARATION
-ALTERNATIVE_PROVIDER
-```
-
----
-
-### `REC-CAP-005 — RECOGNITION_PRIVACY_CONFLICT`
-
-Meaning:
-
-Requested execution path violates PrivacyContext.
-
-Examples:
-
-- local-only but selected path is remote;
-- EPHEMERAL mode conflicts with required persistence;
-- protected diagnostics not authorized.
-
-Severity:
-
-```text
-CRITICAL
-```
-
-for attempted policy violation; otherwise `ERROR`.
-
-Retry:
-
-```text
-NON_RETRYABLE
-```
-
-until policy/path changes.
-
----
-
-## 15. Preparation Errors
-
-### `REC-PREP-001 — RECOGNITION_PREPARATION_FAILED`
-
-Meaning:
-
-Image preparation pipeline cannot produce valid provider input.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-ALTERNATIVE_PREPARATION
-ALTERNATIVE_PROVIDER
-```
-
----
-
-### `REC-PREP-002 — RECOGNITION_TRANSFORM_INVALID`
-
-Meaning:
-
-Preparation transform chain is invalid or non-invertible where inverse mapping is required.
-
-Severity:
-
-```text
-CRITICAL
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-ALTERNATIVE_PREPARATION
-```
-
----
-
-### `REC-PREP-003 — RECOGNITION_PREPARATION_OUTPUT_INVALID`
-
-Meaning:
-
-Prepared image dimensions, format or metadata violate provider/Recognition contract.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
----
-
-## 16. Detection Errors
-
-### `REC-DETECT-001 — RECOGNITION_DETECTION_FAILED`
-
-Meaning:
-
-Text-region detection failed to produce a valid output.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-RETRYABLE
-```
-
-Suggested:
-
-```text
-SAME_PROVIDER
-ALTERNATIVE_PROVIDER
-ALTERNATIVE_PREPARATION
-```
-
----
-
-### `REC-DETECT-002 — RECOGNITION_DETECTION_OUTPUT_INVALID`
-
-Meaning:
-
-Detector output is malformed or cannot be normalized.
-
-Examples:
-
-- invalid geometry;
-- duplicate invalid IDs;
-- out-of-bounds regions;
-- unsupported coordinate semantics.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-ALTERNATIVE_PROVIDER
-```
-
----
-
-### `REC-DETECT-003 — RECOGNITION_REGION_SEGMENTATION_FAILED`
-
-Meaning:
-
-Composed strategy cannot create usable Recognition regions.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-ALTERNATIVE_PROVIDER
-ALTERNATIVE_PREPARATION
-```
-
----
-
-## 17. Text Recognition Errors
-
-### `REC-REC-001 — RECOGNITION_TEXT_FAILED`
-
-Meaning:
-
-Text-recognition operation failed.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-RETRYABLE
-```
-
-depending on provider error.
-
-Suggested:
-
-```text
-SAME_PROVIDER
-ALTERNATIVE_PROVIDER
-ALTERNATIVE_PREPARATION
-```
-
----
-
-### `REC-REC-002 — RECOGNITION_TEXT_OUTPUT_INVALID`
-
-Meaning:
-
-Recognized text output is malformed or violates normalization contract.
-
-Examples:
-
-- invalid encoding;
-- impossible line references;
-- unsupported provider output shape;
-- non-normalizable text structure.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-ALTERNATIVE_PROVIDER
-```
-
----
-
-### `REC-REC-003 — RECOGNITION_OUTPUT_UNUSABLE`
-
-Meaning:
-
-Provider produced output, but Recognition quality policy considers it unusable and no degraded Candidate is allowed.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-ALTERNATIVE_PROVIDER
-ALTERNATIVE_PREPARATION
-REGION_ONLY
-```
-
----
-
-### `REC-REC-004 — RECOGNITION_PROVIDER_TIMEOUT`
-
-Meaning:
-
-Recognition provider exceeded provider-specific execution timeout.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-RETRYABLE
-```
-
-Suggested:
-
-```text
-SAME_PROVIDER
-ALTERNATIVE_PROVIDER
-```
-
-Runtime still owns Attempt deadline/terminal disposition.
-
----
-
-## 18. Coordinate Errors
-
-### `REC-COORD-001 — RECOGNITION_COORDINATE_MAPPING_FAILED`
-
-Meaning:
-
-Processed-space geometry cannot be mapped safely to source space.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-ALTERNATIVE_PREPARATION
-```
-
----
-
-### `REC-COORD-002 — RECOGNITION_GEOMETRY_OUT_OF_BOUNDS`
-
-Meaning:
-
-Normalized public geometry falls outside source CoordinateSpace beyond allowed tolerance.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
----
-
-### `REC-COORD-003 — RECOGNITION_GEOMETRY_INVALID`
-
-Meaning:
-
-Geometry is empty, malformed or inconsistent.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
----
-
-## 19. Reading-Order Errors
-
-### `REC-ORDER-001 — RECOGNITION_READING_ORDER_FAILED`
-
-Meaning:
-
-Recognition cannot produce required valid reading order.
-
-Severity:
-
-```text
-ERROR
-```
-
-only when valid reading order is required by contract.
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-ALTERNATIVE_PROVIDER
-ALTERNATIVE_PREPARATION
-```
-
-When uncertain order is usable:
-
-```text
-Warning = READING_ORDER_UNCERTAIN
-```
-
-not error.
-
----
-
-### `REC-ORDER-002 — RECOGNITION_READING_ORDER_INVALID`
-
-Meaning:
-
-ReadingOrder entries reference missing/duplicate regions or invalid indices.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
----
-
-## 20. Candidate Errors
-
-### `REC-CAND-001 — RECOGNITION_CANDIDATE_ASSEMBLY_FAILED`
-
-Meaning:
-
-Recognition cannot assemble Candidate Recognition Artifact.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-This is not Artifact publication failure.
-
----
-
-### `REC-CAND-002 — RECOGNITION_CANDIDATE_INVALID`
-
-Meaning:
-
-Candidate failed Recognition semantic validation.
-
-Examples:
-
-- duplicate RegionId;
-- invalid ReadingOrder reference;
-- invalid geometry;
-- missing provider provenance;
-- invalid completeness;
-- missing compatibility metadata;
-- SDK object leaked into Metadata.
-
-Severity:
-
-```text
-ERROR
-```
-
-or `CRITICAL` for invariant corruption.
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
----
-
-### `REC-CAND-003 — RECOGNITION_CANDIDATE_PRIVACY_VIOLATION`
-
-Meaning:
-
-Candidate contains forbidden/sensitive data.
-
-Severity:
-
-```text
-CRITICAL
-```
-
-Retry:
-
-```text
-NON_RETRYABLE
-```
-
-Candidate must not be submitted.
-
----
-
-### `REC-CAND-004 — RECOGNITION_CANDIDATE_SUBMISSION_FAILED`
-
-Meaning:
-
-Recognition cannot hand Candidate to Runtime Completion boundary because of local contract/serialization failure.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Do not use for Runtime authority rejection or Artifact Store publication failure.
-
----
-
-## 21. Recognition-Local Resource Errors
-
-### `REC-RES-001 — RECOGNITION_RESOURCE_EXHAUSTED`
-
-Meaning:
-
-Recognition cannot allocate required Attempt-local resources within provided budget.
-
-Examples:
-
-- preparation buffer allocation;
-- region batch allocation;
-- local native working memory.
-
-Severity:
-
-```text
-ERROR
-```
-
-Retry:
-
-```text
-CONDITIONALLY_RETRYABLE
-```
-
-Suggested:
-
-```text
-RESOURCE_WAIT
-ALTERNATIVE_PREPARATION
-REGION_ONLY
-```
-
----
-
-### `REC-RES-002 — RECOGNITION_INPUT_LEASE_FAILED`
-
-Meaning:
-
-Input Artifact Lease cannot be acquired or becomes invalid before use.
+Input Artifact không resolve/lease được.
 
 Severity:
 
@@ -1378,16 +629,14 @@ RESOURCE_WAIT
 
 ---
 
-### `REC-RES-003 — RECOGNITION_LOCAL_RESOURCE_CLEANUP_FAILED`
+## REC-INPUT-003 — RECOGNITION_ARTIFACT_TYPE_UNSUPPORTED
 
-Meaning:
-
-Attempt-local Recognition resource cannot be released cleanly.
+ArtifactType không được Recognition hỗ trợ.
 
 Severity:
 
 ```text
-CRITICAL
+ERROR
 ```
 
 Retry:
@@ -1396,45 +645,322 @@ Retry:
 NON_RETRYABLE
 ```
 
-for same Attempt.
+---
 
-Runtime/Resource Manager may degrade or drain component.
+## REC-INPUT-004 — RECOGNITION_REGION_SELECTION_INVALID
+
+Requested RegionSelection invalid đối với input Artifact.
+
+Recognition không định nghĩa Geometry semantics.
+
+Validation dùng shared/OCR geometry contract.
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+NON_RETRYABLE
+```
+
+cho tới khi input được sửa.
 
 ---
 
-## 22. Errors Not Owned by Recognition
+## REC-INPUT-005 — RECOGNITION_CONTRACT_VERSION_UNSUPPORTED
 
-Do not define Recognition codes for:
+Unsupported Recognition Contract major version.
+
+Severity:
 
 ```text
-QueueOverflow
-SchedulerAdmissionRejected
-WorkItemCanceled
-AttemptAbandoned
-RuntimeDeadlineExpired
-ProviderModelInitializationFailed
-ProviderHealthUnavailable
-GPUGloballyUnavailable
-ArtifactPublicationFailed
-OwnershipTransferFailed
-CacheEvictionFailed
-StorageWriteFailed
-ApplicationShutdownFailed
+ERROR
 ```
 
-These must use canonical errors from owning component.
-
-Recognition may receive/reference them through:
+Retry:
 
 ```text
-RuntimeErrorRef
-ProviderErrorRef
-ResourceErrorRef
+NON_RETRYABLE
 ```
 
 ---
 
-## 23. Provider Error Reference
+# 18. Planning Errors
+
+## REC-PLAN-001 — RECOGNITION_PLAN_INVALID
+
+RecognitionPlan không thể đạt `READY`.
+
+Examples:
+
+* incompatible Profile
+* contradictory options
+* impossible requested outputs
+* unresolved OCR Profile
+* invalid Configuration Snapshot
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+CONDITIONALLY_RETRYABLE
+```
+
+---
+
+## REC-PLAN-002 — RECOGNITION_PROFILE_UNSUPPORTED
+
+Recognition Profile không được module hỗ trợ.
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+NON_RETRYABLE
+```
+
+---
+
+## REC-PLAN-003 — RECOGNITION_EXECUTION_PATH_UNAVAILABLE
+
+Không thể xây executable orchestration path.
+
+Có thể do:
+
+* OCR capability unavailable
+* execution class unavailable
+* Plan constraint mismatch
+
+External causes phải giữ qua ErrorRef.
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+CONDITIONALLY_RETRYABLE
+```
+
+---
+
+# 19. Capability Errors
+
+## REC-CAP-001 — RECOGNITION_CAPABILITY_UNAVAILABLE
+
+Không có eligible OCR capability path đáp ứng requirements.
+
+Examples:
+
+* required language unsupported
+* required script unsupported
+* vertical-text support unavailable
+* local-only requirement không đáp ứng
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+CONDITIONALLY_RETRYABLE
+```
+
+Suggested:
+
+```text
+ALTERNATIVE_PROVIDER
+RESOURCE_WAIT
+```
+
+---
+
+## REC-CAP-002 — RECOGNITION_CAPABILITY_REQUIREMENT_INVALID
+
+CapabilityRequirements malformed hoặc contradictory.
+
+Example:
+
+```text
+LocalOnly = true
+
+RemoteAllowed = true
+
+and policy declares them mutually exclusive
+```
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+NON_RETRYABLE
+```
+
+until request corrected.
+
+---
+
+# 20. OCR Execution Errors
+
+Recognition không define error cho từng OCR sub-stage.
+
+Không còn:
+
+```text
+REC-PREP-*
+REC-DETECT-*
+REC-REC-*
+REC-COORD-*
+REC-ORDER-*
+```
+
+Thay vào đó Recognition sử dụng aggregate boundary.
+
+---
+
+## REC-OCR-001 — RECOGNITION_OCR_EXECUTION_FAILED
+
+Canonical OCR execution không tạo được usable OCR result/reference cho module.
+
+```text
+Recognition Module
+      ↓
+OCR Architecture
+      ↓
+External OCR Error
+      ↓
+REC-OCR-001
+```
+
+`ExternalErrorRef` phải giữ original semantic error.
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+phụ thuộc external error.
+
+---
+
+## REC-OCR-002 — RECOGNITION_OCR_RESULT_UNAVAILABLE
+
+OCR execution hoàn thành nhưng required OCR artifact/reference không tồn tại.
+
+Ví dụ:
+
+* missing OCRDocumentRef
+* required ReadingOrderResult unavailable
+* required QualityReport unavailable
+
+Nếu output là optional, dùng warning thay vì error.
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+CONDITIONALLY_RETRYABLE
+```
+
+---
+
+## REC-OCR-003 — RECOGNITION_OCR_RESULT_INCOMPATIBLE
+
+OCR result/reference không compatible với:
+
+* input content identity
+* current Recognition Plan
+* OCR Profile
+* Contract Version
+* privacy partition
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+CONDITIONALLY_RETRYABLE
+```
+
+---
+
+# 21. External OCR Error Reference
+
+```text
+ExternalOCRErrorRef
+├── Owner
+├── ErrorCode
+├── ErrorContractVersion
+├── Stage?
+├── Retryability?
+├── DiagnosticsRef?
+└── Metadata?
+```
+
+Possible owners:
+
+```text
+PREPROCESS
+
+DETECTION
+
+RECOGNITION
+
+TEXT_DIRECTION
+
+LAYOUT
+
+POSTPROCESS
+
+QUALITY
+
+READING_ORDER
+
+OCR_PROVIDER
+```
+
+Recognition không đổi meaning của `ErrorCode`.
+
+---
+
+# 22. Provider Error Reference
 
 ```text
 ProviderErrorRef
@@ -1450,23 +976,20 @@ ProviderErrorRef
 
 Rules:
 
-1. no raw exception;
-2. no credential;
-3. no full response;
-4. no prompt/image/text payload;
-5. provider code remains traceable;
-6. Recognition maps it to semantic module error where needed;
-7. Provider Manager remains owner of provider health/lifecycle.
+1. no raw exception
+2. no credentials
+3. no full Provider response
+4. no image/text payload
+5. Provider code remains traceable
+6. Provider lifecycle owner remains external
 
 ---
 
-## 24. Provider Output Errors
+# 23. Candidate Errors
 
-### `REC-PROV-001 — RECOGNITION_PROVIDER_OUTPUT_INVALID`
+## REC-CAND-001 — RECOGNITION_CANDIDATE_ASSEMBLY_FAILED
 
-Meaning:
-
-Provider returned data that cannot be normalized into Recognition contract.
+Recognition không thể assemble Candidate contract.
 
 Severity:
 
@@ -1480,26 +1003,52 @@ Retry:
 CONDITIONALLY_RETRYABLE
 ```
 
-Suggested:
-
-```text
-ALTERNATIVE_PROVIDER
-```
-
 ---
 
-### `REC-PROV-002 — RECOGNITION_PROVIDER_CAPABILITY_MISMATCH`
+## REC-CAND-002 — RECOGNITION_CANDIDATE_INVALID
 
-Meaning:
-
-Selected provider behavior does not match declared capability.
+Candidate failed module-level validation.
 
 Examples:
 
-- line geometry required but omitted;
-- vertical text advertised but unsupported;
-- local-only guarantee violated;
-- confidence format differs from declared contract.
+* missing CandidateArtifactId
+* wrong ArtifactType
+* missing OCRDocumentRef
+* incompatible QualityReportRef
+* incompatible ReadingOrderResultRef
+* missing ProviderProvenance
+* invalid Completeness
+* invalid CompatibilityMetadata
+* Provider SDK object leak
+
+Không dùng error này cho:
+
+* invalid Region geometry
+* invalid OCR Line hierarchy
+* invalid Reading Graph internals
+* invalid Quality Score internals
+
+Những lỗi đó thuộc artifact owner.
+
+Severity:
+
+```text
+ERROR
+```
+
+hoặc:
+
+```text
+CRITICAL
+```
+
+nếu module invariant bị phá.
+
+---
+
+## REC-CAND-003 — RECOGNITION_CANDIDATE_PRIVACY_VIOLATION
+
+Candidate chứa forbidden content hoặc vi phạm Privacy Context.
 
 Severity:
 
@@ -1510,24 +1059,23 @@ CRITICAL
 Retry:
 
 ```text
-CONDITIONALLY_RETRYABLE
+NON_RETRYABLE
 ```
 
-Suggested:
-
-```text
-ALTERNATIVE_PROVIDER
-```
-
-Provider Manager should receive health/capability diagnostic.
+Candidate không được submit.
 
 ---
 
-### `REC-PROV-003 — RECOGNITION_PROVIDER_PROTOCOL_FAILED`
+## REC-CAND-004 — RECOGNITION_CANDIDATE_SUBMISSION_FAILED
 
-Meaning:
+Recognition không thể submit Candidate qua Attempt Completion boundary vì local serialization/contract failure.
 
-Provider request/response protocol fails within Recognition adapter.
+Không dùng cho:
+
+* stale rejection
+* authority rejection
+* ownership transfer failure
+* Artifact publication failure
 
 Severity:
 
@@ -1538,20 +1086,96 @@ ERROR
 Retry:
 
 ```text
-RETRYABLE
+CONDITIONALLY_RETRYABLE
 ```
-
-depending on ProviderErrorRef.
 
 ---
 
-## 25. Recognition-Owned State Errors
+# 24. Recognition-Local Resource Errors
 
-### `REC-STATE-001 — RECOGNITION_STATE_INVARIANT_VIOLATION`
+## REC-RES-001 — RECOGNITION_RESOURCE_EXHAUSTED
 
-Meaning:
+Recognition không đủ Attempt-local resource trong Runtime-provided budget.
 
-Recognition-owned Plan, phase or Candidate state transition violates `STATES.md`.
+Examples:
+
+* temporary buffer
+* Candidate assembly buffer
+* bounded local transformation buffer
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+CONDITIONALLY_RETRYABLE
+```
+
+Suggested:
+
+```text
+RESOURCE_WAIT
+REGION_ONLY
+```
+
+---
+
+## REC-RES-002 — RECOGNITION_INPUT_LEASE_FAILED
+
+Không acquire hoặc maintain Input Artifact Lease.
+
+Severity:
+
+```text
+ERROR
+```
+
+Retry:
+
+```text
+CONDITIONALLY_RETRYABLE
+```
+
+---
+
+## REC-RES-003 — RECOGNITION_LOCAL_CLEANUP_FAILED
+
+Attempt-local Recognition resource cleanup thất bại.
+
+Severity:
+
+```text
+CRITICAL
+```
+
+Retry:
+
+```text
+NON_RETRYABLE
+```
+
+cho cùng Attempt.
+
+Resource Manager/Runtime có thể degrade/drain component.
+
+---
+
+# 25. State Errors
+
+## REC-STATE-001 — RECOGNITION_STATE_INVARIANT_VIOLATION
+
+Recognition-owned state transition vi phạm `STATES.md`.
+
+Applies to:
+
+* Availability
+* Plan
+* Operation Phase
+* Candidate Validation
 
 Severity:
 
@@ -1567,22 +1191,11 @@ NON_RETRYABLE
 
 for same Attempt.
 
-Possible Runtime response:
-
-- fail Attempt;
-- degrade module;
-- drain component;
-- collect diagnostics.
-
-Recognition does not transition itself to a canonical `FAILED` state.
-
 ---
 
-### `REC-STATE-002 — RECOGNITION_DUPLICATE_CANDIDATE_SUBMISSION`
+## REC-STATE-002 — RECOGNITION_DUPLICATE_CANDIDATE_SUBMISSION
 
-Meaning:
-
-Same Candidate is submitted more than once from Recognition execution.
+Một Candidate được submit hơn một lần từ cùng Recognition execution.
 
 Severity:
 
@@ -1598,13 +1211,66 @@ NON_RETRYABLE
 
 ---
 
-## 26. Internal Errors
+# 26. Privacy Errors
 
-### `REC-INT-001 — RECOGNITION_INTERNAL_ERROR`
+## REC-PRIV-001 — RECOGNITION_PRIVACY_CONFLICT
 
-Meaning:
+Recognition Plan yêu cầu execution path vi phạm PrivacyContext.
 
-Unexpected Recognition implementation failure.
+Examples:
+
+* LocalOnly nhưng chỉ remote path có sẵn
+* protected diagnostics không authorized
+* persistence required trong EPHEMERAL mode
+
+Severity:
+
+```text
+ERROR
+```
+
+hoặc `CRITICAL` khi implementation cố bypass policy.
+
+Retry:
+
+```text
+NON_RETRYABLE
+```
+
+until Plan/policy changes.
+
+---
+
+## REC-PRIV-002 — RECOGNITION_CONTENT_EXPOSURE_DETECTED
+
+Recognition phát hiện dữ liệu forbidden sắp crossing module/log/event boundary.
+
+Examples:
+
+* raw OCR text in event
+* raw image in diagnostics metadata
+* Provider credential in Candidate
+* raw Provider response in error
+
+Severity:
+
+```text
+CRITICAL
+```
+
+Retry:
+
+```text
+NON_RETRYABLE
+```
+
+---
+
+# 27. Internal Errors
+
+## REC-INT-001 — RECOGNITION_INTERNAL_ERROR
+
+Unexpected Recognition Module implementation failure.
 
 Severity:
 
@@ -1618,23 +1284,22 @@ Retry:
 CONDITIONALLY_RETRYABLE
 ```
 
-A new Attempt may succeed, but Runtime decides.
+Runtime decides.
 
 ---
 
-### `REC-INT-002 — RECOGNITION_INVARIANT_VIOLATION`
+## REC-INT-002 — RECOGNITION_INVARIANT_VIOLATION
 
-Meaning:
-
-Recognition domain invariant is violated.
+Module architecture invariant bị phá.
 
 Examples:
 
-- source mapping lost;
-- raw text overwritten;
-- provider SDK object escapes boundary;
-- Candidate mutated after validation;
-- local-only path attempts remote execution.
+* Candidate mutated after VALID
+* Runtime authority assumed by module
+* OCR contract redefined locally
+* Provider SDK object crosses module boundary
+* Recognition directly invokes downstream Translation
+* local-only path sends data remote
 
 Severity:
 
@@ -1652,11 +1317,9 @@ until implementation/configuration corrected.
 
 ---
 
-### `REC-INT-003 — RECOGNITION_NORMALIZATION_FAILED`
+## REC-INT-003 — RECOGNITION_REFERENCE_NORMALIZATION_FAILED
 
-Meaning:
-
-Provider-independent normalization fails unexpectedly.
+Module không thể normalize external artifact/error/reference vào Recognition contract.
 
 Severity:
 
@@ -1670,75 +1333,141 @@ Retry:
 CONDITIONALLY_RETRYABLE
 ```
 
-Suggested:
-
-```text
-ALTERNATIVE_PROVIDER
-```
-
 ---
 
-## 27. Removed Legacy Errors
+# 28. Errors Not Owned by Recognition
 
-The following legacy errors are removed or moved:
+Không tạo Recognition-specific code cho:
 
 ```text
-RecognitionAlreadyRunning
-    → removed; bounded concurrent Attempts are Runtime-managed
-
-RecognitionNotStarted
-    → removed; no request-oriented singleton lifecycle
-
 QueueOverflow
-    → Work Queue owner
 
-GPUUnavailable
-    → Provider Manager / Resource Manager
+SchedulerAdmissionRejected
 
-ModelUnavailable
-ModelInitializationFailed
-UnsupportedModel
-ModelExecutionFailed
-    → Provider Manager / ProviderErrorRef
+WorkItemCanceled
 
-AtomicCommitFailed
-    → Artifact Store publication/ownership error
+AttemptAbandoned
 
-Timeout
-    → split into provider timeout or Runtime deadline
+RuntimeDeadlineExpired
 
-NoTextDetected
-    → EMPTY_VALID + warning
+ProviderInitializationFailed
 
-LowConfidence
-    → warning/quality state
+ProviderHealthUnavailable
 
-ReadingOrderUnknown
-    → warning unless strict contract fails
+ProviderModelLoadFailed
 
-OverlappingRegions
-    → warning when safely normalized
+GPUCapacityUnavailable
+
+OCRDetectionInvalidGeometry
+
+OCRRecognitionInvalidStructure
+
+OCRReadingOrderCycle
+
+OCRQualityAssessmentFailed
+
+ArtifactOwnershipTransferFailed
+
+ArtifactPublicationFailed
+
+CacheEvictionFailed
+
+StorageWriteFailed
+
+ApplicationShutdownFailed
+```
+
+Recognition chỉ reference canonical owner error.
+
+---
+
+# 29. Removed Legacy Recognition Error Categories
+
+Removed:
+
+```text
+PREP
+DETECT
+REC
+COORD
+ORDER
+PROV
+```
+
+Reason:
+
+```text
+OCR Architecture / Provider Integration
+now owns those semantics.
+```
+
+Examples:
+
+```text
+RECOGNITION_DETECTION_FAILED
+    → Detection error reference
+      wrapped by REC-OCR-001 when needed
+
+RECOGNITION_TEXT_FAILED
+    → OCR Recognition error reference
+
+RECOGNITION_COORDINATE_MAPPING_FAILED
+    → Detection/Postprocessing error reference
+
+RECOGNITION_READING_ORDER_FAILED
+    → Reading Order error reference
+
+RECOGNITION_PROVIDER_OUTPUT_INVALID
+    → Provider/OCR Adapter error reference
 ```
 
 ---
 
-## 28. Cancellation Boundary
+# 30. Removed Legacy Warning Ownership
 
-Cancellation is not a Recognition ModuleError by default.
-
-Recognition may observe:
+Recognition no longer authoritatively defines:
 
 ```text
-CancellationContext.IsCancellationRequested = true
+LOW_DETECTION_CONFIDENCE
+
+LOW_RECOGNITION_CONFIDENCE
+
+READING_ORDER_UNCERTAIN
+
+REGION_GEOMETRY_INFERRED
+
+LINE_GEOMETRY_UNAVAILABLE
+
+OVERLAPPING_REGIONS_SUPPRESSED
+
+DUPLICATE_REGION_SUPPRESSED
+
+MIXED_ORIENTATION_DETECTED
 ```
 
-Then:
+Những warnings/signals thuộc OCR owner tương ứng.
 
-- stop starting new expensive work;
-- request provider cancellation when supported;
-- release Attempt-local resources;
-- return cancellation observation;
-- avoid Candidate submission.
+Recognition có thể surface chúng through references.
+
+---
+
+# 31. Cancellation Boundary
+
+Cancellation không phải RecognitionModuleError mặc định.
+
+Recognition observe:
+
+```text
+CancellationContext
+```
+
+rồi:
+
+* stop new expensive work
+* request provider cancellation if supported
+* cleanup local resources
+* avoid Candidate submission
+* return cancellation observation
 
 Runtime decides:
 
@@ -1748,86 +1477,138 @@ ATTEMPT_ABANDONED
 ATTEMPT_FAILED
 ```
 
-Do not emit a Recognition terminal cancellation error.
-
 ---
 
-## 29. Deadline Boundary
+# 32. Deadline Boundary
 
-Deadline belongs to Runtime ExecutionContext.
+Deadline thuộc Runtime Execution Context.
 
-Recognition can produce:
-
-### Provider timeout
+Recognition có thể observe:
 
 ```text
-REC-REC-004 — RECOGNITION_PROVIDER_TIMEOUT
+deadline exceeded
 ```
 
-### Phase cannot start before deadline
+hoặc receive external Provider timeout error.
 
-Recognition returns safe module/deadline observation or RuntimeErrorRef according to runtime contract.
+Recognition không:
 
-It does not:
-
-- own global timeout;
-- cancel WorkItem lineage;
-- decide retry;
-- convert every deadline into Recognition error.
+* own global timeout
+* cancel WorkItem lineage
+* decide retry
+* convert every deadline into module error
 
 ---
 
-## 30. Error-to-Runtime Disposition
+# 33. Error to Runtime Disposition
 
 ```text
 RecognitionModuleError
-        ↓
+      ↓
 Runtime Error Normalization
-        ↓
-Retry Policy / Cancellation / Authority Evaluation
-        ↓
+      ↓
+Retry Policy
+Cancellation Policy
+Authority Validation
+      ↓
 Attempt Disposition
 ```
 
-Possible Runtime dispositions:
+Possible external dispositions:
 
 ```text
 ATTEMPT_FAILED
+
 ATTEMPT_CANCELED
+
 ATTEMPT_ABANDONED
+
 RETRY_SCHEDULED
+
 FALLBACK_ATTEMPT_CREATED
+
 REJECTED_STALE
 ```
 
-Recognition does not map directly to a terminal state.
+Recognition không map trực tiếp error → terminal Attempt state.
 
 ---
 
-## 31. Error and Candidate Relationship
+# 34. Error and Candidate Relationship
 
 ```text
 Valid Candidate
     → no ModuleError
     → warnings allowed
+```
 
+```text
 Invalid Candidate
-    → RecognitionModuleError
+    → ModuleError
     → Candidate not submitted
+```
 
-Cancellation observed before Candidate
+```text
+Cancellation before Candidate
     → no Candidate
     → Runtime decides outcome
+```
 
-Runtime rejects valid Candidate as stale
+```text
+Valid Candidate rejected stale
     → no RecognitionModuleError
 ```
 
-Stale rejection is not Recognition failure.
+---
+
+# 35. Quality Relationship
+
+Poor Quality không tự động là Recognition failure.
+
+```text
+QualityReport Grade = Poor
+        ↓
+Recognition Plan / Runtime Policy
+        ↓
+may still allow Candidate
+```
+
+Nếu required quality gate không đạt và Candidate policy không cho phép:
+
+```text
+REC-OCR-002
+or
+REC-OCR-003
+```
+
+có thể được dùng ở module boundary.
+
+Recognition không redefine Quality error codes.
 
 ---
 
-## 32. Logging Contract
+# 36. Reading Order Relationship
+
+Reading Order uncertainty không tự động là Recognition error.
+
+Nếu Reading Order optional:
+
+```text
+Warning =
+OPTIONAL_READING_ORDER_UNAVAILABLE
+```
+
+Nếu Plan yêu cầu valid ReadingOrderResult và result không tồn tại:
+
+```text
+REC-OCR-002
+```
+
+Original Reading Order failure vẫn giữ qua ExternalOCRErrorRef.
+
+---
+
+# 37. Logging Contract
 
 Safe structured fields:
 
@@ -1845,10 +1626,9 @@ AttemptId
 InputArtifactId?
 CandidateArtifactId?
 ProviderId?
-ProviderErrorCode?
+ExternalErrorCode?
 Retryability
 TraceId
-DurationMs?
 OccurredAt
 ```
 
@@ -1856,315 +1636,478 @@ Forbidden:
 
 ```text
 image_bytes
+
 image_base64
+
 recognized_text
-surface_text
+
+translated_text
+
 browser_content
-personal_information
-provider_api_key
-provider_access_token
+
+credentials
+
 authorization_header
-full_provider_response
+
+provider_full_response
+
 sensitive_file_path
 ```
 
 ---
 
-## 33. Metrics
+# 38. Metrics
 
-Recognition-owned metrics:
+Recognition-owned:
 
 ```text
 recognition.error.total
+
 recognition.error.by_code
+
 recognition.error.by_category
+
 recognition.error.by_phase
+
 recognition.error.critical_total
+
 recognition.retry_hint.total
+
 recognition.warning.total
+
 recognition.warning.by_code
+
 recognition.empty_valid.total
-recognition.partial_total
-recognition.low_confidence_warning_total
+
+recognition.partial.total
+
 recognition.candidate_invalid_total
-recognition.provider_output_invalid_total
+
+recognition.ocr_execution_failure_total
+
 recognition.invariant_violation_total
+
 recognition.cleanup_failure_total
 ```
 
 Not Recognition-owned:
 
 ```text
-queue_overflow_total
-scheduler_rejection_total
+detection_error_total
+
+recognition_confidence_distribution
+
+reading_order_failure_total
+
+quality_grade_distribution
+
 provider_health_state
-gpu_unavailable_total
+
+queue_overflow_total
+
+scheduler_rejection_total
+
 artifact_publication_failure_total
+
 runtime_deadline_total
 ```
 
 ---
 
-## 34. Error Observability
+# 39. Error Observability
 
-Every ModuleError should be traceable to:
+Mọi RecognitionModuleError nên traceable tới:
 
 ```text
 RevisionId
+
 WorkItemId
+
 AttemptId
+
 OperationPhase
+
 ConfigurationSnapshotId
+
 ProviderId?
+
 TraceId
 ```
 
-Correlation IDs stay in trace/log, not high-cardinality metric labels.
+High-cardinality IDs ở trace/log, không mặc định dùng metric labels.
 
 ---
 
-## 35. Privacy
+# 40. Privacy
 
-Error metadata must be content-free by default.
+Error metadata content-free by default.
 
-Protected diagnostics may contain Artifact references only when:
+Protected diagnostics chỉ thông qua:
 
-- explicit diagnostic mode;
-- authorization;
-- secure storage;
-- bounded retention;
-- redaction;
-- audit trail.
+```text
+DiagnosticsRef
+```
 
-Never embed full content directly in error contract.
+và yêu cầu:
 
----
-
-## 36. Error Contract Evolution
-
-### Backward-compatible
-
-Allowed:
-
-- new error codes;
-- new optional Metadata keys;
-- new RetryStrategy values with safe unknown handling;
-- new warning codes;
-- clarification without semantic change.
-
-### Breaking
-
-Requires major version:
-
-- changing existing error meaning;
-- changing retryability semantics;
-- changing severity semantics materially;
-- removing/renaming stable code;
-- changing privacy guarantee;
-- changing error ownership boundary.
-
-Unknown codes:
-
-- preserve raw stable code;
-- map category when possible;
-- treat unknown severity safely;
-- do not crash;
-- reject unsupported major version.
+* explicit diagnostic mode
+* authorization
+* secure Artifact
+* bounded retention
+* redaction
+* auditability
 
 ---
 
-## 37. Testing Requirements
+# 41. Error Contract Evolution
 
-### Contract
+Backward-compatible:
 
-- every code unique;
-- every code maps one symbolic name;
-- category matches code prefix;
-- severity valid;
-- RetryHint valid;
-- MessageKey present;
-- no Runtime terminal state embedded.
+* add new code
+* add optional Metadata
+* add warning code
+* add RetryStrategy
+* clarification without semantic change
 
-### Warning vs Error
+Breaking:
 
-- no text → EMPTY_VALID warning;
-- low confidence → warning when Candidate usable;
-- uncertain order → warning when usable;
-- overlapping regions → warning when normalized;
-- unusable output → ModuleError.
+* change existing code meaning
+* materially change severity
+* materially change retryability
+* rename/remove stable code
+* change privacy guarantee
+* change ownership boundary
 
-### Input/Image
-
-- missing ArtifactRef;
-- unavailable Artifact;
-- unsupported type;
-- invalid CoordinateSpace;
-- invalid Region;
-- unsupported format;
-- too-large image;
-- too-small unusable image.
-
-### Capability
-
-- unsupported language;
-- unsupported vertical text;
-- local-only conflict;
-- no eligible provider;
-- line-geometry requirement unavailable.
-
-### Pipeline
-
-- preparation failure;
-- detection failure;
-- text recognition failure;
-- provider timeout;
-- output normalization failure;
-- coordinate mapping failure;
-- reading-order failure;
-- Candidate assembly/validation failure.
-
-### Ownership Boundaries
-
-- Queue overflow not mapped to Recognition code;
-- Provider initialization failure remains ProviderErrorRef;
-- Artifact publication failure not mapped to Candidate error;
-- stale rejection not mapped to Recognition failure;
-- cancellation not converted to ModuleError by default.
-
-### Privacy
-
-- no image;
-- no full text;
-- no credentials;
-- no raw provider response;
-- safe diagnostics reference only.
-
-### Runtime Integration
-
-- RetryHint evaluated externally;
-- new Attempt uses new AttemptId;
-- cancellation can lead to abandoned Attempt;
-- valid Candidate rejected stale without Recognition error;
-- critical invariant can degrade/drain module externally.
+Requires major version.
 
 ---
 
-## 38. Error Invariants
+# 42. Unknown Codes
 
-1. Every Recognition failure has stable ErrorCode.
+Consumer phải:
+
+* preserve original code
+* use category if understood
+* tolerate unknown additive values
+* not crash
+* reject unsupported major contract version
+
+---
+
+# 43. Testing Requirements — Contract
+
+Verify:
+
+* every code unique
+* one symbolic name per code
+* category matches prefix
+* valid Severity
+* valid RetryHint
+* MessageKey present
+* no Runtime state embedded
+* no OCR semantic error redefinition
+
+---
+
+# 44. Testing Requirements — Warning vs Error
+
+Test:
+
+```text
+no readable text
+    → EMPTY_VALID + warning
+```
+
+```text
+poor quality but usable
+    → warning / QualityReport
+```
+
+```text
+optional ReadingOrder missing
+    → warning
+```
+
+```text
+required OCR result missing
+    → ModuleError
+```
+
+```text
+invalid Candidate
+    → ModuleError
+```
+
+---
+
+# 45. Testing Requirements — Ownership
+
+Verify:
+
+* Detection error remains Detection-owned
+* ReadingOrder error remains ReadingOrder-owned
+* Quality error remains Quality-owned
+* Provider lifecycle error remains Provider-owned
+* Runtime deadline remains Runtime-owned
+* Queue error remains Queue-owned
+* Artifact publication failure remains Artifact Store-owned
+* stale rejection is not Recognition failure
+
+---
+
+# 46. Testing Requirements — Input and Plan
+
+Test:
+
+* missing ArtifactRef
+* unsupported ArtifactType
+* invalid RegionSelection
+* unsupported major version
+* invalid Recognition Profile
+* invalid CapabilityRequirements
+* Privacy conflict
+* no executable Plan
+
+---
+
+# 47. Testing Requirements — Candidate
+
+Test:
+
+* missing OCRDocumentRef
+* incompatible QualityReportRef
+* incompatible ReadingOrderResultRef
+* missing ProviderProvenance
+* invalid Completeness
+* missing CompatibilityMetadata
+* SDK leakage
+* privacy leakage
+* duplicate Candidate submission
+
+---
+
+# 48. Testing Requirements — Runtime Integration
+
+Test:
+
+* RetryHint evaluated externally
+* new Attempt receives new AttemptId
+* cancellation does not create module terminal error
+* valid Candidate may be rejected stale
+* critical invariant may cause external module degradation
+* Recognition never schedules retry itself
+
+---
+
+# 49. Error Invariants
+
+1. Every Recognition-owned failure has stable ErrorCode.
+
 2. Every code maps to one symbolic meaning.
-3. Provider SDK exceptions never cross boundary.
-4. Raw image never appears in error.
-5. Full recognized text never appears in error.
-6. Credential never appears in error.
-7. Warning is separate from ModuleError.
-8. No-text is not error.
-9. Low confidence is not automatically error.
-10. Uncertain reading order is not automatically error.
-11. Recognition never decides retry.
-12. Recognition never creates retry Attempt.
-13. Recognition never owns cancellation terminal outcome.
-14. Recognition never owns Queue overflow.
-15. Recognition never owns Provider lifecycle.
-16. Recognition never owns Artifact publication error.
-17. Recognition never owns Storage error.
-18. Stale rejection is not Recognition error.
-19. Candidate validation error prevents submission.
-20. Candidate publication failure is not Candidate validation error.
-21. Input Artifact remains unchanged after failure.
-22. Attempt-local resources release on failure.
-23. RetryHint is advisory.
-24. Critical error does not automatically create module FAILED state.
-25. Runtime decides Attempt disposition.
-26. ProviderErrorRef is sanitized.
-27. Metadata is bounded.
-28. OperationPhase is explicit.
-29. Error contract is versioned.
-30. Unknown codes are handled safely.
-31. Local-only violations are critical.
-32. Invalid Candidate is never submitted as valid.
-33. Cleanup failure is observable.
-34. Recognition output is never silently fabricated.
-35. Error handling preserves traceability.
+
+3. OCR stage errors retain their original owner.
+
+4. Provider SDK exceptions never cross Recognition boundary.
+
+5. Raw image never appears in error.
+
+6. Full OCR text never appears in error.
+
+7. Credentials never appear.
+
+8. Warning differs from ModuleError.
+
+9. No-text is not error.
+
+10. Poor Quality is not automatically error.
+
+11. Reading Order uncertainty is not automatically error.
+
+12. Recognition does not own Detection errors.
+
+13. Recognition does not own Text Recognition errors.
+
+14. Recognition does not own Direction errors.
+
+15. Recognition does not own Layout errors.
+
+16. Recognition does not own Postprocessing errors.
+
+17. Recognition does not own Quality errors.
+
+18. Recognition does not own Reading Order errors.
+
+19. Recognition does not own Provider lifecycle errors.
+
+20. Recognition does not own Runtime errors.
+
+21. Recognition does not own Artifact publication errors.
+
+22. Recognition does not own Storage errors.
+
+23. Recognition never decides retry.
+
+24. Recognition never creates retry Attempt.
+
+25. Cancellation terminal outcome belongs to Runtime.
+
+26. Stale rejection is not Recognition error.
+
+27. Candidate validation failure prevents valid submission.
+
+28. Publication failure is not Candidate validation failure.
+
+29. Input Artifact remains immutable after failure.
+
+30. Attempt-local resources are cleaned up after failure.
+
+31. RetryHint is advisory.
+
+32. ExternalErrorRef preserves owner semantics.
+
+33. ProviderErrorRef is sanitized.
+
+34. Metadata remains bounded.
+
+35. OperationPhase uses Recognition module phases only.
+
+36. Error contract is versioned.
+
+37. Unknown codes are handled safely.
+
+38. Privacy violations are explicit.
+
+39. Invalid Candidate is never submitted as valid.
+
+40. Error handling preserves traceability.
 
 ---
 
-## 39. MVP Error Set
+# 50. MVP Error Set
 
 Required MVP errors:
 
 ```text
-REC-INPUT-001 RECOGNITION_INPUT_INVALID
-REC-INPUT-002 RECOGNITION_ARTIFACT_UNAVAILABLE
-REC-INPUT-003 RECOGNITION_ARTIFACT_TYPE_UNSUPPORTED
-REC-INPUT-004 RECOGNITION_COORDINATE_SPACE_INVALID
-REC-INPUT-005 RECOGNITION_REGION_INVALID
+REC-INPUT-001
+RECOGNITION_INPUT_INVALID
 
-REC-IMAGE-001 RECOGNITION_IMAGE_INVALID
-REC-IMAGE-002 RECOGNITION_IMAGE_FORMAT_UNSUPPORTED
-REC-IMAGE-003 RECOGNITION_IMAGE_TOO_LARGE
+REC-INPUT-002
+RECOGNITION_ARTIFACT_UNAVAILABLE
 
-REC-CAP-001 RECOGNITION_CAPABILITY_UNAVAILABLE
-REC-CAP-002 RECOGNITION_LANGUAGE_UNSUPPORTED
-REC-CAP-005 RECOGNITION_PRIVACY_CONFLICT
+REC-INPUT-003
+RECOGNITION_ARTIFACT_TYPE_UNSUPPORTED
 
-REC-PREP-001 RECOGNITION_PREPARATION_FAILED
-REC-DETECT-001 RECOGNITION_DETECTION_FAILED
-REC-REC-001 RECOGNITION_TEXT_FAILED
-REC-REC-002 RECOGNITION_TEXT_OUTPUT_INVALID
-REC-REC-004 RECOGNITION_PROVIDER_TIMEOUT
+REC-INPUT-004
+RECOGNITION_REGION_SELECTION_INVALID
 
-REC-COORD-001 RECOGNITION_COORDINATE_MAPPING_FAILED
-REC-ORDER-001 RECOGNITION_READING_ORDER_FAILED
+REC-INPUT-005
+RECOGNITION_CONTRACT_VERSION_UNSUPPORTED
 
-REC-CAND-001 RECOGNITION_CANDIDATE_ASSEMBLY_FAILED
-REC-CAND-002 RECOGNITION_CANDIDATE_INVALID
 
-REC-RES-001 RECOGNITION_RESOURCE_EXHAUSTED
-REC-PROV-001 RECOGNITION_PROVIDER_OUTPUT_INVALID
+REC-PLAN-001
+RECOGNITION_PLAN_INVALID
 
-REC-STATE-001 RECOGNITION_STATE_INVARIANT_VIOLATION
-REC-INT-001 RECOGNITION_INTERNAL_ERROR
-REC-INT-002 RECOGNITION_INVARIANT_VIOLATION
+REC-PLAN-003
+RECOGNITION_EXECUTION_PATH_UNAVAILABLE
+
+
+REC-CAP-001
+RECOGNITION_CAPABILITY_UNAVAILABLE
+
+
+REC-OCR-001
+RECOGNITION_OCR_EXECUTION_FAILED
+
+REC-OCR-002
+RECOGNITION_OCR_RESULT_UNAVAILABLE
+
+
+REC-CAND-001
+RECOGNITION_CANDIDATE_ASSEMBLY_FAILED
+
+REC-CAND-002
+RECOGNITION_CANDIDATE_INVALID
+
+REC-CAND-003
+RECOGNITION_CANDIDATE_PRIVACY_VIOLATION
+
+
+REC-RES-001
+RECOGNITION_RESOURCE_EXHAUSTED
+
+REC-RES-002
+RECOGNITION_INPUT_LEASE_FAILED
+
+
+REC-STATE-001
+RECOGNITION_STATE_INVARIANT_VIOLATION
+
+
+REC-PRIV-001
+RECOGNITION_PRIVACY_CONFLICT
+
+
+REC-INT-001
+RECOGNITION_INTERNAL_ERROR
+
+REC-INT-002
+RECOGNITION_INVARIANT_VIOLATION
 ```
 
-Required MVP warnings:
+---
+
+# 51. MVP Warning Set
+
+Required:
 
 ```text
 NO_READABLE_TEXT_DETECTED
-LOW_IMAGE_QUALITY
-LOW_DETECTION_CONFIDENCE
-LOW_RECOGNITION_CONFIDENCE
-READING_ORDER_UNCERTAIN
-REGION_GEOMETRY_INFERRED
-LINE_GEOMETRY_UNAVAILABLE
-IMAGE_UPSCALED
-IMAGE_DOWNSCALED
-REMOTE_PROVIDER_USED
+
 PARTIAL_RECOGNITION
+
+REMOTE_PROVIDER_USED
+
+FALLBACK_PROVIDER_USED
+
+OCR_RESULT_DEGRADED
+
+QUALITY_BELOW_PREFERRED_LEVEL
 ```
 
----
+Optional:
 
-## 40. Completion Criteria
+```text
+OPTIONAL_READING_ORDER_UNAVAILABLE
 
-This document is complete when:
+OPTIONAL_QUALITY_REPORT_UNAVAILABLE
 
-- every Recognition semantic failure has stable code;
-- warnings and errors are separate;
-- RetryHint is advisory;
-- Provider errors are referenced and sanitized;
-- Runtime ownership boundaries are explicit;
-- no Recognition code duplicates Queue/Scheduler/Provider lifecycle/Artifact Store errors;
-- privacy is enforced;
-- Candidate validation errors are explicit;
-- stale/cancellation/publication outcomes are correctly externalized;
-- contracts remain backward-compatible within major version;
-- tests cover domain and ownership boundaries.
+OUTPUT_TRUNCATED
+```
+
+OCR-stage warning codes remain owned by OCR Architecture.
 
 ---
 
-## 41. Related Documents
+# 52. Completion Criteria
+
+Tài liệu hoàn chỉnh khi:
+
+* mọi Recognition-owned module failure có stable code
+* OCR-stage failure không bị định nghĩa lại
+* warning/error tách biệt
+* RetryHint advisory
+* ExternalErrorRef giữ source ownership
+* Provider errors sanitized
+* Runtime boundary explicit
+* Candidate validation errors explicit
+* stale/cancellation/publication externalized
+* privacy enforced
+* backward compatibility defined
+* tests cover ownership boundaries
+
+---
+
+# 53. Related Documents
 
 ```text
 doc/02-modules/recognition/README.md
@@ -2173,59 +2116,131 @@ doc/02-modules/recognition/CONTRACT.md
 doc/02-modules/recognition/STATES.md
 doc/02-modules/recognition/EVENTS.md
 
+doc/01-architecture/OWNERSHIP_MAP.md
+
+doc/01-architecture/ocr/PIPELINE.md
+doc/01-architecture/ocr/PREPROCESS.md
+doc/01-architecture/ocr/DETECTION.md
+doc/01-architecture/ocr/RECOGNITION.md
+doc/01-architecture/ocr/TEXT_DIRECTION.md
+doc/01-architecture/ocr/LAYOUT.md
+doc/01-architecture/ocr/POSTPROCESS.md
+doc/01-architecture/ocr/QUALITY.md
+doc/01-architecture/ocr/READING_ORDER.md
+doc/01-architecture/ocr/PROVIDERS.md
+
 doc/01-architecture/runtime/ERROR_MODEL.md
 doc/01-architecture/runtime/RETRY_POLICY.md
 doc/01-architecture/runtime/CANCELLATION.md
 doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
-doc/01-architecture/runtime/PIPELINE_RUNTIME.md
-
-doc/01-architecture/ocr/PIPELINE.md
-doc/01-architecture/ocr/QUALITY.md
-doc/01-architecture/ocr/PROVIDERS.md
 ```
 
 ---
 
-## 42. Summary
+# 54. Summary
 
-Recognition Errors now follow:
+Recognition error flow:
 
 ```text
-Recognition detects semantic failure
+OCR / External Component Error
         ↓
-RecognitionModuleError + RetryHint
+ExternalErrorRef
         ↓
-Runtime normalizes and evaluates
+Recognition Module Context
         ↓
-Runtime decides Attempt disposition
+RecognitionModuleError
+        ↓
+RetryHint
+        ↓
+Runtime
+        ↓
+Runtime Disposition
 ```
 
 Recognition owns:
 
 ```text
+Module Boundary Errors
+
+Plan Errors
+
+Capability Requirement Errors
+
+Aggregate OCR Execution Errors
+
+Candidate Errors
+
+Recognition-Local Resource Errors
+
+Recognition State Errors
+
+Recognition Privacy Errors
+
 Warnings
-Module Errors
+
 Retry Hints
-Provider Error Mapping
-Candidate Validation Errors
 ```
 
-Runtime and other components own:
+OCR Architecture owns:
 
 ```text
-Retry Scheduling
+Preprocessing Errors
+
+Detection Errors
+
+Recognition-stage Errors
+
+Direction Errors
+
+Layout Errors
+
+Postprocessing Errors
+
+Quality Errors
+
+Reading Order Errors
+```
+
+Runtime owns:
+
+```text
+Retry Execution
+
 Cancellation Outcome
-Queue and Admission Errors
-Provider Lifecycle Errors
-Publication Errors
-Storage Errors
-Terminal Attempt State
+
+Deadline Outcome
+
+WorkItem / Attempt Outcome
+
+Authority
 ```
 
-The central boundary is:
+Artifact Store owns:
 
 ```text
-Recognition explains why its semantic work could not produce a valid Candidate.
+Ownership Transfer Errors
 
-Runtime decides what the system does next.
+Publication Errors
+```
+
+Provider Integration owns:
+
+```text
+Provider-native Error Mapping
+
+Provider Protocol Errors
+
+Provider Lifecycle Errors
+```
+
+Core rule:
+
+```text
+The owner that defines a semantic operation
+also defines its semantic failure.
+
+Recognition only owns failures
+at the Recognition Module boundary.
+
+Runtime decides what happens next.
 ```

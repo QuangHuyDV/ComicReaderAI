@@ -1,845 +1,1937 @@
 # Reading Session States
 
-- Module: Reading Session
-- Identifier: reading-session
-- Layer: Business Orchestration
-- Version: 2.0.0
-- Status: Draft
-- Owner: CRAI Architecture
+> **Project:** CRAI
+> **Module:** `reading-session`
+> **Path:** `doc/02-modules/reading-session/STATES.md`
+> **Version:** 3.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2 aligned
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-08
 
 ---
 
 # 1. Purpose
 
-This document defines the complete state model of the Reading Session Module.
+This document defines the Reading Session-owned state model.
 
-Unlike MODULE.md, which defines architectural responsibilities, and CONTRACT.md, which defines public interfaces, this document specifies how business state evolves during the lifetime of a reading activity.
+It specifies:
 
-This specification defines:
+```text
+Reading Session lifecycle
+Reading Context lifecycle
+ReadingContextRevision behavior
+candidate context behavior
+state transitions
+transition guards
+terminal states
+recovery
+persistence semantics
+concurrency
+state invariants
+```
 
-- Session lifecycle states
-- Reading Context states
-- Content Revision states
-- Processing Intent states
-- valid transitions
-- transition guards
-- transition triggers
-- terminal states
-- persistence behavior
-- recovery behavior
-- state ownership
-- architectural invariants
+This state specification describes reading-domain state only.
 
-This document intentionally excludes execution state.
+It does not define:
 
-Execution belongs to Runtime Architecture.
+```text
+Runtime Revision state
+WorkItem state
+Attempt state
+Runtime cancellation state
+Runtime retry state
+ProcessingIntent state
+Artifact state
+Presentation state
+UI surface state
+```
+
+Those concepts belong to their respective owners.
 
 ---
 
 # 2. State Ownership
 
-Reading Session owns only business state.
-
-It never owns runtime state.
-
----
-
-## 2.1 Reading Session Owns
+Reading Session owns:
 
 ```text
 ReadingSessionState
-
 ReadingContextState
-
-ContentRevisionState
-
-ProcessingIntentState
+Current ReadingContext reference
+ReadingContextRevision
+Candidate ReadingContext
 ```
 
----
-
-## 2.2 Reading Session Does Not Own
+Reading Session does not own:
 
 ```text
-Worker State
-
-Scheduler State
-
-Execution Queue State
-
-Capture State
-
-Recognition State
-
-Translation State
-
-Presentation State
-
-Provider State
-
-Retry State
-
-Cache State
+RuntimeRevisionState
+WorkItemState
+AttemptState
+ProcessingIntentState
+ArtifactPublicationState
+PresentationState
+ViewportLifecycleState
 ```
-
-Those states belong to their respective modules.
-
-Reading Session may react to them through events or contracts but never becomes their source of truth.
 
 ---
 
 # 3. State Model Overview
 
-The Reading Session state model consists of four independent state machines.
+Reading Session v3 contains two primary state machines.
 
 ```text
 Reading Session
-
 ├── Session Lifecycle
-│
-├── Reading Context
-│
-├── Content Revision
-│
-└── Processing Intent
+└── Reading Context Lifecycle
 ```
 
-Each state machine owns one business concept.
+`ReadingContextRevision` is not a separate lifecycle state machine.
 
-Each evolves independently while remaining consistent with the others.
-
----
-
-## 3.1 Why Multiple State Machines
-
-Reading is not represented by a single lifecycle.
-
-For example,
-
-the session may remain Active while:
-
-- Reading Context changes
-
-or
-
-- several Content Revisions become obsolete
-
-or
-
-- multiple Processing Intents are published.
-
-Representing all of these using one giant state machine would create unnecessary coupling.
-
-Therefore each concept owns its own lifecycle.
+It is an immutable version identifier attached to committed ReadingContext snapshots.
 
 ---
 
-# 4. State Machine Principles
+# 4. Why Only Two State Machines
 
----
-
-## 4.1 One Owner Per State
-
-Every state belongs to exactly one business concept.
-
-No state may belong to multiple concepts.
-
----
-
-## 4.2 Explicit Transitions
-
-Every transition must be documented.
-
-Business state may never change implicitly.
-
----
-
-## 4.3 Immutable History
-
-Previous state transitions remain historically valid.
-
-Business history is never rewritten.
-
----
-
-## 4.4 Deterministic Evolution
-
-Given the same:
-
-- session
-- context
-- revision
-- configuration
-
-Reading Session must always produce identical state transitions.
-
----
-
-## 4.5 Runtime Independence
-
-Business states never describe execution.
-
-Examples of invalid business states:
+The previous model separated:
 
 ```text
-OCRRunning
-
-TranslationQueued
-
-WorkerBusy
-
-GPUUnavailable
+Session Lifecycle
+Reading Context
+Content Revision
+Processing Intent
 ```
 
-Those belong to Runtime.
+That design overloaded Reading Session with orchestration and execution-authority concepts.
+
+Runtime v2 separates those responsibilities.
+
+The new model is:
+
+```text
+Session Lifecycle
+    → whether the reading activity exists and is usable
+
+Reading Context Lifecycle
+    → whether trustworthy reading-domain context currently exists
+
+ReadingContextRevision
+    → which committed version of that context is current
+```
+
+Pipeline planning belongs elsewhere.
 
 ---
 
-## 4.6 Independent Lifecycles
+# 5. Core State Principle
 
-Each state machine progresses independently.
+Reading Session state answers:
 
-For example,
+> What is the current business state of this reading activity?
 
-Session may remain Active while Context changes multiple times.
+It does not answer:
 
-Likewise,
+> Which processing work is currently valid?
 
-ContentRevision may become Superseded without affecting Session state.
-
----
-
-# 5. Session Lifecycle State
-
-The Session Lifecycle describes the lifetime of a reading activity.
-
-It represents the highest-level business state inside the module.
+Runtime Control owns execution authority.
 
 ---
 
-## 5.1 Lifecycle States
+# 6. Session Lifecycle States
 
 ```text
 ReadingSessionState
 
-├── Created
-├── Initializing
-├── Active
-├── Paused
-├── Completing
-├── Completed
-├── Cancelled
-└── Disposed
+CREATED
+INITIALIZING
+ACTIVE
+PAUSED
+COMPLETING
+COMPLETED
+CANCELLED
+DISPOSED
 ```
+
+These states describe the reading activity itself.
 
 ---
 
-## 5.2 Created
+# 7. `CREATED`
 
-A Reading Session has been created.
+## Meaning
 
-Business identity exists.
+The Reading Session aggregate exists, but active reading has not yet begun.
 
-No business evaluation has begun.
-
-Characteristics:
-
-- SessionId assigned
-- configuration accepted
-- context not initialized
-- no ProcessingIntent published
-
-Allowed next states:
+Typical properties:
 
 ```text
-Initializing
-
-Disposed
+ReadingSessionId exists
+initial configuration accepted
+initial source may exist
+context may not yet be committed
 ```
 
----
-
-## 5.3 Initializing
-
-Reading Session prepares business state.
-
-Possible activities:
-
-- loading source metadata
-- building ReadingContext
-- validating configuration
-- creating initial ContentRevision
-
-Allowed next states:
+## Allowed Next States
 
 ```text
-Active
-
-Cancelled
-
-Disposed
+INITIALIZING
+DISPOSED
 ```
+
+An implementation MAY collapse `CREATED → INITIALIZING` internally for MVP.
 
 ---
 
-## 5.4 Active
+# 8. `INITIALIZING`
 
-The session is actively representing a reading activity.
+## Meaning
 
-Characteristics:
+Reading Session is establishing its initial valid business state.
 
-- accepts business updates
-- evaluates ReadingContext
-- produces ContentRevision
-- publishes ProcessingIntent
-
-This is the normal operating state.
-
-Allowed next states:
+Possible work includes:
 
 ```text
-Paused
-
-Completing
-
-Cancelled
+validate ReadingSource
+validate initial ReadingTarget
+resolve session configuration
+build initial ReadingContext
+create initial ReadingContextRevision
 ```
 
----
+These are Reading Session-owned domain operations.
 
-## 5.5 Paused
-
-Business progression is temporarily suspended.
-
-Characteristics:
-
-- no new ProcessingIntent
-- no new ContentRevision
-- context remains unchanged
-
-Runtime execution may continue independently.
-
-Allowed next states:
+They do not include:
 
 ```text
-Active
-
-Cancelled
-
-Completing
+Capture
+OCR
+Translation
+Runtime scheduling
 ```
 
----
-
-## 5.6 Completing
-
-The reading activity is naturally ending.
-
-Examples:
-
-- browser tab closed
-- user exits reading
-- source finished
-
-The module prepares for completion.
-
-Allowed next states:
+## Allowed Next States
 
 ```text
-Completed
+ACTIVE
+CANCELLED
+DISPOSED
 ```
 
 ---
 
-## 5.7 Completed
+# 9. `ACTIVE`
+
+## Meaning
+
+The reading activity is currently active and may accept reading-domain mutations.
+
+Typical operations:
+
+```text
+UpdateReadingTarget
+ReplaceReadingSource
+UpdateReadingPosition
+UpdateSessionConfiguration
+PauseReadingSession
+CompleteReadingSession
+CancelReadingSession
+```
+
+## Characteristics
+
+* current ReadingContext may exist;
+* new ReadingContext revisions may be committed;
+* domain facts may be published;
+* processing failure does not automatically leave `ACTIVE`.
+
+## Allowed Next States
+
+```text
+PAUSED
+COMPLETING
+CANCELLED
+```
+
+---
+
+# 10. `PAUSED`
+
+## Meaning
+
+Reading-domain progression is intentionally suspended.
+
+Pause does not imply:
+
+```text
+Runtime work canceled
+Presentation cleared
+UI hidden
+Artifacts disposed
+```
+
+Those decisions belong outside Reading Session.
+
+## Default Behavior
+
+While paused:
+
+* ordinary ReadingContext mutations are rejected or deferred according to contract;
+* current committed ReadingContext remains readable/queryable;
+* ReadingContextRevision does not change merely because the session is paused.
+
+## Allowed Next States
+
+```text
+ACTIVE
+COMPLETING
+CANCELLED
+```
+
+---
+
+# 11. `COMPLETING`
+
+## Meaning
+
+The reading activity is transitioning toward a normal terminal state.
+
+Typical causes:
+
+```text
+user exits reading mode
+document is finished
+application closes reader
+```
+
+`COMPLETING` exists so implementations may perform Reading Session-owned final domain work before committing `COMPLETED`.
+
+It does not wait for all Runtime processing to finish unless an explicit future business requirement says so.
+
+## Allowed Next States
+
+```text
+COMPLETED
+CANCELLED
+```
+
+---
+
+# 12. `COMPLETED`
+
+## Meaning
 
 The reading activity finished normally.
 
 Characteristics:
 
-- immutable
-- no new context
-- no new revision
-- no new intent
+```text
+no new ReadingContext mutation
+no return to ACTIVE
+historical state may remain queryable
+```
 
-Allowed next state:
+## Allowed Next State
 
 ```text
-Disposed
+DISPOSED
+```
+
+Processing work may still physically exist elsewhere until Runtime handles it.
+
+---
+
+# 13. `CANCELLED`
+
+## Meaning
+
+The reading activity itself was terminated without normal completion.
+
+Possible causes:
+
+```text
+explicit user cancellation
+source becomes unusable
+business-level unrecoverable condition
+application aborts reading activity
+```
+
+Important:
+
+```text
+ReadingSession CANCELLED
+≠
+Runtime Attempt CANCELLED
+```
+
+Reading Session does not perform Runtime cancellation itself.
+
+## Allowed Next State
+
+```text
+DISPOSED
+```
+
+`CANCELLED` never returns to `ACTIVE`.
+
+---
+
+# 14. `DISPOSED`
+
+## Meaning
+
+Reading Session business state has reached its final lifecycle boundary.
+
+No mutation may succeed.
+
+The state is irreversible.
+
+`DISPOSED` does not imply every external Runtime/UI/Storage resource has already been physically deleted.
+
+Those owners have separate lifecycle rules.
+
+---
+
+# 15. Session Lifecycle Diagram
+
+```text
+CREATED
+   ↓
+INITIALIZING
+   ↓
+ACTIVE
+ ┌─┴───────────────┐
+ ↓                 ↓
+PAUSED         COMPLETING
+ │   ↑             ↓
+ └───┘          COMPLETED
+                  ↓
+               DISPOSED
+```
+
+Cancellation path:
+
+```text
+INITIALIZING
+ACTIVE
+PAUSED
+COMPLETING
+     ↓
+ CANCELLED
+     ↓
+ DISPOSED
 ```
 
 ---
 
-## 5.8 Cancelled
-
-Business activity terminated unexpectedly.
-
-Examples:
-
-- user cancelled
-- source removed
-- unrecoverable business failure
-
-Cancelled sessions cannot become Active again.
-
-Allowed next state:
+# 16. Valid Session Transitions
 
 ```text
-Disposed
+CREATED → INITIALIZING
+CREATED → DISPOSED
+
+INITIALIZING → ACTIVE
+INITIALIZING → CANCELLED
+INITIALIZING → DISPOSED
+
+ACTIVE → PAUSED
+ACTIVE → COMPLETING
+ACTIVE → CANCELLED
+
+PAUSED → ACTIVE
+PAUSED → COMPLETING
+PAUSED → CANCELLED
+
+COMPLETING → COMPLETED
+COMPLETING → CANCELLED
+
+COMPLETED → DISPOSED
+CANCELLED → DISPOSED
 ```
 
----
-
-## 5.9 Disposed
-
-All business resources have been released.
-
-Terminal state.
-
-No transition is allowed.
+Every other lifecycle transition is invalid unless introduced by a future contract version.
 
 ---
 
-# 6. Session Lifecycle Diagram
+# 17. Reading Context Lifecycle
 
-```text
-Created
-    ↓
-Initializing
-    ↓
-Active
- ┌──┴─────┐
- │        │
- ↓        ↓
-Paused  Completing
- │        │
- └──↓─────┘
-   Active
-      ↓
-Completed
-      ↓
-Disposed
-```
+ReadingContext has its own state because the Reading Session may exist while its current reading context is being established or replaced.
 
-Cancellation:
-
-```text
-Created
-Initializing
-Active
-Paused
-Completing
-
-↓
-
-Cancelled
-
-↓
-
-Disposed
-```
-
----
-
-# 7. Session Transition Rules
-
-The following transitions are valid.
-
-```text
-Created → Initializing
-
-Initializing → Active
-
-Initializing → Cancelled
-
-Initializing → Disposed
-
-Active → Paused
-
-Paused → Active
-
-Active → Completing
-
-Paused → Completing
-
-Completing → Completed
-
-Created → Disposed
-
-Completed → Disposed
-
-Cancelled → Disposed
-
-Active → Cancelled
-
-Paused → Cancelled
-```
-
-Any transition not listed above is invalid.
-
----
-
-# 8. Reading Context State
-
-ReadingContext represents the current business understanding of what the user is reading.
-
-Unlike Session Lifecycle,
-
-ReadingContext changes much more frequently.
-
----
-
-## 8.1 ReadingContext States
+States:
 
 ```text
 ReadingContextState
 
-├── Empty
-├── Loading
-├── Ready
-├── Updating
-├── Invalid
-└── Disposed
+EMPTY
+PREPARING
+READY
+UPDATING
+INVALID
+DISPOSED
 ```
 
 ---
 
-## 8.2 Empty
+# 18. `EMPTY`
 
-No ReadingContext exists.
+## Meaning
 
-Occurs before initialization.
+No committed ReadingContext currently exists.
 
----
+Typical situations:
 
-## 8.3 Loading
+* session newly created;
+* context intentionally cleared before replacement;
+* restored session not yet validated.
 
-ReadingContext is being established.
+## Allowed Next States
 
-Possible activities:
-
-- resolve source
-- resolve page
-- resolve chapter
-- resolve viewport
-
----
-
-## 8.4 Ready
-
-The ReadingContext accurately represents the current reading world.
-
-Exactly one Ready context exists.
+```text
+PREPARING
+DISPOSED
+```
 
 ---
 
-## 8.5 Updating
+# 19. `PREPARING`
 
-A business change is occurring.
+## Meaning
 
-Examples:
+Reading Session is preparing the initial Candidate ReadingContext.
 
-- page changed
+Conceptually:
 
-- chapter changed
+```text
+EMPTY
+  ↓
+CandidateReadingContext
+  ↓
+validation
+  ↓
+commit
+  ↓
+READY
+```
 
-- viewport changed
+Candidate state is not externally authoritative.
 
-- language changed
+## Success
 
-- reading mode changed
+```text
+PREPARING → READY
+```
 
-Updating eventually produces either:
+## Rejection
 
-- Ready
+If initial context cannot be constructed:
 
-or
+```text
+PREPARING → EMPTY
+```
 
-- Invalid
+or:
+
+```text
+PREPARING → INVALID
+```
+
+depending on whether the failure means the source/context itself is unusable.
 
 ---
 
-## 8.6 Invalid
+# 20. `READY`
 
-ReadingContext can no longer represent reality.
+## Meaning
 
-Examples:
+A valid committed ReadingContext exists.
 
-- source disappeared
+Conceptually:
 
-- unsupported document
+```text
+Current ReadingContext
++
+Current ReadingContextRevision
+```
 
-- corrupted metadata
+This is the normal stable context state.
 
-Invalid contexts cannot produce new ProcessingIntent.
+## Characteristics
+
+* exactly one current committed context;
+* snapshot immutable;
+* revision stable until next commit;
+* safe for queries and orchestration.
+
+## Allowed Next States
+
+```text
+UPDATING
+INVALID
+DISPOSED
+```
 
 ---
 
-## 8.7 Disposed
+# 21. `UPDATING`
 
-Context permanently removed.
+## Meaning
+
+Reading Session is preparing a Candidate ReadingContext to replace the current context.
+
+Typical causes:
+
+```text
+ReadingTarget changed
+ReadingSource replaced
+ReadingPosition changed
+language changed
+session configuration changed
+```
+
+## Previous State Preservation
+
+While updating:
+
+```text
+current committed ReadingContext N
+```
+
+remains authoritative.
+
+Candidate:
+
+```text
+ReadingContextRevision N+1
+```
+
+remains private until commit.
+
+## Success
+
+```text
+UPDATING
+   ↓
+atomic commit
+   ↓
+READY
+```
+
+## Rejection
+
+If Candidate validation fails but current context remains valid:
+
+```text
+UPDATING → READY
+```
+
+Current revision remains unchanged.
+
+---
+
+# 22. `INVALID`
+
+## Meaning
+
+Reading Session cannot currently represent a trustworthy ReadingContext.
+
+Possible causes:
+
+```text
+ReadingSource invalid
+required domain identity inconsistent
+restored context corrupt
+current committed context becomes semantically unusable
+```
+
+`INVALID` does not mean Runtime processing failed.
+
+## Behavior
+
+Normal context mutations may be restricted.
+
+Recovery may:
+
+```text
+replace source
+rebuild context
+clear context
+terminate session
+```
+
+## Possible Next States
+
+Depending on command and final contract:
+
+```text
+PREPARING
+DISPOSED
+```
+
+A direct `INVALID → READY` transition should occur only through a validated preparation/commit path.
+
+---
+
+# 23. `DISPOSED` Context
+
+The ReadingContext is no longer part of an active Reading Session lifecycle.
 
 Terminal state.
 
+No context mutation is permitted.
+
 ---
 
-# 9. ReadingContext Diagram
+# 24. Reading Context Diagram
 
 ```text
-Empty
-
-↓
-
-Loading
-
-↓
-
-Ready
-
-↓
-
-Updating
-
-↓
-
-Ready
+EMPTY
+  ↓
+PREPARING
+  ↓
+READY
+  ↓
+UPDATING
+  ↓
+READY
 ```
 
-Failure:
+Invalidation:
 
 ```text
-Updating
+PREPARING
+READY
+UPDATING
+    ↓
+ INVALID
+    ↓
+PREPARING
+or
+DISPOSED
+```
 
-↓
+Final disposal:
 
-Invalid
-
-↓
-
-Disposed
+```text
+READY / INVALID / EMPTY
+        ↓
+     DISPOSED
 ```
 
 ---
 
-# 10. Content Revision State
+# 25. ReadingContextRevision Model
 
-ContentRevision represents an immutable snapshot of the Reading Context.
+`ReadingContextRevision` is not a state machine.
 
-Unlike ReadingContext,
+It is an immutable committed version identifier.
 
-which continuously evolves,
+Example:
 
-a ContentRevision never changes after creation.
+```text
+Revision 40
+    ↓
+context update
+    ↓
+Candidate Revision 41
+    ↓
+commit
+    ↓
+Revision 41 becomes current
+```
 
-Instead,
+Revision 40 remains an immutable historical snapshot if retained.
 
-new revisions replace old business authority.
+It does not transition into a `Superseded` business state object.
 
 ---
 
-## 10.1 Revision States
+# 26. Why Revision Lifecycle Was Removed
+
+The previous model used:
+
+```text
+Created
+Current
+Superseded
+Archived
+Discarded
+```
+
+for each ContentRevision.
+
+Runtime v2 separates three concepts:
+
+```text
+Current business context
+Historical context retention
+Execution authority
+```
+
+Reading Session only needs to own the first.
+
+Retention belongs to Reading Session/Storage policy.
+
+Execution supersession belongs to Runtime.
+
+Therefore:
+
+```text
+ReadingContextRevision
+```
+
+is simply an immutable version of committed domain state.
+
+---
+
+# 27. Current Revision
+
+Reading Session maintains one:
+
+```text
+currentReadingContextRevision
+```
+
+for a non-empty committed context.
+
+When a new context commits:
+
+```text
+current = N
+    ↓
+commit Candidate N+1
+    ↓
+current = N+1
+```
+
+This does not mutate revision N.
+
+---
+
+# 28. Historical Revisions
+
+Older ReadingContextSnapshots may be:
+
+```text
+retained
+persisted
+evicted
+```
+
+according to retention policy.
+
+Those are storage/lifetime concerns.
+
+They do not require public lifecycle states such as:
+
+```text
+Archived
+Discarded
+```
+
+unless future product requirements make those states business-visible.
+
+---
+
+# 29. ReadingContextRevision Authority
+
+ReadingContextRevision is authoritative only for Reading Session domain state.
+
+It does not determine:
+
+```text
+whether Runtime work may commit
+whether an Artifact is current
+whether Presentation may commit
+whether UI apply is stale
+```
+
+Those domains own their own authority/version mechanisms.
+
+---
+
+# 30. Candidate Reading Context
+
+Conceptually:
+
+```text
+CandidateReadingContext
+├── readingSessionId
+├── basedOnReadingContextRevision?
+├── candidateReadingContextRevision
+├── readingSource
+├── readingTarget?
+├── readingPosition?
+├── sessionConfiguration
+└── changeSet
+```
+
+A Candidate is:
+
+* private;
+* mutable only while being constructed internally;
+* immutable once validation begins or according to implementation policy;
+* never externally current before commit.
+
+---
+
+# 31. Candidate Isolation
+
+During `UPDATING`:
+
+```text
+Committed Context N
++
+Candidate Context N+1
+```
+
+may coexist.
+
+External queries continue returning:
+
+```text
+Committed Context N
+```
+
+until commit succeeds.
+
+---
+
+# 32. Atomic Context Commit
+
+A successful context mutation atomically replaces:
+
+```text
+current ReadingContextSnapshot
++
+current ReadingContextRevision
++
+current context reference
+```
+
+Partial visibility is forbidden.
+
+---
+
+# 33. ReadingContextRevision Guard
+
+Commands targeting current context SHOULD carry:
+
+```text
+expectedReadingContextRevision
+```
+
+Guard:
+
+```text
+expectedReadingContextRevision
+==
+currentReadingContextRevision
+```
+
+If false:
+
+```text
+ReadingContextRevisionConflict
+```
+
+Candidate must not commit.
+
+---
+
+# 34. Revision Conflict Is Not Runtime Staleness
+
+Example:
+
+```text
+Reading Context current = 12
+
+Command A expects 12
+Command B expects 12
+
+B commits 13
+
+A reaches commit
+    ↓
+revision conflict
+```
+
+This is Reading Session optimistic concurrency.
+
+It says nothing about RuntimeRevisionId or Runtime Attempts.
+
+---
+
+# 35. No-Op Rule
+
+A semantically equivalent domain mutation should not create another ReadingContextRevision.
+
+Examples:
+
+```text
+same target
+same position
+same target language
+same source identity
+same effective session configuration
+```
+
+Result:
+
+```text
+NO_OP
+```
+
+Current revision remains unchanged.
+
+---
+
+# 36. High-Frequency Position Changes
+
+Reading Session should not create revisions for every raw scroll event.
+
+Expected flow:
+
+```text
+Raw UI movement
+    ↓
+UI/Application normalization
+    ↓
+coalesce
+    ↓
+business-significant ReadingPosition/Target change
+    ↓
+Reading Session mutation
+```
+
+Presentation-only layout changes may not touch Reading Session at all.
+
+---
+
+# 37. Session State and Context State Independence
+
+Session state and context state are related but not identical.
+
+Examples:
+
+```text
+Session = ACTIVE
+Context = READY
+```
+
+normal operation.
+
+```text
+Session = ACTIVE
+Context = UPDATING
+```
+
+context mutation in progress.
+
+```text
+Session = PAUSED
+Context = READY
+```
+
+paused activity retaining valid context.
+
+```text
+Session = INITIALIZING
+Context = PREPARING
+```
+
+initial setup.
+
+---
+
+# 38. Lifecycle Compatibility Matrix
+
+Typical valid combinations:
+
+| Session        | Context                          |
+| -------------- | -------------------------------- |
+| `CREATED`      | `EMPTY`                          |
+| `INITIALIZING` | `EMPTY` / `PREPARING`            |
+| `ACTIVE`       | `READY` / `UPDATING` / `INVALID` |
+| `PAUSED`       | `READY` / `INVALID`              |
+| `COMPLETING`   | `READY` / `INVALID`              |
+| `COMPLETED`    | `READY` / `INVALID` / `DISPOSED` |
+| `CANCELLED`    | `READY` / `INVALID` / `DISPOSED` |
+| `DISPOSED`     | `DISPOSED`                       |
+
+Exact implementation may simplify transitional combinations while preserving ownership.
+
+---
+
+# 39. Pause Semantics
+
+Pause changes Reading Session lifecycle.
+
+It does not automatically:
+
+```text
+create ReadingContextRevision
+invalidate ReadingContext
+cancel Runtime work
+mark Runtime Revision obsolete
+clear Presentation
+```
+
+Application/Runtime may separately react according to policy.
+
+---
+
+# 40. Resume Semantics
+
+Resume changes:
+
+```text
+PAUSED → ACTIVE
+```
+
+It does not automatically create a new ReadingContextRevision.
+
+If domain state changed while paused, an explicit context update creates the revision.
+
+---
+
+# 41. Completion Semantics
+
+Completion changes Reading Session lifecycle.
+
+It does not automatically wait for:
+
+```text
+OCR completion
+Translation completion
+Presentation commit
+event delivery
+UI cleanup
+```
+
+Those are independent lifecycles.
+
+---
+
+# 42. Cancellation Semantics
+
+`CancelReadingSession` means:
+
+```text
+cancel the reading activity
+```
+
+not:
+
+```text
+cancel a Runtime Attempt
+```
+
+After Reading Session commits `CANCELLED`, Application/Runtime may derive appropriate execution cancellation.
+
+Reading Session does not mutate Runtime state.
+
+---
+
+# 43. Runtime Supersession
+
+A ReadingContext change may make existing Runtime work less relevant.
+
+But the state flow is:
+
+```text
+Reading Session commits Revision N+1
+        ↓
+domain fact/state available
+        ↓
+Business Pipeline Orchestration
+        ↓
+Runtime establishes newer execution authority
+        ↓
+Runtime supersedes old work
+```
+
+Reading Session does not perform:
+
+```text
+oldRuntimeRevision.state = Superseded
+```
+
+---
+
+# 44. ProcessingIntent State Removed
+
+Reading Session v3 does not own:
+
+```text
+ProcessingIntentState
+```
+
+Therefore the following states are removed:
+
+```text
+Created
+Published
+Accepted
+Fulfilled
+Obsolete
+Discarded
+```
+
+as Reading Session concepts.
+
+Pipeline requirement decisions belong to Business Pipeline Orchestration.
+
+Execution lifecycle belongs to Runtime.
+
+---
+
+# 45. Why ProcessingIntent Lifecycle Was Removed
+
+A state such as:
+
+```text
+ProcessingIntent Accepted
+```
+
+implicitly requires Reading Session to know Runtime accepted work.
+
+A state such as:
+
+```text
+ProcessingIntent Fulfilled
+```
+
+requires Reading Session to evaluate whether pipeline execution fulfilled an objective.
+
+Those responsibilities duplicate Runtime and Business Pipeline Orchestration.
+
+Reading Session should remain unaware of processing topology.
+
+---
+
+# 46. State Transition Guards
+
+Every Reading Session-owned transition must use explicit guards.
+
+---
+
+# 47. Session Guards
+
+Examples:
+
+```text
+ActivateReadingSession
+requires
+state = CREATED or INITIALIZING according to flow
+```
+
+```text
+PauseReadingSession
+requires
+state = ACTIVE
+```
+
+```text
+ResumeReadingSession
+requires
+state = PAUSED
+```
+
+```text
+CompleteReadingSession
+requires
+state ∈ {ACTIVE, PAUSED}
+```
+
+```text
+DisposeReadingSession
+requires
+state ∈ {CREATED, COMPLETED, CANCELLED}
+```
+
+Exact command/state rules must match `CONTRACT.md`.
+
+---
+
+# 48. Context Guards
+
+Context mutation typically requires:
+
+```text
+valid ReadingSession
+allowed Session lifecycle
+valid ReadingSource
+valid ReadingTarget if supplied
+valid SessionConfiguration
+expectedReadingContextRevision match
+candidate invariant validation
+```
+
+Runtime execution state is not a Reading Context guard.
+
+---
+
+# 49. ReadingContextRevision Guards
+
+A new revision may be created only if committed reading-domain state changes.
+
+Examples:
+
+```text
+source changed
+target changed
+position changed meaningfully
+language changed
+session-specific configuration changed
+```
+
+Raw technical changes do not automatically qualify.
+
+---
+
+# 50. Transition Triggers
+
+Reading Session transitions should originate from explicit domain commands.
+
+Examples:
+
+```text
+CreateReadingSession
+ActivateReadingSession
+UpdateReadingTarget
+ReplaceReadingSource
+UpdateReadingPosition
+UpdateSessionConfiguration
+PauseReadingSession
+ResumeReadingSession
+CompleteReadingSession
+CancelReadingSession
+DisposeReadingSession
+```
+
+---
+
+# 51. Events Are Not Direct State Mutators
+
+External events such as:
+
+```text
+BrowserNavigated
+ViewportChanged
+PreferenceChanged
+```
+
+should normally be translated by Application/Adapters into domain commands.
+
+Reading Session does not require direct Event Bus subscriptions for correctness.
+
+---
+
+# 52. Transition Actions
+
+Reading Session-owned transition actions may include:
+
+```text
+validate domain state
+build Candidate ReadingContext
+commit ReadingContext
+increment ReadingContextRevision
+update lifecycle state
+update session metadata
+publish reading-domain fact
+```
+
+They must not include:
+
+```text
+create WorkItem
+cancel Attempt
+retry Translation
+start OCR
+rebuild Presentation
+```
+
+---
+
+# 53. Domain Event Timing
+
+Reading-domain success facts publish only after state commit.
+
+Correct:
+
+```text
+validate
+    ↓
+commit state
+    ↓
+transition complete
+    ↓
+publish fact
+```
+
+Incorrect:
+
+```text
+publish success fact
+    ↓
+attempt state mutation
+```
+
+---
+
+# 54. Context Failure Behavior
+
+If a Candidate context fails validation:
+
+```text
+discard Candidate
+```
+
+If previous context remains valid:
+
+```text
+return to READY
+```
+
+Do not invalidate a valid current context merely because a replacement failed.
+
+---
+
+# 55. `INVALID` Entry Rules
+
+Enter `INVALID` only when current ReadingContext itself cannot be trusted or represented.
+
+Examples:
+
+* current source identity becomes invalid;
+* restored current context is corrupt;
+* committed domain invariant is violated.
+
+Do not enter `INVALID` because:
+
+```text
+OCR failed
+Translation failed
+Runtime timed out
+Presentation failed
+```
+
+---
+
+# 56. Session Failure Model
+
+Reading Session does not require a generic `FAILED` lifecycle state in v3.
+
+Reading-domain failures are normally:
+
+```text
+command rejection
+context INVALID
+session CANCELLED
+```
+
+A future `FAILED` session state should only be introduced if there is a distinct business meaning not already represented by `INVALID` or `CANCELLED`.
+
+---
+
+# 57. Persistence
+
+Potentially persistable domain state includes:
+
+```text
+ReadingSession
+ReadingContextSnapshot
+ReadingContextRevision
+SessionConfiguration
+ReadingPosition
+ReadingMetadata
+```
+
+Persistence implementation is external.
+
+---
+
+# 58. Runtime State Is Never Persisted Here
+
+Reading Session persistence must not contain:
+
+```text
+RuntimeRevisionId as owned state
+WorkItem state
+Attempt state
+retry counter
+scheduler queue
+worker assignment
+provider connection state
+```
+
+Runtime may separately persist what its architecture requires.
+
+---
+
+# 59. ReadingSessionSnapshot
+
+For persistence/query purposes, a consistent aggregate snapshot may be:
+
+```text
+ReadingSessionSnapshot
+├── readingSessionId
+├── lifecycleState
+├── readingContextState
+├── currentReadingContextRevision?
+├── currentReadingContextSnapshot?
+├── sessionConfiguration
+├── readingMetadata?
+└── capturedAt
+```
+
+It does not contain ProcessingIntent.
+
+---
+
+# 60. Recovery
+
+Recovery reconstructs Reading Session business state.
+
+It does not reconstruct Runtime execution.
+
+Conceptually:
+
+```text
+persisted session state
+    ↓
+load
+    ↓
+validate
+    ↓
+Candidate restored session
+    ↓
+commit
+```
+
+---
+
+# 61. Recovery Authority
+
+Recovery restores:
+
+```text
+Reading Session business authority
+```
+
+meaning:
+
+```text
+which ReadingContext is now current
+```
+
+It does not restore:
+
+```text
+Runtime execution authority
+```
+
+Runtime determines execution after recovery.
+
+---
+
+# 62. Revision Recovery
+
+Recovery may select one validated ReadingContextSnapshot as current according to persisted domain ordering.
+
+The selected revision does not need a lifecycle transition such as:
+
+```text
+Archived → Current
+```
+
+because old revisions do not have public lifecycle states.
+
+Instead:
+
+```text
+validate retained snapshots
+    ↓
+select valid current domain snapshot
+    ↓
+restore currentReadingContextRevision
+```
+
+---
+
+# 63. Invalid Restored Context
+
+If persisted ReadingContext cannot be validated:
+
+```text
+do not expose as READY
+```
+
+Possible recovery outcomes:
+
+```text
+context = INVALID
+rebuild through PREPARING
+cancel session
+dispose session
+```
+
+according to business policy.
+
+---
+
+# 64. Invalid Session Transitions
+
+Examples:
+
+```text
+COMPLETED → ACTIVE
+CANCELLED → ACTIVE
+DISPOSED → ACTIVE
+DISPOSED → PAUSED
+PAUSED → CREATED
+```
+
+Invalid transition handling:
+
+1. reject command;
+2. preserve current state;
+3. record diagnostics;
+4. emit no success fact.
+
+---
+
+# 65. Invalid Context Transitions
+
+Examples:
+
+```text
+DISPOSED → READY
+DISPOSED → UPDATING
+EMPTY → READY without commit path
+INVALID → READY without validated preparation/commit
+```
+
+---
+
+# 66. State Invariants — Session
+
+1. Every ReadingSession has exactly one lifecycle state.
+
+2. `COMPLETED` never becomes `ACTIVE`.
+
+3. `CANCELLED` never becomes `ACTIVE`.
+
+4. `DISPOSED` never changes.
+
+5. Processing failures do not automatically change ReadingSessionState.
+
+6. Runtime state never directly mutates ReadingSessionState.
+
+---
+
+# 67. State Invariants — Context
+
+1. Every non-disposed ReadingSession owns at most one current committed ReadingContext.
+
+2. A committed ReadingContext is immutable.
+
+3. Candidate context is never externally current.
+
+4. Current context remains visible during safe update preparation.
+
+5. Failed Candidate does not mutate current context.
+
+6. `INVALID` means Reading Session cannot trust current reading context.
+
+7. Processing failure alone does not make ReadingContext invalid.
+
+---
+
+# 68. State Invariants — Revision
+
+1. Every ReadingContextRevision belongs to exactly one ReadingSession.
+
+2. ReadingContextRevision is immutable.
+
+3. ReadingContextRevision is monotonic.
+
+4. Only successful domain commit advances it.
+
+5. No-op does not advance it.
+
+6. Candidate rejection does not advance it.
+
+7. ReadingContextRevision is not Runtime execution authority.
+
+8. Older revisions do not require `Superseded` state.
+
+9. Historical retention does not change revision semantics.
+
+---
+
+# 69. Ownership Invariants
+
+1. Reading Session owns reading lifecycle.
+
+2. Reading Session owns ReadingContext lifecycle.
+
+3. Reading Session owns ReadingContextRevision.
+
+4. Reading Session does not own ProcessingIntent lifecycle.
+
+5. Reading Session does not own Runtime Revision lifecycle.
+
+6. Reading Session does not own WorkItem lifecycle.
+
+7. Reading Session does not own Attempt lifecycle.
+
+8. Reading Session does not own Artifact lifecycle.
+
+9. Reading Session does not own Presentation lifecycle.
+
+10. Reading Session does not own UI lifecycle.
+
+---
+
+# 70. MVP Session States
+
+MVP may publicly expose:
+
+```text
+CREATED
+ACTIVE
+PAUSED
+COMPLETED
+CANCELLED
+DISPOSED
+```
+
+while treating:
+
+```text
+INITIALIZING
+COMPLETING
+```
+
+as internal transitional states.
+
+The architecture remains compatible with the full model.
+
+---
+
+# 71. MVP Context States
+
+Recommended MVP:
+
+```text
+EMPTY
+PREPARING
+READY
+UPDATING
+INVALID
+DISPOSED
+```
+
+These states are sufficiently small while preserving Candidate isolation.
+
+---
+
+# 72. No MVP Revision State Machine
+
+MVP must not reintroduce:
+
+```text
+Current
+Superseded
+Archived
+Discarded
+```
+
+as ReadingContextRevision lifecycle states.
+
+Instead expose:
+
+```text
+currentReadingContextRevision
+```
+
+plus optional historical snapshot retention.
+
+---
+
+# 73. No MVP ProcessingIntent State
+
+MVP must not implement Reading Session-owned:
+
+```text
+ProcessingIntent
+```
+
+or its lifecycle.
+
+Business Pipeline Orchestration owns processing requirement evaluation.
+
+---
+
+# 74. Testing — Session Lifecycle
+
+Tests must cover:
+
+```text
+create
+initialize
+activate
+pause
+resume
+complete
+cancel
+dispose
+invalid transitions
+terminal-state irreversibility
+```
+
+---
+
+# 75. Testing — Context Lifecycle
+
+Tests must cover:
+
+```text
+EMPTY → PREPARING → READY
+READY → UPDATING → READY
+candidate rejection → previous READY retained
+invalid current context → INVALID
+context rebuild
+context disposal
+```
+
+---
+
+# 76. Testing — Revision
+
+Tests must verify:
+
+```text
+initial revision
+successful increment
+no-op does not increment
+failed Candidate does not increment
+revision conflict rejects mutation
+revision monotonicity
+historical snapshots remain immutable
+```
+
+---
+
+# 77. Testing — Ownership
+
+Tests must verify Reading Session never:
+
+```text
+creates RuntimeRevisionId
+marks Runtime work superseded
+mutates WorkItem
+mutates Attempt
+publishes ProcessingIntent
+marks ProcessingIntent fulfilled
+starts processing modules
+waits for worker completion to change domain state
+```
+
+---
+
+# 78. Testing — Pause and Cancellation
+
+Verify:
+
+```text
+PauseReadingSession
+```
+
+does not mutate Runtime execution state.
+
+Verify:
+
+```text
+CancelReadingSession
+```
+
+changes reading lifecycle only.
+
+Runtime cancellation behavior must be tested in Runtime integration tests.
+
+---
+
+# 79. Testing — Processing Failure Independence
+
+Examples:
+
+```text
+OCR failure
+Translation failure
+Presentation rejection
+UI apply failure
+```
+
+must not automatically transition:
+
+```text
+ACTIVE → CANCELLED
+```
+
+or:
+
+```text
+READY Context → INVALID
+```
+
+---
+
+# 80. Testing — Concurrency
+
+Test:
+
+* two context mutations with same expected revision;
+* target change racing configuration change;
+* pause racing context update;
+* cancel racing context update;
+* completion racing context update;
+* stale command after new revision;
+* equivalent duplicate command.
+
+---
+
+# 81. Open Decisions
+
+The following may remain open:
+
+* whether `INITIALIZING` is public;
+* whether `COMPLETING` is public;
+* whether completed sessions are restorable;
+* historical ReadingContext retention duration;
+* whether PAUSED allows selected context metadata updates;
+* whether `INVALID → PREPARING` is direct or requires explicit reset;
+* whether multiple concurrent ReadingSessions ship in MVP.
+
+These decisions do not change ownership.
+
+---
+
+# 82. Removed v2 Concepts
+
+The following are removed from Reading Session v3 state ownership:
 
 ```text
 ContentRevisionState
-
 ├── Created
 ├── Current
 ├── Superseded
 ├── Archived
 └── Discarded
-```
 
-Each ContentRevision progresses independently.
-
-Multiple revisions may exist simultaneously.
-
-Only one revision may be Current.
-
----
-
-## 10.2 Created
-
-A new ContentRevision has been generated.
-
-Characteristics:
-
-- immutable
-- validated
-- uniquely identified
-- not yet authoritative
-
-Allowed next states:
-
-```text
-Current
-
-Discarded
-```
-
----
-
-## 10.3 Current
-
-The revision represents the current reading world.
-
-Characteristics:
-
-- business authority
-- ProcessingIntent may reference it
-- newest accepted revision
-
-Exactly one Current revision exists per Reading Session.
-
-Allowed next states:
-
-```text
-Superseded
-
-Archived
-```
-
----
-
-## 10.4 Superseded
-
-A newer revision has replaced this revision.
-
-Characteristics:
-
-- immutable
-- historically valid
-- no longer authoritative
-
-Superseded revisions never regain authority.
-
-Allowed next states:
-
-```text
-Archived
-
-Discarded
-```
-
----
-
-## 10.5 Archived
-
-The revision remains available for history.
-
-It no longer participates in business evaluation.
-
-Archived revisions may be used for:
-
-- diagnostics
-- debugging
-- timeline reconstruction
-- analytics
-
-Allowed next state:
-
-```text
-Discarded
-```
-
----
-
-## 10.6 Discarded
-
-The revision has been permanently removed.
-
-Terminal state.
-
----
-
-# 11. Content Revision Diagram
-
-```text
-Created
-
-↓
-
-Current
-
-↓
-
-Superseded
-
-↓
-
-Archived
-
-↓
-
-Discarded
-```
-
-Early discard:
-
-```text
-Created
-
-↓
-
-Discarded
-```
-
-This may occur when a revision becomes invalid before becoming authoritative.
-
----
-
-# 12. Revision Transition Rules
-
-Valid transitions include:
-
-```text
-Created → Current
-
-Created → Discarded
-
-Current → Superseded
-
-Current → Archived
-
-Superseded → Archived
-
-Superseded → Discarded
-
-Archived → Discarded
-```
-
-All other transitions are forbidden.
-
-Examples of invalid transitions:
-
-```text
-Superseded → Current
-
-Archived → Current
-
-Discarded → Current
-
-Discarded → Created
-```
-
----
-
-# 13. Processing Intent State
-
-ProcessingIntent represents business requirements generated from a ContentRevision.
-
-It is not executable work.
-
-Execution belongs to Runtime.
-
-ProcessingIntent exists only to express what business outcomes are required.
-
----
-
-## 13.1 ProcessingIntent States
-
-```text
 ProcessingIntentState
-
 ├── Created
 ├── Published
 ├── Accepted
@@ -848,932 +1940,146 @@ ProcessingIntentState
 └── Discarded
 ```
 
-The lifecycle of ProcessingIntent is intentionally independent from Runtime execution.
-
----
-
-## 13.2 Created
-
-The business requirement has been generated.
-
-It has not yet been published.
-
-Characteristics:
-
-- immutable
-- linked to one ContentRevision
-- not visible outside Reading Session
-
-Allowed next state:
+Replacement model:
 
 ```text
-Published
+ReadingContextRevision
+    → immutable committed version
+
+Business Pipeline Orchestration
+    → processing requirements
+
+Runtime
+    → execution lifecycle and authority
 ```
 
 ---
 
-## 13.3 Published
-
-The ProcessingIntent has been published through the Runtime contract.
-
-Characteristics:
-
-- visible to Runtime
-- immutable
-- awaiting Runtime ownership
-
-Reading Session performs no scheduling.
-
-Allowed next states:
+# 83. Related Documents
 
 ```text
-Accepted
+doc/02-modules/reading-session/MODULE.md
+doc/02-modules/reading-session/CONTRACT.md
+doc/02-modules/reading-session/EVENTS.md
+doc/02-modules/reading-session/ERRORS.md
+doc/02-modules/reading-session/README.md
 
-Obsolete
+doc/01-architecture/core/STATE_MACHINE.md
+doc/01-architecture/core/EVENT_BUS.md
+doc/01-architecture/core/EVENT_CONVENTION.md
+
+doc/01-architecture/modules/OWNERSHIP_MAP.md
+doc/01-architecture/modules/MODULE_DEPENDENCY.md
+
+doc/01-architecture/runtime/BUSINESS_PIPELINE_ORCHESTRATION.md
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RETRY_POLICY.md
 ```
 
 ---
 
-## 13.4 Accepted
+# 84. Completion Criteria
 
-Runtime has accepted responsibility for execution.
+This specification is synchronized when:
 
-Reading Session no longer controls execution.
+* Reading Session has only Reading Session-owned state machines;
+* ProcessingIntent lifecycle has been removed;
+* ContentRevision lifecycle has been removed;
+* ReadingContextRevision is an immutable committed version;
+* Runtime authority is absent from Reading Session state ownership;
+* lifecycle cancellation is distinct from Runtime cancellation;
+* lifecycle completion is distinct from Runtime completion;
+* processing failure does not mutate Reading Session state automatically;
+* Candidate ReadingContext is isolated;
+* previous committed context survives failed replacement;
+* optimistic concurrency uses ReadingContextRevision;
+* raw viewport noise does not create unnecessary revisions;
+* persistence restores business state only;
+* tests verify state ownership and Runtime independence.
 
-Business ownership remains unchanged.
+---
 
-Reading Session does not know:
+# 85. Summary
 
-- execution order
-- worker assignment
-- processing progress
-
-Allowed next states:
+Reading Session v3 state consists of:
 
 ```text
-Fulfilled
-
-Obsolete
+ReadingSessionState
++
+ReadingContextState
++
+ReadingContextRevision
 ```
 
----
-
-## 13.5 Fulfilled
-
-The business intent has been satisfied.
-
-Reading Session has accepted that the requested business outcome exists.
-
-Fulfilled does not imply successful execution of every intermediate stage.
-
-It means the business objective represented by this ProcessingIntent is complete.
-
-Terminal state.
-
----
-
-## 13.6 Obsolete
-
-The intent is no longer relevant.
-
-Typical causes:
-
-- newer ContentRevision
-- newer ProcessingIntent
-- session cancelled
-- session completed
-
-Obsolete intents never become Fulfilled.
-
-Allowed next state:
-
-```text
-Discarded
-```
-
----
-
-## 13.7 Discarded
-
-The intent has been removed permanently.
-
-Terminal state.
-
----
-
-# 14. Processing Intent Diagram
-
-```text
-Created
-
-↓
-
-Published
-
-↓
-
-Accepted
-
-↓
-
-Fulfilled
-```
-
-Replacement path:
-
-```text
-Published
-
-↓
-
-Obsolete
-
-↓
-
-Discarded
-```
-
-or
-
-```text
-Accepted
-
-↓
-
-Obsolete
-
-↓
-
-Discarded
-```
-
----
-
-# 15. Processing Intent Rules
-
-ProcessingIntent follows several mandatory rules.
-
-1. Every ProcessingIntent belongs to exactly one ContentRevision.
-
-2. Every ContentRevision may produce zero or more ProcessingIntent objects.
-
-3. Only one ProcessingIntent may be considered active for a particular business objective.
-
-4. Obsolete intents never become Fulfilled.
-
-5. Fulfilled intents never become Obsolete.
-
-6. ProcessingIntent never changes after publication.
-
-7. Runtime execution never mutates ProcessingIntent.
-
----
-
-# 16. State Transition Guards
-
-Every state transition must satisfy explicit business guards.
-
-Transitions are never implicit.
-
----
-
-## 16.1 Session Guards
-
-Examples:
-
-```text
-Create Session
-
-↓
-
-No existing active session
-```
-
-```text
-Pause Session
-
-↓
-
-Current state = Active
-```
-
-```text
-Resume Session
-
-↓
-
-Current state = Paused
-```
-
-```text
-Complete Session
-
-↓
-
-Current state ∈ {Active, Paused}
-```
-
----
-
-## 16.2 Reading Context Guards
-
-Context updates require:
-
-- valid ReadingSession
-- supported source
-- valid configuration
-- successful context evaluation
-
-Invalid context must not become Ready.
-
----
-
-## 16.3 Revision Guards
-
-A new ContentRevision may be created only when business state changes.
-
-Examples:
-
-- page changed
-- chapter changed
-- viewport changed
-- language changed
-- configuration changed
-
-Repeated evaluation of identical business state must not create duplicate revisions.
-
----
-
-## 16.4 Processing Intent Guards
-
-ProcessingIntent may be published only when:
-
-- ContentRevision is Current
-- ReadingContext is Ready
-- Session is Active
-
-Otherwise,
-
-no ProcessingIntent is produced.
-
----
-
-# 17. Transition Triggers
-
-Transitions occur because business events change the reading domain.
-
-Typical triggers include:
-
-```text
-SessionCreated
-
-SourceChanged
-
-ViewportChanged
-
-PageChanged
-
-ChapterChanged
-
-ConfigurationChanged
-
-LanguageChanged
-
-ReadingModeChanged
-
-SessionPaused
-
-SessionResumed
-
-SessionCompleted
-
-SessionCancelled
-```
-
-Runtime events do not directly trigger business state transitions.
-
-Instead,
-
-Runtime publishes completion through its own contracts,
-
-which Reading Session evaluates as business facts.
-
----
-
-# 18. Transition Actions
-
-Every transition may execute business actions.
-
-Examples include:
-
-```text
-Create ReadingContext
-
-Create ContentRevision
-
-Publish ProcessingIntent
-
-Update Session Metadata
-
-Record Business Timeline
-
-Publish Business Event
-
-Update Statistics
-
-Invalidate Previous Revision
-```
-
-Actions must remain deterministic.
-
-They must never invoke processing modules directly.
-
----
-
-# 19. State Persistence
-
-Reading Session distinguishes between business state that must survive over time and transient state that exists only during the current runtime.
-
-Business persistence is determined by business value rather than implementation convenience.
-
----
-
-## 19.1 Persistent State
-
-The following business objects may be persisted.
+The lifecycle model is:
 
 ```text
 ReadingSession
-
-ReadingContext
-
-ContentRevision
-
-SessionConfiguration
-
-Business Timeline
-
-Session Metadata
+CREATED
+   ↓
+INITIALIZING
+   ↓
+ACTIVE
+  ↕
+PAUSED
+   ↓
+COMPLETING
+   ↓
+COMPLETED
+   ↓
+DISPOSED
 ```
 
-Persistence strategy is implementation-dependent.
-
-The contract only defines what may survive beyond the current runtime.
-
----
-
-## 19.2 Ephemeral State
-
-The following information is transient.
+with:
 
 ```text
-Current Event
-
-Temporary Evaluation Data
-
-Internal Comparison Buffers
-
-Derived Intermediate Objects
-
-Validation Cache
+CANCELLED
 ```
 
-These objects are internal implementation details.
+as a business terminal path.
 
-They are not business state.
-
----
-
-## 19.3 Runtime State Is Never Persisted Here
-
-Reading Session must never persist Runtime execution state.
-
-Examples:
+Reading Context follows:
 
 ```text
-Running Worker
-
-Current OCR Progress
-
-Queued Task
-
-Retry Counter
-
-Execution Pipeline
-
-Processing Queue
+EMPTY
+   ↓
+PREPARING
+   ↓
+READY
+   ↕
+UPDATING
+   ↓
+INVALID
+   ↓
+DISPOSED
 ```
 
-Those belong exclusively to Runtime.
-
----
-
-## 19.4 State Snapshot
-
-At any moment the Reading Session can be represented by a complete business snapshot.
-
-Conceptually:
+And revision semantics are:
 
 ```text
-ReadingSessionSnapshot
-
-├── Session
-├── ReadingContext
-├── CurrentRevision
-├── SessionConfiguration
-├── ActiveProcessingIntent
-└── Metadata
+Committed Context Revision N
+        ↓
+Candidate N+1
+        ↓
+domain validation
+        ↓
+commit
+        ↓
+Current Revision N+1
 ```
 
-A snapshot must represent one consistent business moment.
-
-Partial snapshots are not allowed.
-
----
-
-# 20. Recovery
-
-Recovery reconstructs business state after interruption.
-
-Recovery never reconstructs execution.
-
-Execution restarts independently.
-
----
-
-## 20.1 Recovery Philosophy
-
-Reading Session restores business authority.
-
-Runtime restores execution capability.
-
-These are separate responsibilities.
-
----
-
-## 20.2 Session Recovery
-
-When a persisted Reading Session exists,
-
-the module attempts to restore:
-
-- Session Lifecycle
-- Reading Context
-- Current Revision
-- Configuration
-
-The module does not attempt to resume unfinished worker execution.
-
----
-
-## 20.3 Revision Recovery
-
-Only one ContentRevision may become Current.
-
-If multiple candidate revisions exist,
-
-business rules determine the newest authoritative revision.
-
-All remaining revisions become:
+The critical rule is:
 
 ```text
-Superseded
+Reading Session states describe
+the reading activity.
 
-or
+ReadingContextRevision describes
+the version of reading-domain state.
 
-Archived
+Runtime states describe
+execution.
+
+These lifecycles must remain separate.
 ```
-
----
-
-## 20.4 Intent Recovery
-
-Previously fulfilled ProcessingIntent objects remain historical facts.
-
-Published but unfinished intents are re-evaluated.
-
-Possible outcomes:
-
-```text
-Republish
-
-Obsolete
-
-Discard
-```
-
-Reading Session does not assume Runtime completed previous execution.
-
----
-
-## 20.5 Recovery Constraints
-
-Recovery must preserve:
-
-- Session identity
-- Revision identity
-- business ordering
-- historical correctness
-
-Recovery must never create duplicate business history.
-
----
-
-# 21. Invalid Transitions
-
-Only documented transitions are valid.
-
-Every other transition is considered a contract violation.
-
----
-
-## 21.1 Invalid Session Transitions
-
-Forbidden examples:
-
-```text
-Completed → Active
-
-Disposed → Active
-
-Cancelled → Active
-
-Paused → Created
-
-Completed → Initializing
-```
-
----
-
-## 21.2 Invalid ReadingContext Transitions
-
-Forbidden examples:
-
-```text
-Disposed → Ready
-
-Invalid → Loading
-
-Ready → Empty
-```
-
----
-
-## 21.3 Invalid Revision Transitions
-
-Forbidden examples:
-
-```text
-Superseded → Current
-
-Archived → Current
-
-Discarded → Current
-
-Discarded → Created
-```
-
-Business authority always moves forward.
-
-It never returns.
-
----
-
-## 21.4 Invalid ProcessingIntent Transitions
-
-Forbidden examples:
-
-```text
-Fulfilled → Published
-
-Obsolete → Fulfilled
-
-Discarded → Published
-
-Discarded → Accepted
-```
-
-Once an intent reaches a terminal outcome,
-
-it remains immutable forever.
-
----
-
-## 21.5 Invalid Transition Handling
-
-When an invalid transition is attempted,
-
-Reading Session must:
-
-1. reject the transition;
-2. preserve the current state;
-3. record diagnostics;
-4. avoid publishing business events;
-5. preserve business consistency.
-
-Invalid transitions must never corrupt business history.
-
----
-
-# 22. State Invariants
-
-The following invariants must always remain true.
-
----
-
-## 22.1 Session Invariants
-
-1. Every Reading Session has exactly one current lifecycle state.
-
-2. Completed sessions never become Active.
-
-3. Disposed sessions never change again.
-
-4. Cancelled sessions never resume.
-
-5. Only Active sessions may produce new business activity.
-
----
-
-## 22.2 ReadingContext Invariants
-
-1. Every Reading Session owns at most one active ReadingContext.
-
-2. Ready contexts represent the latest accepted reading world.
-
-3. Invalid contexts never produce ProcessingIntent.
-
-4. Disposed contexts never reappear.
-
----
-
-## 22.3 ContentRevision Invariants
-
-1. Every revision belongs to one Reading Session.
-
-2. Revisions are immutable.
-
-3. Exactly one revision is Current.
-
-4. Superseded revisions never regain authority.
-
-5. Archived revisions remain historically valid.
-
-6. Discarded revisions never reappear.
-
----
-
-## 22.4 ProcessingIntent Invariants
-
-1. Every ProcessingIntent belongs to one ContentRevision.
-
-2. Published intents are immutable.
-
-3. Obsolete intents never become Fulfilled.
-
-4. Fulfilled intents remain historical facts.
-
-5. Runtime never changes ProcessingIntent ownership.
-
----
-
-## 22.5 Business Invariants
-
-1. Business authority always moves forward.
-
-2. Business history is append-only.
-
-3. Previous revisions remain historically correct.
-
-4. Business state is deterministic.
-
-5. Reading Session never owns Runtime execution.
-
-6. Every business object has exactly one owner.
-
----
-
-# 23. MVP State Model
-
-The initial implementation may use a simplified state model while preserving the architectural guarantees.
-
----
-
-## 23.1 MVP Session States
-
-```text
-Created
-
-Active
-
-Paused
-
-Completed
-
-Cancelled
-
-Disposed
-```
-
-The `Initializing` and `Completing` states may be implemented internally without public exposure.
-
----
-
-## 23.2 MVP ReadingContext States
-
-```text
-Loading
-
-Ready
-
-Updating
-
-Invalid
-```
-
-This provides sufficient expressiveness for the first implementation.
-
----
-
-## 23.3 MVP Revision States
-
-```text
-Current
-
-Superseded
-```
-
-Archiving and discarding policies may be added later.
-
----
-
-## 23.4 MVP ProcessingIntent States
-
-```text
-Created
-
-Published
-
-Fulfilled
-
-Obsolete
-```
-
-The `Accepted` state may initially be omitted if Runtime acknowledgment is not yet implemented.
-
----
-
-# 24. Testing
-
-The Reading Session state machine must be validated through deterministic state transition tests.
-
----
-
-## 24.1 Session Tests
-
-Required scenarios include:
-
-- create session
-- activate session
-- pause session
-- resume session
-- complete session
-- cancel session
-- dispose session
-- invalid lifecycle transition
-
----
-
-## 24.2 ReadingContext Tests
-
-Required scenarios include:
-
-- initial context creation
-- page navigation
-- chapter navigation
-- viewport update
-- invalid source
-- context disposal
-
----
-
-## 24.3 Revision Tests
-
-Required scenarios include:
-
-- create first revision
-- create replacement revision
-- supersede previous revision
-- archive revision
-- discard revision
-- reject duplicate revision
-
----
-
-## 24.4 ProcessingIntent Tests
-
-Required scenarios include:
-
-- publish intent
-- obsolete previous intent
-- fulfill current intent
-- reject obsolete fulfillment
-- discard obsolete intent
-
----
-
-## 24.5 Recovery Tests
-
-Recovery testing should verify:
-
-- session restoration
-- context restoration
-- revision restoration
-- historical consistency
-- duplicate prevention
-- business ordering
-
----
-
-# 25. Open Decisions
-
-The following architectural decisions remain intentionally open.
-
-- Should Completed sessions be recoverable after application restart?
-
-- Should historical ReadingContexts be persisted or regenerated?
-
-- Should archived revisions remain indefinitely?
-
-- How long should obsolete ProcessingIntent objects be retained?
-
-- Should business history support time-travel debugging?
-
-- Should multiple Reading Sessions be supported in parallel?
-
-These questions do not affect the correctness of the current state model.
-
-They may be resolved as implementation requirements evolve.
-
----
-
-# 26. Related Documents
-
-This specification complements the remaining Reading Session documentation.
-
-```text
-README.md
-
-MODULE.md
-
-CONTRACT.md
-
-EVENTS.md
-
-ERRORS.md
-```
-
-Responsibilities are divided as follows.
-
-| Document | Responsibility |
-|-----------|----------------|
-| README | Module overview |
-| MODULE | Architectural responsibilities |
-| CONTRACT | Public interfaces |
-| STATES | Business lifecycle |
-| EVENTS | Business event definitions |
-| ERRORS | Business failure model |
-
-No document should redefine concepts owned by another document.
-
----
-
-# 27. Summary
-
-The Reading Session state model separates four independent business lifecycles.
-
-```text
-Reading Session
-
-├── Session Lifecycle
-├── Reading Context
-├── Content Revision
-└── Processing Intent
-```
-
-The key guarantees are:
-
-- business state is deterministic;
-- lifecycle transitions are explicit;
-- business ownership is unambiguous;
-- ContentRevision is immutable;
-- ProcessingIntent expresses business intent rather than execution;
-- Runtime execution is completely independent of business state;
-- historical business information is append-only;
-- business authority always moves forward.
-
-Together, these guarantees ensure that Reading Session remains the single source of truth for the reading domain while remaining fully decoupled from Runtime execution.
-
----
-
-# End of Document

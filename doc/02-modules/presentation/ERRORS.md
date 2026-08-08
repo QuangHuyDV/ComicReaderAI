@@ -1,2870 +1,2918 @@
 # Presentation Errors
 
-- **Module:** Presentation
-- **Version:** 2.0.0
-- **Status:** Draft
-- **Owner:** CRAI Architecture
-
-## Related Documents
-
-- `modules/presentation/MODULE.md`
-- `modules/presentation/CONTRACT.md`
-- `modules/presentation/STATES.md`
-- `modules/presentation/EVENTS.md`
-- `docs/architecture/STATE_MACHINE.md`
-- `docs/architecture/EVENT_BUS.md`
+> **Project:** CRAI
+> **Module:** `presentation`
+> **Path:** `doc/02-modules/presentation/ERRORS.md`
+> **Version:** 2.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2 aligned
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-08
 
 ---
 
 # 1. Purpose
 
-This document defines the error model of the Presentation Module.
+This document defines the Presentation-owned error model.
 
 It standardizes:
 
-- error ownership;
-- error taxonomy;
-- stable error codes;
-- public error contracts;
-- severity classification;
-- retry semantics;
-- recovery behavior;
-- state transition behavior;
-- event publication behavior;
-- diagnostics and observability.
-
-The purpose is to ensure that every Presentation failure is:
-
-- deterministic;
-- observable;
-- recoverable whenever possible;
-- implementation-independent;
-- compatible with command-driven operations;
-- compatible with asynchronous event-driven processing.
-
-This document defines architectural behavior rather than implementation-specific exceptions.
-
-Consumers MUST rely on stable Presentation error contracts instead of language-specific exception types.
-
----
-
-# 2. Scope
-
-This specification covers failures produced while the Presentation Module performs responsibilities defined in `MODULE.md`.
-
-These include:
-
-- validating presentation requests;
-- validating consumed events;
-- validating presentation configuration;
-- creating PresentationSnapshots;
-- updating PresentationSnapshots;
-- rebuilding RenderPlans;
-- applying PresentationProfiles;
-- changing PresentationModes;
-- recalculating layouts;
-- transforming coordinate spaces;
-- processing geometry;
-- resolving layout conflicts;
-- managing Presentation state;
-- publishing Presentation events.
-
-This document also defines failures related to:
-
-- revision validation;
-- concurrency;
-- obsolete operations;
-- fallback strategies;
-- state transitions;
-- recovery;
-- diagnostics.
-
----
-
-## Outside Scope
-
-The Presentation Module does NOT own failures originating from:
-
-- Reading Session;
-- Content Acquisition;
-- OCR;
-- Translation;
-- Browser Integration;
-- Desktop Integration;
-- Storage;
-- UI Rendering;
-- network providers.
-
-Presentation MAY translate upstream failures into Presentation-specific errors only when Presentation processing itself cannot continue safely.
-
----
-
-# 3. Error Philosophy
-
-Errors are part of the public architecture contract.
-
-Every externally observable failure MUST map to:
-
-- a stable ErrorCode;
-- an ErrorCategory;
-- a Severity;
-- a RetryPolicy.
-
-Consumers MUST make decisions using these stable fields.
-
-Consumers MUST NOT depend on:
-
-- exception class names;
-- stack traces;
-- implementation language;
-- internal messages.
-
-Messages are intended only for diagnostics.
-
----
-
-## 3.1 Errors are Architectural Contracts
-
-Every Presentation error represents a semantic failure.
-
-An error code MUST preserve its meaning across implementations.
-
-Changing the semantic meaning of an existing error code requires a major contract version.
-
----
-
-## 3.2 Expected Outcomes are NOT Internal Failures
-
-Many unsuccessful operations are expected outcomes.
-
-Examples include:
-
-- duplicate events;
-- stale revisions;
-- obsolete asynchronous results;
-- unsupported presentation modes;
-- invalid viewport changes;
-- missing optional preferences.
-
-These outcomes do NOT indicate module corruption.
-
-They normally preserve the current PresentationSnapshot.
-
----
-
-## 3.3 Failed State is Reserved
-
-The `Failed` state is reserved for situations where Presentation can no longer guarantee architectural correctness.
-
-Typical causes include:
-
-- broken invariants;
-- corrupted active snapshot;
-- impossible revision ordering;
-- rollback failure;
-- inconsistent internal identity;
-- atomic commit failure.
-
-Expected validation failures MUST NOT transition Presentation into `Failed`.
-
----
-
-## 3.4 Preserve Previous Snapshot
-
-Whenever possible Presentation preserves the previous committed PresentationSnapshot.
-
-Candidate operations MUST NOT replace the active PresentationSnapshot until validation and commit both succeed.
-
-Recoverable failures therefore never expose partially updated presentation data.
-
----
-
-## 3.5 Observable Failures
-
-Every externally visible failure SHOULD be observable through:
-
-- structured logs;
-- diagnostics;
-- metrics;
-- stable error codes.
-
-Presentation SHOULD never silently discard failures except when explicitly defined by architecture (for example obsolete asynchronous operations).
-
----
-
-## 3.6 Privacy
-
-Presentation errors MUST NOT expose user content.
-
-Error payloads MUST NOT contain:
-
-- translated text;
-- original text;
-- screenshots;
-- page images;
-- browser content.
-
-Instead they SHOULD reference:
-
-- identifiers;
-- revisions;
-- geometry summaries;
-- counts;
-- language identifiers.
-
----
-
-# 4. Design Principles
-
-Presentation follows the principles below.
-
----
-
-## 4.1 Stable Error Codes
-
-Error codes are permanent public contracts.
-
-Consumers MUST branch using ErrorCode rather than textual messages.
-
----
-
-## 4.2 Immutable Error Facts
-
-Errors describe completed facts.
-
-Once created an error record MUST NOT be modified.
-
-Additional diagnostics MAY be appended separately.
-
----
-
-## 4.3 Deterministic Behavior
-
-Given identical:
-
-- command;
-- event;
-- PresentationState;
-- revisions;
-
-Presentation MUST produce the same error.
-
----
-
-## 4.4 Explicit Recovery
-
-Every error MUST define recovery semantics.
-
-Recovery may include:
-
-- ignore;
-- retry;
-- fallback;
-- rebuild;
-- restore previous snapshot;
-- transition to Failed.
-
----
-
-## 4.5 Explicit Retry Policy
-
-Every error MUST declare one retry policy.
-
-Retry behavior MUST NOT depend on implementation.
-
----
-
-## 4.6 Candidate Isolation
-
-Candidate operations MUST never corrupt committed PresentationSnapshots.
-
-Failed candidates MUST be discarded.
-
----
-
-## 4.7 Module Independence
-
-Presentation errors describe Presentation behavior only.
-
-They MUST NOT expose internal failures from:
-
-- OCR
-- Translation
-- Browser
-- Rendering
-
-except through Presentation-owned contracts.
-
----
-
-# 5. Error Ownership
-
-Presentation owns only failures inside the Presentation boundary.
-
-Ownership follows module responsibilities.
-
-| Failure Source | Owned By |
-|---------------|----------|
-| Reading Session validation | Reading Session |
-| OCR recognition | OCR |
-| Translation generation | Translation |
-| Browser capture | Browser Integration |
-| UI rendering | UI Adapter |
-| PresentationSnapshot construction | Presentation |
-| RenderPlan generation | Presentation |
-| Layout computation | Presentation |
-| Geometry normalization | Presentation |
-| PresentationProfile application | Presentation |
-| PresentationMode selection | Presentation |
-| State transition | Presentation |
-| Event publication | Presentation |
-
-Presentation MAY wrap upstream failures when Presentation cannot safely continue.
-
-The original upstream failure MUST remain available through diagnostics whenever possible.
-
----
-
-## 5.1 Revision Ownership
-
-Presentation recognizes revisions owned by multiple modules.
-
-Presentation MUST NOT modify revisions owned by another module.
-
-| Revision | Owner |
-|----------|-------|
-| ContentRevision | Reading Session |
-| TranslationRevision | Translation |
-| PreferenceRevision | Preferences |
-| ProfileRevision | Preferences |
-| ViewportRevision | UI Adapter |
-| PresentationRevision | Presentation |
-
-Only Presentation may create or increment PresentationRevision.
-
----
-
-## 5.2 Identity Ownership
-
-Presentation recognizes the following identities.
-
-| Identity | Owner |
-|----------|-------|
-| SessionId | Reading Session |
-| ContentId | Reading Session |
-| PresentationContextId | Presentation |
-| PresentationId | Presentation |
-| SnapshotId | Presentation |
-| RenderPlanId | Presentation |
-
-Presentation MUST reject inconsistent ownership relationships.
-
----
-
-# 6. Error Categories
-
-Every Presentation error belongs to exactly one category.
-
-| Prefix | Category |
-|---------|----------|
-| VAL | Validation |
-| CTX | Context |
-| REV | Revision |
-| GEO | Geometry |
-| LAY | Layout |
-| MODE | Presentation Mode |
-| STATE | State Machine |
-| EVENT | Event Processing |
-| RES | Resources |
-| REC | Recovery |
-| INT | Internal |
-
-Categories are architectural classifications only.
-
-Severity and RetryPolicy are defined independently.
-
----
-
-# 7. Error Code Format
-
-Presentation uses stable error identifiers.
-
+* error ownership;
+* stable error codes;
+* error categories;
+* severity;
+* recovery semantics;
+* retry hints;
+* candidate rejection;
+* PresentationRevision conflicts;
+* geometry/layout failures;
+* state-machine failures;
+* resource failures;
+* recovery failures;
+* internal invariant failures;
+* diagnostics and observability.
+
+The goal is to ensure that Presentation failures remain:
+
+```text
+Deterministic
+Observable
+Recoverable where possible
+Serializable
+Implementation-independent
+Privacy-safe
+Runtime-v2 compatible
 ```
+
+Presentation errors describe failures inside the Presentation boundary only.
+
+---
+
+# 2. Error Ownership
+
+Presentation owns errors created while performing Presentation-owned responsibilities such as:
+
+```text
+Presentation input validation
+Artifact compatibility validation
+Presentation item mapping
+Presentation geometry validation
+Layout planning
+Mode resolution
+Profile application
+Candidate Presentation creation
+PresentationRevision validation
+Presentation commit
+Presentation state transitions
+Presentation-local recovery
+```
+
+Presentation does not own failures from:
+
+```text
+Runtime Control
+Scheduler
+Work Queue
+Recognition
+Text Processing
+Translation
+Artifact Store
+Reading Session
+Preferences persistence
+UI Adapter rendering
+Storage
+Platform integration
+```
+
+External failures may be referenced or normalized for diagnostics, but ownership must remain explicit.
+
+---
+
+# 3. The Four Failure Domains
+
+CRAI distinguishes four fundamentally different conditions.
+
+## 3.1 Presentation-Owned Error
+
+A Presentation responsibility failed.
+
+Example:
+
+```text
+invalid Presentation mapping
+invalid geometry
+layout cannot satisfy invariants
+PresentationRevision conflict
+committed state corruption
+```
+
+Presentation owns the error.
+
+---
+
+## 3.2 Runtime Authority Rejection
+
+Runtime decides that a Presentation Candidate may no longer commit.
+
+Examples:
+
+```text
+Runtime Revision superseded
+Work canceled
+Session no longer active
+Attempt no longer authoritative
+```
+
+This is not a Presentation error.
+
+Presentation receives a normalized authority result and discards its Candidate.
+
+---
+
+## 3.3 Expected Supersession / Cancellation Outcome
+
+Presentation work becomes obsolete.
+
+Examples:
+
+```text
+newer viewport
+newer Presentation command
+clear operation
+newer PresentationRevision committed first
+coalesced reflow
+```
+
+These are expected control outcomes.
+
+They normally require:
+
+```text
+discard
++
+diagnostics
+```
+
+not a public error.
+
+---
+
+## 3.4 UI Apply Failure
+
+Presentation committed successfully but UI Adapter could not apply it.
+
+Examples:
+
+```text
+target destroyed
+surface unavailable
+stale UI revision
+platform rendering failure
+```
+
+This belongs to UI Adapter.
+
+Presentation must not reclassify it as a Presentation internal failure unless it independently damages Presentation-owned state.
+
+---
+
+# 4. Error Philosophy
+
+## 4.1 Stable Machine Contract
+
+Every public Presentation error contains a stable machine-readable code.
+
+Consumers MUST NOT branch on:
+
+* exception classes;
+* stack traces;
+* implementation language;
+* human-readable messages.
+
+---
+
+## 4.2 Candidate Failure Does Not Equal Current-State Failure
+
+A Candidate may fail while current committed Presentation remains perfectly valid.
+
+Default model:
+
+```text
+Current Presentation
+        +
+Candidate
+        ↓
+Candidate fails
+        ↓
+Discard Candidate
+        ↓
+Current Presentation unchanged
+```
+
+---
+
+## 4.3 `FAILED` Is Reserved
+
+Presentation enters `FAILED` only when Presentation-owned correctness cannot be trusted.
+
+Examples:
+
+* current Snapshot/RenderPlan mismatch;
+* impossible PresentationRevision ordering;
+* corrupted Presentation registry;
+* failed atomic commit leaving uncertain state;
+* recovery data untrustworthy.
+
+Validation errors do not enter `FAILED`.
+
+---
+
+## 4.4 Expected Outcomes Are Not Errors
+
+Normal control behavior includes:
+
+```text
+superseded Candidate
+coalesced layout operation
+duplicate request
+no-op request
+Runtime authority rejection
+PresentationRevision conflict
+unsupported mode with valid fallback
+```
+
+Some may produce a rejection result, but they are not internal failures.
+
+---
+
+# 5. Error Categories
+
+Presentation v2 uses:
+
+| Prefix   | Category                       |
+| -------- | ------------------------------ |
+| `VAL`    | Presentation Input Validation  |
+| `CTX`    | Presentation Context           |
+| `ART`    | Artifact Compatibility         |
+| `PRSREV` | Presentation Revision          |
+| `GEO`    | Geometry                       |
+| `LAY`    | Layout                         |
+| `MODE`   | Presentation Mode              |
+| `STATE`  | Presentation State             |
+| `RES`    | Presentation Resources         |
+| `REC`    | Presentation Recovery          |
+| `PUB`    | Presentation Event Publication |
+| `INT`    | Internal Invariant             |
+
+Notably absent:
+
+```text
+Runtime
+Translation
+Reading Session
+UI rendering
+```
+
+because those are external owners.
+
+---
+
+# 6. Error Code Format
+
+```text
 PRS-<CATEGORY>-<NUMBER>
 ```
 
-Examples
+Examples:
 
-```
+```text
 PRS-VAL-001
-PRS-REV-004
-PRS-LAY-002
-PRS-MODE-003
+PRS-ART-003
+PRS-PRSREV-001
+PRS-GEO-005
+PRS-LAY-004
+PRS-INT-002
 ```
 
 Rules:
 
-- category names never change;
-- existing meanings never change;
-- numbers are never reused;
-- deprecated codes remain documented.
+* codes are stable;
+* meanings are never reused;
+* deprecated codes remain documented;
+* semantic changes require version review.
 
 ---
 
-# 8. Severity Model
+# 7. Severity
 
-Every Presentation error declares one severity.
+| Severity   | Meaning                                                                  |
+| ---------- | ------------------------------------------------------------------------ |
+| `Info`     | Expected non-success/control outcome                                     |
+| `Warning`  | Request rejected while current Presentation remains valid                |
+| `Error`    | Presentation operation cannot complete and recovery/fallback is required |
+| `Critical` | Presentation-owned correctness cannot be guaranteed                      |
 
-| Severity | Meaning |
-|-----------|---------|
-| Info | Expected no-op or obsolete operation |
-| Warning | Request rejected while current Presentation remains valid |
-| Error | Operation failed and caller action or fallback is required |
-| Critical | Presentation correctness can no longer be guaranteed |
-
-Severity does not determine retry behavior.
+Severity does not decide Runtime retry.
 
 ---
 
-## Severity Guidelines
+# 8. Recovery Hint
 
-### Info
+Presentation error contracts expose a recovery hint rather than commanding Runtime retry.
+
+```text
+RecoveryHint
+- None
+- CorrectInput
+- RefreshPresentationRevision
+- ChangeTarget
+- ChangeViewport
+- UseFallback
+- RebuildPresentation
+- ClearPresentation
+- RestoreKnownGood
+- ResetPresentation
+```
+
+Presentation does not schedule retry itself.
+
+---
+
+# 9. Retry Hint vs Runtime Retry
+
+Presentation may provide:
+
+```text
+RetryHint
+```
+
+but Runtime/Application owns retry execution.
 
 Examples:
 
-- stale event;
-- duplicate event;
-- obsolete layout result;
-- obsolete translation.
+```text
+DoNotRetry
+RetryWithLatestPresentationRevision
+RetryAfterInputChange
+RetryAfterTargetChange
+RetryWithFallback
+```
 
-Usually ignored after diagnostics.
-
----
-
-### Warning
-
-Examples:
-
-- invalid command;
-- unsupported mode;
-- invalid viewport;
-- missing required input.
-
-Previous PresentationSnapshot remains active.
-
----
-
-### Error
-
-Examples:
-
-- layout computation failed;
-- geometry transformation failed;
-- RenderPlan generation failed;
-- event publication failed.
-
-Fallback or recovery is required.
-
----
-
-### Critical
-
-Examples:
-
-- invariant violation;
-- atomic commit failure;
-- rollback failure;
-- corrupted PresentationSnapshot.
-
-Presentation transitions to `Failed`.
-
----
-
-# 9. Retry Policy
-
-Each error defines exactly one retry policy.
-
-| Policy | Meaning |
-|---------|---------|
-| Never | Retrying identical input cannot succeed |
-| AfterCorrection | Retry only after correcting input |
-| WithLatestRevision | Retry using current revisions |
-| WithFallback | Retry using another PresentationStrategy |
-| Transient | Retry may succeed without semantic changes |
-| ResetRequired | Presentation must be reset before retry |
-
-Retry behavior MUST be deterministic.
-
-Retries MUST NOT reuse obsolete revisions.
+Presentation errors MUST NOT directly create Runtime retry.
 
 ---
 
 # 10. Public Error Contract
 
-Presentation exposes a conceptual public error object.
+Conceptually:
 
 ```text
 PresentationError
-
-- ErrorId
-- ErrorCode
-- Category
-- Severity
-- RetryPolicy
-
-- Message
-
-- Operation
-- State
-
-- SessionId
-- ContentId
-
-- PresentationContextId
-- PresentationId
-
-- SnapshotId
-- RenderPlanId
-
-- ContentRevision
-- TranslationRevision
-- PreferenceRevision
-- ProfileRevision
-- ViewportRevision
-- PresentationRevision
-
-- RequestId
-- OperationId
-- EventId
-
-- CorrelationId
-- CausationId
-- TraceId
-
-- Details
-
-- OccurredAt
+├── errorId
+├── errorCode
+├── category
+├── severity
+├── recoveryHint
+├── retryHint?
+├── messageKey?
+├── operationType?
+├── presentationState?
+├── presentationContextId?
+├── presentationId?
+├── expectedPresentationRevision?
+├── currentPresentationRevision?
+├── targetId?
+├── targetRevision?
+├── viewportRevision?
+├── runtimeIdentity?
+├── requestId?
+├── operationId?
+├── correlationId?
+├── causationId?
+├── traceId?
+├── diagnosticRef?
+└── occurredAt
 ```
 
-The exact serialization format is implementation dependent.
+---
 
-Only semantic fields are standardized.
+# 11. Runtime Identity in Errors
+
+Presentation errors may include:
+
+```text
+sessionId
+runtimeRevisionId
+workItemId
+attemptId
+```
+
+for diagnostics.
+
+Presentation does not own or alter those identities.
+
+They MUST NOT be used as Presentation error ordering mechanisms.
 
 ---
 
-## Required Fields
+# 12. Message Rules
 
-Every externally observable Presentation error MUST contain:
+Human-readable message text:
 
-- ErrorId
-- ErrorCode
-- Category
-- Severity
-- RetryPolicy
-- Operation
-- State
-- OccurredAt
-- CorrelationId
+* is optional;
+* is diagnostic;
+* must not contain user content;
+* must not contain secrets;
+* is never the machine contract.
 
----
+Consumers branch on:
 
-## Optional Fields
-
-Identifiers SHOULD be included whenever known.
-
-Typical examples:
-
-- SessionId
-- ContentId
-- PresentationId
-- SnapshotId
-- RenderPlanId
-- EventId
-- RequestId
+```text
+errorCode
+category
+recoveryHint
+```
 
 ---
 
-## Revision Fields
+# 13. Validation Errors
 
-Revision fields SHOULD be included whenever relevant.
+Validation errors mean a Presentation command does not satisfy Presentation contracts.
 
-Examples:
-
-- ContentRevision
-- TranslationRevision
-- ViewportRevision
-- PresentationRevision
-
-Presentation MUST NOT invent missing revision values.
-
----
-
-## Message Rules
-
-The Message field:
-
-- is intended for diagnostics only;
-- MUST be concise;
-- MUST NOT contain user content;
-- MUST NOT contain secrets;
-- MUST NOT be used as a programmatic contract.
-
-Consumers MUST branch using ErrorCode rather than Message.
-
----
-
-# 11. Validation Errors
-
-Validation errors indicate that an incoming command, query, event, or configuration does not satisfy the Presentation contract.
-
-Validation failures are expected operational outcomes.
-
-They MUST NOT transition Presentation into `Failed`.
-
-Whenever possible, the current committed `PresentationSnapshot` remains active.
+They never enter `FAILED`.
 
 ---
 
 ## PRS-VAL-001 — MissingRequiredField
 
-### Meaning
+A required Presentation field is absent.
 
-A required field is missing from the request.
+Examples:
 
-### Examples
+* missing `PresentationContextId`;
+* missing `PresentationTarget`;
+* missing `PresentationProfile`;
+* missing required Artifact reference;
+* missing required viewport.
 
-- missing SessionId
-- missing ContentId
-- missing PresentationMode
-- missing PresentationTarget
-- missing PresentationProfile
-- missing Viewport
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
+```text
+CorrectInput
+```
 
-### State Behavior
-
-- active PresentationSnapshot remains unchanged
-- candidate operation discarded
-
-### Event
-
-Publish `PresentationRejected` if the request was accepted for processing.
+Committed Presentation remains unchanged.
 
 ---
 
 ## PRS-VAL-002 — InvalidFieldValue
 
-### Meaning
+A supplied field has invalid semantics.
 
-A field exists but contains an invalid value.
+Examples:
 
-### Examples
+* invalid enum;
+* invalid scale;
+* negative size;
+* malformed identifier;
+* invalid typography value.
 
-- invalid zoom
-- empty identifier
-- negative size
-- unsupported enum value
-- invalid PresentationTarget
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
-
-### Recovery
-
-Preserve current PresentationSnapshot.
+```text
+CorrectInput
+```
 
 ---
 
 ## PRS-VAL-003 — InvalidPresentationProfile
 
-### Meaning
+PresentationProfile cannot be safely applied.
 
-The supplied PresentationProfile is malformed.
+Examples:
 
-### Examples
+* invalid typography constraints;
+* impossible fallback configuration;
+* inconsistent overlay policy.
 
-- invalid typography
-- unsupported spacing
-- inconsistent profile configuration
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
-
-### Recovery
-
-Continue using the current PresentationProfile whenever possible.
+```text
+CorrectInput
+or
+UseFallback
+```
 
 ---
 
 ## PRS-VAL-004 — MissingPresentationInput
 
-### Meaning
+Required semantic input is unavailable.
 
-Required presentation input is unavailable.
+Examples:
 
-Presentation cannot construct a PresentationSnapshot.
+* required TranslationArtifactRef missing;
+* required SourceDocumentArtifactRef missing;
+* mode requires geometry but no compatible Recognition Artifact exists.
 
-### Examples
+Severity:
 
-- missing translated content
-- missing source markers
-- missing reading content
-
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
+```text
+CorrectInput
+```
 
-### Ownership
-
-Presentation does not generate missing input.
-
-The caller must provide complete data.
+Presentation does not generate missing upstream data itself.
 
 ---
 
 ## PRS-VAL-005 — UnsupportedContractVersion
 
-### Meaning
+Presentation command contract version is incompatible.
 
-The supplied Presentation contract version is unsupported.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
-
-### Recovery
-
-Caller must use a compatible contract version.
+```text
+CorrectInput
+```
 
 ---
 
-# 12. Context Errors
-
-Context errors indicate that incoming data belongs to a different Presentation context.
-
-They do not indicate module corruption.
+# 14. Presentation Context Errors
 
 ---
 
 ## PRS-CTX-001 — PresentationContextNotFound
 
-### Meaning
+Requested Presentation Context does not exist.
 
-The requested PresentationContextId does not exist.
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
-
-### Recovery
-
-Create a new Presentation context or use a valid identifier.
-
----
-
-## PRS-CTX-002 — SessionMismatch
-
-### Meaning
-
-SessionId differs from the active Presentation context.
-
-### Severity
-
-Info or Warning
-
-### Retry Policy
-
-WithLatestRevision
-
-### Behavior
-
-Ignore stale operations.
+```text
+CorrectInput
+```
 
 ---
 
-## PRS-CTX-003 — ContentMismatch
+## PRS-CTX-002 — PresentationNotFound
 
-### Meaning
+Requested PresentationId does not exist in the context.
 
-ContentId differs from the active Presentation content.
+Severity:
 
-### Severity
-
-Info or Warning
-
-### Retry Policy
-
-AfterCorrection
-
-### Recovery
-
-Begin a replacement Presentation flow.
-
----
-
-## PRS-CTX-004 — SnapshotNotFound
-
-### Meaning
-
-Referenced PresentationSnapshot cannot be found.
-
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-WithLatestRevision
+```text
+RefreshPresentationRevision
+or
+RebuildPresentation
+```
 
 ---
 
-## PRS-CTX-005 — RenderPlanNotFound
+## PRS-CTX-003 — PresentationItemNotFound
 
-### Meaning
+Referenced PresentationItemId does not exist.
 
-Referenced RenderPlan does not exist.
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-WithLatestRevision
-
----
-
-## PRS-CTX-006 — IdentityConflict
-
-### Meaning
-
-Multiple Presentation identities conflict.
-
-### Examples
-
-- Snapshot belongs to another context
-- RenderPlan belongs to another Presentation
-- PresentationId mismatch
-
-### Severity
-
-Critical
-
-### Retry Policy
-
-ResetRequired
-
-### State Behavior
-
-Transition to Failed if committed state is affected.
+```text
+RefreshPresentationRevision
+```
 
 ---
 
-# 13. Revision Errors
+## PRS-CTX-004 — PresentationIdentityConflict
 
-Revision errors protect deterministic updates.
+Public Presentation identities disagree.
 
-Presentation only owns PresentationRevision.
+Examples:
 
-Other revisions belong to their respective modules.
+* Snapshot belongs to another Presentation;
+* RenderPlan references another PresentationId;
+* marker references unknown item;
+* PresentationContext mismatch.
 
----
+Severity:
 
-## PRS-REV-001 — StaleContentRevision
-
-### Meaning
-
-Incoming ContentRevision is older than the current context.
-
-### Severity
-
-Info
-
-### Retry Policy
-
-WithLatestRevision
-
-### Behavior
-
-Ignore operation.
-
----
-
-## PRS-REV-002 — FutureContentRevision
-
-### Meaning
-
-Incoming ContentRevision cannot be processed incrementally.
-
-### Severity
-
-Warning
-
-### Retry Policy
-
-WithLatestRevision
-
-### Recovery
-
-Perform Presentation rebuild.
-
----
-
-## PRS-REV-003 — StaleTranslationRevision
-
-### Meaning
-
-Incoming TranslationRevision is obsolete.
-
-### Severity
-
-Info
-
-### Retry Policy
-
-Never
-
-### Behavior
-
-Ignore duplicate translation.
-
----
-
-## PRS-REV-004 — PresentationRevisionConflict
-
-### Meaning
-
-Caller expects a different PresentationRevision.
-
-### Severity
-
-Warning
-
-### Retry Policy
-
-WithLatestRevision
-
-### Typical Cause
-
-Concurrent updates.
-
----
-
-## PRS-REV-005 — ObsoleteOperation
-
-### Meaning
-
-A candidate operation completed after being superseded.
-
-### Examples
-
-- newer viewport
-- newer translation
-- newer PresentationProfile
-
-### Severity
-
-Info
-
-### Retry Policy
-
-Never
-
-### Behavior
-
-Discard candidate.
-
----
-
-## PRS-REV-006 — NonMonotonicRevision
-
-### Meaning
-
-Presentation attempted to commit a revision lower than or equal to the active PresentationRevision.
-
-### Severity
-
-Critical
-
-### Retry Policy
-
-ResetRequired
-
-### State Behavior
-
-Transition to Failed.
-
----
-
-## PRS-REV-007 — RevisionContextMismatch
-
-### Meaning
-
-Revision values belong to different Presentation contexts.
-
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+If only Candidate affected:
 
-WithLatestRevision
+```text
+discard Candidate
+```
 
-### Recovery
+If committed state affected:
 
-Discard candidate.
-
-Reload current context.
+```text
+Critical
+→ FAILED
+```
 
 ---
 
-# 14. Geometry Errors
+# 15. Artifact Compatibility Errors
 
-Geometry errors occur while preparing source-aligned presentation.
+Presentation consumes accepted immutable Artifact references.
 
-These errors are owned by Presentation.
+These errors concern compatibility, not publication authority.
+
+---
+
+## PRS-ART-001 — UnsupportedArtifactType
+
+Presentation received an Artifact type it cannot consume.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+## PRS-ART-002 — ArtifactReferenceInvalid
+
+Artifact reference is structurally invalid or cannot be resolved through the permitted runtime boundary.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+CorrectInput
+or
+RebuildPresentation
+```
+
+---
+
+## PRS-ART-003 — ArtifactCompatibilityMismatch
+
+Supplied Artifacts do not represent compatible semantic content.
+
+Examples:
+
+* Translation Artifact maps to another SourceDocument;
+* geometry belongs to unrelated source content;
+* required source identifiers do not match.
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+CorrectInput
+```
+
+---
+
+## PRS-ART-004 — RequiredArtifactDataUnavailable
+
+Artifact exists but lacks information required by the selected mode.
+
+Example:
+
+```text
+Overlay requires geometry
+but accepted Artifacts provide no usable source geometry
+```
+
+Severity:
+
+```text
+Warning
+```
+
+Recovery:
+
+```text
+UseFallback
+```
+
+---
+
+## PRS-ART-005 — ArtifactLeaseUnavailable
+
+Presentation cannot acquire required Artifact access according to Runtime resource policy.
+
+Ownership:
+
+```text
+resource/Artifact infrastructure
+```
+
+Presentation records normalized failure but does not claim Artifact ownership.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+RebuildPresentation
+or external retry decision
+```
+
+---
+
+# 16. Presentation Revision Errors
+
+Presentation owns only `PresentationRevision`.
+
+---
+
+## PRS-PRSREV-001 — PresentationRevisionConflict
+
+Caller expected:
+
+```text
+PresentationRevision = N
+```
+
+but current is:
+
+```text
+N + K
+```
+
+Severity:
+
+```text
+Info or Warning
+```
+
+Recovery:
+
+```text
+RefreshPresentationRevision
+```
+
+This is expected optimistic concurrency behavior.
+
+---
+
+## PRS-PRSREV-002 — CandidateSuperseded
+
+Candidate became obsolete because newer Presentation work won.
+
+Examples:
+
+* newer reflow;
+* newer update;
+* newer mode operation;
+* clear.
+
+Severity:
+
+```text
+Info
+```
+
+Recovery:
+
+```text
+None
+```
+
+Normally diagnostics only.
+
+---
+
+## PRS-PRSREV-003 — CandidateViewportObsolete
+
+Candidate layout uses an obsolete viewport revision.
+
+Severity:
+
+```text
+Info
+```
+
+Recovery:
+
+```text
+None
+```
+
+Newer useful work should already exist or be requested externally.
+
+---
+
+## PRS-PRSREV-004 — CandidateTargetObsolete
+
+Target revision changed before commit.
+
+Severity:
+
+```text
+Info or Warning
+```
+
+Recovery:
+
+```text
+ChangeTarget
+```
+
+---
+
+## PRS-PRSREV-005 — NonMonotonicPresentationRevision
+
+Presentation attempts to commit a revision not greater than current revision when mutation requires advancement.
+
+Severity:
+
+```text
+Critical
+```
+
+Recovery:
+
+```text
+ResetPresentation
+```
+
+State:
+
+```text
+FAILED
+```
+
+---
+
+## PRS-PRSREV-006 — SnapshotRenderPlanRevisionMismatch
+
+Candidate or committed Snapshot and RenderPlan do not share the same PresentationRevision.
+
+Candidate-only:
+
+```text
+Error
+discard
+```
+
+Committed:
+
+```text
+Critical
+FAILED
+```
+
+---
+
+# 17. Runtime Authority Outcomes
+
+Runtime authority rejection is **not a PRS error category**.
+
+Presentation receives:
+
+```text
+AuthorityRevalidationResult
+```
+
+Possible normalized results:
+
+```text
+RejectedStale
+RejectedCanceled
+RejectedSessionInactive
+RejectedRuntimeRevision
+RejectedOther
+```
+
+Presentation behavior:
+
+```text
+discard Candidate
+do not commit
+do not increment PresentationRevision
+do not enter FAILED
+```
+
+Optional external rejection fact:
+
+```text
+PresentationRejected
+rejectionSource = RuntimeAuthority
+```
+
+---
+
+# 18. Cancellation Outcomes
+
+Presentation does not define:
+
+```text
+PRS-STATE-OperationCancelled
+```
+
+as a module failure.
+
+Cancellation is represented as:
+
+```text
+Runtime cancellation observation
+or
+Presentation-local supersession
+```
+
+Candidate is discarded.
+
+No new PresentationRevision.
+
+No PresentationFailed.
+
+---
+
+# 19. Geometry Errors
 
 ---
 
 ## PRS-GEO-001 — InvalidBoundingBox
 
-### Meaning
+Geometry contains invalid numeric bounds.
 
-Bounding box contains invalid values.
+Examples:
 
-### Examples
+* negative dimensions;
+* NaN;
+* infinity.
 
-- negative size
-- NaN
-- infinite coordinate
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
+```text
+CorrectInput
+or
+UseFallback
+```
 
 ---
 
 ## PRS-GEO-002 — InvalidPolygon
 
-### Meaning
+Polygon cannot represent valid geometry.
 
-Polygon cannot represent a valid source region.
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
+```text
+CorrectInput
+or
+UseFallback
+```
 
 ---
 
 ## PRS-GEO-003 — MissingCoordinateSpace
 
-### Meaning
+Public geometry has no explicit coordinate space.
 
-Geometry has no declared coordinate space.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
+```text
+CorrectInput
+```
 
 ---
 
 ## PRS-GEO-004 — UnsupportedCoordinateSpace
 
-### Meaning
+Presentation cannot interpret required coordinate semantics.
 
-Presentation cannot interpret the supplied coordinate system.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
+```text
+CorrectInput
+or
+UseFallback
+```
 
 ---
 
 ## PRS-GEO-005 — CoordinateTransformationUnavailable
 
-### Meaning
+Required transform is unavailable.
 
-Required coordinate transformation is unavailable.
+Example:
 
-### Examples
+```text
+NormalizedSource → OverlaySurface
+```
 
-- Image → Overlay
-- Overlay → Viewport
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
+```text
+UseFallback
+```
 
-### Recovery
+Typical fallback:
 
-Use a PresentationStrategy that does not require source-aligned geometry.
+```text
+Overlay → SidePanel
+```
 
 ---
 
 ## PRS-GEO-006 — CoordinateTransformationFailed
 
-### Meaning
+A known transform produced invalid output.
 
-Known coordinate transformation produced invalid output.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
+```text
+UseFallback
+```
 
-### Recovery
-
-Keep previous RenderPlan.
-
----
-
-## PRS-GEO-007 — GeometryOutsideViewport
-
-### Meaning
-
-Presentation item is outside the visible viewport.
-
-### Severity
-
-Info
-
-### Retry Policy
-
-Never
-
-### Behavior
-
-Hide item.
-
-Do not remove it from PresentationSnapshot.
+Previous committed RenderPlan remains valid.
 
 ---
 
-## PRS-GEO-008 — GeometryConflict
+## PRS-GEO-007 — GeometryNotVisible
 
-### Meaning
+Source geometry is outside current visible region.
 
-Geometry relationships contradict each other.
+This is not necessarily an error.
 
-### Examples
+Default classification:
 
-- duplicate regions
-- impossible hierarchy
-- inconsistent coordinates
+```text
+Expected Presentation condition
+```
 
-### Severity
+Behavior:
 
+* hide or mark unavailable;
+* do not remove semantic PresentationItem.
+
+No error event required.
+
+---
+
+## PRS-GEO-008 — GeometryRelationshipInvalid
+
+Presentation-facing geometry relationships are inconsistent.
+
+Severity:
+
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
+```text
+CorrectInput
+or
+UseFallback
+```
 
 ---
 
-## PRS-GEO-009 — GeometryInvariantViolation
+## PRS-GEO-009 — CommittedGeometryInvariantViolation
 
-### Meaning
+Committed Presentation geometry violates internal invariant.
 
-Committed geometry violates Presentation invariants.
+Severity:
 
-### Severity
-
+```text
 Critical
+```
 
-### Retry Policy
+Recovery:
 
-ResetRequired
+```text
+ResetPresentation
+```
 
-### State Behavior
+State:
 
-Transition to Failed.
+```text
+FAILED
+```
 
 ---
 
-# 15. Layout Errors
-
-Layout errors occur while generating RenderPlans.
-
-Presentation SHOULD preserve the previous RenderPlan whenever possible.
+# 20. Layout Errors
 
 ---
 
 ## PRS-LAY-001 — InvalidViewport
 
-### Meaning
+Viewport cannot safely support layout.
 
-Viewport cannot be used for layout.
+Severity:
 
-### Examples
-
-- zero size
-- invalid zoom
-- invalid transform
-
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
+```text
+ChangeViewport
+```
+
+Previous committed layout remains current.
 
 ---
 
 ## PRS-LAY-002 — TextMeasurementFailed
 
-### Meaning
+Presentation cannot produce trusted text measurements.
 
-Presentation cannot accurately measure translated text.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
+```text
+UseFallback
+```
 
-### Recovery
-
-Use approximate metrics.
+Fallback may use bounded approximate metrics or a simpler Presentation mode.
 
 ---
 
-## PRS-LAY-003 — FontProfileUnavailable
+## PRS-LAY-003 — TypographyUnavailable
 
-### Meaning
+Requested typography resource or semantic profile cannot be used.
 
-Requested font profile is unavailable.
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
-
-### Recovery
-
-Use default typography profile.
+```text
+UseFallback
+```
 
 ---
 
-## PRS-LAY-004 — LayoutOverflowUnresolved
+## PRS-LAY-004 — OverflowUnresolved
 
-### Meaning
+Layout cannot satisfy overflow policy.
 
-Overflow cannot be resolved.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
+```text
+UseFallback
+```
 
-### Recovery
-
-Possible fallback:
-
-- reduce text size
-- SidePanel
-- Reader
-- Marker mode
+Presentation MUST NOT shrink text below readability rules merely to avoid this error.
 
 ---
 
-## PRS-LAY-005 — LayoutOverlapUnresolved
+## PRS-LAY-005 — OverlapUnresolved
 
-### Meaning
+Layout violates overlap policy after allowed resolution attempts.
 
-PresentationItems overlap beyond policy limits.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
-
-### Recovery
-
-Use another PresentationStrategy.
+```text
+UseFallback
+```
 
 ---
 
-## PRS-LAY-006 — InvalidReadingOrder
+## PRS-LAY-006 — SemanticOrderUnavailable
 
-### Meaning
+Presentation cannot obtain a deterministic semantic ordering required by the active strategy.
 
-Presentation cannot establish deterministic reading order.
+Presentation MUST NOT invent a new semantic reading order.
 
-### Severity
+Severity:
 
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
-
----
-
-## PRS-LAY-007 — LayoutComputationTimeout
-
-### Meaning
-
-Layout computation exceeded its execution budget.
-
-### Severity
-
-Warning or Error
-
-### Retry Policy
-
-Transient
-
-### Recovery
-
-Cancel obsolete computation.
+```text
+CorrectInput
+or
+UseFallback
+```
 
 ---
 
-## PRS-LAY-008 — LayoutResultObsolete
+## PRS-LAY-007 — LayoutBudgetExceeded
 
-### Meaning
+Layout exceeded Presentation-local computation budget.
 
-Computed RenderPlan belongs to an obsolete PresentationRevision.
+Severity:
 
-### Severity
+```text
+Warning
+```
 
-Info
+Recovery:
 
-### Retry Policy
+```text
+UseFallback
+```
 
-Never
-
-### Behavior
-
-Discard RenderPlan.
+If work is already obsolete, classify as supersession rather than error.
 
 ---
 
-## PRS-LAY-009 — LayoutInvariantViolation
+## PRS-LAY-008 — LayoutCandidateObsolete
 
-### Meaning
+Deprecated in v2.
 
-Committed RenderPlan violates architectural invariants.
+Replacement:
 
-### Severity
+```text
+PRS-PRSREV-003 CandidateViewportObsolete
+```
 
+This condition is an expected supersession outcome.
+
+---
+
+## PRS-LAY-009 — CommittedLayoutInvariantViolation
+
+Committed RenderPlan violates Presentation invariants.
+
+Severity:
+
+```text
 Critical
+```
 
-### Retry Policy
+Recovery:
 
-ResetRequired
+```text
+ResetPresentation
+```
+
+State:
+
+```text
+FAILED
+```
 
 ---
 
-# 16. Presentation Mode Errors
-
-PresentationMode errors occur while selecting or changing PresentationStrategy.
+# 21. Presentation Mode Errors
 
 ---
 
 ## PRS-MODE-001 — UnsupportedPresentationMode
 
-### Meaning
+Requested mode is unknown or unsupported.
 
-Requested PresentationMode is not supported.
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
+```text
+UseFallback
+```
 
 ---
 
-## PRS-MODE-002 — ModeNotCompatibleWithContent
+## PRS-MODE-002 — ModeIncompatibleWithContent
 
-### Meaning
+Mode cannot safely represent current accepted content.
 
-PresentationMode does not support the supplied content.
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
+```text
+UseFallback
+```
 
 ---
 
-## PRS-MODE-003 — ModeRequirementsMissing
+## PRS-MODE-003 — ModeRequirementsUnavailable
 
-### Meaning
+Required capability/data for the selected mode is missing.
 
-Required input for the selected PresentationMode is unavailable.
+Examples:
 
-### Examples
+* Overlay needs geometry;
+* marker mode needs source associations;
+* target does not support overlay.
 
-- missing geometry
-- missing markers
-- missing translated segments
+Severity:
 
-### Severity
+```text
+Warning or Error
+```
 
-Error
+Recovery:
 
-### Retry Policy
-
-WithFallback
+```text
+UseFallback
+```
 
 ---
 
 ## PRS-MODE-004 — ModeTransitionRejected
 
-### Meaning
+Presentation-local state does not permit the requested mode mutation.
 
-Current Presentation state does not allow the requested mode change.
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
+```text
+RefreshPresentationRevision
+or
+CorrectInput
+```
 
 ---
 
-## PRS-MODE-005 — ModeReconfigurationFailed
+## PRS-MODE-005 — ModeCandidateInvalid
 
-### Meaning
+Candidate for requested mode fails Presentation validation.
 
-Presentation failed to produce a valid PresentationSnapshot for the new mode.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
+```text
+UseFallback
+```
 
-### Recovery
-
-Preserve the previous PresentationMode.
+Previous mode remains current.
 
 ---
 
-## PRS-MODE-006 — ModeRollbackFailed
+## PRS-MODE-006 — ModeRecoveryFailed
 
-### Meaning
+Presentation cannot retain or verify previously committed state after a failed reconfiguration.
 
-Presentation could not restore the previous PresentationMode after failure.
+Severity:
 
-### Severity
-
+```text
 Critical
+```
 
-### Retry Policy
+Recovery:
 
-ResetRequired
+```text
+ResetPresentation
+```
 
-### State Behavior
+State:
 
-Transition to Failed.
+```text
+FAILED
+```
 
 ---
 
-# 17. State Machine Errors
-
-State Machine errors occur when an operation violates the Presentation lifecycle defined in `STATES.md`.
-
-These errors protect the integrity of the Presentation state machine.
+# 22. Presentation State Errors
 
 ---
 
 ## PRS-STATE-001 — InvalidStateTransition
 
-### Meaning
+Requested Presentation operation is invalid from current Presentation state.
 
-The requested operation is not allowed from the current Presentation state.
+Examples:
 
-### Examples
+* update while `EMPTY`;
+* mode change while `CLEARING`;
+* normal mutation while `FAILED`.
 
-- UpdatePresentation while `Empty`
-- ChangePresentationMode while `Preparing`
-- BuildPresentation while `Clearing`
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
-
-### Recovery
-
-Reject the operation.
-
-The current PresentationState remains unchanged.
+```text
+CorrectInput
+```
 
 ---
 
 ## PRS-STATE-002 — PresentationNotReady
 
-### Meaning
+Operation requires a committed Presentation but none exists.
 
-The requested operation requires a ready PresentationSnapshot.
+Severity:
 
-No active Presentation exists.
-
-### Severity
-
+```text
 Info or Warning
+```
 
-### Retry Policy
+Recovery:
 
-AfterCorrection
-
-### Recovery
-
-Caller should build a Presentation before retrying.
+```text
+RebuildPresentation
+```
 
 ---
 
-## PRS-STATE-003 — OperationAlreadyInProgress
+## PRS-STATE-003 — ConflictingOperation
 
-### Meaning
+Presentation-local operation conflicts with another active operation.
 
-A conflicting operation is already executing.
+This is not automatically an error.
 
-### Examples
+Possible behavior:
 
-- another BuildPresentation
-- another RecomputePresentationLayout
-- another ApplyPresentationProfile
+```text
+queue
+coalesce
+supersede
+reject
+```
 
-### Severity
+If rejected:
 
+Severity:
+
+```text
 Info
+```
 
-### Retry Policy
+Recovery:
 
-Transient
-
-### Recovery
-
-Implementation MAY:
-
-- queue
-- coalesce
-- reject
-- supersede
-
-according to architecture policy.
+```text
+None
+or
+RefreshPresentationRevision
+```
 
 ---
 
-## PRS-STATE-004 — OperationCancelled
+## PRS-STATE-004 — Deprecated
 
-### Meaning
+Old meaning:
 
-The operation was cancelled intentionally.
+```text
+OperationCancelled
+```
 
-### Typical Causes
+Removed in v2.
 
-- newer request
-- Presentation cleared
-- Presentation replaced
-- application shutdown
-
-### Severity
-
-Info
-
-### Retry Policy
-
-Never
-
-### Behavior
-
-Candidate operation is discarded.
-
-Committed PresentationSnapshot remains unchanged.
+Cancellation belongs to Runtime or expected Presentation supersession.
 
 ---
 
-## PRS-STATE-005 — ActiveSnapshotMissing
+## PRS-STATE-005 — CurrentSnapshotMissing
 
-### Meaning
+Presentation state claims a committed Presentation exists but current Snapshot cannot be resolved.
 
-Presentation state indicates that an active Presentation exists but the active PresentationSnapshot is unavailable.
+Severity:
 
-### Severity
-
+```text
 Critical
+```
 
-### Retry Policy
+Recovery:
 
-ResetRequired
+```text
+ResetPresentation
+```
 
-### State Behavior
+State:
 
-Transition to `Failed`.
+```text
+FAILED
+```
 
 ---
 
-## PRS-STATE-006 — ActiveContextConflict
+## PRS-STATE-006 — CurrentPresentationStateConflict
 
-### Meaning
+Current committed identifiers disagree.
 
-Internal Presentation context is inconsistent.
+Examples:
 
-### Examples
+* PresentationId mismatch;
+* context mismatch;
+* Snapshot/RenderPlan mismatch;
+* impossible revision relationship.
 
-- Snapshot belongs to another PresentationContext
-- RenderPlan references another Snapshot
-- PresentationRevision mismatch
-- Active PresentationId mismatch
+Severity:
 
-### Severity
-
+```text
 Critical
+```
 
-### Retry Policy
+Recovery:
 
-ResetRequired
-
-### State Behavior
-
-Transition to `Failed`.
-
----
-
-## PRS-STATE-007 — ClearOperationFailed
-
-### Meaning
-
-Presentation could not fully clear internal state.
-
-### Severity
-
-Error or Critical
-
-### Retry Policy
-
-Transient or ResetRequired
-
-### Recovery
-
-Old Presentation becomes logically unavailable immediately.
-
-Physical cleanup MAY continue asynchronously.
+```text
+ResetPresentation
+```
 
 ---
 
-# 18. Event Errors
+## PRS-STATE-007 — LogicalClearFailed
 
-Event errors occur while consuming or publishing Presentation events.
+Presentation could not establish a trustworthy logically cleared state.
 
-These errors describe event processing only.
+Severity:
 
-They do not describe transport failures.
+```text
+Critical
+```
 
----
+Recovery:
 
-## PRS-EVENT-001 — UnsupportedEventType
+```text
+ResetPresentation
+```
 
-### Meaning
+Important distinction:
 
-Presentation received an event that is not part of its public contract.
+failure to physically destroy a UI resource is not this error.
 
-### Severity
-
-Warning
-
-### Retry Policy
-
-Never
+That belongs to UI Adapter/platform.
 
 ---
 
-## PRS-EVENT-002 — InvalidEventPayload
+# 23. Event Publication Errors
 
-### Meaning
+Presentation no longer owns errors for consuming arbitrary external business events.
 
-The received event does not satisfy its schema.
-
-### Examples
-
-- missing identifiers
-- invalid revisions
-- malformed payload
-
-### Severity
-
-Warning
-
-### Retry Policy
-
-AfterCorrection
-
-### Recovery
-
-Ignore the event.
+The only Presentation-relevant event errors concern publication of Presentation-owned facts.
 
 ---
 
-## PRS-EVENT-003 — DuplicateEvent
+## PRS-PUB-001 — EventSerializationFailed
 
-### Meaning
+A Presentation-owned event cannot be serialized according to the canonical event contract.
 
-An EventId has already been processed.
+Severity:
 
-### Severity
-
-Info
-
-### Retry Policy
-
-Never
-
-### Behavior
-
-Ignore idempotently.
-
----
-
-## PRS-EVENT-004 — EventOutOfOrder
-
-### Meaning
-
-The event ordering violates Presentation revision rules.
-
-### Examples
-
-- TranslationUpdated arrives after PresentationCleared
-- old ViewportChanged
-- obsolete ProfileChanged
-
-### Severity
-
-Info or Warning
-
-### Retry Policy
-
-WithLatestRevision
-
----
-
-## PRS-EVENT-005 — EventContextMismatch
-
-### Meaning
-
-The event belongs to another PresentationContext.
-
-### Severity
-
-Info
-
-### Retry Policy
-
-Never
-
-### Recovery
-
-Ignore stale event.
-
----
-
-## PRS-EVENT-006 — EventPublicationFailed
-
-### Meaning
-
-Presentation committed state successfully but failed to publish the corresponding Presentation event.
-
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-Transient
+```text
+CorrectInput / fix implementation
+```
 
-### Recovery
-
-Implementation SHOULD retry publication using an Outbox or equivalent mechanism.
-
-Committed state MUST NOT be repeated.
+The committed Presentation remains committed.
 
 ---
 
-## PRS-EVENT-007 — EventSerializationFailed
+## PRS-PUB-002 — EventPublicationFailed
 
-### Meaning
+Presentation committed successfully but Event Bus publication failed.
 
-Presentation event cannot be serialized.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Key invariant:
 
-AfterCorrection
+```text
+Presentation commit remains valid
+```
 
-### Recovery
+The Presentation operation MUST NOT be rerun merely to recreate the event.
 
-Do not publish invalid events.
+Recovery belongs to Event Bus/outbox policy.
 
----
-
-# 19. Resource Errors
-
-Resource errors occur when Presentation exceeds implementation limits.
-
-These limits are implementation-dependent.
+Presentation may report diagnostics.
 
 ---
 
-## PRS-RES-001 — PresentationTooLarge
+## PRS-PUB-003 — EventPayloadContractViolation
 
-### Meaning
+Presentation constructed an event payload violating its public event schema.
 
-Presentation exceeds configured limits.
+Severity:
 
-### Examples
-
-- too many PresentationItems
-- excessive geometry
-- excessive translated content
-
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+If caused by isolated event-building code:
 
-WithFallback
+```text
+Presentation remains committed
+```
 
-### Recovery
+If it reveals committed Presentation corruption:
 
-Possible actions:
-
-- pagination
-- lazy loading
-- partial Presentation
-- visible region only
+```text
+escalate to internal invariant failure
+```
 
 ---
 
-## PRS-RES-002 — MemoryBudgetExceeded
+# 24. Removed Event Errors
 
-### Meaning
+The following v1/v2-pre-sync concepts are no longer Presentation-owned:
 
-Presentation cannot continue within memory limits.
+```text
+UnsupportedEventType
+InvalidExternalEventPayload
+DuplicateExternalEvent
+ExternalEventOutOfOrder
+ExternalEventContextMismatch
+```
 
-### Severity
+Those belong to:
 
+```text
+Event Router
+owning producer/consumer adapter
+canonical Event Bus validation
+```
+
+Presentation's business correctness does not depend on directly consuming those events.
+
+---
+
+# 25. Resource Errors
+
+Presentation owns only Presentation-local resource behavior.
+
+Global Runtime admission/resource policy remains external.
+
+---
+
+## PRS-RES-001 — PresentationComplexityLimitExceeded
+
+Candidate Presentation exceeds configured Presentation complexity limits.
+
+Examples:
+
+* too many visible items;
+* excessive marker count;
+* excessive layout nodes.
+
+Severity:
+
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-Transient or WithFallback
+```text
+UseFallback
+```
 
-### Recovery
+Possible strategies:
 
-Discard obsolete PresentationSnapshots.
-
-Reduce cached geometry.
+* pagination;
+* visible-region presentation;
+* simplified marker plan;
+* partial Presentation.
 
 ---
 
-## PRS-RES-003 — ComputationBudgetExceeded
+## PRS-RES-002 — PresentationMemoryBudgetExceeded
 
-### Meaning
+Presentation-local preparation or retention exceeds budget assigned to Presentation.
 
-Presentation exceeded its CPU or processing budget.
+Severity:
 
-### Severity
+```text
+Error
+```
 
+Recovery:
+
+```text
+UseFallback
+or
+ClearPresentation
+```
+
+Presentation may release:
+
+* obsolete Candidate state;
+* previous Presentation reference where policy allows;
+* reusable local caches.
+
+It MUST NOT evict arbitrary Runtime Artifacts it does not own.
+
+---
+
+## PRS-RES-003 — PresentationComputationBudgetExceeded
+
+Presentation computation exceeds assigned budget.
+
+Severity:
+
+```text
 Warning or Error
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
-
-### Recovery
-
-Use a simpler PresentationStrategy.
+```text
+UseFallback
+```
 
 ---
 
-## PRS-RES-004 — TooManyPendingOperations
+## PRS-RES-004 — TooManyPresentationOperations
 
-### Meaning
+Too many Presentation-local operations are pending.
 
-Too many Presentation operations are queued.
+Severity:
 
-### Severity
-
+```text
 Warning
+```
 
-### Retry Policy
+Recovery:
 
-Transient
+```text
+coalesce
+supersede
+reject low-value work
+```
 
-### Recovery
-
-Coalesce compatible operations.
-
-Discard obsolete operations.
+This does not modify Scheduler state.
 
 ---
 
-## PRS-RES-005 — StrategyUnavailable
+## PRS-RES-005 — PresentationStrategyUnavailable
 
-### Meaning
+Requested Presentation strategy cannot be instantiated or used.
 
-Requested PresentationStrategy cannot be created.
+Severity:
 
-### Severity
-
+```text
 Error
+```
 
-### Retry Policy
+Recovery:
 
-WithFallback
-
-### Recovery
-
-Select another compatible strategy.
-
----
-
-# 20. Recovery Errors
-
-Recovery errors occur while restoring Presentation after failure.
+```text
+UseFallback
+```
 
 ---
 
-## PRS-REC-001 — CandidateRollbackFailed
+# 26. Recovery Errors
 
-### Meaning
+---
 
-Presentation failed to restore the previous committed PresentationSnapshot.
+## PRS-REC-001 — KnownGoodStateUnavailable
 
-### Severity
+Presentation expected a safe previous committed state but cannot access or verify one.
 
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+ClearPresentation
+```
+
+May escalate to `FAILED` if current state cannot be trusted.
+
+---
+
+## PRS-REC-002 — RestoredSnapshotUnavailable
+
+Requested restoration source does not exist.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+RebuildPresentation
+```
+
+---
+
+## PRS-REC-003 — RestoredSnapshotInvalid
+
+Restored/persisted PresentationSnapshot fails validation.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+RebuildPresentation
+or
+ClearPresentation
+```
+
+Snapshot MUST NOT become `READY`.
+
+---
+
+## PRS-REC-004 — RestoredSnapshotVersionUnsupported
+
+Stored snapshot contract incompatible with current Presentation version.
+
+Severity:
+
+```text
+Error
+```
+
+Recovery:
+
+```text
+RebuildPresentation
+```
+
+---
+
+## PRS-REC-005 — VerifiedRecoveryFailed
+
+Presentation cannot restore a trustworthy committed state.
+
+Severity:
+
+```text
 Critical
+```
 
-### Retry Policy
+Recovery:
 
-ResetRequired
+```text
+ResetPresentation
+```
 
-### State Behavior
+State:
 
-Transition to `Failed`.
-
----
-
-## PRS-REC-002 — SnapshotUnavailable
-
-### Meaning
-
-No recoverable PresentationSnapshot exists.
-
-### Severity
-
-Error
-
-### Retry Policy
-
-ResetRequired
-
-### Recovery
-
-Clear Presentation.
-
-Return to `Empty`.
+```text
+FAILED
+```
 
 ---
 
-## PRS-REC-003 — SnapshotInvalid
+# 27. Internal Errors
 
-### Meaning
-
-Stored PresentationSnapshot failed validation.
-
-### Severity
-
-Error
-
-### Retry Policy
-
-ResetRequired
-
-### Recovery
-
-Snapshot MUST NOT become active.
-
----
-
-## PRS-REC-004 — SnapshotVersionUnsupported
-
-### Meaning
-
-Snapshot version is incompatible with the current Presentation contract.
-
-### Severity
-
-Error
-
-### Retry Policy
-
-AfterCorrection
-
-### Recovery
-
-Rebuild Presentation.
-
----
-
-## PRS-REC-005 — RecoveryAttemptFailed
-
-### Meaning
-
-Presentation recovery could not produce a valid PresentationSnapshot.
-
-### Severity
-
-Critical
-
-### Retry Policy
-
-ResetRequired
-
-### State Behavior
-
-Transition to `Failed`.
-
----
-
-# 21. Internal Errors
-
-Internal errors indicate architectural correctness can no longer be guaranteed.
-
-These errors should be extremely rare.
+Internal errors are rare and indicate Presentation-owned correctness risk.
 
 ---
 
 ## PRS-INT-001 — UnexpectedInternalFailure
 
-### Meaning
+Unexpected implementation failure with no better Presentation error classification.
 
-Presentation encountered an unexpected implementation failure.
+Severity depends on effect.
 
-No more specific Presentation error applies.
+If current committed state remains trusted:
 
-### Severity
+```text
+Error
+```
 
-Error or Critical
+If current state cannot be trusted:
 
-### Retry Policy
-
-Transient or ResetRequired
+```text
+Critical
+→ FAILED
+```
 
 ---
 
 ## PRS-INT-002 — InvariantViolation
 
-### Meaning
+A core Presentation invariant has been violated.
 
-A core Presentation architecture invariant has been violated.
+Examples:
 
-### Examples
+* mutable committed Snapshot;
+* Candidate exposed as current;
+* stale Candidate committed;
+* invalid identity ownership;
+* impossible PresentationRevision ordering.
 
-- mutable committed PresentationSnapshot
-- invalid identity ownership
-- stale candidate committed
-- invalid revision ordering
+Severity:
 
-### Severity
-
+```text
 Critical
+```
 
-### Retry Policy
+Recovery:
 
-ResetRequired
-
-### State Behavior
-
-Transition to `Failed`.
+```text
+ResetPresentation
+```
 
 ---
 
 ## PRS-INT-003 — AtomicCommitFailed
 
-### Meaning
+Presentation cannot atomically commit:
 
-Presentation could not atomically commit:
+```text
+PresentationRevision
++
+PresentationSnapshot
++
+RenderPlan
+```
 
-- PresentationSnapshot
-- RenderPlan
-- PresentationRevision
+If previous committed state is certainly unchanged:
 
-### Severity
+```text
+Error
+preserve previous state
+```
 
+If commit outcome is uncertain:
+
+```text
 Critical
+FAILED
+```
 
-### Retry Policy
-
-ResetRequired
-
-### Recovery
-
-Committed state MUST remain unchanged.
+This distinction must be explicit in implementation.
 
 ---
 
 ## PRS-INT-004 — StrategyContractViolation
 
-### Meaning
+A Presentation strategy produces output violating Presentation contracts.
 
-PresentationStrategy returned output violating the public Presentation contract.
+Severity:
 
-### Severity
+```text
+Error
+```
 
-Error or Critical
+Recovery:
 
-### Retry Policy
+```text
+UseFallback
+```
 
-WithFallback
+If invalid output reached committed state:
 
-### Recovery
-
-Disable the faulty strategy for the current operation.
-
-Use another compatible strategy.
+```text
+Critical
+FAILED
+```
 
 ---
 
 ## PRS-INT-005 — SnapshotSerializationViolation
 
-### Meaning
+Committed or Candidate Snapshot cannot satisfy the public serialization contract.
 
-PresentationSnapshot cannot be represented using the public Presentation contract.
+Candidate-only:
 
-### Severity
+```text
+Error
+discard
+```
 
+Committed state affected:
+
+```text
 Critical
-
-### Retry Policy
-
-ResetRequired
+FAILED
+```
 
 ---
 
-# 22. Error → State Mapping
+## PRS-INT-006 — RenderPlanSerializationViolation
 
-| Error Category | Typical State Result |
-|----------------|----------------------|
-| Validation | Preserve current state |
-| Context | Ignore or reject |
-| Revision | Ignore obsolete request |
-| Geometry | Reject candidate |
-| Layout | Preserve previous RenderPlan |
-| Mode | Preserve previous PresentationMode |
-| State | Reject operation |
-| Event | Ignore or retry publication |
-| Resource | Apply fallback |
-| Recovery | Transition to Failed if unrecoverable |
-| Internal | Transition to Failed |
+RenderPlan cannot satisfy public serialization contract.
+
+Same escalation rules as Snapshot serialization failure.
 
 ---
 
-## State Mapping Principles
+# 28. UI Apply Failures
 
-Recoverable errors MUST preserve the previous committed PresentationSnapshot.
+These are not Presentation errors.
 
-Candidate failures MUST NOT mutate committed state.
+Typical UI Adapter-owned failures:
 
-Only Critical correctness failures transition Presentation into `Failed`.
+```text
+PresentationApplyRejectedStale
+PresentationApplyTargetMismatch
+PresentationApplyTargetUnavailable
+PresentationApplyFailed
+```
 
----
+Presentation may observe them for recovery coordination.
 
-# 23. Error → Event Mapping
+It MUST NOT emit:
 
-Presentation SHOULD publish events describing externally visible failures.
+```text
+PresentationFailed
+```
 
----
-
-## PresentationRejected
-
-Published when:
-
-- command validation fails
-- unsupported PresentationMode
-- invalid PresentationProfile
-- invalid PresentationTarget
-- invalid revisions
-- invalid state transition
-
-PresentationRejected describes failures visible to callers.
+solely because UI apply failed.
 
 ---
 
-## PresentationFailed
+# 29. Artifact Store Failures
 
-Published only when architectural correctness cannot be guaranteed.
+Artifact publication/access failures remain externally owned.
+
+Presentation may receive normalized outcomes such as:
+
+```text
+ArtifactUnavailable
+LeaseRejected
+ArtifactDisposed
+```
+
+Presentation then decides whether it can:
+
+```text
+fallback
+reject Candidate
+request rebuild through Application
+```
+
+but it must not rename Artifact Store failure as an internal Presentation invariant unless its own state became corrupt.
+
+---
+
+# 30. Error-to-State Mapping
+
+| Condition                     | Presentation State Result                |
+| ----------------------------- | ---------------------------------------- |
+| Validation rejection          | Preserve current stable state            |
+| Artifact incompatibility      | Preserve current stable state            |
+| PresentationRevision conflict | Preserve current stable state            |
+| Candidate superseded          | Preserve current stable state            |
+| Runtime authority rejected    | Preserve current stable state            |
+| Invalid geometry              | Reject Candidate / fallback              |
+| Layout failure                | Preserve previous RenderPlan / fallback  |
+| Mode failure                  | Preserve current mode / fallback         |
+| UI apply failure              | No automatic Presentation state failure  |
+| Event publication failure     | Committed Presentation remains committed |
+| Resource pressure             | Fallback / reject Candidate              |
+| Recovery failure              | `FAILED` if correctness lost             |
+| Internal invariant violation  | `FAILED`                                 |
+
+---
+
+# 31. PresentationRejected Mapping
+
+`PresentationRejected` may describe externally meaningful non-commit outcomes such as:
+
+```text
+invalid Presentation command
+Artifact compatibility rejection
+PresentationRevision conflict
+unsupported mode without usable fallback
+invalid geometry
+invalid viewport
+target capability mismatch
+Runtime authority rejection
+```
+
+It does not mean Presentation state is corrupted.
+
+---
+
+# 32. PresentationFailed Mapping
+
+`PresentationFailed` is published only when:
+
+```text
+Presentation-owned correctness cannot be trusted
+```
 
 Typical causes:
 
-- invariant violation
-- atomic commit failure
-- rollback failure
-- active context corruption
-- committed snapshot corruption
-
-PresentationFailed indicates Presentation entered `Failed`.
+* committed Snapshot/RenderPlan mismatch;
+* PresentationRevision corruption;
+* state registry corruption;
+* uncertain atomic commit;
+* verified recovery failure.
 
 ---
 
-## No Event Required
+# 33. No Public Error Event Required
 
-The following errors normally do NOT publish events:
+Normally diagnostics-only:
 
-- DuplicateEvent
-- ObsoleteOperation
-- LayoutResultObsolete
-- GeometryOutsideViewport
-- stale revisions
-- repeated ClearPresentation
+```text
+CandidateSuperseded
+CandidateViewportObsolete
+duplicate request
+coalesced operation
+no-op
+Runtime cancellation observed
+same mode requested
+same viewport received
+```
 
-These conditions SHOULD be recorded only through diagnostics.
-
----
-
-# 24. Fallback Policy
-
-Presentation SHOULD preserve the user's reading experience whenever a recoverable failure occurs.
-
-Fallback MUST be:
-
-- deterministic;
-- observable;
-- reversible;
-- compatible with the current PresentationContext.
-
-Fallback MUST NEVER silently violate architectural correctness.
+These should not flood the Event Bus.
 
 ---
 
-## 24.1 Fallback Principles
+# 34. Fallback Principles
 
-Presentation MAY apply fallback only when:
+Presentation prefers graceful degradation when correctness is preserved.
 
-- correctness is preserved;
-- user intent remains recognizable;
-- PresentationSnapshot remains internally consistent.
+Fallback must be:
+
+* deterministic;
+* explicit;
+* observable;
+* reversible where practical;
+* semantically valid.
 
 Fallback MUST NOT:
 
-- fabricate content;
-- modify translated text;
-- modify source content;
-- silently ignore corrupted Presentation state.
+* fabricate source geometry;
+* fabricate translation;
+* mutate upstream Artifact content;
+* silently violate semantic reading order;
+* reduce text below readability policy without explicit policy;
+* conceal internal corruption.
 
 ---
 
-## 24.2 Strategy Fallback
+# 35. Mode Fallback
 
-When the requested PresentationStrategy cannot be used, Presentation SHOULD attempt another compatible strategy.
-
-Typical order:
+Possible image-reading path:
 
 ```text
-Hybrid
+Overlay
     ↓
-SimpleOverlay
-    ↓
-MarkerOverlay
+FocusedOverlay
     ↓
 SidePanel
-    ↓
-Reader
-    ↓
-NoPresentation
 ```
 
-The selected fallback depends on the current PresentationTarget and PresentationMode.
-
----
-
-## 24.3 Layout Fallback
-
-When layout computation cannot produce a valid RenderPlan, Presentation MAY attempt:
-
-1. reduce typography complexity;
-2. simplify spacing;
-3. switch to marker layout;
-4. move translated content into SidePanel;
-5. switch to Reader mode.
-
-Every fallback MUST generate a new RenderPlan.
-
----
-
-## 24.4 Geometry Fallback
-
-If source geometry cannot safely be used:
+Possible structured-text path:
 
 ```text
-Precise Overlay
+StyledTextReader
+    ↓
+SimplifiedTextReader
+```
+
+There is no universal fallback order for every content type.
+
+---
+
+# 36. Geometry Fallback
+
+If spatial mapping is unavailable:
+
+```text
+Precise source-aligned layout
         ↓
-Marker Overlay
+Marker-based association
         ↓
 SidePanel
-        ↓
-Reader
 ```
 
-Presentation MUST NOT fabricate geometry.
+Presentation MUST NOT fabricate geometry to keep Overlay alive.
 
 ---
 
-## 24.5 Typography Fallback
+# 37. Layout Fallback
 
-When the requested typography profile is unavailable:
+Possible bounded actions:
 
 ```text
-Requested Profile
-        ↓
-Compatible Profile
-        ↓
-System Default
-        ↓
-Approximate Metrics
+wrap
+expand allowed container
+scroll
+reduce secondary content
+simplify marker placement
+switch Presentation mode
 ```
 
-Approximate metrics SHOULD only be used as a temporary fallback.
+Readability rules remain mandatory.
 
 ---
 
-## 24.6 Snapshot Preservation
+# 38. Typography Fallback
 
-Whenever fallback succeeds:
-
-- previous PresentationSnapshot remains valid until commit;
-- candidate Snapshot is validated;
-- atomic replacement occurs.
-
-Fallback MUST NOT partially mutate the active Snapshot.
-
----
-
-## 24.7 Recording Fallback
-
-Whenever fallback is applied, diagnostics SHOULD record:
-
-- original strategy;
-- fallback strategy;
-- triggering ErrorCode;
-- affected Snapshot;
-- affected RenderPlan;
-- whether user-visible behavior changed.
-
----
-
-# 25. Diagnostics
-
-Diagnostics help developers understand Presentation behavior without exposing user content.
-
-Diagnostics MUST NOT be treated as public APIs.
-
----
-
-## 25.1 Diagnostic Principles
-
-Diagnostics SHOULD be:
-
-- structured;
-- deterministic;
-- privacy-safe;
-- machine-readable.
-
----
-
-## 25.2 Diagnostic Context
-
-Diagnostics MAY include:
-
-- PresentationContextId
-- PresentationId
-- SnapshotId
-- RenderPlanId
-
-- SessionId
-- ContentId
-
-- PresentationRevision
-- ContentRevision
-- TranslationRevision
-- ViewportRevision
-
-- OperationId
-- EventId
-
-- CorrelationId
-- CausationId
-- TraceId
-
----
-
-## 25.3 Privacy
-
-Diagnostics MUST NOT contain:
-
-- translated text;
-- original text;
-- screenshots;
-- browser HTML;
-- image data;
-- user credentials;
-- provider secrets.
-
----
-
-# 26. Logging
-
-Presentation SHOULD produce structured logs.
-
-Logging format is implementation-dependent.
-
-Only semantic content is standardized.
-
----
-
-## 26.1 Logging Levels
-
-Presentation uses four logical levels.
-
-| Level | Typical Usage |
-|--------|---------------|
-| Debug | Development diagnostics |
-| Info | Successful operations |
-| Warning | Recoverable failures |
-| Error | Failed operations |
-| Critical | Broken architectural invariants |
-
----
-
-## 26.2 Structured Fields
-
-Recommended log fields:
+Possible:
 
 ```text
-timestamp
+Requested semantic typography
+    ↓
+Compatible fallback typography
+    ↓
+System-neutral default semantic profile
+```
 
-operation
+Presentation contracts should not depend on native font handles.
 
-state
+---
 
+# 39. Diagnostics
+
+Error diagnostics may include:
+
+```text
 errorCode
-
+category
 severity
-
-retryPolicy
-
+recoveryHint
 presentationContextId
-
 presentationId
-
-snapshotId
-
-renderPlanId
-
-sessionId
-
-contentId
-
 presentationRevision
-
-contentRevision
-
-translationRevision
-
+expectedPresentationRevision
+runtimeRevisionId
+workItemId
+attemptId
+targetId
+targetRevision
 viewportRevision
-
 operationId
-
-eventId
-
+requestId
 correlationId
-
-causationId
-
 traceId
-
-durationMs
-
 fallbackApplied
 ```
 
 ---
 
-## 26.3 Logging Rules
+# 40. Privacy
 
-Presentation SHOULD log:
+Public error payloads and normal diagnostics MUST NOT contain:
 
-- rejected operations;
-- fallback execution;
-- state transitions;
-- recovery attempts;
-- invariant violations.
+* source text;
+* translated text;
+* screenshots;
+* page images;
+* raw geometry arrays unless explicitly diagnostic and access-controlled;
+* provider prompts;
+* provider responses;
+* secrets;
+* native handles.
 
-Presentation SHOULD NOT log:
-
-- every duplicate event;
-- every obsolete operation;
-- every stale revision.
-
----
-
-# 27. Metrics
-
-Presentation SHOULD expose implementation-independent metrics.
-
-Metrics support operational monitoring only.
-
----
-
-## Recommended Metrics
+Use:
 
 ```text
-presentation_operation_total
+IDs
+counts
+bounded summaries
+error codes
+```
 
-presentation_snapshot_total
+instead.
 
-presentation_renderplan_total
+---
 
-presentation_error_total
+# 41. Logging
 
-presentation_rejection_total
+Recommended structured fields:
 
-presentation_failure_total
+```text
+timestamp
+operation
+presentationState
+errorCode
+category
+severity
+recoveryHint
+presentationContextId
+presentationId
+presentationRevision
+runtimeRevisionId
+workItemId
+attemptId
+targetRevision
+viewportRevision
+operationId
+correlationId
+traceId
+durationMs
+fallbackApplied
+```
 
-presentation_fallback_total
+Do not log every normal supersession or duplicate at warning/error level.
 
-presentation_recovery_total
+---
 
-presentation_layout_total
+# 42. Logging Levels
 
-presentation_geometry_total
+Suggested:
 
-presentation_event_total
+```text
+Debug
+    fine-grained diagnostic
 
-presentation_strategy_total
+Info
+    normal supersession/no-op where useful
+
+Warning
+    recoverable Presentation rejection
+
+Error
+    operation failure requiring fallback/recovery
+
+Critical
+    Presentation correctness compromised
 ```
 
 ---
 
-## Suggested Labels
+# 43. Metrics
 
-Metrics MAY include:
+Recommended:
 
-- operation
-- state
-- presentationMode
-- presentationTarget
-- strategy
-- errorCode
-- severity
-- retryPolicy
-- fallbackApplied
+```text
+presentation_error_total
+presentation_rejection_total
+presentation_failure_total
+presentation_fallback_total
+presentation_candidate_superseded_total
+presentation_revision_conflict_total
+presentation_geometry_failure_total
+presentation_layout_failure_total
+presentation_mode_failure_total
+presentation_event_publish_failure_total
+presentation_recovery_total
+```
 
-Metrics SHOULD NOT include:
+Avoid high-cardinality labels such as:
 
-- PresentationId
-- SnapshotId
-- SessionId
-- ContentId
-
-High-cardinality identifiers reduce metric usefulness.
-
----
-
-# 28. Testing Requirements
-
-Presentation implementations MUST verify the complete error model.
+```text
+PresentationId
+SessionId
+ContentId
+ArtifactId
+```
 
 ---
 
-## 28.1 Error Mapping
+# 44. Testing — Ownership
 
 Tests MUST verify:
 
-- every failure maps to exactly one ErrorCode;
-- ErrorCodes remain stable;
-- categories are correct.
+* Runtime authority rejection does not map to internal Presentation failure;
+* Runtime cancellation does not create Presentation failure;
+* UI apply failure remains UI Adapter-owned;
+* Translation failure remains Translation-owned;
+* Artifact Store failure remains externally owned;
+* Presentation errors describe only Presentation responsibilities.
 
 ---
 
-## 28.2 Recovery
+# 45. Testing — Candidate Isolation
 
 Tests MUST verify:
 
-- previous PresentationSnapshot is preserved;
-- failed candidates never commit;
-- fallback executes correctly.
+* validation error does not mutate current Presentation;
+* layout error does not partially mutate RenderPlan;
+* mode Candidate failure preserves previous mode;
+* Artifact compatibility failure preserves current state;
+* failed Candidate never becomes current.
 
 ---
 
-## 28.3 State Machine
+# 46. Testing — Presentation Revision
 
 Tests MUST verify:
 
-- invalid transitions are rejected;
-- recoverable failures preserve state;
-- Critical failures enter Failed.
+* conflict is deterministic;
+* old Candidate cannot commit;
+* PresentationRevision increments only after successful commit;
+* non-monotonic commit triggers invariant protection;
+* RuntimeRevisionId never substitutes for PresentationRevision.
 
 ---
 
-## 28.4 Event Processing
+# 47. Testing — Runtime Authority
 
 Tests MUST verify:
 
-- duplicate events are idempotent;
-- obsolete events are ignored;
-- publication failures never duplicate commits.
+```text
+Runtime authority rejected
+    ↓
+Candidate discarded
+    ↓
+no PresentationRevision increment
+    ↓
+no PresentationFailed
+```
 
 ---
 
-## 28.5 Revision Handling
+# 48. Testing — UI Apply Boundary
 
 Tests MUST verify:
 
-- stale revisions are ignored;
-- newer revisions supersede older work;
-- revision ownership is respected.
+```text
+Presentation commit succeeds
+UI apply fails
+```
+
+does not automatically corrupt Presentation state.
 
 ---
 
-## 28.6 Privacy
-
-Tests MUST verify that logs and diagnostics never expose user content.
-
----
-
-## 28.7 Fallback
+# 49. Testing — Event Publication
 
 Tests MUST verify:
 
-- strategy fallback;
-- layout fallback;
-- geometry fallback;
-- typography fallback.
+```text
+Presentation commit succeeds
+Presentation event publication fails
+```
+
+does not:
+
+* roll back committed Presentation automatically;
+* create duplicate commit;
+* rerun business work automatically.
 
 ---
 
-# 29. Compatibility Rules
+# 50. Testing — Fatal Failures
 
-Presentation error contracts are versioned.
+Tests MUST verify `FAILED` only for Presentation-owned correctness failure such as:
 
-Compatibility rules apply to every implementation.
-
----
-
-## 29.1 Minor Version
-
-A minor version MAY:
-
-- add new ErrorCodes;
-- add optional fields;
-- add diagnostics;
-- add new categories.
-
-Existing behavior MUST remain compatible.
+* committed revision mismatch;
+* committed Snapshot/RenderPlan mismatch;
+* state registry corruption;
+* uncertain atomic commit;
+* unrecoverable recovery failure.
 
 ---
 
-## 29.2 Major Version
+# 51. Compatibility
 
-A major version is required when:
+Error contract versioning follows semantic versioning.
 
-- removing ErrorCodes;
-- changing semantic meaning;
-- changing required fields;
-- changing retry behavior incompatibly;
-- changing severity incompatibly.
+Major revision required when:
 
----
+* existing ErrorCode meaning changes;
+* ownership changes;
+* severity semantics become incompatible;
+* recovery semantics become incompatible;
+* public required fields change.
 
-## 29.3 Deprecated Errors
-
-Deprecated ErrorCodes SHOULD remain documented for at least one compatibility cycle.
-
-Consumers SHOULD migrate to replacement codes.
+New compatible codes may be added in a minor version where consumers safely handle unknown codes.
 
 ---
 
-# 30. Architecture Invariants
+# 52. Deprecated Error Codes
 
-Every Presentation implementation MUST preserve these invariants.
+The following old concepts are deprecated or removed from active v2 semantics:
 
-1. ErrorCodes are stable contracts.
+```text
+PRS-REV-001 StaleContentRevision
+PRS-REV-002 FutureContentRevision
+PRS-REV-003 StaleTranslationRevision
+PRS-STATE-004 OperationCancelled
 
-2. Consumers branch using ErrorCode.
+PRS-EVENT-001 UnsupportedEventType
+PRS-EVENT-002 InvalidEventPayload
+PRS-EVENT-003 DuplicateEvent
+PRS-EVENT-004 EventOutOfOrder
+PRS-EVENT-005 EventContextMismatch
+```
 
-3. PresentationSnapshot is immutable after commit.
+Reason:
 
-4. RenderPlan belongs to exactly one Snapshot.
+```text
+Runtime / upstream Artifact compatibility / Event Router
+now own those semantics.
+```
 
-5. PresentationRevision is monotonic.
-
-6. Candidate operations never mutate committed state.
-
-7. Failed candidates are discarded.
-
-8. Duplicate events are idempotent.
-
-9. Obsolete operations never commit.
-
-10. Fallback never violates correctness.
-
-11. Recovery never exposes invalid Snapshots.
-
-12. Critical failures transition Presentation to Failed.
-
-13. PresentationRejected never indicates corruption.
-
-14. PresentationFailed always indicates loss of architectural correctness.
-
-15. User content never appears in public error payloads.
-
-16. Diagnostics remain implementation-independent.
-
-17. Logging remains privacy-safe.
-
-18. Retry behavior is explicitly defined.
-
-19. Revision ownership is respected.
-
-20. Presentation remains independent from UI frameworks.
+Historical codes should remain documented for one compatibility cycle if implementation has already shipped them.
 
 ---
 
-# 31. Error Code Summary
+# 53. Error Code Summary
 
-Every Presentation error code defined in this specification belongs to one of the following categories.
+## Validation
 
-| Category | Prefix |
-|----------|--------|
-| Validation | PRS-VAL |
-| Context | PRS-CTX |
-| Revision | PRS-REV |
-| Geometry | PRS-GEO |
-| Layout | PRS-LAY |
-| Presentation Mode | PRS-MODE |
-| State Machine | PRS-STATE |
-| Event | PRS-EVENT |
-| Resource | PRS-RES |
-| Recovery | PRS-REC |
-| Internal | PRS-INT |
+```text
+PRS-VAL-001 MissingRequiredField
+PRS-VAL-002 InvalidFieldValue
+PRS-VAL-003 InvalidPresentationProfile
+PRS-VAL-004 MissingPresentationInput
+PRS-VAL-005 UnsupportedContractVersion
+```
 
-Each ErrorCode MUST:
+## Context
 
-- belong to exactly one category;
-- define exactly one Severity;
-- define exactly one RetryPolicy;
-- remain stable after release.
+```text
+PRS-CTX-001 PresentationContextNotFound
+PRS-CTX-002 PresentationNotFound
+PRS-CTX-003 PresentationItemNotFound
+PRS-CTX-004 PresentationIdentityConflict
+```
+
+## Artifact
+
+```text
+PRS-ART-001 UnsupportedArtifactType
+PRS-ART-002 ArtifactReferenceInvalid
+PRS-ART-003 ArtifactCompatibilityMismatch
+PRS-ART-004 RequiredArtifactDataUnavailable
+PRS-ART-005 ArtifactLeaseUnavailable
+```
+
+## Presentation Revision
+
+```text
+PRS-PRSREV-001 PresentationRevisionConflict
+PRS-PRSREV-002 CandidateSuperseded
+PRS-PRSREV-003 CandidateViewportObsolete
+PRS-PRSREV-004 CandidateTargetObsolete
+PRS-PRSREV-005 NonMonotonicPresentationRevision
+PRS-PRSREV-006 SnapshotRenderPlanRevisionMismatch
+```
+
+## Geometry
+
+```text
+PRS-GEO-001 InvalidBoundingBox
+PRS-GEO-002 InvalidPolygon
+PRS-GEO-003 MissingCoordinateSpace
+PRS-GEO-004 UnsupportedCoordinateSpace
+PRS-GEO-005 CoordinateTransformationUnavailable
+PRS-GEO-006 CoordinateTransformationFailed
+PRS-GEO-008 GeometryRelationshipInvalid
+PRS-GEO-009 CommittedGeometryInvariantViolation
+```
+
+## Layout
+
+```text
+PRS-LAY-001 InvalidViewport
+PRS-LAY-002 TextMeasurementFailed
+PRS-LAY-003 TypographyUnavailable
+PRS-LAY-004 OverflowUnresolved
+PRS-LAY-005 OverlapUnresolved
+PRS-LAY-006 SemanticOrderUnavailable
+PRS-LAY-007 LayoutBudgetExceeded
+PRS-LAY-009 CommittedLayoutInvariantViolation
+```
+
+## Mode
+
+```text
+PRS-MODE-001 UnsupportedPresentationMode
+PRS-MODE-002 ModeIncompatibleWithContent
+PRS-MODE-003 ModeRequirementsUnavailable
+PRS-MODE-004 ModeTransitionRejected
+PRS-MODE-005 ModeCandidateInvalid
+PRS-MODE-006 ModeRecoveryFailed
+```
+
+## State
+
+```text
+PRS-STATE-001 InvalidStateTransition
+PRS-STATE-002 PresentationNotReady
+PRS-STATE-003 ConflictingOperation
+PRS-STATE-005 CurrentSnapshotMissing
+PRS-STATE-006 CurrentPresentationStateConflict
+PRS-STATE-007 LogicalClearFailed
+```
+
+## Publication
+
+```text
+PRS-PUB-001 EventSerializationFailed
+PRS-PUB-002 EventPublicationFailed
+PRS-PUB-003 EventPayloadContractViolation
+```
+
+## Resource
+
+```text
+PRS-RES-001 PresentationComplexityLimitExceeded
+PRS-RES-002 PresentationMemoryBudgetExceeded
+PRS-RES-003 PresentationComputationBudgetExceeded
+PRS-RES-004 TooManyPresentationOperations
+PRS-RES-005 PresentationStrategyUnavailable
+```
+
+## Recovery
+
+```text
+PRS-REC-001 KnownGoodStateUnavailable
+PRS-REC-002 RestoredSnapshotUnavailable
+PRS-REC-003 RestoredSnapshotInvalid
+PRS-REC-004 RestoredSnapshotVersionUnsupported
+PRS-REC-005 VerifiedRecoveryFailed
+```
+
+## Internal
+
+```text
+PRS-INT-001 UnexpectedInternalFailure
+PRS-INT-002 InvariantViolation
+PRS-INT-003 AtomicCommitFailed
+PRS-INT-004 StrategyContractViolation
+PRS-INT-005 SnapshotSerializationViolation
+PRS-INT-006 RenderPlanSerializationViolation
+```
 
 ---
 
-# 32. Completion Criteria
+# 54. Architecture Invariants
 
-This specification is considered complete when:
+1. Presentation errors describe Presentation-owned failures only.
 
-- every Presentation failure maps to a stable ErrorCode;
-- every ErrorCode defines Severity;
-- every ErrorCode defines RetryPolicy;
-- ownership boundaries are respected;
-- revision ownership is explicitly defined;
-- recoverable failures preserve committed PresentationSnapshots;
-- RenderPlans are never partially committed;
-- fallback behavior is deterministic;
-- state transitions follow `STATES.md`;
-- published failure events follow `EVENTS.md`;
-- command failures follow `CONTRACT.md`;
-- diagnostics are privacy-safe;
-- logging is structured;
-- metrics avoid high-cardinality identifiers;
-- testing covers every ErrorCode category;
-- Presentation remains independent of implementation language and UI framework.
+2. Runtime authority rejection is not a Presentation internal error.
+
+3. Runtime cancellation is not a Presentation internal error.
+
+4. Supersession is not internal failure.
+
+5. UI apply failure belongs to UI Adapter.
+
+6. Translation failures remain Translation-owned.
+
+7. Artifact publication failures remain externally owned.
+
+8. Presentation owns only PresentationRevision.
+
+9. Runtime Revision does not replace PresentationRevision.
+
+10. Candidate failure never partially mutates committed state.
+
+11. Previous committed Presentation remains valid during recoverable failure.
+
+12. PresentationRevision increments only after successful commit.
+
+13. PresentationRevision conflict is expected concurrency behavior.
+
+14. Candidate supersession normally requires no public error event.
+
+15. Geometry fallback must never fabricate source geometry.
+
+16. Layout fallback must preserve readability.
+
+17. Unsupported mode may fall back without entering `FAILED`.
+
+18. `PresentationRejected` means no Presentation commit occurred.
+
+19. `PresentationFailed` means Presentation-owned correctness is untrusted.
+
+20. Event publication failure does not invalidate an already committed Presentation.
+
+21. Event publication failure does not rerun Presentation work automatically.
+
+22. Logical clear is distinct from native resource destruction.
+
+23. Resource errors do not grant Presentation ownership of Runtime resource policy.
+
+24. Error payloads are immutable and serializable.
+
+25. Error messages are non-authoritative.
+
+26. Diagnostics remain privacy-safe.
+
+27. Normal error payloads contain no full user content.
+
+28. Stable ErrorCodes preserve meaning across implementations.
 
 ---
 
-**End of Presentation Errors**
+# 55. Related Documents
+
+```text
+doc/02-modules/presentation/MODULE.md
+doc/02-modules/presentation/CONTRACT.md
+doc/02-modules/presentation/STATES.md
+doc/02-modules/presentation/EVENTS.md
+doc/02-modules/presentation/README.md
+
+doc/01-architecture/core/STATE_MACHINE.md
+doc/01-architecture/core/EVENT_BUS.md
+doc/01-architecture/core/EVENT_CONVENTION.md
+
+doc/01-architecture/modules/OWNERSHIP_MAP.md
+doc/01-architecture/modules/MODULE_DEPENDENCY.md
+
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RETRY_POLICY.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+doc/01-architecture/runtime/RUNTIME_OBSERVABILITY.md
+
+doc/02-modules/translation/ERRORS.md
+doc/02-modules/ui-adapter/ERRORS.md
+doc/02-modules/reading-session/ERRORS.md
+```
+
+---
+
+# 56. Completion Criteria
+
+This error specification is synchronized when:
+
+* Presentation error ownership is explicit;
+* Runtime authority rejection is external;
+* Runtime cancellation is external;
+* PresentationRevision is the only Presentation-owned revision guard;
+* Artifact compatibility errors replace old ContentRevision/TranslationRevision ownership;
+* event-consumption errors are removed from Presentation;
+* event publication failure remains distinguishable from Presentation business failure;
+* UI apply failure remains UI Adapter-owned;
+* expected supersession is not treated as failure;
+* recoverable Candidate failure preserves current Presentation;
+* `FAILED` is reserved for Presentation-owned correctness loss;
+* every stable Presentation error has deterministic severity and recovery semantics;
+* fallback is bounded and correctness-preserving;
+* tests cover ownership, revision, authority, candidate isolation, publication, recovery, and privacy.
+
+---
+
+# 57. Summary
+
+Presentation error flow is:
+
+```text
+Presentation Operation
+    ↓
+Candidate preparation
+    ↓
+Possible Presentation-owned failure?
+    ├── yes
+    │    ↓
+    │  reject / fallback / FAILED if invariant broken
+    │
+    └── no
+         ↓
+      Runtime authority revalidation
+         ├── rejected
+         │      ↓
+         │   discard Candidate
+         │   not Presentation failure
+         │
+         └── accepted
+                ↓
+             commit
+                ↓
+             Presentation current
+                ↓
+             UI Adapter apply
+                ├── success
+                └── UI-owned failure
+```
+
+The central rule is:
+
+```text
+Presentation owns failures in constructing
+and maintaining Presentation state.
+
+Runtime owns whether the work may commit.
+
+UI Adapter owns whether committed state becomes visible.
+```

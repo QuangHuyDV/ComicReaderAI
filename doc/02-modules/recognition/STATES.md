@@ -1,58 +1,55 @@
 # Recognition Module States
 
-> Project: CRAI  
-> Module: Recognition  
-> Path: `doc/02-modules/recognition/STATES.md`  
-> Version: 1.0  
-> Status: Architecture Draft
+> **Project:** CRAI
+> **Module:** Recognition
+> **Path:** `02-modules/recognition/STATES.md`
+> **Version:** 1.1
+> **Status:** Architecture Draft
+> **Related:** `MODULE.md`, `CONTRACT.md`, `01-architecture/ocr/`
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
 Tài liệu này định nghĩa state model mà Recognition Module thực sự sở hữu.
 
 Recognition state model bao phủ:
 
-- Recognition capability availability;
-- Recognition Plan lifecycle;
-- Recognition operation phases;
-- Candidate Recognition Artifact validation;
-- Recognition quality;
-- Recognition completeness;
-- provider-execution observations;
-- cancellation checkpoint behavior;
-- deadline behavior;
-- resource-state interaction;
-- external Runtime disposition observation;
-- invalid transitions;
-- concurrency constraints;
-- diagnostics;
-- recovery;
-- MVP state model;
-- state invariants.
+* Recognition capability availability
+* Recognition Plan lifecycle
+* Attempt-local operation phases
+* Candidate Recognition Artifact validation
+* Recognition completeness
+* Provider execution observations
+* cancellation/deadline observations
+* resource cleanup observations
+* external Runtime disposition observations
+* invalid transitions
+* concurrency constraints
+* recovery
+* state invariants
 
-Tài liệu này không định nghĩa canonical lifecycle của:
+Recognition state model không định nghĩa canonical lifecycle của:
 
-- WorkItem;
-- Attempt;
-- Provider Manager;
-- Scheduler;
-- Work Queue;
-- Retry Policy;
-- Runtime cancellation authority;
-- Artifact publication;
-- Artifact retention;
-- Resource disposal;
-- Reading Session;
-- Translation;
-- Presentation.
-
-Các lifecycle đó thuộc Runtime hoặc module owner tương ứng.
+* WorkItem
+* Attempt
+* Provider Manager
+* Scheduler
+* Work Queue
+* Runtime Retry Policy
+* Runtime cancellation authority
+* Artifact publication
+* Artifact retention
+* Resource disposal
+* OCR Quality semantics
+* Reading Session
+* Text Processing
+* Translation
+* Presentation
 
 ---
 
-## 2. State Ownership
+# 2. State Ownership
 
 Recognition owns:
 
@@ -61,9 +58,9 @@ RecognitionAvailabilityState
 RecognitionPlanState
 RecognitionOperationPhase
 CandidateValidationState
-RecognitionQualityState
 RecognitionCompleteness
 ProviderExecutionObservation
+CleanupObservation
 ```
 
 Recognition does not own:
@@ -81,14 +78,16 @@ PublicationState
 ArtifactLifecycleState
 RetentionState
 StorageState
+OCRQualityState
+ReadingOrderState
 SessionState
 ```
 
-Recognition có thể đọc external state snapshot nhưng không trở thành source of truth.
+Recognition may observe external snapshots without becoming their source of truth.
 
 ---
 
-## 3. State Model Overview
+# 3. State Model Overview
 
 ```text
 Recognition Module
@@ -96,13 +95,14 @@ Recognition Module
 ├── Attempt-Local Recognition Plan
 ├── Attempt-Local Operation Phase
 ├── Attempt-Local Candidate Validation
-├── Recognition Quality
 ├── Recognition Completeness
-└── External State Observations
+└── External Observations
     ├── Provider Availability Snapshot
+    ├── Provider Execution Observation
     ├── Cancellation Context
     ├── Deadline Context
-    ├── Resource Pressure
+    ├── Resource Cleanup Observation
+    ├── Quality Report Reference
     └── Runtime Candidate Disposition
 ```
 
@@ -114,36 +114,48 @@ Recognition Attempt Registry
 Recognition Result Registry
 Recognition Cancellation Registry
 Recognition Retry Registry
+Recognition Quality Registry
 ```
-
-Runtime v2 đã sở hữu các lifecycle đó.
 
 ---
 
-## 4. State Machine Principles
+# 4. State Principles
 
-### 4.1 Explicit Transitions
+## 4.1 Explicit Transitions
 
 Mọi Recognition-owned state transition phải explicit và testable.
 
-### 4.2 Attempt-Local State
+---
 
-Plan, operation phase và Candidate validation là Attempt-local.
+## 4.2 Attempt-Local State
 
-Chúng không sống lâu hơn Attempt execution context.
+Các state sau là Attempt-local:
 
-### 4.3 No Runtime Authority
+* Recognition Plan
+* Operation Phase
+* Candidate Validation
+* Provider Execution Observation
+* Cleanup Observation
+
+Chúng không sống lâu hơn execution context.
+
+---
+
+## 4.3 No Runtime Authority
 
 Recognition state không quyết định:
 
-- Attempt success;
-- current Revision;
-- cancellation terminal outcome;
-- retry;
-- publication;
-- Artifact availability.
+* Attempt success/failure
+* current Revision
+* cancellation terminal outcome
+* retry
+* publication
+* Artifact authority
+* downstream scheduling
 
-### 4.4 Candidate Is Not Published Artifact
+---
+
+## 4.4 Candidate Is Not Published Artifact
 
 ```text
 Candidate VALID
@@ -151,29 +163,42 @@ Candidate VALID
 Published Recognition Artifact
 ```
 
-Sau submission, Runtime và Artifact Store xử lý ownership transfer/publication.
-
-### 4.5 Operation Phase Is Diagnostic
-
-Operation phase không phải Runtime state machine.
-
-Nó chỉ hỗ trợ:
-
-- metrics;
-- cancellation checkpoint;
-- error localization;
-- resource cleanup;
-- debugging.
-
-### 4.6 Provider State Is External
-
-Recognition không quản lý provider lifecycle.
-
-Nó chỉ quan sát capability/availability snapshot từ Provider Manager.
+`VALID` chỉ có nghĩa Candidate hợp lệ theo module contract.
 
 ---
 
-## 5. Recognition Availability State
+## 4.5 Operation Phase Is Diagnostic
+
+Operation Phase:
+
+* hỗ trợ metrics
+* hỗ trợ cancellation checkpoint
+* hỗ trợ diagnostics
+* hỗ trợ cleanup
+* hỗ trợ error localization
+
+Nó không phải Runtime lifecycle.
+
+---
+
+## 4.6 OCR Stage State Is External
+
+Recognition orchestrates OCR Architecture.
+
+Nó không sở hữu state machines riêng của:
+
+* Preprocessing
+* Detection
+* Recognition
+* Text Direction
+* Layout
+* Postprocessing
+* Quality
+* Reading Order
+
+---
+
+# 5. Recognition Availability State
 
 ```text
 RecognitionAvailabilityState
@@ -186,51 +211,55 @@ RecognitionAvailabilityState
 └── STOPPED
 ```
 
-Availability state mô tả Recognition capability boundary, không phải provider lifecycle.
+Availability mô tả khả năng của **Recognition Module boundary** nhận execution.
+
+Nó không phải Provider lifecycle.
 
 ---
 
-## 6. `UNINITIALIZED`
+# 6. UNINITIALIZED
 
-Recognition capability chưa được đăng ký đầy đủ trong Runtime.
+Recognition module chưa active.
 
 Characteristics:
 
-- contract chưa active;
-- profile registry chưa ready;
-- quality/normalization policy chưa ready;
-- module không nhận execution.
+* contract chưa active
+* Recognition Profile registry chưa ready
+* Plan builder chưa ready
+* Candidate validator chưa ready
 
-Allowed next states:
+Allowed:
 
 ```text
-INITIALIZING
-STOPPED
+UNINITIALIZED
+    → INITIALIZING
+    → STOPPED
 ```
 
 ---
 
-## 7. `INITIALIZING`
+# 7. INITIALIZING
 
 Recognition đang chuẩn bị module-owned structures:
 
-- contract validation;
-- Recognition Profile registry;
-- Recognition Plan builders;
-- normalization rules;
-- quality policy;
-- provider capability requirements;
-- module diagnostics.
+* contract validation
+* Recognition Profile registry
+* Recognition Plan builder
+* capability requirement builder
+* Candidate validator
+* compatibility policy
+* diagnostics schema
 
 Recognition không initialize:
 
-- Scheduler;
-- Work Queue;
-- Provider Manager;
-- cancellation registry;
-- Artifact Store.
+* Scheduler
+* Work Queue
+* Provider Manager
+* Resource Manager
+* Artifact Store
+* cancellation registry
 
-Allowed next states:
+Allowed next:
 
 ```text
 AVAILABLE
@@ -241,19 +270,21 @@ DRAINING
 
 ---
 
-## 8. `AVAILABLE`
+# 8. AVAILABLE
 
-Recognition có thể thực thi các operation được support.
+Recognition có thể nhận operation hợp lệ.
 
 Requirements:
 
-- module contract valid;
-- Recognition Plan builder ready;
-- at least one provider-capability path externally available;
-- Candidate validation available;
-- required Runtime dependencies ready.
+```text
+contract_valid
+plan_builder_ready
+candidate_validator_ready
+runtime_dependencies_ready
+at_least_one_satisfiable_capability_path
+```
 
-Allowed next states:
+Allowed next:
 
 ```text
 DEGRADED
@@ -263,23 +294,22 @@ DRAINING
 
 ---
 
-## 9. `DEGRADED`
+# 9. DEGRADED
 
-Recognition vẫn usable nhưng capability hoặc quality bị hạn chế.
+Recognition vẫn usable nhưng một số capability path không khả dụng.
 
-Examples:
+Ví dụ:
 
-- vertical text unavailable;
-- only CPU execution available;
-- line geometry unavailable;
-- only one provider capability path usable;
-- partial quality policy active;
-- remote path disabled;
-- resource pressure requires reduced profile.
+* vertical-text capability unavailable
+* GPU path unavailable
+* remote path disabled
+* only one Provider path available
+* optional Quality/ReadingOrder output unavailable
+* resource pressure giới hạn profile
 
-Recognition may execute only requests whose requirements remain satisfiable.
+Module chỉ nhận request có requirements vẫn satisfiable.
 
-Allowed next states:
+Allowed next:
 
 ```text
 AVAILABLE
@@ -289,23 +319,22 @@ DRAINING
 
 ---
 
-## 10. `UNAVAILABLE`
+# 10. UNAVAILABLE
 
-Recognition không thể đáp ứng useful execution.
+Không tồn tại usable Recognition capability path.
 
-Examples:
+Ví dụ:
 
-- no eligible Recognition provider capability;
-- module contract invalid;
-- required image primitive unavailable;
-- Candidate validation unavailable;
-- critical Runtime dependency unavailable.
+* no eligible OCR Provider
+* module contract invalid
+* Candidate validator unavailable
+* required Runtime dependency unavailable
 
-Recognition does not reject WorkItem directly.
+Recognition không tự reject WorkItem.
 
-Runtime receives a capability-unavailable response/guard result.
+Nó trả module guard/error để Runtime xử lý.
 
-Allowed next states:
+Allowed:
 
 ```text
 INITIALIZING
@@ -316,19 +345,17 @@ DRAINING
 
 ---
 
-## 11. `DRAINING`
+# 11. DRAINING
 
-Recognition không nhận new execution nhưng Attempt-local work đang cleanup hoặc finish.
+Recognition:
 
-Behavior:
+* không nhận execution mới
+* cho phép work hiện tại cleanup/finish
+* không tạo new expensive work
+* tiếp tục cooperative cancellation
+* release Attempt-local resources
 
-- no new execution;
-- existing execution observes cancellation/deadline;
-- Attempt-local resources released;
-- Candidate submission may be denied by Runtime authority;
-- module-owned structures remain until drain ends.
-
-Allowed next state:
+Allowed next:
 
 ```text
 STOPPED
@@ -336,38 +363,35 @@ STOPPED
 
 ---
 
-## 12. `STOPPED`
+# 12. STOPPED
 
-Recognition module-owned runtime structures đã released.
+Recognition module-owned structures đã release.
 
-Characteristics:
+Không còn:
 
-- no new execution;
-- no active module-owned Attempt-local state;
-- no pending Candidate validation;
-- no module-owned temporary resources.
+* active Recognition Plan
+* active Candidate validation
+* active module-owned resources
 
-Allowed next state:
+Restart:
 
 ```text
-INITIALIZING
+STOPPED
+    → INITIALIZING
 ```
-
-chỉ qua new startup sequence.
 
 ---
 
-## 13. Availability Transition Diagram
+# 13. Availability Transition
 
 ```text
 UNINITIALIZED
       ↓
 INITIALIZING
-  ┌────┼──────────┐
-  ↓    ↓          ↓
-AVAILABLE DEGRADED UNAVAILABLE
-   ↕       ↕         ↕
-   └───────┴─────────┘
+   ┌──┼────────────┐
+   ↓  ↓            ↓
+AVAILABLE ←→ DEGRADED ←→ UNAVAILABLE
+   \        |          /
             ↓
          DRAINING
             ↓
@@ -376,37 +400,9 @@ AVAILABLE DEGRADED UNAVAILABLE
 
 ---
 
-## 14. Availability Guards
+# 14. Provider Availability Snapshot
 
-Transition to `AVAILABLE` requires:
-
-```text
-contract_valid
-plan_builder_ready
-candidate_validator_ready
-runtime_dependencies_ready
-at_least_one_capability_path_available
-```
-
-Transition to `DEGRADED` allowed when:
-
-```text
-core_execution_possible
-but
-one_or_more_declared_capabilities_unavailable
-```
-
-Transition to `UNAVAILABLE` when:
-
-```text
-no_satisfiable_recognition_capability_path
-```
-
----
-
-## 15. External Provider Availability Snapshot
-
-Recognition may read:
+Recognition có thể consume external snapshot:
 
 ```text
 ProviderAvailabilitySnapshot
@@ -420,41 +416,33 @@ ProviderAvailabilitySnapshot
 └── SnapshotVersion
 ```
 
-```text
-ProviderAvailability
-├── HEALTHY
-├── DEGRADED
-├── UNAVAILABLE
-└── DRAINING
-```
+Provider Manager là owner.
 
-This is external state owned by Provider Manager.
-
-Recognition must not mutate it.
+Recognition chỉ dùng snapshot để build Plan/capability requirements.
 
 ---
 
-## 16. Provider Eligibility Guard
+# 15. Provider Eligibility Guard
 
-A provider path is eligible only when:
+Một capability path usable khi:
 
 ```text
-availability ∈ {HEALTHY, DEGRADED}
-capabilities satisfy RecognitionCapabilityRequirements
-privacy policy satisfied
-image limits satisfied
+provider available
+AND
+required capabilities satisfied
+AND
+privacy constraints satisfied
+AND
+input limits satisfied
+AND
 execution class compatible
-capacity available or Runtime may wait
-provider not draining
 ```
 
-Recognition may build capability requirements.
-
-Provider selection authority remains external.
+Provider selection authority không thuộc Recognition.
 
 ---
 
-## 17. Recognition Plan State
+# 16. Recognition Plan State
 
 ```text
 RecognitionPlanState
@@ -465,58 +453,58 @@ RecognitionPlanState
 └── INVALID
 ```
 
-Plan state is Attempt-local.
+Plan State là Attempt-local.
 
 ---
 
-## 18. `NOT_CREATED`
+# 17. NOT_CREATED
 
-No Recognition Plan exists.
+Chưa có Recognition Plan.
 
-Allowed next state:
+```text
+NOT_CREATED
+    → BUILDING
+```
+
+---
+
+# 18. BUILDING
+
+Plan được xây từ:
+
+* RecognitionAttemptInput
+* Recognition Profile
+* OCR Profile reference
+* Capability Requirements
+* Privacy Context
+* Configuration Snapshot
+* Provider Availability Snapshot
+* Runtime resource constraints
+
+Allowed:
 
 ```text
 BUILDING
+    → VALIDATING
+    → INVALID
 ```
 
 ---
 
-## 19. `BUILDING`
+# 19. VALIDATING
 
-Recognition derives plan from:
+Plan validation kiểm tra:
 
-- RecognitionAttemptInput;
-- Recognition Profile;
-- Capability Requirements;
-- privacy context;
-- configuration snapshot;
-- provider availability snapshot;
-- resource constraints.
+* operation supported
+* Recognition Profile valid
+* OCR Profile resolvable
+* capability requirements coherent
+* privacy compatible
+* execution path satisfiable
+* required output references supported
+* resource estimate bounded
 
-Allowed next states:
-
-```text
-VALIDATING
-INVALID
-```
-
----
-
-## 20. `VALIDATING`
-
-Plan is checked for:
-
-- supported operation;
-- valid profile;
-- coherent image preparation;
-- satisfiable capability requirements;
-- valid coordinate strategy;
-- valid quality policy;
-- privacy compatibility;
-- executable strategy;
-- bounded resource estimate.
-
-Allowed next states:
+Allowed:
 
 ```text
 READY
@@ -525,42 +513,43 @@ INVALID
 
 ---
 
-## 21. `READY`
+# 20. READY
 
-Plan is immutable and may be executed.
+Plan immutable và executable.
 
-Properties:
+Fixed:
 
-- strategy fixed for this Attempt;
-- policy versions fixed;
-- capability requirements fixed;
-- coordinate transform policy fixed;
-- quality policy fixed.
+* operation
+* profile
+* OCR Profile reference
+* capability requirements
+* compatibility policy
+* configuration versions
+* privacy constraints
 
-No transition back to `BUILDING`.
-
----
-
-## 22. `INVALID`
-
-Plan cannot be executed.
-
-Examples:
-
-- impossible capability combination;
-- unsupported profile;
-- privacy conflict;
-- invalid preparation chain;
-- unsupported geometry requirement;
-- no executable strategy.
-
-`INVALID` is terminal for that plan instance.
-
-Runtime still owns Attempt terminal outcome.
+Không quay lại `BUILDING`.
 
 ---
 
-## 23. Plan Transition Diagram
+# 21. INVALID
+
+Plan không executable.
+
+Ví dụ:
+
+* unsupported profile
+* impossible capability requirements
+* privacy conflict
+* unavailable OCR capability path
+* incompatible configuration
+
+Terminal cho Plan instance đó.
+
+Runtime vẫn sở hữu Attempt outcome.
+
+---
+
+# 22. Plan Transition
 
 ```text
 NOT_CREATED
@@ -568,29 +557,29 @@ NOT_CREATED
 BUILDING
     ↓
 VALIDATING
-   ┌┴───────┐
-   ↓        ↓
- READY    INVALID
+   ┌┴──────┐
+   ↓       ↓
+ READY   INVALID
 ```
 
 ---
 
-## 24. Plan Invariants
+# 23. Plan Invariants
 
-1. One Attempt has at most one active Recognition Plan.
-2. READY plan immutable.
-3. INVALID plan never executes.
-4. Plan does not contain credential values.
-5. Plan does not own provider lifecycle.
-6. Plan preserves configuration snapshot identity.
-7. Plan cannot weaken privacy.
-8. Plan cannot grant Runtime authority.
-9. Plan can reference capability requirements, not provider SDK objects.
-10. Plan version remains stable during Attempt.
+1. Một Attempt có tối đa một active Recognition Plan.
+2. READY Plan immutable.
+3. INVALID Plan không execute.
+4. Plan không chứa credential.
+5. Plan không own Provider lifecycle.
+6. Plan giữ Configuration Snapshot identity.
+7. Plan không weaken Privacy policy.
+8. Plan không grant Runtime authority.
+9. Plan reference capability contract, không Provider SDK object.
+10. Plan không schedule retry.
 
 ---
 
-## 25. Recognition Operation Phase
+# 24. Recognition Operation Phase
 
 ```text
 RecognitionOperationPhase
@@ -598,25 +587,33 @@ RecognitionOperationPhase
 ├── VALIDATING
 ├── PLANNING
 ├── ACQUIRING_INPUT
-├── PREPARING
-├── DETECTING
-├── RECOGNIZING
-├── NORMALIZING
-├── MAPPING_COORDINATES
-├── RESOLVING_READING_ORDER
+├── EXECUTING_OCR
 ├── ASSEMBLING_CANDIDATE
 ├── VALIDATING_CANDIDATE
 ├── FINALIZING
 └── FINISHED
 ```
 
-Phase describes current module operation.
+Đây là thay đổi quan trọng so với bản cũ.
 
-It is not a terminal lifecycle.
+Recognition Module không còn encode:
+
+```text
+PREPARING
+DETECTING
+RECOGNIZING
+NORMALIZING
+MAPPING_COORDINATES
+RESOLVING_READING_ORDER
+```
+
+thành module state.
+
+Những bước đó thuộc OCR Architecture.
 
 ---
 
-## 26. Primary Operation Path
+# 25. Primary Operation Path
 
 ```text
 NOT_STARTED
@@ -627,17 +624,7 @@ PLANNING
     ↓
 ACQUIRING_INPUT
     ↓
-PREPARING
-    ↓
-DETECTING
-    ↓
-RECOGNIZING
-    ↓
-NORMALIZING
-    ↓
-MAPPING_COORDINATES
-    ↓
-RESOLVING_READING_ORDER
+EXECUTING_OCR
     ↓
 ASSEMBLING_CANDIDATE
     ↓
@@ -648,193 +635,122 @@ FINALIZING
 FINISHED
 ```
 
-Some phases may be skipped according to plan.
-
 ---
 
-## 27. Combined Recognition Path
+# 26. EXECUTING_OCR
+
+`EXECUTING_OCR` đại diện cho việc Recognition Module đang điều phối canonical OCR flow.
+
+Bên trong có thể xảy ra:
 
 ```text
-VALIDATING
-    ↓
-PLANNING
-    ↓
-ACQUIRING_INPUT
-    ↓
-PREPARING
-    ↓
-RECOGNIZING
-    ↓
-NORMALIZING
-    ↓
-MAPPING_COORDINATES
-    ↓
-RESOLVING_READING_ORDER
-    ↓
-ASSEMBLING_CANDIDATE
-    ↓
-VALIDATING_CANDIDATE
-    ↓
-FINALIZING
+Preprocessing
+Detection
+Recognition
+Text Direction
+Layout
+Postprocessing
+Quality
+Reading Order
 ```
 
-`DETECTING` is skipped because provider performs combined recognition.
+nhưng những stage này không trở thành Recognition Module states.
+
+Detailed stage progress có thể xuất hiện trong diagnostics/trace.
 
 ---
 
-## 28. Single-Region Path
+# 27. Phase Entry Rules
+
+Trước expensive phase:
+
+1. check CancellationContext
+2. check Deadline
+3. validate prerequisites
+4. ensure Resource Lease
+5. ensure Plan = READY
+6. enforce Privacy Context
+7. avoid new work when DRAINING
+
+---
+
+# 28. Phase Exit Rules
+
+Trước khi rời phase:
+
+1. validate output
+2. record duration
+3. observe cancellation/deadline
+4. release unnecessary Attempt-local resources
+5. preserve traceability
+6. normalize warnings/errors
+7. determine next phase explicitly
+
+---
+
+# 29. Phase Skipping
+
+Một phase chỉ skip khi Plan cho phép.
+
+Ví dụ:
 
 ```text
-VALIDATING
-    ↓
-PLANNING
-    ↓
-ACQUIRING_INPUT
-    ↓
-PREPARING
-    ↓
-RECOGNIZING
-    ↓
-NORMALIZING
-    ↓
-MAPPING_COORDINATES
-    ↓
-ASSEMBLING_CANDIDATE
-    ↓
-VALIDATING_CANDIDATE
-    ↓
-FINALIZING
+ACQUIRING_INPUT may be trivial
+    → already leased execution context
+
+EXECUTING_OCR may short-circuit
+    → compatible result reused by Runtime policy
 ```
 
-Reading-order phase may be skipped when one region exists.
+Silent skipping không được phép.
 
 ---
 
-## 29. Empty-Valid Path
+# 30. Phase Failure
 
-```text
-DETECTING or RECOGNIZING
-    ↓
-NORMALIZING
-    ↓
-ASSEMBLING_CANDIDATE
-    ↓
-VALIDATING_CANDIDATE
-    ↓
-FINALIZING
-```
-
-Candidate:
-
-```text
-Completeness = EMPTY_VALID
-Regions = []
-ReadingOrder = []
-Warning = NO_READABLE_TEXT_DETECTED
-```
-
-This is not module failure.
-
----
-
-## 30. Phase Entry Rules
-
-Before entering an expensive phase:
-
-1. check CancellationContext;
-2. check ExecutionContext deadline;
-3. validate prerequisite output;
-4. verify required Resource Lease;
-5. verify plan remains READY;
-6. record phase start;
-7. verify privacy constraints;
-8. avoid new work when module is DRAINING.
-
----
-
-## 31. Phase Exit Rules
-
-Before leaving a phase:
-
-1. validate phase output;
-2. record duration;
-3. check cancellation/deadline;
-4. release no-longer-needed Attempt-local resource;
-5. preserve traceability;
-6. determine next phase explicitly;
-7. normalize warnings/errors;
-8. update diagnostic phase only after output is safe.
-
----
-
-## 32. Phase Skipping Rules
-
-A phase may be skipped only when plan explicitly states it.
-
-Examples:
-
-```text
-DETECTING skipped
-    → combined provider or single-region input
-
-PREPARING skipped
-    → provider accepts source view directly
-
-RESOLVING_READING_ORDER skipped
-    → no regions or explicit valid order already present
-```
-
-Silent phase skipping is forbidden.
-
----
-
-## 33. Phase Failure
-
-Any phase may produce:
+Bất kỳ phase nào có thể tạo:
 
 ```text
 RecognitionModuleError
 ```
 
-The phase then moves to:
-
-```text
-FINALIZING
-    ↓
-FINISHED
-```
-
-Recognition does not transition to Runtime `FAILED`.
-
-Runtime receives module error through Attempt Completion.
-
----
-
-## 34. Cancellation During Phase
-
-When cancellation observed:
+Local flow:
 
 ```text
 Current Phase
     ↓
-Stop Starting New Expensive Work
+FINALIZING
     ↓
-Request Provider Cancellation if Supported
+FINISHED
+```
+
+`FINISHED` không đồng nghĩa Runtime `SUCCEEDED`.
+
+---
+
+# 31. Cancellation During Phase
+
+```text
+Current Phase
     ↓
-Release Attempt-Local Resources
+Cancellation Observed
+    ↓
+Stop New Expensive Local Work
+    ↓
+Request Provider Cancellation if supported
+    ↓
+Cleanup
     ↓
 FINALIZING
     ↓
 FINISHED
 ```
 
-Recognition reports cancellation observed.
-
-Runtime decides Attempt outcome.
+Runtime quyết định Attempt outcome.
 
 ---
 
-## 35. Candidate Validation State
+# 32. Candidate Validation State
 
 ```text
 CandidateValidationState
@@ -846,40 +762,39 @@ CandidateValidationState
 └── SUBMITTED_TO_RUNTIME
 ```
 
-This is the main Recognition-owned Candidate state machine.
+Đây là Recognition-owned state machine chính của Candidate.
 
 ---
 
-## 36. `NOT_CREATED`
-
-No Candidate exists.
-
-Allowed next state:
+# 33. NOT_CREATED
 
 ```text
-ASSEMBLING
+NOT_CREATED
+    → ASSEMBLING
 ```
 
 ---
 
-## 37. `ASSEMBLING`
+# 34. ASSEMBLING
 
-Recognition builds Candidate from normalized outputs.
+Recognition tạo Candidate từ module outputs/references.
 
-Activities:
+Candidate assembly bao gồm:
 
-- assign CandidateArtifactId;
-- attach InputArtifactRef;
-- attach provider provenance;
-- attach source coordinate space;
-- attach regions/lines;
-- attach ReadingOrder;
-- attach warnings;
-- attach quality/completeness;
-- attach compatibility metadata;
-- attach integrity metadata.
+* CandidateArtifactId
+* InputArtifactRef
+* ContentIdentity
+* OCRDocumentRef
+* optional ReadingOrderResultRef
+* optional QualityReportRef
+* ProviderProvenance
+* warnings
+* completeness
+* compatibility metadata
+* traceability metadata
+* integrity metadata
 
-Allowed next states:
+Allowed:
 
 ```text
 VALIDATING
@@ -888,27 +803,35 @@ INVALID
 
 ---
 
-## 38. `VALIDATING`
+# 35. VALIDATING
 
-Candidate validation checks:
+Validation chỉ kiểm tra module-level contract:
 
-- identity;
-- Artifact type;
-- owner module;
-- region/line ID uniqueness;
-- line-region references;
-- reading-order references;
-- geometry bounds;
-- confidence ranges;
-- completeness consistency;
-- provider provenance;
-- transform chain;
-- compatibility metadata;
-- privacy-safe metadata;
-- no provider SDK object;
-- no Runtime Attempt status.
+* Candidate identity
+* ArtifactType
+* OwnerModule
+* InputArtifactRef
+* ContentIdentity
+* OCRDocumentRef valid
+* optional output refs compatible
+* ProviderProvenance
+* Completeness
+* CompatibilityMetadata
+* privacy-safe metadata
+* no SDK object
+* no Runtime state
+* no credentials
 
-Allowed next states:
+Recognition không validate lại:
+
+* Region geometry
+* Line hierarchy
+* Reading Graph
+* Quality Score internals
+
+Các semantics đó thuộc artifact owner tương ứng.
+
+Allowed:
 
 ```text
 VALID
@@ -917,64 +840,59 @@ INVALID
 
 ---
 
-## 39. `VALID`
+# 36. VALID
 
-Candidate passed Recognition semantic validation.
+Candidate:
 
-Properties:
-
-- immutable;
-- source-space geometry valid;
-- provider-independent;
-- content-safe metadata;
-- ready for Runtime submission.
-
-Allowed next state:
+* module-contract valid
+* immutable
+* provider-independent
+* traceable
+* ready for Runtime submission
 
 ```text
-SUBMITTED_TO_RUNTIME
+VALID
+    → SUBMITTED_TO_RUNTIME
 ```
 
 ---
 
-## 40. `INVALID`
+# 37. INVALID
 
-Candidate cannot be submitted as valid Recognition output.
+Candidate vi phạm module contract.
 
-Examples:
+Ví dụ:
 
-- invalid geometry;
-- dangling RegionId;
-- duplicate LineId;
-- impossible completeness;
-- missing provider provenance;
-- invalid compatibility metadata;
-- provider SDK object leaked;
-- privacy violation.
+* missing OCRDocumentRef
+* invalid Artifact identity
+* incompatible optional artifact refs
+* invalid completeness
+* missing ProviderProvenance
+* invalid compatibility metadata
+* SDK object leak
+* privacy violation
 
-`INVALID` is terminal for that Candidate instance.
-
-Recognition returns module error.
+Terminal cho Candidate instance.
 
 ---
 
-## 41. `SUBMITTED_TO_RUNTIME`
+# 38. SUBMITTED_TO_RUNTIME
 
-Candidate has crossed Recognition boundary.
+Candidate đã vượt Recognition boundary.
 
-After this transition:
+Sau đó:
 
-- Recognition does not own publication;
-- Recognition does not mutate Candidate;
-- Runtime may accept or reject;
-- Artifact Store may receive ownership;
-- rejected Candidate follows cleanup path.
+* Recognition không mutate
+* Runtime validate authority
+* Runtime accept/reject
+* Artifact Store có thể receive ownership
+* rejected Candidate cleanup
 
-No transition back to `ASSEMBLING`.
+Không quay lại `ASSEMBLING`.
 
 ---
 
-## 42. Candidate Transition Diagram
+# 39. Candidate Transition
 
 ```text
 NOT_CREATED
@@ -982,18 +900,18 @@ NOT_CREATED
 ASSEMBLING
     ↓
 VALIDATING
-   ┌┴────────┐
-   ↓         ↓
- VALID     INVALID
+   ┌┴─────────┐
+   ↓          ↓
+ VALID      INVALID
    ↓
 SUBMITTED_TO_RUNTIME
 ```
 
 ---
 
-## 43. External Candidate Disposition
+# 40. External Candidate Disposition
 
-After submission, Recognition may observe:
+Runtime có thể trả:
 
 ```text
 RuntimeCandidateDisposition
@@ -1005,17 +923,17 @@ RuntimeCandidateDisposition
 └── REJECTED_RUNTIME_FAILURE
 ```
 
-This is external Runtime state.
+Đây là external Runtime state.
 
-Recognition must not treat it as CandidateValidationState.
+Không phải `CandidateValidationState`.
 
 ---
 
-## 44. Candidate Ownership Boundary
+# 41. Candidate Ownership Boundary
 
 ```text
 ASSEMBLING / VALIDATING / VALID
-    → Recognition-side producer ownership
+    → Recognition producer ownership
 
 SUBMITTED_TO_RUNTIME
     → transfer pending
@@ -1024,62 +942,12 @@ ACCEPTED
     → Artifact Store ownership
 
 REJECTED_*
-    → Candidate cleanup required
+    → cleanup
 ```
-
-Recognition never owns published Artifact payload.
 
 ---
 
-## 45. Recognition Quality State
-
-```text
-RecognitionQualityState
-├── UNKNOWN
-├── ACCEPTABLE
-├── DEGRADED
-└── UNUSABLE
-```
-
-### UNKNOWN
-
-Insufficient quality information.
-
-### ACCEPTABLE
-
-Output meets configured quality policy.
-
-### DEGRADED
-
-Output usable with warnings.
-
-### UNUSABLE
-
-Output cannot satisfy Recognition semantic requirements.
-
----
-
-## 46. Quality Transition Rules
-
-Quality is derived, not freely mutated.
-
-```text
-Provider Output
-    ↓
-Normalization
-    ↓
-Quality Evaluation
-    ↓
-UNKNOWN / ACCEPTABLE / DEGRADED / UNUSABLE
-```
-
-Quality may be recalculated during Candidate validation.
-
-A Candidate with `UNUSABLE` quality normally becomes `INVALID` unless explicit diagnostic operation allows otherwise.
-
----
-
-## 47. Recognition Completeness
+# 42. Recognition Completeness
 
 ```text
 RecognitionCompleteness
@@ -1089,40 +957,93 @@ RecognitionCompleteness
 └── UNKNOWN
 ```
 
-Completeness is Artifact metadata, not execution status.
+Completeness là Artifact metadata.
 
-### COMPLETE
-
-Expected Recognition output produced.
-
-### PARTIAL
-
-Some usable regions produced, some unavailable.
-
-### EMPTY_VALID
-
-No readable text detected successfully.
-
-### UNKNOWN
-
-Completeness cannot be determined.
+Không phải execution state.
 
 ---
 
-## 48. Quality and Completeness Matrix
+# 43. COMPLETE
 
-| Completeness | Possible Quality |
-|---|---|
-| COMPLETE | ACCEPTABLE, DEGRADED |
-| PARTIAL | DEGRADED, UNUSABLE |
-| EMPTY_VALID | ACCEPTABLE, DEGRADED |
-| UNKNOWN | UNKNOWN, DEGRADED, UNUSABLE |
-
-`EMPTY_VALID` is not automatically degraded.
+Expected module-level OCR output available.
 
 ---
 
-## 49. Provider Execution Observation
+# 44. PARTIAL
+
+Một phần output usable.
+
+Phải explicit.
+
+---
+
+# 45. EMPTY_VALID
+
+OCR execution hợp lệ nhưng không phát hiện readable source text.
+
+Không phải failure.
+
+---
+
+# 46. UNKNOWN
+
+Không đủ information để xác định completeness.
+
+---
+
+# 47. Quality Observation
+
+Recognition Module **không còn sở hữu `RecognitionQualityState`**.
+
+Quality semantics thuộc:
+
+```text
+01-architecture/ocr/QUALITY.md
+```
+
+Recognition chỉ có thể observe/reference:
+
+```text
+QualityReportRef
+QualityGrade?
+QualitySummary?
+```
+
+để:
+
+* quyết định Candidate requirements theo Plan
+* tạo warning
+* cung cấp diagnostics
+
+Recognition không mutate Quality state.
+
+---
+
+# 48. Quality vs Candidate Validation
+
+Candidate validity và OCR quality khác nhau.
+
+```text
+Candidate VALID
+    = module contract valid
+
+Quality Poor
+    = OCR result may be low quality
+```
+
+Một Candidate có thể:
+
+```text
+VALID
++
+QualityReport Grade = Poor
+```
+
+Runtime/Policy mới quyết định có publish/use hay retry.
+
+---
+
+# 49. Provider Execution Observation
 
 ```text
 ProviderExecutionObservation
@@ -1135,17 +1056,15 @@ ProviderExecutionObservation
 └── PHYSICALLY_FINISHED
 ```
 
-This is observational, not authoritative.
+Observation này không authoritative.
 
-Provider Manager owns lifecycle/health.
+Provider Manager owns Provider lifecycle/health.
 
 Runtime owns Attempt outcome.
 
 ---
 
-## 50. Provider Observation Flow
-
-Typical:
+# 50. Provider Observation Flow
 
 ```text
 NOT_STARTED
@@ -1153,11 +1072,11 @@ NOT_STARTED
 STARTING
     ↓
 RUNNING
-   ┌┴─────────────┐
-   ↓              ↓
-OUTPUT_RECEIVED ERROR_RECEIVED
-   └──────┬───────┘
-          ↓
+   ┌┴──────────────┐
+   ↓               ↓
+OUTPUT_RECEIVED  ERROR_RECEIVED
+   └───────┬───────┘
+           ↓
 PHYSICALLY_FINISHED
 ```
 
@@ -1171,30 +1090,26 @@ CANCELLATION_REQUESTED
 PHYSICALLY_FINISHED
 ```
 
-Provider may still produce late callback after cancellation request.
+Late physical completion không cấp authority.
 
 ---
 
-## 51. Duplicate Provider Callback
-
-Provider callback must be deduplicated by adapter/request identity.
+# 51. Duplicate Provider Callback
 
 Rules:
 
-1. first normalized output/error is retained for module processing;
-2. duplicate callback does not restart phase;
-3. duplicate callback does not create second Candidate;
-4. duplicate callback does not change Runtime outcome;
-5. duplicate callback resources are released safely;
-6. diagnostics record duplication.
+1. normalize/deduplicate theo Provider request identity
+2. duplicate callback không restart phase
+3. duplicate không tạo second Candidate
+4. duplicate không đổi Runtime outcome
+5. duplicate resources cleanup idempotently
+6. diagnostics record duplication
 
 ---
 
-## 52. Cancellation Behavior
+# 52. Cancellation Observation
 
-Recognition reads external CancellationContext.
-
-Possible observations:
+Recognition có thể observe:
 
 ```text
 NOT_REQUESTED
@@ -1204,28 +1119,25 @@ PROVIDER_CANCEL_REQUESTED
 PROVIDER_CANCEL_UNSUPPORTED
 ```
 
-Recognition does not own canonical cancellation state.
+Đây không phải canonical cancellation state.
 
 ---
 
-## 53. Cancellation Checkpoints
+# 53. Cancellation Checkpoints
 
 Required checkpoints:
 
-- before Plan execution;
-- before Input Lease acquisition;
-- before image preparation;
-- after image preparation;
-- before provider execution;
-- between bounded region batches;
-- after provider completion;
-- before coordinate mapping;
-- before Candidate assembly;
-- before Candidate submission.
+* before Plan execution
+* before Input Lease acquisition
+* before EXECUTING_OCR
+* between bounded OCR work when supported
+* after OCR completion
+* before Candidate assembly
+* before Candidate submission
 
 ---
 
-## 54. Non-Cancelable Provider
+# 54. Non-Cancelable Provider
 
 ```text
 Cancellation Requested
@@ -1234,24 +1146,24 @@ Provider Cannot Stop
     ↓
 Recognition Stops New Local Work
     ↓
-Runtime May Mark Attempt Abandoned
+Runtime May Revoke Authority
     ↓
-Provider Finishes Physically
+Provider Physically Finishes
     ↓
-Late Output Rejected
+Late Output Ignored / Rejected
     ↓
-Resources Released
+Cleanup
 ```
 
-Recognition must not wait indefinitely for physical provider completion.
+Recognition không chờ vô hạn.
 
 ---
 
-## 55. Deadline Behavior
+# 55. Deadline Observation
 
-Deadline belongs to Runtime ExecutionContext.
+Deadline thuộc Runtime Execution Context.
 
-Recognition only observes:
+Recognition chỉ observe:
 
 ```text
 DeadlineAvailable
@@ -1259,47 +1171,30 @@ RemainingBudget
 DeadlineExceeded
 ```
 
-Before expensive phase:
+Trước expensive work:
 
 ```text
-remaining_budget >= phase_minimum_budget
+remaining_budget >= required_budget
 ```
 
-If not:
+nếu không, Recognition trả normalized module result/error.
 
-- do not start phase;
-- return normalized module/provider timeout information;
-- allow Runtime to decide failed/canceled outcome.
+Runtime quyết định terminal outcome.
 
 ---
 
-## 56. Timeout Sources
+# 56. Resource Interaction
 
-Possible external sources:
-
-```text
-ATTEMPT_DEADLINE
-PROVIDER_TIMEOUT
-RESOURCE_WAIT_TIMEOUT
-SHUTDOWN_DEADLINE
-```
-
-Queue timeout is not Recognition-owned.
-
----
-
-## 57. Resource Interaction
-
-Recognition uses:
+Recognition sử dụng:
 
 ```text
 Input Artifact Lease
 Attempt-Local Buffers
 Provider Request Resource
-Candidate Artifact Resource
+Candidate Resource
 ```
 
-Recognition does not own:
+Recognition không own:
 
 ```text
 Published Artifact Retention
@@ -1310,7 +1205,7 @@ Provider Model Lifetime
 
 ---
 
-## 58. Resource-State Interaction
+# 57. Resource Flow
 
 ```text
 Acquire Input Lease
@@ -1319,7 +1214,7 @@ Use Immutable Input
     ↓
 Create Attempt-Local Resources
     ↓
-Execute Recognition
+Execute OCR
     ↓
 Create Candidate
     ↓
@@ -1330,13 +1225,11 @@ Release Attempt-Local Resources
 Release Input Lease
 ```
 
-Resource Manager owns canonical resource lifecycle.
+Canonical resource lifecycle thuộc Resource Manager/Runtime.
 
 ---
 
-## 59. Resource Cleanup State
-
-Recognition may track Attempt-local cleanup observation:
+# 58. Cleanup Observation
 
 ```text
 CleanupObservation
@@ -1347,15 +1240,15 @@ CleanupObservation
 └── FAILED
 ```
 
-This does not replace Resource Lifecycle state.
+Observation này chỉ phục vụ local execution/diagnostics.
 
-Cleanup failure is returned/recorded through Runtime Error Model.
+Không thay Resource Lifecycle state.
 
 ---
 
-## 60. Runtime Disposition Observation
+# 59. Runtime Disposition Observation
 
-Recognition may receive/observe:
+Recognition có thể observe:
 
 ```text
 AttemptDisposition
@@ -1367,70 +1260,76 @@ AttemptDisposition
 └── REJECTED_DUPLICATE
 ```
 
-Recognition cannot mutate this disposition.
+Use only for:
 
-It may use it only for:
+* cleanup
+* diagnostics
+* late output handling
 
-- cleanup;
-- diagnostics;
-- provider late-output handling.
+Recognition không mutate disposition.
 
 ---
 
-## 61. Invalid Transitions
+# 60. Invalid Transitions
 
-Forbidden:
+Forbidden examples:
 
 ```text
-Availability STOPPED → AVAILABLE without INITIALIZING
-Availability DRAINING → AVAILABLE
+STOPPED → AVAILABLE without INITIALIZING
+
+DRAINING → AVAILABLE
+
 Plan READY → BUILDING
+
 Plan INVALID → READY
+
 Candidate VALID → ASSEMBLING
+
 Candidate INVALID → VALID
+
 Candidate SUBMITTED_TO_RUNTIME → ASSEMBLING
-Operation FINISHED → RECOGNIZING
-Quality UNUSABLE → ACCEPTABLE without reevaluation
+
+Operation FINISHED → EXECUTING_OCR
+
 Provider OUTPUT_RECEIVED → RUNNING
 ```
 
 ---
 
-## 62. Invalid Transition Handling
+# 61. Invalid Transition Handling
 
-When attempted:
+Khi transition invalid:
 
-1. reject transition;
-2. preserve current state;
-3. record contract violation;
-4. avoid Candidate publication implication;
-5. release duplicate resources if needed;
-6. surface diagnostics;
-7. do not crash whole application unless corruption is unrecoverable.
+1. reject transition
+2. preserve current state
+3. record contract violation
+4. avoid authority implication
+5. cleanup duplicate resource if necessary
+6. emit safe diagnostics
+7. avoid application-wide crash unless corruption unrecoverable
 
 ---
 
-## 63. Concurrency Rules
+# 62. Concurrency Rules
 
 1. One Attempt owns one Recognition execution context.
 2. Plan transitions serialized logically.
 3. Operation phase transitions serialized logically.
-4. Candidate validation transitions serialized logically.
-5. Provider callbacks normalized before phase mutation.
-6. Duplicate callback cannot create duplicate Candidate.
-7. Candidate submission occurs at most once.
-8. Attempt-local resource release is idempotent.
-9. Input Lease released exactly once.
-10. Recognition never races Runtime authority mutation.
-11. Recognition never owns terminal CAS.
-12. Region-level concurrency bounded.
-13. Provider concurrency controlled externally.
-14. Shutdown prevents new execution.
-15. External disposition may arrive after local FINISHED.
+4. Candidate transitions serialized logically.
+5. Provider callbacks normalized before state mutation.
+6. Duplicate callbacks cannot create duplicate Candidate.
+7. Candidate submitted at most once.
+8. Attempt-local cleanup idempotent.
+9. Input Lease released once.
+10. Recognition never races Runtime authority ownership.
+11. Region-level OCR concurrency is handled within OCR/Runtime execution policy.
+12. Provider concurrency controlled externally.
+13. DRAINING blocks new execution.
+14. Runtime disposition may arrive after local FINISHED.
 
 ---
 
-## 64. Diagnostic Transition Record
+# 63. Diagnostic Transition Record
 
 ```text
 RecognitionStateTransition
@@ -1448,13 +1347,11 @@ RecognitionStateTransition
 └── Metadata?
 ```
 
-No raw image or full recognized text.
+Không chứa raw image/full OCR content.
 
 ---
 
-## 65. Transition Triggers
-
-Recognition-owned triggers:
+# 64. Recognition-Owned Transition Triggers
 
 ```text
 MODULE_INITIALIZE_REQUESTED
@@ -1483,29 +1380,20 @@ CANDIDATE_INVALID
 CANDIDATE_SUBMITTED
 ```
 
-Runtime terminal triggers are not Recognition-owned.
+OCR-stage event semantics không được redefine ở đây.
 
 ---
 
-## 66. State and Events
+# 65. States and Events
 
-Recognition-specific diagnostic facts may correspond to:
+Recognition diagnostic facts có thể correspond:
 
 ```text
 Plan READY
     → RECOGNITION_PLAN_CREATED
 
-PREPARING finished
-    → RECOGNITION_PREPARATION_COMPLETED
-
-DETECTING finished
-    → RECOGNITION_REGIONS_DETECTED
-
-NORMALIZING finished
-    → RECOGNITION_PROVIDER_OUTPUT_NORMALIZED
-
-RESOLVING_READING_ORDER finished
-    → RECOGNITION_READING_ORDER_RESOLVED
+EXECUTING_OCR completed
+    → RECOGNITION_OCR_COMPLETED
 
 Candidate VALID
     → RECOGNITION_CANDIDATE_VALIDATED
@@ -1514,94 +1402,83 @@ Candidate SUBMITTED_TO_RUNTIME
     → RECOGNITION_CANDIDATE_CREATED
 ```
 
-These facts:
+Facts:
 
-- do not grant authority;
-- do not define Attempt outcome;
-- do not trigger downstream work directly;
-- are optional for correctness.
+* do not grant authority
+* do not define Attempt outcome
+* do not create downstream work directly
+* optional for correctness
 
 ---
 
-## 67. Recovery
+# 66. Recovery
 
-Recognition-owned active state is ephemeral.
+Recognition-owned active state là ephemeral.
 
-After process crash:
+Sau crash, không restore trực tiếp:
 
 ```text
-Plan state
-Operation phase
-Candidate assembly state
-Provider execution observation
-Attempt-local resources
+Recognition Plan
+Operation Phase
+Candidate Assembly State
+Provider Execution Observation
+Attempt-Local Resources
+Cleanup Observation
 ```
 
-are not restored directly.
+Runtime có thể:
 
-Runtime may:
-
-- mark Attempt interrupted;
-- create new Attempt;
-- reacquire input Artifact;
-- rebuild Recognition Plan;
-- re-execute Recognition.
+* mark Attempt interrupted
+* create new Attempt
+* reacquire input Artifact
+* rebuild Plan
+* rerun Recognition
 
 ---
 
-## 68. Candidate Recovery
+# 67. Candidate Recovery
 
-Candidate not yet accepted by Artifact Store:
+Candidate chưa được accepted:
 
-- is not published;
-- should not be resurrected automatically;
-- may be cleaned by recovery process;
-- must not generate publication event after restart without explicit idempotent transfer design.
+* không published
+* không tự resurrect
+* có thể cleanup
+* không publish sau restart trừ khi explicit idempotent transfer design tồn tại
 
-Published Artifact recovery belongs to Artifact Store/Storage.
-
----
-
-## 69. Provider Recovery
-
-Provider model/client recovery belongs to Provider Manager.
-
-Recognition only receives updated availability snapshot.
-
-Recognition does not transition provider from unavailable to ready.
+Published Artifact recovery thuộc Artifact Store/Storage.
 
 ---
 
-## 70. State Persistence
+# 68. Provider Recovery
 
-MVP persists none of the active Recognition-owned state.
+Provider recovery thuộc Provider Manager.
+
+Recognition chỉ nhận snapshot mới.
+
+Recognition không transition Provider health state.
+
+---
+
+# 69. State Persistence
+
+MVP không persist active Recognition state.
 
 Ephemeral:
 
 ```text
 Recognition Plan
 Operation Phase
-Attempt-Local Buffers
-Provider Request Observation
+Provider Observation
 Candidate Assembly State
 Cancellation Observation
 Cleanup Observation
 ```
 
-Potentially persistent objects:
-
-```text
-Published Recognition Artifact
-Benchmark Results
-Sanitized Diagnostics
-Provider Configuration Versions
-```
-
-Their persistence owner is not Recognition state machine.
+Potentially persistent artifacts/diagnostics thuộc owner khác.
 
 ---
 
-## 71. MVP State Model
+# 70. MVP State Model
 
 Required:
 
@@ -1630,12 +1507,7 @@ RecognitionOperationPhase
 ├── VALIDATING
 ├── PLANNING
 ├── ACQUIRING_INPUT
-├── PREPARING
-├── DETECTING
-├── RECOGNIZING
-├── NORMALIZING
-├── MAPPING_COORDINATES
-├── RESOLVING_READING_ORDER
+├── EXECUTING_OCR
 ├── ASSEMBLING_CANDIDATE
 ├── VALIDATING_CANDIDATE
 ├── FINALIZING
@@ -1654,18 +1526,16 @@ CandidateValidationState
 
 ---
 
-## 72. MVP Simplification
-
-Implementation may store operation phase as diagnostic enum only.
-
-It must not create a second Runtime lifecycle.
+# 71. MVP Simplification
 
 Minimal control flow:
 
 ```text
-Plan
+Build Plan
     ↓
-Execute Phases
+Execute OCR
+    ↓
+Assemble Candidate
     ↓
 Validate Candidate
     ↓
@@ -1674,183 +1544,182 @@ Submit to Runtime
 Cleanup
 ```
 
----
-
-## 73. When to Expand State Detail
-
-Expand only when needed for:
-
-- stage-specific cancellation;
-- independent detector/recognizer;
-- long-page chunking;
-- provider streaming;
-- partial Candidate;
-- complex resource cleanup;
-- distributed provider execution;
-- advanced diagnostics;
-- benchmark comparison;
-- process isolation.
-
-Expansion must remain Attempt-local.
+Không tạo lifecycle song song với Runtime.
 
 ---
 
-## 74. Availability Invariants
+# 72. When to Expand State Detail
 
-1. AVAILABLE requires at least one satisfiable capability path.
+Chỉ mở rộng khi thật sự cần:
+
+* streaming OCR
+* long-page chunks
+* multi-provider composition
+* partial Candidate
+* complex cleanup
+* process isolation
+* distributed execution
+* fine-grained diagnostics
+
+Nếu cần stage detail, ưu tiên:
+
+```text
+OCR diagnostic stage record
+```
+
+thay vì thêm Recognition Module state machine.
+
+---
+
+# 73. Availability Invariants
+
+1. AVAILABLE requires satisfiable capability path.
 2. DRAINING accepts no new execution.
-3. STOPPED has no module-owned active state.
-4. UNAVAILABLE does not create Recognition Plan for normal execution.
-5. Availability does not depend on one Attempt result.
-6. Provider state is not owned by Recognition.
-7. Capability degradation is explicit.
-8. Privacy policy cannot be weakened by degraded mode.
+3. STOPPED has no active module-owned execution state.
+4. UNAVAILABLE does not create normal execution Plan.
+5. Availability is not determined by one Attempt result.
+6. Provider health remains external.
+7. Degradation is explicit.
+8. Privacy constraints cannot be weakened.
 
 ---
 
-## 75. Plan Invariants
+# 74. Plan Invariants
 
-1. Every execution uses zero or one Plan.
+1. At most one active Plan per Attempt.
 2. READY Plan immutable.
 3. INVALID Plan never executes.
-4. Plan preserves config snapshot identity.
-5. Plan contains no credentials.
-6. Plan references capabilities, not provider SDK types.
-7. Plan cannot alter Runtime priority.
-8. Plan cannot alter Runtime deadline.
-9. Plan cannot grant authority.
-10. Plan cannot schedule retry.
+4. Plan contains no credentials.
+5. Plan preserves Configuration Snapshot identity.
+6. Plan uses capability contracts, not SDK objects.
+7. Plan does not alter Runtime priority.
+8. Plan does not alter Runtime deadline.
+9. Plan does not grant authority.
+10. Plan does not schedule retry.
 
 ---
 
-## 76. Phase Invariants
+# 75. Phase Invariants
 
-1. One current phase per Recognition execution.
-2. Phase transition order explicit.
-3. Skipped phase documented by Plan.
-4. Expensive phase checks cancellation/deadline.
-5. Phase output validated before dependent phase.
-6. Geometry-changing phase updates transform chain.
-7. Semantic text correction forbidden.
-8. FINISHED does not imply Runtime success.
-9. Phase failure returns module error.
-10. Phase state remains Attempt-local.
+1. One current local phase.
+2. Phase progression explicit.
+3. Phase skip must be Plan-defined.
+4. Expensive work checks cancellation/deadline.
+5. Outputs validated before dependency usage.
+6. FINISHED does not imply Runtime success.
+7. Phase failure produces normalized module output/error.
+8. Phase state remains Attempt-local.
+9. OCR stage semantics remain outside Recognition state ownership.
 
 ---
 
-## 77. Candidate Invariants
+# 76. Candidate Invariants
 
 1. One Candidate instance has one validation state.
 2. Candidate ID unique.
 3. Candidate immutable after VALID.
 4. INVALID Candidate never submitted as valid.
-5. SUBMITTED Candidate not mutated.
-6. Candidate does not include Runtime terminal status.
-7. Candidate geometry source-space valid.
-8. Candidate ReadingOrder references existing regions.
-9. Candidate contains no credential.
-10. Candidate contains no provider SDK object.
-11. Candidate rejection triggers cleanup.
-12. Candidate submission does not imply publication.
+5. SUBMITTED Candidate never mutated.
+6. Candidate has no Runtime terminal state.
+7. Candidate references a valid OCRDocument.
+8. Optional ReadingOrderResult/QualityReport references are compatible.
+9. Candidate contains no credentials.
+10. Candidate contains no Provider SDK object.
+11. Rejected Candidate cleanup required.
+12. Submission does not imply publication.
 
 ---
 
-## 78. Quality and Completeness Invariants
+# 77. Completeness Invariants
 
-1. UNKNOWN confidence is not zero.
-2. Warning is not failure.
-3. EMPTY_VALID is valid success candidate.
-4. PARTIAL explicit.
-5. UNUSABLE normally invalidates Candidate.
-6. Quality derived from configured policy.
-7. Provider confidence normalized before use.
-8. Quality does not claim translation correctness.
-9. Completeness is Artifact metadata.
-10. User corrections do not mutate quality state of original Artifact.
+1. EMPTY_VALID is valid module output.
+2. PARTIAL is explicit.
+3. UNKNOWN is not silently interpreted.
+4. Completeness is Artifact metadata.
+5. Completeness does not define Runtime terminal outcome.
 
 ---
 
-## 79. External-State Invariants
+# 78. External-State Invariants
 
 1. Runtime owns WorkItem state.
 2. Runtime owns Attempt state.
 3. Runtime owns cancellation authority.
 4. Runtime Retry Policy owns retry.
-5. Provider Manager owns provider lifecycle.
-6. Artifact Store owns publication.
-7. Resource Manager owns physical resource lifecycle.
-8. Cache Policy owns retention.
-9. Recognition never maintains parallel request registry.
-10. Recognition never commits terminal outcome.
+5. Provider Manager owns Provider lifecycle.
+6. OCR Quality owns quality semantics.
+7. Artifact Store owns publication.
+8. Resource Manager owns physical resource lifecycle.
+9. Cache Policy owns retention/reuse decision.
+10. Recognition never maintains parallel Runtime registries.
+11. Recognition never commits terminal Runtime outcome.
 
 ---
 
-## 80. Testing Requirements
+# 79. Testing Requirements
 
-### Availability
+## Availability
 
-- initialize to AVAILABLE;
-- initialize to DEGRADED;
-- initialize to UNAVAILABLE;
-- drain rejects new execution;
-- stop clears module-owned state;
-- reinitialize from STOPPED.
+* initialize AVAILABLE
+* initialize DEGRADED
+* initialize UNAVAILABLE
+* drain rejects new execution
+* stop clears module-owned state
+* restart requires INITIALIZING
 
-### Plan
+## Plan
 
-- valid Plan path;
-- invalid capability combination;
-- privacy conflict;
-- immutable READY Plan;
-- INVALID cannot execute;
-- config snapshot preserved.
+* valid Plan
+* invalid capability requirements
+* privacy conflict
+* READY immutable
+* INVALID cannot execute
+* configuration snapshot preserved
 
-### Operation Phases
+## Operation
 
-- combined path;
-- composed path;
-- single-region path;
-- empty-valid path;
-- skipped phase recorded;
-- cancellation at every checkpoint;
-- deadline before expensive phase;
-- phase error;
-- phase output validation;
-- transform update.
+* normal OCR path
+* combined provider path
+* selected-region path
+* empty-valid path
+* cancellation checkpoints
+* deadline before OCR execution
+* module error path
+* FINISHED without Runtime success implication
 
-### Candidate
+## Candidate
 
-- valid Candidate;
-- invalid geometry;
-- duplicate RegionId;
-- invalid ReadingOrder;
-- incomplete compatibility metadata;
-- Candidate immutable after VALID;
-- submit once;
-- reject and cleanup.
+* valid Candidate references OCRDocument
+* invalid OCRDocumentRef
+* incompatible ReadingOrderResultRef
+* incompatible QualityReportRef
+* missing compatibility metadata
+* immutable after VALID
+* submit once
+* reject and cleanup
 
-### Provider Observation
+## Provider Observation
 
-- normal output;
-- provider error;
-- duplicate callback;
-- cancellation supported;
-- cancellation unsupported;
-- late callback;
-- physical completion after Runtime abandonment.
+* normal output
+* Provider error
+* duplicate callback
+* supported cancellation
+* unsupported cancellation
+* late callback
+* physical completion after Runtime abandonment
 
-### Concurrency
+## Concurrency
 
-- duplicate Candidate submission;
-- provider callback vs cancellation;
-- cleanup vs late callback;
-- module drain vs Candidate assembly;
-- external Runtime rejection after local VALID;
-- input Lease released once.
+* duplicate Candidate submission
+* callback vs cancellation
+* cleanup vs late callback
+* drain vs Candidate assembly
+* Runtime rejection after Candidate VALID
+* Input Lease released once
 
 ---
 
-## 81. Property Tests
+# 80. Property Tests
 
 ```text
 candidate_submission_count <= 1
@@ -1865,15 +1734,11 @@ VALID candidate never returns to ASSEMBLING
 ```
 
 ```text
-public geometry always fits source coordinate space
-```
-
-```text
 FINISHED does not imply published Artifact
 ```
 
 ```text
-all acquired Attempt-local resources are released
+all Attempt-local resources are eventually released
 ```
 
 ```text
@@ -1884,43 +1749,41 @@ Recognition never changes Runtime Attempt state
 Recognition never mutates Provider Manager state
 ```
 
----
-
-## 82. Open Decisions
-
-- Is availability state a distinct runtime object or derived capability view?
-- Should `DEGRADED` be one state or capability flags only?
-- Should `VALIDATING_CANDIDATE` remain a phase and state simultaneously?
-- Do partial Candidates need substate?
-- Should provider execution observation be persisted in trace only?
-- Should quality reevaluation happen during Text Processing?
-- Should Plan expose selected provider ID or only capability path reference?
-- How is long-page chunk state represented?
-- Do streaming providers require `PARTIAL_OUTPUT_RECEIVED` observation?
-- When does Candidate ownership transfer begin exactly?
-- Which cleanup failures invalidate module availability?
-- Is `DRAINING` controlled directly by Runtime Container?
+```text
+Recognition never mutates Quality Report state
+```
 
 ---
 
-## 83. Recommended MVP Decisions
+# 81. Recommended MVP Decisions
 
 ```text
-Availability state is explicit.
-DEGRADED is retained.
-Operation phases are diagnostic enums.
-Candidate validation is explicit.
+Availability state remains explicit.
+
+DEGRADED remains explicit.
+
+Operation phases remain diagnostic.
+
+OCR stages are not Recognition module states.
+
+Candidate validation remains explicit.
+
+RecognitionQualityState is removed.
+
+QualityReport is externally referenced.
+
 No active Recognition state persists.
-Provider execution observations stay in trace/snapshot.
-Provider attempts do not overlap in MVP.
-Partial Candidate support is optional.
-Runtime owns all terminal outcomes.
+
+Provider execution observation stays trace/local.
+
+Runtime owns every terminal outcome.
+
 Candidate transfer begins on submit.
 ```
 
 ---
 
-## 84. Related Documents
+# 82. Related Documents
 
 ```text
 doc/02-modules/recognition/README.md
@@ -1929,40 +1792,55 @@ doc/02-modules/recognition/CONTRACT.md
 doc/02-modules/recognition/EVENTS.md
 doc/02-modules/recognition/ERRORS.md
 
-doc/01-architecture/runtime/PIPELINE_RUNTIME.md
-doc/01-architecture/runtime/CANCELLATION.md
-doc/01-architecture/runtime/RETRY_POLICY.md
-doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
-doc/01-architecture/runtime/THREADING_MODEL.md
-
 doc/01-architecture/ocr/PIPELINE.md
 doc/01-architecture/ocr/PREPROCESS.md
 doc/01-architecture/ocr/DETECTION.md
 doc/01-architecture/ocr/RECOGNITION.md
-doc/01-architecture/ocr/READING_ORDER.md
+doc/01-architecture/ocr/TEXT_DIRECTION.md
+doc/01-architecture/ocr/LAYOUT.md
+doc/01-architecture/ocr/POSTPROCESS.md
 doc/01-architecture/ocr/QUALITY.md
+doc/01-architecture/ocr/READING_ORDER.md
 doc/01-architecture/ocr/PROVIDERS.md
+
+doc/01-architecture/runtime/CANCELLATION.md
+doc/01-architecture/runtime/RETRY_POLICY.md
+doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
+doc/01-architecture/runtime/CACHE_POLICY.md
 ```
 
 ---
 
-## 85. Summary
+# 83. Summary
 
-Recognition state model now focuses only on state that Recognition actually owns:
+Recognition state model chỉ tập trung vào state Recognition thực sự sở hữu:
 
 ```text
 Recognition Availability
         ↓
 Recognition Plan
         ↓
-Recognition Operation Phases
+Recognition Operation Phase
         ↓
 Candidate Validation
         ↓
 Submitted to Runtime
 ```
 
-Runtime owns:
+OCR Architecture sở hữu:
+
+```text
+Detection
+Recognition semantics
+Text Direction
+Layout
+OCR Document
+Quality
+Reading Order
+Provider semantics
+```
+
+Runtime sở hữu:
 
 ```text
 WorkItem
@@ -1970,11 +1848,10 @@ Attempt
 Authority
 Cancellation
 Retry
-Publication
-Artifact Lifecycle
+Publication Decision
 ```
 
-Provider Manager owns:
+Provider Manager sở hữu:
 
 ```text
 Provider Lifecycle
@@ -1982,12 +1859,20 @@ Provider Health
 Provider Capacity
 ```
 
-The key boundary is:
+Artifact Store sở hữu:
 
 ```text
-Recognition may produce a valid Candidate.
+Published Recognition Artifact
+```
 
-Only Runtime can decide whether that Candidate matters.
+Boundary quan trọng nhất:
 
-Only Artifact Store can publish and own the accepted Artifact.
+```text
+Recognition may create a valid Candidate.
+
+Quality may report that OCR is good or poor.
+
+Only Runtime decides whether that Candidate matters.
+
+Only Artifact Store owns the accepted published Artifact.
 ```
