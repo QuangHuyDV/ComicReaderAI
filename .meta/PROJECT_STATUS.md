@@ -1,6 +1,6 @@
 # CRAI — Project Status
 
-**Updated:** 2026-08-03  
+**Updated:** 2026-08-09  
 **Project key:** `CRAI`  
 **Document role:** Current project entry point and architecture status summary  
 **Approach:** Documentation First · Capability First · User Experience First · Provider Independent
@@ -77,8 +77,8 @@ Implementation
 | Capability Analysis | ✅ Complete | Core capabilities and their boundaries are documented. |
 | Core Architecture | ✅ Complete | State, event, dependency and data-flow foundations are defined. |
 | Runtime Architecture | ✅ Runtime v2 synchronized | Runtime documents now use the same WorkItem/Attempt, authority, Candidate Artifact, ownership, publication, Lease, retention and disposal model. |
-| Business Module Architecture | ✅ Complete | Core business modules (including Translation, Presentation and Provider Management) have completed the standard document set. Cross-module Runtime v2 terminology review remains an ongoing maintenance task. |
-| Detailed Recognition/OCR Architecture | 🟡 Next review area | The detailed `doc/01-architecture/ocr/` documents exist but have not yet been reconciled with the newly completed Recognition module contracts. |
+| Business Module Architecture | 🟡 Final Runtime v2 synchronization | Recognition, Presentation, Reading Session, Capture, Preferences, Diagnostics and UI Adapter have been re-reviewed against the current ownership/runtime model. Text Processing is the remaining business-module review area before the final cross-module consistency sweep. |
+| Detailed Recognition/OCR Architecture | ✅ Runtime v2 synchronized | The detailed `doc/01-architecture/ocr/` set has been reconciled with the Recognition module boundary: internal OCR phases remain Attempt-local, provider-independent and non-authoritative for scheduling/retry/publication. |
 | Infrastructure Architecture | ✅ Complete | All seven Infrastructure modules (Configuration, Secret Management, Event Bus, Logging, Telemetry, Scheduler and Resource Manager) have completed the standard document set. |
 | Technology Selection | ⏳ Not Started | Frameworks, languages, providers and process topology have not been finalized. |
 | Implementation | ❌ Not Started | No production implementation has begun. |
@@ -140,18 +140,18 @@ Presentation Commit
 
 | Module | Status | Notes |
 |---|---|---|
-| Capture | ✅ Documented | Module overview, contract, events, states and errors exist; later Runtime v2 terminology review may still be needed. |
+| Capture | ✅ Runtime v2 synchronized | Standard six-file set re-reviewed; Capture owns acquisition semantics and Candidate capture output, while Runtime owns WorkItem/Attempt, retry, cancellation and publication authority. |
 | Recognition | ✅ Runtime v2 synchronized | `README.md`, `MODULE.md`, `CONTRACT.md`, `STATES.md`, `EVENTS.md` and `ERRORS.md` now share the Candidate Artifact and Runtime authority model. |
-| Text Processing | ✅ Documented | Produces normalized and structured source data for Translation; cross-check against the new Recognition Artifact boundary remains a later synchronization task. |
+| Text Processing | ✅ Runtime v2 synchronized | Six-file core set aligned with the RecognitionArtifact → SourceDocument/Candidate → SourceDocumentArtifact boundary; TranslationUnit ownership remains in Translation, and Runtime retains WorkItem/Attempt, retry, cancellation and publication authority. |
 | Translation | ✅ Complete | Standard document set completed and synchronized. |
-| Presentation | ✅ Complete | Standard document set completed. |
-| Reading / Reading Session | ✅ Documented | Reading/session responsibilities and lifecycle have been designed. |
+| Presentation | ✅ Runtime v2 synchronized | `README.md`, `MODULE.md`, `CONTRACT.md`, `STATES.md`, `EVENTS.md` and `ERRORS.md` aligned around Presentation-owned semantic layout/output and UI Adapter-owned native rendering. |
+| Reading / Reading Session | ✅ Runtime v2 synchronized | Standard six-file set re-reviewed; Reading Session owns session identity/context/configuration while Runtime owns processing execution and retry authority. |
 | Storage | ✅ Complete | Storage was consolidated as a Persistence Capability with README, contracts, models, migration, states, events and errors. |
 | Provider Management | ✅ Complete | Standard document set (README, MODULE, CONTRACT, STATES, EVENTS, ERRORS) completed. |
 | Configuration Infrastructure | ✅ Complete | MODULE, CONTRACT, STATES, EVENTS, ERRORS and README completed. |
-| Preferences | ✅ Documented | Module document set exists. |
-| Diagnostics | ✅ Documented | Module document set exists. |
-| UI Adapter | ✅ Documented | Module document set exists and remains separate from Presentation semantics. |
+| Preferences | ✅ Runtime v2 synchronized | Standard six-file set re-reviewed; Preferences owns persistent Default/Global/Source semantics, Reading Session owns session overrides, and Runtime Configuration owns execution-ready snapshots. |
+| Diagnostics | ✅ Runtime v2 synchronized | Standard six-file set re-reviewed; Diagnostics owns observational semantics while Logging/Telemetry infrastructure owns transport/storage. Event Bus is not used as general telemetry transport. |
+| UI Adapter | ✅ Runtime v2 synchronized | Standard six-file set re-reviewed; UI Adapter is an application/presentation adapter, ViewModels are immutable projections, and Runtime/business authority remains outside the UI layer. |
 
 Storage is treated as a **Persistence Capability**, not as the owner of business data and not as a generic Repository, Cache or Backend module.
 
@@ -187,16 +187,31 @@ Recognition does not own WorkItem/Attempt lifecycle, retry, cancellation authori
 
 ## 1.5 Current Focus
 
-The immediate focus is completion of the Infrastructure Architecture before technology selection.
+The immediate focus is now the final project-wide Runtime v2 consistency and legacy-terminology review before technology selection.
 
 Current priorities are:
 
-1. review and simplify Infrastructure documentation for consistency
-2. synchronize architecture terminology across modules
-3. reconcile `doc/01-architecture/ocr/` with `doc/02-modules/recognition/`
-4. update PROJECT_STATUS after each completed document group
-5. begin technology selection after architecture stabilization
+1. run the final cross-module terminology/ownership consistency sweep
+2. review current-authority architecture summaries for stale pre-Runtime-v2 wording
+3. remove direct stage-completion chaining or module-owned execution authority where still present
+4. verify all current module boundaries remain consistent with Runtime v2 and Event Convention
+5. begin technology selection after this consistency sweep is closed
 
+The core business modules now synchronized with Runtime v2 include:
+
+```text
+Capture
+Recognition
+Text Processing
+Translation
+Presentation
+Reading Session
+Preferences
+Diagnostics
+UI Adapter
+```
+
+Detailed `doc/01-architecture/ocr/` synchronization is also complete.
 
 ## 1.6 Architecture Snapshot
 
@@ -301,8 +316,11 @@ Pipeline stages and module events never independently decide the next business s
 
 ## 1.7 How to Resume
 
-For Infrastructure work, continue from the current unfinished module under `03-infrastructure/`.
- the Project
+For current architecture work, continue from `doc/02-modules/text-processing/` and apply the same Runtime v2 ownership review used for the recently synchronized modules.
+
+For Recognition/OCR detail work, treat `doc/02-modules/recognition/` as the module boundary and `doc/01-architecture/ocr/` as its internal architecture.
+
+## Resume the Project
 
 For a new AI session or a new contributor, use this reading order:
 
@@ -3878,79 +3896,50 @@ Completed work is not kept as an active backlog item.
 
 ## 29.2 High Priority
 
-### Detailed Recognition/OCR Architecture Synchronization
+### Project-Wide Legacy Terminology and Ownership Review
 
-**Status:** In Progress
+**Status:** Next active review
 
 **Scope:**
 
+Review current-authority architecture and module summaries for terminology or ownership that predates Runtime v2.
+
+Primary targets include:
+
 ```text
-doc/01-architecture/ocr/
-├── PIPELINE.md
-├── PREPROCESS.md
-├── DETECTION.md
-├── RECOGNITION.md
-├── POSTPROCESS.md
-├── LAYOUT.md
-├── READING_ORDER.md
-├── TEXT_DIRECTION.md
-├── QUALITY.md
-└── PROVIDERS.md
+doc/01-architecture/
+doc/02-modules/
+.meta/
+PROJECT_STATUS.md
 ```
 
-**Goal:**
+Historical Development History sections should not be rewritten merely because terminology changed; preserve them as history unless they are incorrectly presented as current truth.
 
-- align detailed OCR architecture with the Recognition module boundary;
-- use `RecognitionArtifact` rather than legacy OCR Result terminology where appropriate;
-- keep algorithms and provider mechanics in `01-architecture/ocr/`;
-- keep module ownership, public contracts, states, events and errors in `02-modules/recognition/`;
-- prevent detailed stages from owning Runtime scheduling, retry, cancellation, authority or publication;
-- align provider descriptions with capability-based Provider Manager boundaries.
-
----
-
-### Recognition → Text Processing Boundary Review
-
-**Status:** Planned after OCR architecture synchronization
-
-**Goal:**
-
-- verify the exact published Recognition Artifact consumed by Text Processing;
-- remove assumptions that Text Processing receives raw OCR strings;
-- preserve geometry, order, confidence, provenance and source traceability;
-- keep semantic reconstruction outside Recognition;
-- verify downstream WorkItem creation remains Runtime-orchestrated.
-
----
-
-### Cross-Module Runtime v2 Terminology Review
-
-**Status:** Planned
-
-**Modules to review:**
-
-- Capture
-- Text Processing
-- Translation
-- Presentation
-- Reading Session
-- Preferences
-- Diagnostics
-- UI Adapter
-
-**Goal:**
-
-Remove or reconcile legacy concepts such as:
+**Review for legacy concepts such as:**
 
 ```text
-request-owned lifecycle
-module-owned retry
-module-owned cancellation registry
+pipelineId / taskId used where WorkItemId / AttemptId is now authoritative
+request-owned execution lifecycle
+module-owned retry or cancellation authority
 module terminal event as execution authority
-Result object containing task status
-direct downstream event triggering
-provider lifecycle owned by business module
+direct stage-completion chaining
+Result objects carrying Runtime task state
+provider lifecycle owned by business modules
+stage-owned Artifact publication
+global EffectivePreferences state
+business Event Bus used as telemetry/UI event transport
+UI Adapter or Presentation owning Runtime decisions
 ```
+
+**Goal:**
+
+- make current-authority documents consistent with Runtime v2;
+- preserve explicit module ownership;
+- ensure Event Bus events remain facts rather than hidden commands;
+- ensure Runtime retains execution authority;
+- ensure Artifact publication/acceptance semantics are consistent;
+- remove stale cross-module assumptions without rewriting historical rationale;
+- leave the architecture ready for Technology Selection.
 
 ---
 
@@ -4036,18 +4025,31 @@ Outside MVP:
 
 Implementation should begin only after:
 
-1. detailed Recognition/OCR architecture is synchronized;
-2. Recognition → Text Processing boundary is verified;
-3. remaining module documents are checked for Runtime v2 conflicts;
-4. public contracts and Event Convention are internally consistent;
-5. technology and process-topology decisions are recorded explicitly;
-6. MVP acceptance and test strategy are defined.
+1. the final project-wide Runtime v2 terminology/ownership consistency sweep is completed;
+2. current-authority public contracts and Event Convention are internally consistent;
+3. technology and process-topology decisions are recorded explicitly;
+4. MVP acceptance and test strategy are defined.
 
-The architecture is already broad enough for implementation planning, but starting production code before these synchronization steps may reintroduce conflicting ownership models.
+The following synchronization work is already complete and is no longer an active blocker:
+
+```text
+Detailed Recognition/OCR Architecture
+Capture
+Recognition
+Text Processing
+Translation
+Presentation
+Reading Session
+Preferences
+Diagnostics
+UI Adapter
+```
+
+The architecture is broad enough for implementation planning. The remaining architecture task is consolidation and consistency checking, not redesign of those synchronized modules.
 
 ---
 
-## 30. Presentation Module Architecture Completed
+# 30. Presentation Module Architecture Completed
 
 **Status:** ✅ Completed
 
@@ -4648,21 +4650,243 @@ The next task is to synchronize the detailed `ocr/` documents with this complete
 
 ---
 
-# 33. Current Next Step
+---
+
+# 33. Detailed Recognition/OCR Runtime v2 Synchronization Completed
+
+**Status:** ✅ Completed  
+**Completed:** 2026-08-07
+
+The detailed `doc/01-architecture/ocr/` set was re-reviewed against the Recognition v2 public boundary.
+
+Documents synchronized include:
+
+```text
+doc/01-architecture/ocr/
+├── README.md
+├── PIPELINE.md
+├── READING_ORDER.md
+├── DETECTION.md
+├── PREPROCESS.md
+├── RECOGNITION.md
+├── LAYOUT.md
+├── TEXT_DIRECTION.md
+├── POSTPROCESS.md
+├── QUALITY.md
+└── PROVIDERS.md
+```
+
+The detailed OCR architecture now follows these rules:
+
+- OCR stages are internal Recognition responsibilities, not standalone business modules;
+- internal phases are Attempt-local and diagnostic;
+- detailed stages do not own Scheduler, Queue, retry, cancellation or publication;
+- provider mechanics remain capability-based and Provider Manager-compatible;
+- output converges on `CandidateRecognitionArtifact`;
+- source-coordinate mapping and reading-order provenance are preserved;
+- published Recognition output remains compatible with Text Processing.
+
+---
+
+# 34. Presentation Module Runtime v2 Synchronization Completed
+
+**Status:** ✅ Completed  
+**Completed:** 2026-08-08
+
+The full Presentation document set was synchronized:
+
+```text
+doc/02-modules/presentation/
+├── README.md
+├── MODULE.md
+├── CONTRACT.md
+├── STATES.md
+├── EVENTS.md
+└── ERRORS.md
+```
+
+Key ownership result:
+
+```text
+Presentation
+    → owns semantic presentation output, layout and presentation artifacts
+
+UI Adapter / Platform UI
+    → owns platform-facing adaptation and native rendering
+
+Runtime
+    → owns WorkItem/Attempt execution authority
+```
+
+Presentation does not own Runtime retry, scheduling or native UI rendering.
+
+---
+
+# 35. Reading Session Module Runtime v2 Synchronization Completed
+
+**Status:** ✅ Completed  
+**Completed:** 2026-08-08
+
+The full Reading Session document set was synchronized.
+
+Reading Session now clearly owns:
+
+```text
+Session identity
+Session lifecycle
+ReadingContext
+ReadingContextRevision
+SessionConfiguration
+Session-only overrides
+```
+
+It does not own pipeline retry, Scheduler, WorkItem/Attempt lifecycle or provider execution.
+
+---
+
+# 36. Capture Module Runtime v2 Synchronization Completed
+
+**Status:** ✅ Completed  
+**Completed:** 2026-08-08
+
+The full Capture document set was re-reviewed against Runtime v2.
+
+Capture owns acquisition semantics, source/capture metadata, geometry and Candidate capture output. Runtime retains scheduling, Attempt, retry, cancellation and publication authority.
+
+---
+
+# 37. Preferences Module Runtime v2 Synchronization Completed
+
+**Status:** ✅ Completed  
+**Completed:** 2026-08-09
+
+The full Preferences document set was synchronized.
+
+The final ownership split is:
+
+```text
+Preferences
+    → persistent Default / Global / Source preference semantics
+
+Reading Session
+    → temporary session configuration / overrides
+
+Business Pipeline Orchestration
+    → processing consequences of preference changes
+
+Runtime Configuration
+    → execution-ready ConfigurationSnapshot
+```
+
+`EffectivePreferencesSnapshot` is contextual and immutable; it is not one global mutable application state.
+
+---
+
+# 38. Diagnostics Module Runtime v2 Synchronization Completed
+
+**Status:** ✅ Completed  
+**Completed:** 2026-08-09
+
+The full Diagnostics document set was synchronized.
+
+The architecture now separates:
+
+```text
+Business / Runtime Module
+    → owns operational meaning
+
+Diagnostics
+    → owns diagnostic representation, correlation, health aggregation and safe views
+
+Logging / Telemetry Infrastructure
+    → owns transport, buffering, exporter and storage implementation
+```
+
+`LogRecorded`, `MetricUpdated`, `TraceStarted`, `TraceCompleted` and generic `ErrorReported` are no longer required business Event Bus events. Diagnostics failure normally degrades observability only.
+
+---
+
+# 39. UI Adapter Module Runtime v2 Synchronization Completed
+
+**Status:** ✅ Completed  
+**Completed:** 2026-08-09
+
+The full UI Adapter document set was synchronized:
+
+```text
+doc/02-modules/ui-adapter/
+├── README.md
+├── MODULE.md
+├── CONTRACT.md
+├── STATES.md
+├── EVENTS.md
+└── ERRORS.md
+```
+
+The final adapter model is:
+
+```text
+Native UI Event
+    ↓
+UiIntent
+    ↓
+UI Adapter
+    ↓
+Application / Module Command
+```
+
+and:
+
+```text
+Authoritative Application / Module State
+    ↓
+UI Adapter
+    ↓
+Immutable ViewModel
+    ↓
+Native UI
+```
+
+UI Adapter does not orchestrate the business pipeline, does not own Runtime retry, and does not convert external domain errors into UI-owned errors. UI-local events remain local by default rather than flooding the business Event Bus.
+
+---
+
+# 40. Current Next Step
 
 Continue with:
 
 ```text
-doc/01-architecture/ocr/PIPELINE.md
+Project-Wide Legacy Terminology and Ownership Review
 ```
 
-Review goals:
+Recommended review order:
 
-1. align detailed pipeline with `RecognitionAttemptInput`;
-2. produce `CandidateRecognitionArtifact`, not legacy `RecognitionResult`;
-3. keep operation phases diagnostic and Attempt-local;
-4. prevent detailed OCR stages from owning scheduling, retry, cancellation or publication;
-5. preserve source-coordinate mapping;
-6. align provider selection with capability requirements and Provider Manager;
-7. verify output compatibility with Text Processing.
+```text
+1. doc/01-architecture/core/
+2. doc/01-architecture/modules/
+3. doc/01-architecture/runtime/ current-authority summaries
+4. doc/02-modules/ cross-module references
+5. .meta/ current project/module maps
+6. PROJECT_STATUS.md final consistency pass
+```
 
+Primary goals:
+
+1. remove stale pre-Runtime-v2 terminology from current-authority sections;
+2. verify no business module owns WorkItem/Attempt, retry, cancellation, Scheduler admission or Artifact publication authority;
+3. verify no direct stage-completion event chain implicitly controls downstream execution;
+4. verify Preferences/Diagnostics/UI Adapter use the new contextual and adapter boundaries;
+5. verify historical sections remain historical and are not mistaken for current architecture;
+6. close the architecture consistency sweep before Technology Selection.
+
+After this review:
+
+```text
+Technology Selection
+    ↓
+Process Topology
+    ↓
+Provider / Framework feasibility
+    ↓
+Implementation Planning
+```

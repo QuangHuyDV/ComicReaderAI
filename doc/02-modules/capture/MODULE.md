@@ -1,422 +1,1298 @@
-# Capture Module Design
+# Capture Module Specification
 
-## Purpose
+> **Project:** CRAI
+> **Module:** `capture`
+> **Path:** `doc/02-modules/capture/MODULE.md`
+> **Version:** 2.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2 aligned
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-09
 
-Tài liệu này mô tả thiết kế nội bộ của Capture Module trong CRAI.
+---
 
-Capture Module chịu trách nhiệm kết nối với nguồn nội dung, thu nhận dữ liệu đầu vào và chuẩn hóa dữ liệu đó thành `CaptureFrame` để chuyển sang Recognition Module.
+# 1. Module Definition
 
-Tài liệu này tập trung vào:
+Capture is the CRAI processing module responsible for acquiring source data through a Capture Provider and normalizing that data into a platform-independent Candidate Capture Result.
 
-- Thành phần nội bộ của module.
-- Trách nhiệm của từng thành phần.
-- Luồng xử lý capture.
-- Quyền sở hữu dữ liệu và tài nguyên.
-- Quan hệ với Runtime.
-- Quan hệ với Capture Provider.
-- Boundary giữa Capture và các module khác.
-
-Tài liệu này không định nghĩa chi tiết public API, event contract hoặc state transition đầy đủ. Các nội dung đó được mô tả trong:
+Its primary responsibility is:
 
 ```text
-API.md
-EVENTS.md
-STATES.md
+Capture Request
+    +
+Capture Source
+    +
+Runtime Execution Context
+    +
+Capture Configuration
+        ↓
+Capture Operation
+        ↓
+Capture Provider
+        ↓
+Raw Provider Result
+        ↓
+Capture Normalization
+        ↓
+Candidate Capture Result
+        ↓
+Runtime Authority Validation
+        ↓
+Artifact Publication
+        ↓
+CapturedFrameArtifact
 ```
 
----
+Capture answers:
 
-# Module Responsibility
+> **How can the requested source be safely acquired and normalized into a valid capture result?**
 
-Capture Module chịu trách nhiệm:
+Capture does not answer:
 
-- Khởi tạo capture source.
-- Xác thực source có thể sử dụng.
-- Quản lý quyền truy cập nguồn.
-- Thực hiện capture theo yêu cầu.
-- Thực hiện capture liên tục khi được cấu hình.
-- Chuẩn hóa dữ liệu đầu vào.
-- Gắn runtime context và source metadata.
-- Kiểm soát frame lifetime.
-- Xử lý backpressure.
-- Hủy capture khi context không còn hợp lệ.
-- Giải phóng source và tài nguyên liên quan.
+> Is this asynchronous work still authoritative?
 
-Capture Module không chịu trách nhiệm:
+That belongs to Runtime Control.
 
-- Phát hiện nội dung có thay đổi.
-- Phát hiện cuộn trang.
-- Phát hiện đổi trang.
-- OCR.
-- Phân tích bố cục.
-- Phát hiện khung thoại.
-- Chuẩn hóa văn bản.
-- Dịch nội dung.
-- Hiển thị kết quả.
-- Lưu lịch sử đọc lâu dài.
-- Quản lý lifecycle của Reading Session.
+Capture also does not answer:
+
+> Should OCR, Translation, or Presentation run next?
+
+That belongs to Business Pipeline Orchestration.
 
 ---
 
-# Module Boundary
+# 2. Module Identity
 
 ```text
-Reading Module
-      |
-      | source selection
-      | capture policy
-      | session context
-      v
-+----------------------------------+
-|          Capture Module          |
-|----------------------------------|
-| Capture Coordinator              |
-| Source Manager                   |
-| Permission Controller            |
-| Capture Policy Engine            |
-| Frame Acquirer                   |
-| Frame Normalizer                 |
-| Frame Lifecycle Manager          |
-| Capture Health Monitor           |
-+----------------------------------+
-      |
-      | CaptureFrame
-      v
+Module ID: capture
+Module Type: Processing Module
+Primary Domain: Source acquisition and capture normalization
+Primary Execution Unit: CaptureOperation
+Primary Candidate Output: CandidateCaptureResult
+Published Output: CapturedFrameArtifact
+Runtime Authority: Runtime Control
+Artifact Publication Owner: Runtime / Artifact Store
+Platform Boundary: CaptureProvider
+MVP Priority: Required
+```
+
+Capture is a processing module.
+
+It is not:
+
+```text
+Business Pipeline Orchestrator
+Runtime Scheduler
+Artifact Store
 Recognition Module
+UI Adapter
+Platform Capture Implementation
 ```
 
-Capture Module nhận yêu cầu từ Reading Module hoặc Runtime.
-
-Capture Module trả về dữ liệu thô đã được chuẩn hóa về mặt định dạng và metadata.
-
-Capture Module không diễn giải nội dung bên trong dữ liệu.
-
 ---
 
-# Internal Components
+# 3. Architectural Position
 
-## Capture Coordinator
-
-### Purpose
-
-Điều phối toàn bộ hoạt động của Capture Module.
-
-### Responsibilities
-
-- Tiếp nhận capture command.
-- Xác định source đang hoạt động.
-- Kiểm tra session và generation.
-- Chọn capture policy.
-- Tạo capture operation.
-- Gửi work tới Scheduler.
-- Nhận kết quả từ Frame Acquirer.
-- Chuyển kết quả qua Frame Normalizer.
-- Đăng ký frame với Frame Lifecycle Manager.
-- Trả kết quả hoặc phát event.
-- Điều phối cancellation.
-- Điều phối shutdown.
-
-### Ownership
-
-Capture Coordinator sở hữu:
-
-- Active capture operations.
-- Quan hệ giữa operation và source.
-- Quan hệ giữa operation và session context.
-- Trạng thái điều phối cấp module.
-
-Capture Coordinator không sở hữu:
-
-- Native capture handle.
-- Provider implementation.
-- Raw frame lâu dài.
-- Reading Session.
-
----
-
-## Source Manager
-
-### Purpose
-
-Quản lý lifecycle của các capture source.
-
-### Responsibilities
-
-- Tạo source instance.
-- Khởi tạo source.
-- Kiểm tra source availability.
-- Theo dõi source identity.
-- Giữ primary source của session.
-- Thay thế source.
-- Suspend source.
-- Resume source.
-- Stop source.
-- Giải phóng source.
-
-### Source Types
-
-Source Manager có thể quản lý:
+The processing path is:
 
 ```text
-ScreenRegionSource
-ApplicationWindowSource
-DisplaySource
-BrowserConnectorSource
-LocalInputSource
+Reading Domain State
+        ↓
+Business Pipeline Orchestration
+        ↓
+Runtime Control
+        ↓
+Capture WorkItem / Attempt
+        ↓
+Capture
+        ↓
+Candidate Capture Result
+        ↓
+Runtime Completion + Authority Validation
+        ↓
+CapturedFrameArtifact publication
+        ↓
+Recognition when required
 ```
 
-### Source Identity
+Capture does not directly invoke Recognition.
 
-Mỗi source phải có:
+Recognition receives accepted Artifact references through Runtime-orchestrated flow.
+
+---
+
+# 4. Core Ownership Separation
+
+CRAI separates four responsibilities around Capture.
+
+## 4.1 Capture Semantics
+
+Capture owns:
+
+```text
+CaptureSource semantic model
+CaptureOperation semantic processing
+Capture request validation
+Provider capability validation
+Capture normalization
+Capture-result validation
+Capture-specific source lifecycle
+Capture-specific health
+Capture-specific errors
+CandidateCaptureResult
+```
+
+## 4.2 Runtime Execution
+
+Runtime Control owns:
+
+```text
+RuntimeRevisionId
+WorkItem
+Attempt
+execution authority
+cancellation authority
+retry execution
+deadline enforcement policy
+scheduler priority
+queue admission
+completion acceptance
+stale-result rejection
+```
+
+## 4.3 Artifact Publication
+
+Runtime Artifact Store owns:
+
+```text
+accepted CapturedFrameArtifact publication
+accepted Artifact identity
+accepted Artifact leases
+retention
+disposal
+cross-module Artifact lifetime
+```
+
+## 4.4 Platform Capture
+
+Capture Provider / platform adapter owns:
+
+```text
+native capture APIs
+browser capture APIs
+native source handles
+screen/window enumeration
+provider callbacks
+platform permission APIs
+provider-specific raw results
+provider-specific errors
+```
+
+---
+
+# 5. Central Architecture Rule
+
+```text
+Runtime decides whether Capture work still matters.
+
+Capture decides whether acquired data is a valid Capture result.
+
+Artifact Store owns the accepted CapturedFrameArtifact.
+
+Capture Provider owns platform-specific acquisition.
+```
+
+---
+
+# 6. Primary Responsibilities
+
+Capture is responsible for:
+
+* validating capture requests;
+* resolving CaptureSource semantics;
+* validating Capture Provider capabilities;
+* obtaining Capture Provider leases/references;
+* invoking Capture Provider;
+* validating minimum raw provider output;
+* normalizing capture data;
+* assigning Capture-owned semantic metadata;
+* validating Candidate Capture Result;
+* reporting Capture-specific health;
+* cooperating with Runtime cancellation;
+* releasing Capture-owned temporary resources;
+* enforcing Capture privacy rules.
+
+---
+
+# 7. Explicit Non-Responsibilities
+
+Capture MUST NOT:
+
+* determine whether source content changed;
+* detect page changes;
+* detect scrolling;
+* detect duplicate visual content;
+* detect text regions;
+* perform OCR;
+* analyze text layout;
+* detect speech bubbles;
+* normalize recognized text;
+* translate text;
+* build Presentation state;
+* render UI;
+* schedule its own Runtime work;
+* create WorkItems;
+* create Attempts;
+* create RuntimeRevisionId;
+* decide Runtime retry execution;
+* decide global queue priority;
+* publish accepted Artifacts itself;
+* own long-term reading history.
+
+---
+
+# 8. Capture vs Recognition
+
+Capture owns:
+
+```text
+acquisition
+source geometry
+raw source dimensions
+pixel representation normalization
+capture timestamp
+capture-source metadata
+```
+
+Recognition owns:
+
+```text
+image preprocessing for recognition
+text-region detection
+OCR
+orientation/text-direction interpretation
+layout interpretation
+duplicate/content analysis where defined
+recognition quality
+```
+
+Capture MUST NOT optimize or mutate frame content specifically for OCR.
+
+---
+
+# 9. Capture vs Reading Session
+
+Reading Session owns:
+
+```text
+what the user is reading
+ReadingSource
+ReadingTarget
+ReadingContextRevision
+reading lifecycle
+```
+
+Capture owns:
+
+```text
+how a Runtime-authorized capture request
+is acquired from a CaptureSource
+```
+
+Reading Session does not directly invoke Capture implementation.
+
+Preferred flow:
+
+```text
+ReadingContext changed
+        ↓
+Business Pipeline Orchestration
+        ↓
+Runtime
+        ↓
+Capture
+```
+
+---
+
+# 10. Capture vs Business Pipeline Orchestration
+
+Business Pipeline Orchestration decides:
+
+```text
+Is Capture required?
+Can an existing CapturedFrameArtifact be reused?
+Is Recognition required afterward?
+Should Capture be skipped?
+```
+
+Capture does not maintain those dependency rules.
+
+---
+
+# 11. Capture vs Runtime
+
+Runtime invokes Capture through stable processing contracts.
+
+Runtime provides execution context such as:
+
+```text
+SessionId
+RuntimeRevisionId
+WorkItemId
+AttemptId
+ConfigurationSnapshotRef
+CancellationContext
+Correlation / Trace Context
+```
+
+Capture may use these values for:
+
+* tracing;
+* diagnostics;
+* cancellation observation;
+* Candidate correlation.
+
+Capture does not own them.
+
+---
+
+# 12. CaptureSource
+
+`CaptureSource` represents a logical capturable source.
+
+Conceptually:
+
+```text
+CaptureSource
+├── captureSourceId
+├── sourceKind
+├── sourceDescriptor
+├── sourceVersion
+├── capabilities
+└── sourceState
+```
+
+Possible source kinds:
+
+```text
+ScreenRegion
+ApplicationWindow
+Display
+BrowserConnector
+LocalInput
+RenderedDocument
+```
+
+A CaptureSource is not a native handle.
+
+---
+
+# 13. CaptureSourceId
 
 ```text
 CaptureSourceId
-SourceType
-SourceDescriptor
-SourceVersion
-SourceState
 ```
 
-`SourceVersion` tăng khi source được tái tạo hoặc cấu hình source thay đổi đáng kể.
+identifies one logical Capture source.
 
-Kết quả từ source version cũ không được tiếp tục đi vào pipeline.
-
----
-
-## Permission Controller
-
-### Purpose
-
-Quản lý quyền truy cập nguồn capture.
-
-### Responsibilities
-
-- Kiểm tra quyền capture màn hình.
-- Yêu cầu quyền khi cần.
-- Theo dõi permission state.
-- Phát hiện quyền bị thu hồi.
-- Chuyển lỗi nền tảng sang error model chung.
-- Ngăn capture khi quyền không hợp lệ.
-
-### Rules
-
-- Không tự động mở rộng phạm vi capture.
-- Không tự động chuyển sang full display.
-- Không tiếp tục capture khi quyền đã bị thu hồi.
-- Không yêu cầu quyền nhiều lần liên tục.
-- Permission prompt phải gắn với hành động rõ ràng của người dùng.
+It must remain stable across provider/native-handle replacement when the logical source is still considered the same source.
 
 ---
 
-## Capture Policy Engine
+# 14. SourceVersion
 
-### Purpose
+`SourceVersion` identifies significant CaptureSource configuration/lifecycle changes.
 
-Quyết định cách capture được thực hiện trong phạm vi policy đã cấu hình.
+Examples:
 
-### Responsibilities
+* region changed;
+* underlying window re-created;
+* source descriptor changed;
+* capture capability set changed;
+* provider-side logical source re-established.
 
-- Chọn capture mode.
-- Xác định capture interval.
-- Áp dụng deadline.
-- Áp dụng priority.
-- Áp dụng backpressure strategy.
-- Xác định frame replacement policy.
-- Điều chỉnh tần suất theo runtime pressure.
-- Tôn trọng trạng thái session.
+SourceVersion is Capture-owned.
 
-### Inputs
+It is not Runtime execution authority.
+
+A mismatch may make a Candidate semantically invalid for the requested CaptureSource.
+
+Runtime authority remains a separate check.
+
+---
+
+# 15. Source State
+
+Capture may own a small source-local lifecycle such as:
 
 ```text
-CapturePolicy
-RuntimeResourceState
-SessionState
-SourceCapability
-QueuePressure
-ConfigSnapshot
+UNINITIALIZED
+INITIALIZING
+READY
+SUSPENDED
+UNAVAILABLE
+STOPPING
+STOPPED
 ```
 
-### Outputs
+Detailed transitions belong to `STATES.md`.
 
-```text
-EffectiveCapturePolicy
-```
+Source state describes CaptureSource availability only.
 
-### Notes
-
-Capture Policy Engine không xác định nội dung đã thay đổi hay chưa.
-
-Nó chỉ quyết định khi nào và bằng cách nào nên yêu cầu thêm dữ liệu.
+It does not describe Runtime WorkItem state.
 
 ---
 
-## Frame Acquirer
+# 16. Source Manager
 
-### Purpose
+A logical Source Manager may be responsible for:
 
-Thực hiện thao tác thu nhận dữ liệu thực tế từ provider.
+* creating CaptureSource instances;
+* validating source descriptors;
+* tracking SourceVersion;
+* acquiring provider source resources;
+* exposing normalized capability information;
+* suspending/resuming CaptureSource;
+* replacing platform resources behind the same logical source;
+* releasing Capture-owned source references.
 
-### Responsibilities
+It must not become a Reading Session registry.
 
-- Gọi Capture Provider.
-- Áp dụng region.
-- Áp dụng timeout.
-- Nhận raw provider result.
-- Kiểm tra dữ liệu tối thiểu.
-- Chuyển provider failure thành capture failure.
-- Tôn trọng cancellation.
-- Trả dữ liệu cho Frame Normalizer.
+---
 
-### Inputs
+# 17. Native Source Handle Ownership
+
+Native source handles belong behind the Capture Provider/platform boundary.
+
+Conceptually:
+
+```text
+Capture
+    ↓
+Opaque Provider Source Reference
+    ↓
+CaptureProvider
+    ↓
+Native Window / Display / Browser Resource
+```
+
+Capture public contracts MUST NOT expose:
+
+```text
+HWND
+CGWindowID
+X11 Window
+Wayland object
+DOM Node
+browser tab object
+native texture handle
+```
+
+---
+
+# 18. Permission Boundary
+
+Capture must enforce permission-related semantic requirements such as:
+
+```text
+required capture permission exists
+requested scope is permitted
+capture region is within granted scope
+privacy fallback is permitted
+```
+
+Actual permission APIs and prompts belong to:
+
+```text
+Capture Provider
+Platform Adapter
+Application/UI integration
+```
+
+Capture MUST NOT directly import operating-system permission APIs.
+
+---
+
+# 19. Permission Rules
+
+Capture must preserve:
+
+1. never widen capture scope automatically;
+2. never fall back from window/region to full display without explicit policy/user authorization;
+3. stop producing valid Candidates when required permission is revoked;
+4. avoid permission-prompt loops;
+5. expose normalized permission requirement/error semantics;
+6. keep native permission objects outside public contracts.
+
+---
+
+# 20. CaptureOperation
+
+`CaptureOperation` is Capture-owned semantic processing for one Runtime invocation.
+
+Conceptually:
 
 ```text
 CaptureOperation
-CaptureSourceHandle
-EffectiveCapturePolicy
-CancellationContext
+├── operationId
+├── operationType
+├── captureSourceId
+├── sourceVersion
+├── requestedRegion?
+├── captureMode
+├── runtimeExecutionIdentity
+├── configurationSnapshotRef
+└── diagnosticState
 ```
 
-### Outputs
+`CaptureOperation` is not:
 
 ```text
+WorkItem
+Attempt
+SchedulerJob
+```
+
+---
+
+# 21. Runtime Execution Identity
+
+Conceptually:
+
+```text
+RuntimeExecutionIdentity
+├── sessionId
+├── runtimeRevisionId
+├── workItemId
+├── attemptId
+├── configurationSnapshotRef
+├── correlationId?
+├── causationId?
+└── traceContext?
+```
+
+Capture MUST NOT create these IDs.
+
+---
+
+# 22. Removal of Generation-as-Authority
+
+The previous Capture model used:
+
+```text
+GenerationId
+```
+
+as a primary stale-result authority mechanism.
+
+Runtime v2 already owns execution authority through:
+
+```text
+RuntimeRevisionId
+WorkItem
+Attempt
+authority validation
+```
+
+Therefore Capture MUST NOT maintain a competing global/session generation authority.
+
+If a Capture-specific generation/version is still required for source semantics, it must be scoped and renamed appropriately, for example:
+
+```text
+SourceVersion
+CaptureStreamVersion
+```
+
+and must not replace Runtime authority.
+
+---
+
+# 23. CaptureRequest
+
+A Capture request conceptually contains:
+
+```text
+CaptureRequest
+├── captureSourceRef
+├── requestedRegion?
+├── captureMode
+├── captureOptions
+├── runtimeExecutionContext
+└── configurationSnapshotRef
+```
+
+Detailed public schemas belong to `CONTRACT.md`.
+
+---
+
+# 24. Capture Mode
+
+Typical semantic modes:
+
+```text
+ON_DEMAND
+CONTINUOUS_SAMPLE
+PROVIDER_EVENT_TRIGGERED
+```
+
+Capture Mode describes how a single Capture capability is requested.
+
+It does not grant Capture permission to create an independent scheduler.
+
+---
+
+# 25. On-Demand Capture
+
+Normal flow:
+
+```text
+Runtime invokes Capture
+        ↓
+Validate Capture request
+        ↓
+Resolve CaptureSource
+        ↓
+Acquire provider reference
+        ↓
+Invoke provider
+        ↓
 RawCaptureResult
+        ↓
+Normalize
+        ↓
+Validate Candidate
+        ↓
+CandidateCaptureResult
+        ↓
+Return Completion to Runtime
 ```
 
-### Rules
-
-- Không retry vô hạn.
-- Không giữ raw result sau khi đã bàn giao.
-- Không gọi trực tiếp Recognition.
-- Không tự ghi raw data xuống storage.
-- Không tạo worker pool riêng ngoài Scheduler.
+Runtime then determines whether the result may be accepted.
 
 ---
 
-## Frame Normalizer
+# 26. Continuous Capture
 
-### Purpose
+Continuous capture must not create a hidden scheduler inside Capture.
 
-Chuẩn hóa dữ liệu từ provider thành `CaptureFrame`.
-
-### Responsibilities
-
-- Chuẩn hóa pixel format.
-- Chuẩn hóa dimensions.
-- Chuẩn hóa orientation.
-- Gắn coordinate metadata.
-- Gắn DPI scale.
-- Gắn source metadata.
-- Gắn timestamp.
-- Gắn runtime context.
-- Gắn config snapshot.
-- Kiểm tra frame validity.
-
-### Input
+Preferred Runtime-v2 model:
 
 ```text
-RawCaptureResult
-CaptureOperationContext
-SourceMetadata
+Business/Runtime policy decides repeated sampling
+        ↓
+Runtime schedules Capture WorkItems
+        ↓
+Capture executes one bounded acquisition per invocation
 ```
 
-### Output
+Alternatively, if a provider requires a continuous native stream:
 
 ```text
-CaptureFrame
+Runtime-authorized stream lifetime
+        ↓
+CaptureProvider stream
+        ↓
+bounded samples
+        ↓
+Capture Candidate results
 ```
 
-### Normalization Rules
+Even then:
 
-CaptureFrame phải mô tả rõ:
-
-```text
-Frame width
-Frame height
-Pixel format
-Image orientation
-Capture region
-Coordinate space
-DPI scale
-Source dimensions
-Capture timestamp
-Source identity
-Session identity
-Generation identity
-```
-
-Frame Normalizer không:
-
-- Resize tùy ý để phục vụ OCR.
-- Enhance ảnh.
-- Sharpen ảnh.
-- Denoise ảnh.
-- Crop theo bubble.
-- Detect text region.
-
-Các thao tác đó thuộc Recognition Module hoặc provider chuyên biệt phía sau.
+* Runtime owns execution authority;
+* Capture does not create arbitrary unbounded work;
+* every accepted sample remains authority-validated.
 
 ---
 
-## Frame Lifecycle Manager
+# 27. Continuous Provider Stream
 
-### Purpose
+Some platforms expose capture as a callback stream rather than request/response.
 
-Quản lý vòng đời và quyền sở hữu bộ nhớ của CaptureFrame.
-
-### Responsibilities
-
-- Đăng ký frame.
-- Theo dõi frame owner.
-- Theo dõi reference.
-- Áp dụng retention policy.
-- Giải phóng raw buffer.
-- Loại bỏ stale frame.
-- Giới hạn số frame tồn tại đồng thời.
-- Hủy frame thuộc generation cũ.
-- Hủy frame khi session kết thúc.
-
-### Default Policy
+Capture may adapt such providers behind:
 
 ```text
-Raw frame is memory-only.
+CaptureProviderStream
 ```
 
-Frame phải được giải phóng khi:
+but must normalize provider callbacks into bounded Capture results associated with current Runtime execution context.
 
-- Không còn consumer.
-- Hết retention window.
-- Bị thay thế bởi frame mới.
-- Generation thay đổi.
-- Session dừng.
-- Runtime shutdown.
-- Resource pressure vượt ngưỡng.
-
-### Ownership Rule
-
-Tại mỗi thời điểm phải xác định được một owner rõ ràng của frame.
-
-Không được truyền raw pointer hoặc mutable buffer tự do giữa các module.
+Provider callback frequency must not define Runtime scheduling policy.
 
 ---
 
-## Capture Health Monitor
+# 28. Backpressure
 
-### Purpose
+Capture should preserve freshness and bounded memory.
 
-Theo dõi tình trạng hoạt động của Capture Module và source.
+Default domain preference:
 
-### Responsibilities
+```text
+Latest relevant capture result
+>
+large stale backlog
+```
 
-- Theo dõi capture latency.
-- Theo dõi failure rate.
-- Theo dõi source availability.
-- Theo dõi dropped frame.
-- Theo dõi reconnect attempts.
-- Theo dõi permission failures.
-- Theo dõi memory pressure liên quan tới frame.
-- Cung cấp health status cho Runtime Coordinator.
+However, global queue admission and Runtime scheduling belong to Runtime.
 
-### Health States
+Capture may apply local bounded behavior such as:
+
+* drop obsolete provider callback samples;
+* retain only the newest unsubmitted sample;
+* refuse a new local acquisition while one source operation is active;
+* report pressure to Runtime;
+* reduce provider callback buffering.
+
+---
+
+# 29. Backpressure Ownership
+
+Capture may decide:
+
+```text
+this local provider sample is obsolete
+this local source cannot safely accept concurrent acquisition
+local buffer limit exceeded
+```
+
+Runtime decides:
+
+```text
+whether another WorkItem is created
+queue priority
+global fairness
+retry scheduling
+resource admission
+```
+
+---
+
+# 30. No Private Capture Queue
+
+Capture MUST NOT own separate global queues such as:
+
+```text
+UserTriggeredQueue
+ContinuousCaptureQueue
+RecoveryQueue
+```
+
+when Runtime Work Queue already owns scheduling.
+
+Those may exist as Runtime priority/classes, not Capture-owned queue infrastructure.
+
+---
+
+# 31. Capture Policy
+
+Capture may own semantic policy specific to acquisition behavior.
+
+Examples:
+
+```text
+requested capture mode
+provider format preference
+maximum accepted dimensions
+region policy
+cursor inclusion
+capture privacy policy
+source concurrency constraint
+```
+
+Capture policy MUST NOT duplicate:
+
+```text
+Runtime priority policy
+global deadline policy
+Runtime retry scheduling
+global resource admission
+```
+
+---
+
+# 32. Configuration
+
+Capture consumes immutable typed configuration.
+
+Example:
+
+```text
+CaptureConfiguration
+├── preferredPixelFormat
+├── maximumWidth
+├── maximumHeight
+├── maximumCandidateBytes
+├── sourceConcurrencyLimit
+├── localSampleBufferLimit
+├── includeCursor
+├── allowFullDisplayCapture
+├── rawFramePersistencePolicy
+└── privacyPolicy
+```
+
+Capture MUST NOT parse YAML/environment variables directly.
+
+---
+
+# 33. Frame Acquirer
+
+A logical Frame Acquirer:
+
+* invokes CaptureProvider;
+* supplies requested source/region;
+* cooperates with cancellation;
+* receives provider result;
+* performs minimum provider-output checks;
+* normalizes provider-specific failures;
+* releases provider temporary resources.
+
+It does not:
+
+* retry indefinitely;
+* schedule Runtime retry;
+* call Recognition;
+* persist raw frame;
+* create private workers.
+
+---
+
+# 34. RawCaptureResult
+
+`RawCaptureResult` is provider-facing transient data.
+
+It may contain provider-native representation internally.
+
+Its lifetime is bounded to:
+
+```text
+provider acquisition
+    ↓
+Capture normalization
+```
+
+It MUST NOT cross the public Capture module boundary.
+
+---
+
+# 35. Capture Normalization
+
+Normalization converts provider result into a stable Capture-owned representation.
+
+Typical normalized semantics:
+
+```text
+width
+height
+pixel format
+orientation
+capture region
+coordinate space
+DPI / scale metadata
+source dimensions
+capture timestamp
+CaptureSourceId
+SourceVersion
+```
+
+Runtime execution identity may be attached as provenance, not Capture-owned authority.
+
+---
+
+# 36. What Capture Normalization Must Not Do
+
+Capture normalization does not:
+
+* sharpen;
+* denoise for OCR;
+* deskew text;
+* detect bubbles;
+* detect text;
+* binarize for Recognition;
+* resize purely to improve OCR;
+* infer reading order;
+* interpret language.
+
+Those responsibilities remain downstream.
+
+---
+
+# 37. CandidateCaptureResult
+
+The primary Capture module result is:
+
+```text
+CandidateCaptureResult
+├── operationId
+├── captureSourceId
+├── sourceVersion
+├── normalizedFrame
+├── captureMetadata
+├── runtimeExecutionIdentity
+├── warnings[]
+└── diagnostics?
+```
+
+A Candidate is not an accepted Artifact.
+
+---
+
+# 38. Candidate Validation
+
+Before returning Candidate completion, Capture validates:
+
+* source identity matches request;
+* source version compatible;
+* dimensions valid;
+* pixel format supported;
+* buffer exists;
+* buffer bounds valid;
+* coordinate metadata valid;
+* capture region valid;
+* privacy scope respected;
+* candidate size within configured limits;
+* required provider result metadata exists.
+
+Capture MUST NOT determine global Runtime staleness itself.
+
+---
+
+# 39. Runtime Authority Validation
+
+After Capture completes:
+
+```text
+CandidateCaptureResult
+        ↓
+Runtime Completion Validation
+        ↓
+authority current?
+    ├── no → discard
+    └── yes
+          ↓
+       Artifact publication
+```
+
+Capture must not publish a Candidate merely because local validation succeeded.
+
+---
+
+# 40. CapturedFrameArtifact
+
+After Runtime accepts completion, an immutable accepted Artifact is published:
+
+```text
+CapturedFrameArtifact
+├── artifactId
+├── contentIdentity
+├── captureSourceId
+├── sourceVersion
+├── frame representation/ref
+├── geometry metadata
+├── capture metadata
+├── provenance
+└── contractVersion
+```
+
+The exact schema belongs to Capture/Artifact contracts.
+
+---
+
+# 41. Artifact Ownership
+
+Once accepted and published:
+
+```text
+CapturedFrameArtifact
+```
+
+belongs to Runtime Artifact Store lifetime rules.
+
+Capture does not continue to own the accepted Artifact merely because it created the Candidate.
+
+---
+
+# 42. Frame Memory Ownership
+
+Before publication:
+
+```text
+Raw provider data
+    → provider/acquirer temporary ownership
+
+Normalized Candidate data
+    → Capture operation ownership
+```
+
+After accepted Artifact publication:
+
+```text
+Artifact payload
+    → Artifact Store / Runtime resource ownership
+```
+
+This prevents Capture from becoming a second Artifact lifetime manager.
+
+---
+
+# 43. Removal of Frame Lifecycle Manager as Global Owner
+
+The previous `Frame Lifecycle Manager` owned:
+
+```text
+retention
+reference tracking
+stale-frame disposal
+cross-module frame lifetime
+```
+
+Those responsibilities overlap Runtime Resource Lifecycle and Artifact Store.
+
+In v2, Capture may retain only a:
+
+```text
+Capture Temporary Resource Manager
+```
+
+for:
+
+* raw provider buffers;
+* Candidate-local normalized buffers;
+* provider leases;
+* source-local transient sample buffers.
+
+Accepted Artifact retention belongs outside Capture.
+
+---
+
+# 44. Temporary Resource Manager
+
+A logical Capture Temporary Resource Manager may:
+
+* release raw provider buffers;
+* release discarded Candidate buffers;
+* enforce local sample buffer limits;
+* release provider leases;
+* clean source-local temporary state;
+* cooperate with Runtime resource pressure signals.
+
+It does not own accepted Artifact leases globally.
+
+---
+
+# 45. Immutability
+
+Normalized Candidate data must be treated as immutable once handed to Runtime completion boundary.
+
+Accepted `CapturedFrameArtifact` is immutable.
+
+Recognition MUST NOT mutate the shared Artifact in place.
+
+If Recognition requires preprocessing, it creates a separate representation according to Memory Model.
+
+---
+
+# 46. Source Concurrency
+
+MVP default:
+
+```text
+maxConcurrentAcquisitionPerSource = 1
+```
+
+This is a Capture/provider safety constraint, not Scheduler ownership.
+
+It prevents:
+
+* native handle races;
+* duplicate acquisitions;
+* provider instability;
+* excessive local buffering.
+
+Runtime should respect the declared capability/constraint.
+
+---
+
+# 47. Provider Capability
+
+Normalized capability examples:
+
+```text
+SupportsRegionCapture
+SupportsWindowCapture
+SupportsDisplayCapture
+SupportsContinuousStream
+SupportsCursorExclusion
+SupportsOccludedWindowCapture
+SupportsDpiMetadata
+SupportsStructuredCapture
+SupportsEventTrigger
+```
+
+Capture resolves semantic capability from provider declarations.
+
+Public contracts must not expose provider-specific SDK objects.
+
+---
+
+# 48. Provider Boundary
+
+```text
+Capture
+    ↓
+CaptureProvider Contract
+    ├── Desktop Screen Provider
+    ├── Desktop Window Provider
+    ├── Browser Capture Provider
+    ├── Local Input Provider
+    └── Document Render Provider
+```
+
+CaptureProvider owns platform-specific acquisition mechanics.
+
+---
+
+# 49. CaptureProvider Responsibilities
+
+Provider owns:
+
+* native API invocation;
+* provider-specific source handle;
+* native callback lifecycle;
+* provider result extraction;
+* provider-specific capability detection;
+* platform-specific permission bridge where applicable;
+* provider-specific error capture.
+
+Provider does not own:
+
+* Runtime retry;
+* pipeline orchestration;
+* accepted Artifact publication;
+* Recognition.
+
+---
+
+# 50. Retry Semantics
+
+Capture may classify an error as:
+
+```text
+retryable
+non-retryable
+retryable-after-source-refresh
+retryable-after-permission-change
+```
+
+Capture does not execute Runtime retry policy.
+
+Correct ownership:
+
+```text
+Capture
+    → classify Capture failure
+
+Runtime Retry Policy
+    → decide retry
+
+Scheduler
+    → schedule retry execution
+```
+
+---
+
+# 51. Hidden Provider Retry
+
+Capture Providers MUST NOT perform unbounded hidden retry.
+
+Provider-local retry is permitted only when:
+
+* bounded;
+* required by the platform API;
+* transparent to deadline/cancellation semantics;
+* observable;
+* does not consume Runtime retry budget invisibly.
+
+---
+
+# 52. Cancellation
+
+Runtime owns cancellation authority.
+
+Capture receives a cancellation context and must cooperate.
+
+Capture may check cancellation:
+
+* before provider invocation;
+* during long provider operations where supported;
+* before normalization;
+* before returning Candidate completion.
+
+Capture MUST NOT mutate Runtime Attempt state.
+
+---
+
+# 53. Late Provider Result
+
+If provider cannot hard-cancel:
+
+```text
+Runtime cancellation
+        ↓
+provider continues physically
+        ↓
+provider returns result
+        ↓
+Capture may stop local processing if cancellation observed
+        ↓
+Runtime authority validation remains final protection
+```
+
+Capture does not need a competing Generation authority to solve this.
+
+---
+
+# 54. Source Replacement
+
+Source replacement is a CaptureSource semantic operation.
+
+Typical flow:
+
+```text
+Replace CaptureSource request
+        ↓
+validate replacement
+        ↓
+stop accepting new acquisition on old source
+        ↓
+release/replace provider source resource
+        ↓
+increment SourceVersion
+        ↓
+new source READY
+```
+
+Runtime separately decides what existing WorkItems/Attempts become obsolete.
+
+---
+
+# 55. Source Replacement and Authority
+
+A Candidate referencing an incompatible old `SourceVersion` fails Capture semantic validation or Runtime compatibility validation.
+
+This is distinct from:
+
+```text
+Runtime Revision superseded
+```
+
+Both protections may apply independently.
+
+---
+
+# 56. Health Model
+
+Capture may expose Capture-specific health:
 
 ```text
 Healthy
@@ -426,1072 +1302,1072 @@ Recovering
 Stopped
 ```
 
-### Notes
+Health reflects CaptureSource/provider capability.
 
-Health Monitor không tự restart module.
+Examples:
 
-Nó cung cấp tín hiệu để Runtime Coordinator hoặc Source Manager thực hiện recovery.
+### Healthy
+
+* source available;
+* permission usable;
+* provider operating;
+* latency within expected Capture budget.
+
+### Degraded
+
+* high Capture latency;
+* provider callback drops;
+* temporary source instability;
+* local sample pressure.
+
+### Unavailable
+
+* source lost;
+* required permission unavailable;
+* provider unavailable.
+
+### Recovering
+
+* source resource being reacquired;
+* provider reconnect in progress.
+
+### Stopped
+
+* source explicitly stopped.
 
 ---
 
-# Supporting Components
+# 57. Health Does Not Control Runtime
 
-## Capture Operation Factory
+Capture health may be exposed to Runtime/Application.
 
-Tạo `CaptureOperation` từ request và runtime context.
+Capture Health Monitor does not:
 
-Operation phải chứa tối thiểu:
+* restart Runtime;
+* schedule WorkItems;
+* change Runtime Revision;
+* cancel Attempts;
+* alter global queue policy.
+
+---
+
+# 58. Error Ownership
+
+Capture owns errors such as:
 
 ```text
-OperationId
-JobId
-RuntimeId
-SessionId
-GenerationId
-CaptureSourceId
-SourceVersion
-ConfigSnapshotId
-Priority
-Deadline
-CancellationScope
-RequestedRegion
-CaptureMode
+InvalidCaptureRequest
+UnsupportedSource
+SourceUnavailable
+PermissionUnavailable
+InvalidRegion
+ProviderFailure
+CaptureTimeoutClassification
+InvalidRawResult
+InvalidFrameGeometry
+NormalizationFailed
+SourceVersionMismatch
+CandidateInvalid
+```
+
+Detailed taxonomy belongs to `ERRORS.md`.
+
+---
+
+# 59. Runtime Errors Are External
+
+Capture does not own:
+
+```text
+RuntimeRevisionStale
+WorkItemCancelled
+AttemptSuperseded
+RetryExhausted
+SchedulerOverloaded
+RuntimeShutdown
+```
+
+These may affect Capture execution but remain Runtime-owned outcomes.
+
+---
+
+# 60. Event Ownership
+
+Capture may publish Capture-owned facts only.
+
+Possible facts:
+
+```text
+CaptureSourceReady
+CaptureSourceChanged
+CaptureSourceUnavailable
+CaptureSourceStopped
+CaptureHealthChanged
+```
+
+Processing success associated with Runtime WorkItem completion should not create a competing terminal lifecycle event model.
+
+Detailed events belong to `EVENTS.md`.
+
+---
+
+# 61. No Hidden Event Orchestration
+
+Capture MUST NOT require:
+
+```text
+ReadingTargetChanged
+    ↓
+Capture subscribes
+    ↓
+Capture starts itself
+```
+
+Correct:
+
+```text
+Reading domain change
+        ↓
+Business Pipeline Orchestration
+        ↓
+Runtime
+        ↓
+Capture invocation
 ```
 
 ---
 
-## Source Capability Resolver
+# 62. Public Module Surface
 
-Xác định khả năng của source và provider.
-
-Ví dụ:
+Capture should expose a small stable contract boundary, conceptually:
 
 ```text
-SupportsRegionCapture
-SupportsWindowCapture
-SupportsContinuousCapture
-SupportsCursorExclusion
-SupportsOccludedWindowCapture
-SupportsDpiMetadata
-SupportsDomSnapshot
-SupportsEventTrigger
-```
-
-Capability phải được kiểm tra trước khi áp dụng policy.
-
----
-
-## Capture Result Validator
-
-Kiểm tra kết quả capture ở mức tối thiểu:
-
-- Kích thước hợp lệ.
-- Buffer tồn tại.
-- Format được hỗ trợ.
-- Source identity khớp.
-- Source version khớp.
-- Session generation còn hiệu lực.
-- Kết quả chưa quá deadline.
-- Operation chưa bị cancel.
-
-Validator không đánh giá nội dung hình ảnh.
-
----
-
-# Public Module Surface
-
-Capture Module chỉ nên expose một public surface nhỏ.
-
-Khái niệm dự kiến:
-
-```text
-CaptureService
-CaptureSourceService
+CaptureProcessor
+CaptureSourcePort
 CaptureCapabilityQuery
 CaptureHealthQuery
 ```
 
-Public API chi tiết được định nghĩa trong:
+Detailed public commands/data contracts belong to:
 
 ```text
-API.md
+CONTRACT.md
 ```
 
-Các component nội bộ như:
+not `API.md`.
 
-```text
-FrameAcquirer
-FrameNormalizer
-SourceManager
-FrameLifecycleManager
-```
-
-không được truy cập trực tiếp từ module khác.
+Internal services must not be imported by other modules.
 
 ---
 
-# Main Processing Flow
+# 63. Internal Logical Components
 
-## On-Demand Capture Flow
-
-```text
-Capture Request
-      |
-      v
-Capture Coordinator
-      |
-      v
-Validate Session Context
-      |
-      v
-Resolve Active Source
-      |
-      v
-Resolve Effective Policy
-      |
-      v
-Create Capture Operation
-      |
-      v
-Submit Capture Job
-      |
-      v
-Frame Acquirer
-      |
-      v
-Capture Provider
-      |
-      v
-Raw Capture Result
-      |
-      v
-Frame Normalizer
-      |
-      v
-Capture Result Validator
-      |
-      v
-Frame Lifecycle Manager
-      |
-      v
-CaptureFrame
-```
-
----
-
-## Continuous Capture Flow
-
-```text
-Continuous Capture Started
-      |
-      v
-Capture Policy Engine
-      |
-      v
-Schedule Capture Tick
-      |
-      v
-Check Session State
-      |
-      v
-Check Queue Pressure
-      |
-      +---- overloaded ----> skip or delay tick
-      |
-      v
-Create Capture Operation
-      |
-      v
-Acquire Frame
-      |
-      v
-Normalize Frame
-      |
-      v
-Replace Stale Pending Frame
-      |
-      v
-Publish Latest CaptureFrame
-      |
-      v
-Schedule Next Tick
-```
-
-Continuous capture phải dừng khi:
-
-```text
-Session paused
-Session stopped
-Generation changed
-Source lost
-Permission revoked
-Runtime shutting down
-Resource limit exceeded
-```
-
----
-
-## Source Replacement Flow
-
-```text
-Replace Source Requested
-      |
-      v
-Suspend Current Capture
-      |
-      v
-Cancel Active Operations
-      |
-      v
-Increment Session Generation
-      |
-      v
-Stop Old Source
-      |
-      v
-Create New Source
-      |
-      v
-Validate Permission
-      |
-      v
-Initialize New Source
-      |
-      v
-Set Primary Source
-      |
-      v
-Resume Capture
-```
-
-Kết quả từ source cũ đến sau thời điểm replacement phải bị loại bỏ.
-
----
-
-# Backpressure Design
-
-Capture Module không nên duy trì một backlog dài các frame.
-
-Đối với trải nghiệm đọc, dữ liệu hiện tại thường quan trọng hơn dữ liệu cũ.
-
-Chiến lược mặc định:
-
-```text
-Latest relevant frame wins.
-```
-
-## Backpressure Actions
-
-Khi pipeline bị chậm, Capture Module có thể:
-
-- Không tạo capture operation mới.
-- Bỏ qua capture tick.
-- Thay thế pending frame cũ.
-- Giảm capture frequency.
-- Tạm dừng continuous capture.
-- Chỉ giữ user-triggered request.
-- Giảm độ phân giải nếu policy cho phép.
-
-## Queue Recommendation
-
-Capture Queue nên tách ít nhất:
-
-```text
-UserTriggeredQueue
-ContinuousCaptureQueue
-RecoveryQueue
-```
-
-Priority đề xuất:
-
-```text
-User-triggered capture
-    >
-Source recovery capture
-    >
-Continuous capture
-```
-
----
-
-# Concurrency Model
-
-## Source Concurrency
-
-Mỗi source mặc định chỉ có một active capture operation.
-
-```text
-maxConcurrentCapturePerSource = 1
-```
-
-Điều này tránh:
-
-- Tranh chấp native handle.
-- Capture dư thừa.
-- Frame reorder.
-- Tăng memory không cần thiết.
-
-Provider có thể khai báo hỗ trợ concurrency lớn hơn, nhưng không nên là mặc định.
-
----
-
-## Session Concurrency
-
-MVP nên giới hạn:
-
-```text
-one primary active source per reading session
-```
-
-Một session có thể có pending source trong lúc chuyển đổi, nhưng chỉ một source được phép phát frame chính thức.
-
----
-
-## Frame Concurrency
-
-Frame phải được xem là immutable sau khi normalization hoàn tất.
-
-Consumer không được thay đổi trực tiếp buffer hoặc metadata.
-
-Nếu cần preprocessing, Recognition Module phải tạo representation mới hoặc sử dụng copy-on-write theo Memory Model.
-
----
-
-# Threading Model
-
-Capture Module không sở hữu global thread pool.
-
-Các capture operation chạy thông qua Runtime Scheduler.
-
-Provider adapter có thể sử dụng:
-
-- Native callback.
-- OS capture thread.
-- Async runtime.
-- Dedicated provider thread.
-
-Nhưng các chi tiết đó phải bị che sau `CaptureProvider`.
-
-Public module behavior phải nhất quán bất kể provider dùng threading model nào.
-
----
-
-# Runtime Context
-
-Mỗi capture operation phải mang runtime context đầy đủ.
-
-```text
-RuntimeId
-SessionId
-GenerationId
-JobId
-OperationId
-CaptureSourceId
-SourceVersion
-ConfigSnapshotId
-CorrelationId
-CausationId
-TraceContext
-CancellationScope
-```
-
-Các identity này được dùng để:
-
-- Tracing.
-- Cancellation.
-- Stale result rejection.
-- Error correlation.
-- Session isolation.
-- Config consistency.
-
----
-
-# Configuration
-
-Capture Module nhận typed configuration từ Configuration Service.
-
-Ví dụ cấu hình:
-
-```yaml
-capture:
-  defaultMode: continuous
-  defaultSourceType: screen-region
-  intervalMs: 500
-  timeoutMs: 1500
-  maxConcurrentPerSource: 1
-  maxActiveFrames: 3
-
-  backpressure:
-    strategy: latest-relevant-frame
-    skipWhenBusy: true
-    reduceFrequencyWhenDegraded: true
-
-  frame:
-    preferredPixelFormat: rgba8
-    maxWidth: 4096
-    maxHeight: 4096
-    rawRetentionMs: 3000
-    memoryOnly: true
-
-  privacy:
-    allowFullDisplayCapture: false
-    persistRawFrames: false
-    includeCursor: false
-```
-
-Capture Module không tự đọc YAML, JSON hoặc environment variable.
-
----
-
-# Error Handling
-
-## Error Translation
-
-Provider-specific error phải được chuyển thành error chung.
-
-Ví dụ:
-
-```text
-NativeAccessDenied
-    ->
-PermissionDenied
-```
-
-```text
-WindowHandleInvalid
-    ->
-SourceLost
-```
-
-```text
-ProviderDeadlineExceeded
-    ->
-CaptureTimeout
-```
-
----
-
-## Recoverable Errors
-
-Có thể recovery:
-
-```text
-SourceTemporarilyUnavailable
-CaptureTimeout
-TransientProviderFailure
-SourceOccluded
-ResourcePressure
-```
-
-Hành vi có thể gồm:
-
-- Retry có giới hạn.
-- Backoff.
-- Suspend.
-- Reconnect.
-- Giảm tần suất.
-- Yêu cầu người dùng chọn lại source.
-
----
-
-## Non-Recoverable Errors
-
-Không nên retry tự động:
-
-```text
-PermissionDenied
-UnsupportedSource
-InvalidRegion
-InvalidConfiguration
-SourcePermanentlyClosed
-PrivacyPolicyViolation
-```
-
----
-
-## Retry Ownership
-
-Capture Module quyết định lỗi capture nào có thể retry.
-
-Scheduler thực hiện delay, deadline và retry scheduling.
-
-Capture Provider không tự retry vô hạn bên trong adapter.
-
----
-
-# Cancellation Design
-
-Cancellation có thể đến từ:
-
-```text
-Runtime shutdown
-Session stop
-Session pause
-Generation change
-Source replacement
-User cancellation
-Deadline exceeded
-Resource pressure
-Provider shutdown
-```
-
-## Propagation
-
-```text
-Cancellation Scope
-      |
-      v
-Capture Coordinator
-      |
-      v
-Capture Operation
-      |
-      v
-Scheduler Job
-      |
-      v
-Frame Acquirer
-      |
-      v
-Capture Provider
-```
-
-Khi provider không hỗ trợ hard cancellation, kết quả trả về sau đó vẫn phải bị validator loại bỏ.
-
----
-
-# Resource Ownership
-
-## Native Source Handle
-
-Owner:
-
-```text
-Source Manager
-```
-
-## Active Capture Operation
-
-Owner:
-
-```text
-Capture Coordinator
-```
-
-## Raw Provider Result
-
-Owner:
-
-```text
-Frame Acquirer
-```
-
-sau đó chuyển quyền cho:
-
-```text
-Frame Normalizer
-```
-
-## Normalized CaptureFrame
-
-Owner ban đầu:
-
-```text
-Frame Lifecycle Manager
-```
-
-Sau đó consumer nhận reference theo contract.
-
-## Provider Instance
-
-Owner:
-
-```text
-Provider Registry
-```
-
-Capture Module chỉ sử dụng provider lease hoặc provider reference.
-
----
-
-# Privacy and Security
-
-Capture Module phải thực hiện các quy tắc sau:
-
-1. Chỉ capture source được cho phép.
-2. Không tự động mở rộng capture region.
-3. Không capture cửa sổ khác khi source biến mất.
-4. Không lưu raw frame mặc định.
-5. Không log nội dung frame.
-6. Không gửi frame ra ngoài module nếu contract không yêu cầu.
-7. Không gửi remote provider nếu policy không cho phép.
-8. Không giữ frame lâu hơn retention policy.
-9. Phải hủy frame khi session hoặc generation hết hiệu lực.
-10. Phải hiển thị trạng thái continuous capture ở UI.
-
----
-
-# Diagnostics
-
-Capture Module được phép ghi:
-
-```text
-OperationId
-SessionId
-GenerationId
-CaptureSourceId
-SourceType
-Frame dimensions
-Frame byte size
-Capture duration
-Queue wait duration
-Dropped frame count
-Retry count
-Error category
-Provider name
-Health state
-```
-
-Không được ghi:
-
-```text
-Raw frame bytes
-Screenshot
-DOM content
-Recognized text
-Translated text
-Secret
-Access token
-Full window title nếu có dữ liệu nhạy cảm
-```
-
----
-
-# Health Model
-
-## Healthy
-
-- Source available.
-- Permission valid.
-- Capture success rate bình thường.
-- Latency trong budget.
-- Không có memory pressure đáng kể.
-
-## Degraded
-
-- Capture chậm.
-- Có dropped frame.
-- Retry tăng.
-- Source không ổn định.
-- Runtime đang giảm frequency.
-
-## Unavailable
-
-- Source mất.
-- Permission bị thu hồi.
-- Provider không hoạt động.
-- Không thể tạo frame.
-
-## Recovering
-
-- Đang reconnect.
-- Đang yêu cầu lại quyền.
-- Đang tái tạo source.
-
-## Stopped
-
-- Source đã dừng hoặc module đang shutdown.
-
----
-
-# Dependency Rules
-
-Capture Module được phép phụ thuộc vào:
-
-```text
-Runtime Context Contracts
-Scheduler Contracts
-Event Contracts
-Configuration Contracts
-Diagnostics Contracts
-Provider Contracts
-Common Error Contracts
-```
-
-Capture Module không được phụ thuộc trực tiếp vào:
-
-```text
-Recognition Module implementation
-Translation Module
-Presentation Module
-Storage implementation
-OCR provider implementation
-Translation provider implementation
-Desktop UI implementation
-Browser SDK implementation
-```
-
-Platform-specific capture code phải nằm sau Capture Provider boundary.
-
----
-
-# Interaction with Reading Module
-
-Reading Module chịu trách nhiệm:
-
-- Tạo Reading Session.
-- Chọn reading mode.
-- Chọn hoặc yêu cầu source.
-- Pause/resume session.
-- Quyết định khi session kết thúc.
-- Quản lý page/chapter semantics.
-
-Capture Module chịu trách nhiệm:
-
-- Biến source đã chọn thành dữ liệu capture.
-- Giữ source hoạt động trong session.
-- Dừng capture theo lifecycle signal.
-
-Capture Module không tự tạo Reading Session.
-
----
-
-# Interaction with Recognition Module
-
-Capture Module cung cấp:
-
-```text
-CaptureFrame
-```
-
-Recognition Module quyết định:
-
-- Frame có ổn định hay không.
-- Frame có trùng hay không.
-- Có cần OCR hay không.
-- Vùng nào cần nhận diện.
-- Nội dung thuộc loại nào.
-- Preprocessing nào cần áp dụng.
-
-Capture Module không gọi trực tiếp OCR.
-
----
-
-# Interaction with Presentation Module
-
-Presentation Module có thể cung cấp capture region selection UI.
-
-Tuy nhiên:
-
-- Presentation sở hữu UI.
-- Capture sở hữu source descriptor và region validation.
-- Capture không render selection overlay.
-- Presentation không thao tác trực tiếp native capture handle.
-
----
-
-# Interaction with Storage
-
-Capture Module không lưu raw frame mặc định.
-
-Có thể sử dụng storage thông qua contract cho:
-
-- Persist source preference.
-- Persist region metadata.
-- Persist non-sensitive capture settings.
-
-Raw frame persistence chỉ được phép khi:
-
-- Có feature rõ ràng.
-- Người dùng chủ động bật.
-- Privacy policy cho phép.
-- Retention được xác định.
-- Dữ liệu được bảo vệ phù hợp.
-
----
-
-# Provider Boundary
+Possible internal responsibilities:
 
 ```text
 Capture Module
-      |
-      v
-CaptureProvider Contract
-      |
-      +-- Desktop Screen Provider
-      +-- Desktop Window Provider
-      +-- Browser Connector Provider
-      +-- Local File Provider
+├── Capture Coordinator
+├── Capture Source Manager
+├── Capture Source Validator
+├── Capture Capability Resolver
+├── Capture Operation Factory
+├── Frame Acquirer
+├── Frame Normalizer
+├── Capture Result Validator
+├── Temporary Resource Manager
+├── Capture Health Monitor
+└── Capture Diagnostics
 ```
 
-Capture Provider chịu trách nhiệm:
-
-- Giao tiếp nền tảng.
-- Native API.
-- Provider-specific source handle.
-- Provider-specific result.
-- Provider capability.
-
-Capture Module chịu trách nhiệm:
-
-- Policy.
-- Session integration.
-- Scheduling.
-- Normalization.
-- Lifecycle coordination.
-- Error translation.
-- Backpressure.
-- Frame ownership.
+These names describe responsibilities, not required package layout.
 
 ---
 
-# Internal Component Dependency
+# 64. Capture Coordinator
 
-```text
-Capture Coordinator
-    |
-    +--> Source Manager
-    |
-    +--> Permission Controller
-    |
-    +--> Capture Policy Engine
-    |
-    +--> Capture Operation Factory
-    |
-    +--> Frame Acquirer
-    |       |
-    |       +--> CaptureProvider
-    |
-    +--> Frame Normalizer
-    |
-    +--> Capture Result Validator
-    |
-    +--> Frame Lifecycle Manager
-    |
-    +--> Capture Health Monitor
-```
+Capture Coordinator may:
 
-Dependency phải đi theo một chiều.
+* receive Runtime-authorized Capture invocation;
+* validate Capture request;
+* resolve source;
+* resolve provider capability;
+* create CaptureOperation;
+* invoke Frame Acquirer;
+* invoke Frame Normalizer;
+* validate Candidate;
+* return Candidate completion;
+* coordinate Capture-owned cleanup.
 
-Các component cấp thấp không được gọi ngược Capture Coordinator bằng direct reference.
+It MUST NOT:
 
-Kết quả hoặc trạng thái bất đồng bộ phải trả qua:
-
-- Callback contract.
-- Future/Promise.
-- Event.
-- Scheduler completion signal.
+* create Runtime WorkItem;
+* create Attempt;
+* submit arbitrary Scheduler jobs;
+* implement Runtime retry;
+* publish accepted Artifact;
+* invoke Recognition.
 
 ---
 
-# Suggested Internal Layout
+# 65. Capture Operation Factory
 
-Cấu trúc dưới đây chỉ mang tính khái niệm, không khóa ngôn ngữ hoặc framework:
+Creates Capture-owned operation state from:
 
 ```text
-capture/
-├── application/
-│   ├── capture-coordinator
-│   ├── capture-operation-factory
-│   └── capture-policy-engine
-│
-├── domain/
-│   ├── capture-source
-│   ├── capture-operation
-│   ├── capture-frame
-│   ├── capture-policy
-│   └── capture-errors
-│
-├── services/
-│   ├── source-manager
-│   ├── permission-controller
-│   ├── frame-acquirer
-│   ├── frame-normalizer
-│   ├── frame-validator
-│   ├── frame-lifecycle-manager
-│   └── capture-health-monitor
-│
-├── contracts/
-│   ├── capture-service
-│   ├── capture-provider
-│   └── capture-events
-│
-└── infrastructure/
-    └── provider-adapters
+CaptureRequest
++
+RuntimeExecutionContext
++
+CaptureSource
++
+CaptureConfiguration
 ```
 
-Provider adapter cụ thể có thể được đặt ngoài module nếu project structure sau này quy định provider nằm trong `04-providers` hoặc package riêng.
+It does not create Runtime job identity.
 
 ---
 
-# MVP Internal Scope
+# 66. Capture Result Validator
 
-MVP cần các component sau:
+Validator checks Capture-specific invariants only.
+
+Examples:
+
+* valid dimensions;
+* supported format;
+* correct CaptureSourceId;
+* compatible SourceVersion;
+* valid capture region;
+* valid coordinate space;
+* privacy policy respected;
+* normalized representation valid.
+
+It does not decide:
 
 ```text
-Capture Coordinator
-Source Manager
-Permission Controller
-Capture Policy Engine
-Frame Acquirer
-Frame Normalizer
-Capture Result Validator
-Frame Lifecycle Manager
-Capture Health Monitor
+RuntimeRevision is current
+Attempt is authoritative
 ```
 
-MVP chỉ cần hỗ trợ đầy đủ:
+---
+
+# 67. Threading Model
+
+Capture owns no global thread pool.
+
+Runtime controls processing execution.
+
+CaptureProvider may internally require:
+
+* native callback thread;
+* OS capture thread;
+* platform async runtime;
+* device-specific worker.
+
+Those details remain behind CaptureProvider.
+
+---
+
+# 68. Scheduler Boundary
+
+Capture must not call the global Scheduler merely to run its normal processing operation.
+
+Runtime has already scheduled/invoked the WorkItem/Attempt.
+
+If a Capture Provider requires internal asynchronous callbacks, those are provider mechanics, not Runtime scheduling.
+
+---
+
+# 69. Resource Pressure
+
+Runtime may expose resource pressure.
+
+Capture may respond locally by:
+
+* reducing temporary provider buffering;
+* declining optional expensive normalization;
+* reporting degraded health;
+* returning a classified resource failure.
+
+Capture does not independently change global Runtime scheduling.
+
+---
+
+# 70. Privacy
+
+Capture handles especially sensitive data.
+
+Required rules:
+
+1. capture only explicitly authorized source scope;
+2. never silently widen source scope;
+3. never automatically fall back to full display;
+4. raw provider data remains temporary by default;
+5. accepted frame persistence is disabled by default unless explicit feature/policy permits it;
+6. raw image bytes are never logged;
+7. full screenshots are never included in normal diagnostics;
+8. native source titles/paths are minimized;
+9. remote transmission requires explicit capability/policy;
+10. discarded Candidates are released promptly.
+
+---
+
+# 71. Raw Frame Persistence
+
+Default:
 
 ```text
-Screen Region Source
+Raw captured image content is memory-only.
+```
+
+Persistence requires explicit architecture/product policy covering:
+
+* user intent;
+* privacy;
+* encryption;
+* retention;
+* deletion;
+* storage ownership.
+
+Capture itself does not persist raw frame content.
+
+---
+
+# 72. Diagnostics
+
+Capture diagnostics may include:
+
+```text
+operationId
+sessionId
+runtimeRevisionId
+workItemId
+attemptId
+captureSourceId
+sourceVersion
+sourceKind
+frame dimensions
+frame byte size
+capture duration
+normalization duration
+provider name
+health state
+error code
+candidate result size
+```
+
+Do not include:
+
+```text
+raw frame bytes
+screenshots
+recognized text
+translated text
+DOM content
+secrets
+tokens
+full sensitive source titles
+```
+
+---
+
+# 73. Observability
+
+Recommended metrics:
+
+```text
+capture_operation_total
+capture_operation_duration_ms
+capture_provider_duration_ms
+capture_normalization_duration_ms
+capture_candidate_bytes
+capture_source_unavailable_total
+capture_provider_failure_total
+capture_permission_failure_total
+capture_local_sample_drop_total
+capture_candidate_discard_total
+capture_health_state
+```
+
+Runtime queue/retry metrics remain Runtime-owned.
+
+---
+
+# 74. Dependency Rules
+
+Capture may depend on stable contracts for:
+
+```text
+Runtime execution context
+Cancellation context
+Configuration snapshot
+Capture Provider
+Artifact Candidate interface
+Geometry primitives
+Diagnostics
+Common error model
+Resource abstractions
+```
+
+Capture MUST NOT directly depend on:
+
+```text
+Reading Session implementation
+Recognition implementation
+Translation implementation
+Presentation implementation
+Scheduler implementation
+Work Queue implementation
+Storage implementation
+Desktop UI implementation
+Browser SDK implementation
+OCR provider implementation
+```
+
+---
+
+# 75. Provider Dependency Rule
+
+Capture core may depend on:
+
+```text
+CaptureProvider interface
+```
+
+but not concrete:
+
+```text
+WindowsCaptureProvider
+MacScreenProvider
+WaylandProvider
+BrowserExtensionSDK
+```
+
+Concrete implementations are wired at Composition Root/provider infrastructure.
+
+---
+
+# 76. Browser Connector Boundary
+
+The Browser Connector may eventually be:
+
+```text
+CaptureProvider
+Application connector
+Structured-source adapter
+```
+
+This remains an open architecture choice.
+
+Whichever design is selected must preserve:
+
+```text
+platform/browser details
+outside Capture core contracts
+```
+
+---
+
+# 77. Structured Browser Content
+
+If a browser integration can provide structured DOM/text rather than pixels, it should not automatically be forced into `CapturedFrameArtifact`.
+
+The architecture may route structured source through a separate structured-source capability.
+
+Capture should remain focused on acquisition semantics appropriate to the requested source type.
+
+---
+
+# 78. Storage Boundary
+
+Capture does not directly depend on Storage.
+
+Storage may persist:
+
+* source preferences;
+* region preferences;
+* non-sensitive Capture configuration;
+
+through application-owned persistence flows.
+
+Accepted Artifact persistence follows Artifact/Storage policies.
+
+---
+
+# 79. Interaction with Recognition
+
+Recognition consumes accepted Capture Artifact references when required.
+
+Correct:
+
+```text
+Capture Candidate
+    ↓
+Runtime accepts
+    ↓
+CapturedFrameArtifact
+    ↓
+Runtime/Orchestration
+    ↓
+Recognition
+```
+
+Incorrect:
+
+```text
+Capture
+    ↓
+Recognition.execute(frame)
+```
+
+---
+
+# 80. Interaction with Presentation/UI
+
+UI may allow the user to select a capture source or region.
+
+Correct separation:
+
+```text
+UI Adapter
+    → user interaction / platform surface
+
+Application
+    → normalized capture-source selection intent
+
+Capture
+    → validates CaptureSource / region semantics
+
+CaptureProvider
+    → native source resource
+```
+
+Presentation does not own source-selection UI merely because it displays translated output.
+
+UI Adapter/Application owns actual interaction.
+
+---
+
+# 81. MVP Scope
+
+Required:
+
+```text
+ScreenRegion CaptureSource
 On-Demand Capture
-Limited Continuous Capture
-Single Active Source
-Single Active Capture Per Source
-Memory-Only Frame
-Latest-Frame Backpressure
-Session Cancellation
-Generation Validation
+limited provider-stream support if platform requires it
+single active acquisition per source
+immutable normalized Candidate result
+Runtime authority-aware completion
+SourceVersion validation
+memory-only temporary raw provider data
+bounded local sample buffering
+CaptureProvider abstraction
+permission-safe acquisition
+privacy-safe diagnostics
+fake provider testing
 ```
 
 ---
 
-# Deferred Internal Scope
+# 82. Deferred Scope
 
-Sau MVP có thể bổ sung:
+Deferred:
 
 ```text
-Automatic Source Discovery
-Automatic Reading Area Detection
-Multi-Source Coordinator
-GPU Frame Pool
-Zero-Copy Frame Sharing
-Adaptive Resolution Controller
-Browser DOM Capture Adapter
-PDF Render Source
-Remote Capture Source
-Capture Recording
-Frame Replay
-Multi-Monitor Coordination
+automatic source discovery
+automatic reading-area detection
+multi-source Capture coordination
+GPU frame pools
+zero-copy sharing
+adaptive capture resolution
+remote Capture source
+capture recording
+frame replay
+advanced multi-monitor coordination
+browser DOM-specific capture
 ```
 
-Các khả năng này không được làm phức tạp MVP boundary.
+Automatic reading-area detection does not become Capture-owned merely because it is listed as future functionality.
+
+Its final owner must be decided separately.
 
 ---
 
-# Invariants
+# 83. Architecture Risks
 
-Capture Module phải luôn giữ các invariant sau:
+## 83.1 Capture Scope Expansion
 
-1. Mỗi active source có một `CaptureSourceId`.
-2. Mỗi capture result thuộc đúng một source version.
-3. Mỗi frame thuộc đúng một session generation.
-4. Frame bị cancel không được chuyển tiếp.
-5. Frame từ source cũ không được chuyển tiếp.
-6. Raw frame không được persist mặc định.
-7. Mỗi native source handle có đúng một owner.
-8. Capture không tự diễn giải nội dung.
-9. Capture không tự thay đổi source ngoài ý định người dùng.
-10. Capture backlog không được tăng không giới hạn.
-11. Provider-specific error không được rò rỉ qua public boundary.
-12. Cleanup phải hoàn thành khi source dừng.
+Do not move into Capture:
+
+* duplicate detection;
+* image preprocessing for OCR;
+* text-region detection;
+* scroll detection;
+* page-change detection;
+* content classification.
 
 ---
 
-# Testing Expectations
+## 83.2 Runtime Duplication
 
-Thiết kế module phải cho phép kiểm thử:
-
-## Unit Tests
-
-- Capture policy resolution.
-- Operation creation.
-- Source version validation.
-- Generation validation.
-- Frame metadata normalization.
-- Backpressure decision.
-- Error translation.
-- Cancellation handling.
-- Retention decision.
-- Health state calculation.
-
-## Integration Tests
-
-- Capture Coordinator với fake provider.
-- Source replacement.
-- Permission revoked.
-- Source lost.
-- Timeout.
-- Provider failure.
-- Continuous capture.
-- Queue pressure.
-- Session stop.
-- Runtime shutdown.
-
-## Stress Tests
-
-- Capture tần suất cao.
-- Frame kích thước lớn.
-- Source thay đổi liên tục.
-- Cancellation liên tục.
-- Provider trả kết quả muộn.
-- Memory pressure.
-- Pipeline xử lý chậm.
-
-## Privacy Tests
-
-- Không ghi raw frame vào log.
-- Không persist raw frame mặc định.
-- Không capture ngoài region.
-- Không fallback sang full display.
-- Frame được giải phóng sau session.
-
----
-
-# Completion Criteria
-
-Thiết kế nội bộ của Capture Module được xem là hoàn chỉnh khi:
-
-- Mọi component nội bộ có trách nhiệm rõ ràng.
-- Public boundary nhỏ và ổn định.
-- Source lifecycle có một owner duy nhất.
-- Frame ownership được xác định.
-- Capture operation mang đầy đủ runtime context.
-- Backpressure không tạo backlog vô hạn.
-- Cancellation truyền được tới provider.
-- Late result bị loại bỏ.
-- Provider-specific detail không rò rỉ.
-- Privacy rule được thực thi ở cấp module.
-- MVP không phụ thuộc vào browser connector.
-- Recognition không bị trộn vào Capture.
-- Thiết kế có thể kiểm thử bằng fake provider.
-
----
-
-# Related Documents
+Do not reintroduce:
 
 ```text
-doc/02-modules/capture/README.md
-doc/02-modules/capture/API.md
-doc/02-modules/capture/EVENTS.md
-doc/02-modules/capture/STATES.md
+Capture Job
+Capture private Scheduler
+Capture retry loop
+Session Generation authority
+Capture global queue
+```
 
+when Runtime already owns those concerns.
+
+---
+
+## 83.3 Platform Leakage
+
+Never allow native types through public contracts.
+
+---
+
+## 83.4 Artifact Ownership Leakage
+
+Do not let Capture retain accepted Artifacts indefinitely.
+
+Accepted Artifact lifetime belongs to Artifact Store.
+
+---
+
+## 83.5 Hidden Provider Retry
+
+Provider retries must remain bounded and observable.
+
+---
+
+## 83.6 Full-Screen Privacy Fallback
+
+Never automatically expand Capture scope.
+
+---
+
+# 84. Design Trade-offs
+
+## Freshness over Historical Completeness
+
+For interactive reading:
+
+```text
+fresh relevant capture
+>
+processing every historical sample
+```
+
+This applies to local Capture sampling behavior.
+
+Global scheduling remains Runtime-owned.
+
+## Simplicity over Zero-Copy
+
+MVP prioritizes:
+
+* clear ownership;
+* deterministic cleanup;
+* fake-provider testability;
+* platform independence.
+
+## Explicit Source over Automatic Discovery
+
+MVP requires deliberate source selection.
+
+## Runtime Scheduling over Private Workers
+
+Capture performs bounded operations under Runtime control.
+
+---
+
+# 85. Testing Strategy
+
+Capture must be testable without:
+
+```text
+real screen capture
+real browser
+Recognition
+Translation
+native UI
+Storage backend
+```
+
+---
+
+# 86. Unit Tests
+
+Test:
+
+* request validation;
+* CaptureSource validation;
+* SourceVersion logic;
+* capability resolution;
+* provider result normalization;
+* coordinate metadata;
+* Candidate validation;
+* privacy scope;
+* source concurrency rule;
+* error classification;
+* cancellation observation;
+* temporary resource release.
+
+---
+
+# 87. Runtime Integration Tests
+
+Verify:
+
+* Capture never creates WorkItem;
+* Capture never creates Attempt;
+* Capture never creates RuntimeRevisionId;
+* Capture never schedules Runtime retry;
+* Runtime authority rejection prevents Artifact publication;
+* canceled Attempt cannot publish accepted Capture Artifact;
+* late provider result cannot bypass Runtime completion validation.
+
+---
+
+# 88. Provider Integration Tests
+
+Test:
+
+* provider success;
+* provider failure;
+* permission denied;
+* source lost;
+* provider callback stream;
+* unsupported region;
+* source replacement;
+* provider late completion;
+* provider cleanup.
+
+---
+
+# 89. Resource Tests
+
+Verify:
+
+* raw provider buffers released;
+* discarded Candidate released;
+* accepted Artifact ownership transferred correctly;
+* Capture does not dispose Artifact while leased downstream;
+* source provider resources released exactly once;
+* local buffering remains bounded.
+
+---
+
+# 90. Privacy Tests
+
+Verify:
+
+* no full-display fallback without authorization;
+* requested region cannot escape authorized scope;
+* raw bytes never logged;
+* Candidate discarded promptly after authority rejection;
+* sensitive source metadata is redacted in diagnostics;
+* raw content is memory-only by default.
+
+---
+
+# 91. Concurrency Tests
+
+Test races between:
+
+* source replacement and capture completion;
+* permission revocation and capture;
+* cancellation and provider callback;
+* Runtime supersession and Candidate completion;
+* two acquisitions for one source;
+* provider stream shutdown and Runtime cancellation.
+
+---
+
+# 92. Architecture Invariants
+
+1. Capture only acquires and normalizes source data.
+
+2. Capture does not interpret textual content.
+
+3. Capture does not perform Recognition.
+
+4. Capture does not perform Translation.
+
+5. Capture does not build Presentation.
+
+6. Capture does not decide pipeline topology.
+
+7. Capture does not own RuntimeRevisionId.
+
+8. Capture does not own WorkItem lifecycle.
+
+9. Capture does not own Attempt lifecycle.
+
+10. Capture does not own Runtime cancellation authority.
+
+11. Capture does not own Runtime retry execution.
+
+12. Capture does not own global Scheduler queues.
+
+13. CaptureOperation is not a Runtime WorkItem.
+
+14. SourceVersion is not Runtime authority.
+
+15. CandidateCaptureResult is not an accepted Artifact.
+
+16. Runtime validates authority before Artifact publication.
+
+17. Accepted CapturedFrameArtifact lifetime belongs to Artifact Store.
+
+18. Capture owns only temporary Candidate/raw resources.
+
+19. Raw provider result never crosses public module boundary.
+
+20. Accepted frame data is immutable.
+
+21. Provider-specific types never cross public contracts.
+
+22. Native source handles remain behind provider boundary.
+
+23. Capture scope is never widened silently.
+
+24. Full-display fallback requires explicit authorization.
+
+25. Capture does not persist raw frame by default.
+
+26. Capture does not log raw frame content.
+
+27. Source concurrency remains bounded.
+
+28. Local provider buffering remains bounded.
+
+29. Hidden infinite provider retry is forbidden.
+
+30. Capture events do not become hidden workflow orchestration.
+
+31. Reading Session does not directly invoke Capture implementation.
+
+32. Recognition does not receive unpublished Capture Candidates.
+
+33. Runtime execution state and Capture source state remain separate.
+
+34. Diagnostics remain privacy-safe.
+
+---
+
+# 93. Example — On-Demand Screen Region Capture
+
+```text
+Business Pipeline Orchestration
+        ↓
+Runtime WorkItem
+        ↓
+Attempt
+        ↓
+Capture Request
+        ↓
+Capture validates ScreenRegion source
+        ↓
+CaptureProvider acquires image
+        ↓
+Raw provider result
+        ↓
+Capture normalization
+        ↓
+CandidateCaptureResult
+        ↓
+Return Attempt completion
+        ↓
+Runtime authority validation
+        ↓
+ACCEPT
+        ↓
+CapturedFrameArtifact publication
+        ↓
+Recognition may consume Artifact
+```
+
+---
+
+# 94. Example — Runtime Revision Superseded
+
+```text
+Runtime Revision 20
+        ↓
+Capture operation begins
+        ↓
+Runtime Revision 21 becomes current
+        ↓
+provider returns old result
+        ↓
+Capture locally normalizes or exits early if canceled
+        ↓
+Candidate completion reaches Runtime
+        ↓
+authority rejected
+        ↓
+Candidate discarded
+```
+
+Capture does not need to mutate a Session Generation registry.
+
+---
+
+# 95. Example — Source Replacement
+
+```text
+CaptureSource S version 4
+        ↓
+source replaced/reconfigured
+        ↓
+CaptureSource S version 5
+        ↓
+old provider result references version 4
+        ↓
+Capture Candidate validation detects incompatibility
+        ↓
+candidate rejected
+```
+
+Runtime authority checks still apply independently.
+
+---
+
+# 96. Example — Permission Revoked
+
+```text
+CaptureSource READY
+        ↓
+platform permission revoked
+        ↓
+provider reports normalized permission failure
+        ↓
+CaptureSource → UNAVAILABLE
+        ↓
+Capture health changes
+        ↓
+new Capture requests rejected
+```
+
+Reading Session lifecycle is not directly changed.
+
+---
+
+# 97. Example — Provider Callback Stream
+
+```text
+Runtime-authorized Capture stream
+        ↓
+CaptureProvider native callback
+        ↓
+sample A
+sample B
+sample C
+        ↓
+local bounded freshness policy
+        ↓
+obsolete A/B dropped
+        ↓
+C normalized
+        ↓
+Candidate completion
+        ↓
+Runtime authority validation
+```
+
+Capture does not build an unbounded frame queue.
+
+---
+
+# 98. Recommended Implementation Order
+
+```text
+1. Capture identifiers and Source contracts
+2. CaptureProvider interface
+3. Runtime execution boundary
+4. CaptureOperation
+5. Raw provider result adapter
+6. normalization model
+7. CandidateCaptureResult
+8. Capture result validation
+9. SourceVersion semantics
+10. temporary resource ownership
+11. Runtime completion/publication bridge
+12. privacy rules
+13. Capture health
+14. source replacement
+15. provider-stream support
+16. advanced CaptureSource types
+```
+
+Do not implement continuous Capture orchestration before Runtime scheduling/authority boundaries are correct.
+
+---
+
+# 99. Completion Criteria
+
+Capture is architecturally usable when:
+
+* CaptureSource semantics are stable;
+* native source details remain behind CaptureProvider;
+* one bounded Capture operation can produce CandidateCaptureResult;
+* Candidate result is distinct from accepted Artifact;
+* Runtime authority controls publication eligibility;
+* accepted CapturedFrameArtifact has clear Artifact Store ownership;
+* Capture no longer owns Runtime scheduling;
+* Capture no longer owns Runtime retry execution;
+* Capture no longer depends on session Generation as execution authority;
+* SourceVersion remains Capture-specific semantic versioning;
+* raw provider data has bounded lifetime;
+* Recognition never receives unpublished Candidate results;
+* privacy scope cannot silently expand;
+* provider-specific errors are normalized;
+* fake-provider tests cover core behavior.
+
+---
+
+# 100. Related Documents
+
+```text
+.meta/AI_BOOT.md
+.meta/PROJECT_RULE.md
+.meta/MODULE_ROLE.md
+.meta/WORKFLOW.md
+.meta/CHANGE_RULE.md
+
+doc/01-architecture/core/CAPABILITY_MAP.md
 doc/01-architecture/core/DATA_FLOW.md
 doc/01-architecture/core/EVENT_BUS.md
+doc/01-architecture/core/EVENT_CONVENTION.md
 doc/01-architecture/core/STATE_MACHINE.md
 
 doc/01-architecture/modules/MODULE_MAP.md
 doc/01-architecture/modules/MODULE_DEPENDENCY.md
+doc/01-architecture/modules/OWNERSHIP_MAP.md
 
-doc/01-architecture/runtime/RUNTIME_COMPONENTS.md
-doc/01-architecture/runtime/RUNTIME_CONTEXT.md
-doc/01-architecture/runtime/RUNTIME_CONFIG.md
-doc/01-architecture/runtime/SCHEDULER.md
-doc/01-architecture/runtime/WORK_QUEUE.md
+doc/01-architecture/runtime/BUSINESS_PIPELINE_ORCHESTRATION.md
+doc/01-architecture/runtime/PIPELINE_RUNTIME.md
 doc/01-architecture/runtime/CANCELLATION.md
-doc/01-architecture/runtime/MEMORY_MODEL.md
+doc/01-architecture/runtime/RETRY_POLICY.md
 doc/01-architecture/runtime/RESOURCE_LIFECYCLE.md
-doc/01-architecture/runtime/ERROR_MODEL.md
+doc/01-architecture/runtime/MEMORY_MODEL.md
+doc/01-architecture/runtime/RUNTIME_OBSERVABILITY.md
+
+doc/02-modules/capture/README.md
+doc/02-modules/capture/CONTRACT.md
+doc/02-modules/capture/STATES.md
+doc/02-modules/capture/EVENTS.md
+doc/02-modules/capture/ERRORS.md
+
+doc/02-modules/reading-session/MODULE.md
+doc/02-modules/recognition/MODULE.md
+doc/02-modules/presentation/MODULE.md
 
 doc/03-contracts/
 doc/04-providers/
@@ -1499,343 +2375,106 @@ doc/04-providers/
 
 ---
 
-# Open Decisions
+# 101. Documentation Ownership
 
-Các quyết định sau chưa cần khóa ở giai đoạn thiết kế module:
+This file defines:
 
-## Frame Representation
+* Capture module identity;
+* Capture ownership;
+* Runtime boundary;
+* CaptureSource semantics;
+* provider boundary;
+* Capture operation semantics;
+* Candidate Capture Result;
+* Artifact publication boundary;
+* temporary resource ownership;
+* privacy rules;
+* major architecture invariants.
 
-Chưa quyết định representation vật lý của frame:
+Detailed public schemas belong to:
 
 ```text
-Owned byte buffer
-Shared memory
-Native texture
-GPU surface
-Reference-counted image
+CONTRACT.md
 ```
 
-Public contract chỉ nên yêu cầu một abstraction ổn định, không khóa implementation cụ thể.
-
----
-
-## Pixel Format
-
-Chưa quyết định pixel format nội bộ mặc định:
+Detailed Capture-owned state transitions belong to:
 
 ```text
-RGBA8
-BGRA8
-RGB8
-Native provider format
+STATES.md
 ```
 
-MVP nên ưu tiên format dễ tích hợp và dễ kiểm thử hơn tối ưu zero-copy quá sớm.
-
----
-
-## Continuous Capture Interval
-
-Chưa khóa capture interval mặc định.
-
-Giá trị thực tế cần được xác định qua benchmark dựa trên:
-
-- CPU usage.
-- GPU usage.
-- Capture latency.
-- OCR latency.
-- Tốc độ cuộn trang.
-- Trải nghiệm người dùng.
-
----
-
-## Frame Sharing Strategy
-
-Chưa quyết định giữa:
+Detailed Capture-owned facts belong to:
 
 ```text
-Copy per consumer
-Reference counting
-Immutable shared frame
-Copy-on-write
+EVENTS.md
 ```
 
-Quyết định này phải tuân theo `MEMORY_MODEL.md`.
-
----
-
-## Browser Connector Boundary
-
-Chưa quyết định Browser Connector sẽ:
-
-- Là một Capture Provider.
-- Là một application-level connector.
-- Hay là một source adapter kết hợp giữa Capture và Recognition.
-
-MVP không phụ thuộc vào quyết định này.
-
----
-
-# Architectural Risks
-
-## Capture Scope Expansion
-
-Capture có nguy cơ bị mở rộng để chứa:
-
-- Duplicate detection.
-- Image preprocessing.
-- Text-region detection.
-- Scroll detection.
-- Page-change detection.
-
-Các chức năng này phải được giữ ngoài Capture Module.
-
----
-
-## Platform Leakage
-
-Native type như window handle, display handle hoặc OS-specific error có thể rò rỉ qua public API.
-
-Mọi dữ liệu platform-specific phải được bao bọc trong provider contract hoặc opaque descriptor.
-
----
-
-## Excessive Frame Retention
-
-Giữ quá nhiều frame có thể gây:
-
-- Memory pressure.
-- UI lag.
-- OCR backlog.
-- Dữ liệu cũ tiếp tục được xử lý.
-- Rủi ro riêng tư.
-
-Frame Lifecycle Manager phải áp dụng giới hạn cứng.
-
----
-
-## Hidden Provider Retry
-
-Provider tự retry bên trong có thể phá vỡ:
-
-- Deadline.
-- Cancellation.
-- Scheduler policy.
-- Observability.
-- Retry budget.
-
-Retry phải được điều phối ở cấp module và runtime.
-
----
-
-## Full-Screen Privacy Fallback
-
-Không được tự động chuyển sang full-display capture khi window hoặc region source thất bại.
-
-Fallback này chỉ hợp lệ khi người dùng chủ động xác nhận.
-
----
-
-## Source Identity Instability
-
-Một cửa sổ có thể:
-
-- Đóng rồi mở lại.
-- Đổi native handle.
-- Đổi kích thước.
-- Di chuyển sang display khác.
-- Thay đổi DPI.
-
-`CaptureSourceId` và `SourceVersion` phải giúp phân biệt source logic với native handle hiện tại.
-
----
-
-# Design Trade-offs
-
-## Freshness over Completeness
-
-Capture ưu tiên frame mới và phù hợp hơn việc xử lý đầy đủ mọi frame.
+Detailed Capture error taxonomy belongs to:
 
 ```text
-Freshness > frame completeness
+ERRORS.md
 ```
 
-Điều này phù hợp với Reading Session vì người dùng thường cần bản dịch của nội dung đang nhìn thấy, không phải nội dung đã cuộn qua.
+Runtime scheduling, retry, authority, and Artifact publication belong to Runtime architecture.
 
 ---
 
-## Simplicity over Zero-Copy
+# 102. Summary
 
-MVP ưu tiên:
+Capture v2 is CRAI's source-acquisition processing boundary.
 
-- Ownership rõ ràng.
-- Dễ kiểm thử.
-- Dễ giải phóng bộ nhớ.
-- Ít phụ thuộc nền tảng.
-
-Zero-copy và GPU-native sharing chỉ nên được triển khai khi benchmark chứng minh cần thiết.
-
----
-
-## Explicit Source over Automatic Discovery
-
-MVP ưu tiên người dùng chọn source rõ ràng.
-
-Automatic source discovery có thể cải thiện trải nghiệm sau này nhưng làm tăng:
-
-- Rủi ro capture nhầm.
-- Complexity.
-- Platform-specific behavior.
-- Privacy concerns.
-
----
-
-## Central Scheduler over Private Workers
-
-Capture sử dụng Runtime Scheduler thay vì duy trì worker system riêng.
-
-Điều này giúp thống nhất:
-
-- Priority.
-- Cancellation.
-- Deadline.
-- Retry.
-- Resource budget.
-- Observability.
-
----
-
-# Traceability
-
-Các yêu cầu của Capture Module phải truy ngược được tới kiến trúc cấp cao.
-
-| Capture requirement | Architecture source |
-|---|---|
-| Capture chỉ thu nhận dữ liệu | `MODULE_MAP.md` |
-| Raw frame memory-only | `MEMORY_MODEL.md` |
-| Không tạo backlog vô hạn | `WORK_QUEUE.md` |
-| Latest relevant frame wins | `PIPELINE_RUNTIME.md` |
-| Job mang Generation ID | `RUNTIME_CONTEXT.md` |
-| Late result bị loại bỏ | `CANCELLATION.md` |
-| Provider được thay thế | `MODULE_DEPENDENCY.md` |
-| Không ghi nội dung nhạy cảm | `RUNTIME_OBSERVABILITY.md` |
-| Config là typed snapshot | `RUNTIME_CONFIG.md` |
-| Source cleanup có owner | `RESOURCE_LIFECYCLE.md` |
-
-Khi tài liệu kiến trúc nguồn thay đổi, Capture Module phải được rà soát lại.
-
----
-
-# Change Impact
-
-Các thay đổi sau được xem là thay đổi lớn đối với Capture Module:
-
-- Thêm một source type mới.
-- Thay đổi ownership của `CaptureFrame`.
-- Cho phép nhiều primary source trong một session.
-- Thay đổi coordinate-space model.
-- Cho phép persist raw frame mặc định.
-- Thay đổi backpressure strategy mặc định.
-- Cho phép provider-specific type đi qua public API.
-- Di chuyển preprocessing vào Capture Module.
-- Thay đổi quan hệ giữa Capture và Reading Module.
-
-Những thay đổi này phải được kiểm tra với:
+Its core flow is:
 
 ```text
-MODULE_DEPENDENCY.md
-DATA_FLOW.md
-RUNTIME_CONTEXT.md
-MEMORY_MODEL.md
-CANCELLATION.md
-RESOURCE_LIFECYCLE.md
+Runtime-authorized Capture invocation
+        ↓
+CaptureSource
+        ↓
+CaptureProvider
+        ↓
+Raw Provider Result
+        ↓
+Capture Normalization
+        ↓
+CandidateCaptureResult
+        ↓
+Runtime Authority Validation
+        ↓
+CapturedFrameArtifact
+        ↓
+Downstream Processing
 ```
 
----
-
-# Review Checklist
-
-Trước khi chấp nhận một thay đổi trong Capture Module, cần kiểm tra:
-
-## Boundary
-
-- Thay đổi có thực sự thuộc trách nhiệm thu nhận dữ liệu không?
-- Có đưa Recognition logic vào Capture không?
-- Có làm public API phụ thuộc nền tảng không?
-
-## Context
-
-- Operation có đầy đủ Session ID và Generation ID không?
-- Source ID và Source Version có được kiểm tra không?
-- Config Snapshot có được giữ nhất quán không?
-
-## Resource
-
-- Native resource có owner rõ ràng không?
-- Raw frame được giải phóng ở đâu?
-- Có khả năng tạo backlog không giới hạn không?
-
-## Cancellation
-
-- Operation có thể bị hủy không?
-- Late result có bị loại bỏ không?
-- Provider không hỗ trợ hard cancellation được xử lý thế nào?
-
-## Privacy
-
-- Có capture ngoài phạm vi người dùng chọn không?
-- Có lưu hoặc log raw frame không?
-- Có gửi frame tới remote service không?
-
-## Recovery
-
-- Lỗi nào có thể retry?
-- Retry do thành phần nào điều phối?
-- Source mất có dẫn tới fallback không an toàn không?
-
-## Testing
-
-- Có thể kiểm thử bằng fake provider không?
-- Có test source replacement không?
-- Có test generation change không?
-- Có test memory release không?
-
----
-
-# Document Status
+The ownership model is:
 
 ```text
-Status: Draft
-Architecture level: Module Design
-Implementation binding: None
-MVP applicability: Required
+Business Pipeline Orchestration
+    → decides whether Capture is required
+
+Runtime Control
+    → owns execution authority
+
+Capture
+    → owns acquisition and normalization semantics
+
+CaptureProvider
+    → owns platform-native acquisition
+
+Artifact Store
+    → owns accepted CapturedFrameArtifact lifetime
+
+Recognition
+    → owns interpretation of captured image content
 ```
 
-Tài liệu chuyển sang trạng thái `Accepted` khi:
-
-- `API.md` hoàn thành.
-- `EVENTS.md` hoàn thành.
-- `STATES.md` hoàn thành.
-- Các contract chính được đối chiếu với `doc/03-contracts/`.
-- Capture Provider boundary được đối chiếu với `doc/04-providers/`.
-- Không còn xung đột với Runtime Architecture.
-
----
-
-# Next Documents
-
-Thứ tự hoàn thiện Capture Module:
+The central invariant is:
 
 ```text
-1. README.md       Completed
-2. MODULE.md       Completed
-3. API.md          Next
-4. EVENTS.md
-5. STATES.md
-```
+Capture may produce a valid image Candidate.
 
-Tài liệu tiếp theo:
+Only Runtime-authoritative work
+may publish that Candidate as an accepted Artifact.
 
-```text
-doc/02-modules/capture/API.md
+Only downstream modules
+may interpret its content.
 ```
