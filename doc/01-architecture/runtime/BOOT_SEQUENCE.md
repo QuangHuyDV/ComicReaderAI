@@ -1,70 +1,178 @@
-# runtime/BOOT_SEQUENCE.md
-
 # Runtime Boot Sequence
 
-> Project: CRAI  
-> Version: 1.0  
-> Status: Architecture Draft
+* **Document:** Runtime Architecture / Boot Sequence
+* **Version:** 2.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-Tài liệu này định nghĩa startup lifecycle của CRAI Application và thứ tự khởi tạo các Runtime Component.
+This document defines the startup, readiness, degraded-start and rollback lifecycle of the CRAI application runtime.
 
-Boot Sequence phải bảo đảm:
+Boot must ensure that:
 
-- dependency được thỏa mãn trước activation;
-- component critical fail theo cách có kiểm soát;
-- component optional có thể degrade;
-- không nhận user/runtime command trước khi authority path sẵn sàng;
-- không tạo WorkItem trước Scheduler, Queue và Runtime Control;
-- không cấp Lease trước Resource Manager;
-- không publish Artifact trước Artifact Store;
-- partial initialization luôn có rollback/cleanup path;
-- Application chỉ phát `APPLICATION_READY` khi Runtime đạt operational state.
+* required dependencies are available before activation;
+* Runtime execution authority exists before work is admitted;
+* required ownership/storage/resource boundaries exist before publication;
+* plugins/providers are activated only after validation and resolution;
+* critical failures stop readiness safely;
+* optional failures may produce degraded operation;
+* partial initialization always has a cleanup path;
+* application processing is enabled only when its required readiness profile is satisfied.
 
----
+Boot coordinates startup.
 
-## 2. Design Principles
-
-1. Deterministic startup.
-2. Dependency-aware initialization.
-3. Fail-fast cho critical component.
-4. Degraded mode cho optional component.
-5. Parallel initialization chỉ khi dependency cho phép.
-6. Observability càng sớm càng tốt.
-7. No user processing before Runtime authority is ready.
-8. No publication before ownership infrastructure is ready.
-9. No active Reading Session is created during boot.
-10. Rollback theo reverse dependency order.
-11. Startup state observable.
-12. Secrets không xuất hiện trong startup events/logs.
-13. Storage failure không được silently ignored.
-14. Safe Mode phải có đường vào rõ ràng.
-15. Boot không phụ thuộc provider warmup thành công nếu provider là optional.
+It does NOT redefine ownership of the components it initializes.
 
 ---
 
-## 3. Boot State Machine
+# 2. Core Boot Principle
+
+```text
+Process Start
+    |
+    v
+Bootstrap Configuration
+    |
+    v
+Early Diagnostics
+    |
+    v
+Configuration / Security Foundation
+    |
+    v
+Infrastructure Foundation
+    |
+    v
+Plugin / Provider Resolution
+    |
+    v
+Runtime State / Resource Foundation
+    |
+    v
+Scheduling / Execution Foundation
+    |
+    v
+Runtime Authority
+    |
+    v
+RUNTIME_READY
+    |
+    v
+Application / UI Initialization
+    |
+    v
+APPLICATION_READY
+```
+
+Critical distinction:
+
+```text
+RUNTIME_READY
+    !=
+APPLICATION_READY
+```
+
+---
+
+# 3. Design Principles
+
+1. Startup is dependency-aware.
+
+2. Startup transition semantics are deterministic.
+
+3. Critical dependencies fail fast.
+
+4. Optional dependencies may degrade.
+
+5. Independent initialization MAY execute concurrently.
+
+6. Early diagnostics SHOULD start before critical component initialization.
+
+7. No Runtime WorkItem is admitted before Runtime authority is ready.
+
+8. No Runtime Artifact publication occurs before Artifact ownership infrastructure is ready.
+
+9. No shared Resource Lease is issued before Resource lifecycle infrastructure is ready.
+
+10. Boot MUST NOT create a Reading Session unless explicit application startup policy requests one after readiness.
+
+11. Runtime initialization MUST NOT mirror Business Module names.
+
+12. Partial initialization MUST have rollback/cleanup.
+
+13. Cleanup follows reverse ownership/dependency order.
+
+14. Raw secret values MUST NOT enter startup events or normal boot configuration snapshots.
+
+15. Provider/plugin optional failures MUST NOT abort unrelated capabilities.
+
+16. Safe Mode has an explicit entry path.
+
+17. Boot telemetry MUST NOT become required for correctness.
+
+18. `APPLICATION_READY` is emitted at most once per application instance.
+
+---
+
+# 4. Readiness Layers
+
+CRAI SHOULD distinguish several readiness levels.
+
+```text
+PROCESS_READY
+CONFIGURATION_READY
+INFRASTRUCTURE_READY
+RUNTIME_READY
+APPLICATION_READY
+```
+
+Optional:
+
+```text
+DEGRADED
+SAFE_MODE
+```
+
+These are operational states, not Business Module states.
+
+---
+
+# 5. Boot State Machine
+
+Recommended:
 
 ```text
 PROCESS_STARTING
-    ↓
+        |
+        v
 BOOTSTRAP_LOADING
-    ↓
+        |
+        v
 CONFIGURING
-    ↓
+        |
+        v
 INFRASTRUCTURE_INITIALIZING
-    ↓
+        |
+        v
+EXTENSIONS_RESOLVING
+        |
+        v
 RUNTIME_INITIALIZING
-    ↓
-UI_INITIALIZING
-    ↓
-READY
+        |
+        v
+RUNTIME_READY
+        |
+        v
+APPLICATION_INITIALIZING
+        |
+        v
+APPLICATION_READY
 ```
 
-Failure states:
+Failure/degraded states MAY include:
 
 ```text
 DEGRADED
@@ -73,783 +181,1018 @@ BOOT_FAILED
 SHUTTING_DOWN
 ```
 
-`READY` chỉ đạt khi Runtime Control, Scheduler, Queue, Artifact Store và UI boundary đã operational.
-
 ---
 
-## 4. High-Level Boot Flow
-
-```text
-Process Start
-    ↓
-Load Bootstrap Configuration
-    ↓
-Initialize Early Diagnostics
-    ↓
-Initialize Configuration Service
-    ↓
-Load / Merge / Validate Configuration
-    ↓
-Resolve Secret References
-    ↓
-Initialize Storage
-    ↓
-Create Runtime Container
-    ↓
-Initialize Event Bus
-    ↓
-Initialize Resource Manager
-    ↓
-Initialize Artifact Store
-    ↓
-Initialize Provider Manager
-    ↓
-Initialize Scheduler
-    ↓
-Initialize Work Queue and Execution Pools
-    ↓
-Initialize Runtime Control
-    ↓
-Initialize Session Manager
-    ↓
-Initialize Presentation Runtime
-    ↓
-Initialize UI Adapter
-    ↓
-Run Readiness Validation
-    ↓
-Publish APPLICATION_READY
-```
-
----
-
-## 5. Boot Dependency Graph
-
-```text
-Bootstrap Configuration
-        ↓
-Early Diagnostics
-        ↓
-Configuration Service
-        ↓
-Validated Configuration Snapshot
-        ├── Storage
-        ├── Secret Resolver
-        └── Runtime Container
-                ↓
-            Event Bus
-                ↓
-        ┌───────┴────────┐
-        ↓                ↓
-Resource Manager     Provider Manager
-        ↓                ↓
-Artifact Store       Provider Registry
-        └───────┬────────┘
-                ↓
-            Scheduler
-                ↓
-        Work Queue / Execution Pools
-                ↓
-          Runtime Control
-                ↓
-          Session Manager
-                ↓
-       Presentation Runtime
-                ↓
-            UI Adapter
-```
-
----
-
-## 6. Stage 1 — Process Start
+# 6. PROCESS_STARTING
 
 Responsibilities:
 
-- create `ApplicationInstanceId`;
-- establish process-level cancellation/shutdown signal;
-- capture startup timestamp;
-- determine executable/runtime environment;
-- prepare emergency stderr/fallback diagnostics.
+* create `ApplicationInstanceId`;
+* create host/runtime epoch identity where required;
+* establish process shutdown/cancellation signal;
+* capture startup timestamp;
+* identify platform/runtime environment;
+* initialize emergency diagnostics sink.
 
-No Runtime Component is active yet.
+No Runtime execution component is active yet.
 
 ---
 
-## 7. Stage 2 — Load Bootstrap Configuration
+# 7. Bootstrap Configuration
 
-Bootstrap loader reads only values required before main config infrastructure:
+Bootstrap Configuration contains only values required to create the real configuration/infrastructure system.
+
+Examples:
 
 ```text
 environment
-profile
+runtimeProfile
 dataDirectory
-configFile
+configurationLocation
 secretStoreBackend
 recoveryMode
-startupLoggingDestination
 safeModeFlag
+earlyDiagnosticDestination
+pluginDiscoveryRoots?
 ```
 
-Validation:
-
-- syntax;
-- required fields;
-- supported profile;
-- valid data directory policy;
-- supported secret store type.
-
-Failure:
-
-- enter minimal boot diagnostics;
-- preserve source configuration;
-- start Safe Mode when supported;
-- otherwise terminate safely.
+It MUST remain minimal.
 
 ---
 
-## 8. Stage 3 — Initialize Early Diagnostics
+# 8. Bootstrap Validation
 
-Early diagnostics includes:
+Validate only bootstrap-critical information:
 
-- minimal structured logging;
-- startup trace;
-- bounded startup event buffer;
-- crash/failure marker;
-- redaction rules;
-- emergency sink fallback.
+* syntax;
+* supported runtime profile;
+* data-directory policy;
+* supported configuration source;
+* supported secret-store backend;
+* safe-mode options;
+* permitted plugin discovery roots where needed.
 
-Early diagnostics must start before normal component initialization so later failures are observable.
+Failure MAY:
 
-It does not require full observability infrastructure yet.
+```text
+Enter Safe Mode
+or
+BOOT_FAILED
+```
+
+according to policy.
 
 ---
 
-## 9. Stage 4 — Initialize Configuration Service
+# 9. Early Diagnostics
 
-Configuration Service initializes:
+Early Diagnostics SHOULD provide:
 
-- parser;
-- profile loader;
-- persisted-config loader;
-- environment/CLI override adapters;
-- schema registry;
-- migration registry;
-- redaction;
-- snapshot builder.
+* minimal structured logging;
+* startup trace;
+* bounded startup buffer;
+* failure marker;
+* redaction rules;
+* emergency fallback sink.
 
-Then it performs:
+It MUST NOT require:
+
+* remote telemetry;
+* provider availability;
+* full application Storage.
+
+---
+
+# 10. Configuration Foundation
+
+Initialize configuration infrastructure capable of resolving the initial runtime/application configuration.
+
+Recommended:
 
 ```text
 Load Defaults
-    ↓
-Load Runtime Profile
-    ↓
+    |
+    v
 Load Persisted Configuration
-    ↓
-Apply Overrides
-    ↓
-Migrate if Needed
-    ↓
+    |
+    v
+Apply Approved Overrides
+    |
+    v
+Migrate if Required
+    |
+    v
 Schema Validation
-    ↓
+    |
+    v
 Semantic Validation
-    ↓
-Capability Prevalidation
-    ↓
+    |
+    v
 Create Immutable Configuration Snapshot
 ```
 
-No normal Runtime Component starts before snapshot validation succeeds.
-
 ---
 
-## 10. Stage 5 — Resolve Secret References
+# 11. Configuration Ownership Boundary
 
-Secret Resolver initializes after bootstrap/config structure is known.
-
-Responsibilities:
-
-- open configured secure store;
-- validate required credential references;
-- avoid resolving optional secret eagerly unless needed;
-- expose safe credential metadata;
-- never log secret value.
-
-Failure behavior:
-
-- critical bootstrap secret failure → Safe Mode or boot failure;
-- optional provider credential missing → provider disabled/degraded;
-- unrelated local capability continues.
-
----
-
-## 11. Stage 6 — Initialize Storage
-
-Storage initialization includes:
-
-- open configured backend;
-- validate backend availability;
-- validate storage schema;
-- run supported migrations;
-- load required configuration/preferences records;
-- load safe recovery metadata;
-- expose durable persistence capability.
-
-Criticality depends on required use case:
-
-- configuration persistence backend failure → critical;
-- optional history unavailable → degraded;
-- optional durable cache unavailable → degraded;
-- corrupt state requiring recovery → Safe Mode possible.
-
-Storage does not initialize Runtime Artifact Store.
-
----
-
-## 12. Stage 7 — Create Runtime Container
-
-Runtime Container registers:
-
-- validated configuration snapshot;
-- typed configuration views;
-- Event Bus contract;
-- Storage contract;
-- Secret Resolver contract;
-- Observability contract;
-- clock/time provider;
-- lifecycle registry;
-- component factories.
-
-Container creation must follow `MODULE_DEPENDENCY.md`.
-
-No hidden service-locator access should be introduced for convenience.
-
----
-
-## 13. Stage 8 — Initialize Event Bus
-
-Event Bus initializes:
-
-- event registry;
-- subscribers;
-- dispatch policy;
-- bounded internal buffers;
-- failure isolation;
-- event-version validation.
-
-Event dispatch may remain paused until required subscribers are registered.
-
-Event Bus must not depend on remote telemetry.
-
----
-
-## 14. Stage 9 — Initialize Resource Manager
-
-Resource Manager initializes before Artifact Store and Worker execution.
-
-Responsibilities:
-
-- resource registry;
-- Lease coordination;
-- retention tracking;
-- logical disposal coordination;
-- physical cleanup coordination;
-- pressure state;
-- leak diagnostics;
-- native/GPU cleanup adapters.
-
-No shared Resource Lease may be issued before Resource Manager is ready.
-
----
-
-## 15. Stage 10 — Initialize Artifact Store
-
-Artifact Store initializes:
-
-- Artifact registry;
-- Candidate registration;
-- ownership-transfer mechanism;
-- atomic publication mechanism;
-- Artifact lookup;
-- Lease integration;
-- cache-retention integration;
-- disposal coordination.
-
-Runtime memory cache may be initialized as part of Artifact Store integration.
-
-Durable cache remains behind Storage.
-
----
-
-## 16. Stage 11 — Initialize Provider Manager
-
-Provider Manager initializes:
+Boot consumes:
 
 ```text
-Load Provider Registry
-    ↓
-Validate Provider Config
-    ↓
-Validate Capability Declarations
-    ↓
-Create Provider Adapters
-    ↓
-Run Health Checks
-    ↓
-Optional Warmup
-    ↓
-Publish Provider Availability
+Resolved Configuration
 ```
 
-Provider initialization is capability-based, not hard-coded to OCR or Translation.
+It does not own configuration semantics.
 
-Provider states may become:
+Business/module configuration remains owned by the relevant architecture.
 
-```text
-HEALTHY
-DEGRADED
-UNAVAILABLE
-PROBING
-```
-
-Optional provider failure must not abort unrelated Runtime capability.
+Runtime receives only the Runtime-relevant immutable projection/reference.
 
 ---
 
-## 17. Stage 12 — Initialize Scheduler
+# 12. Secret / Credential Foundation
+
+Boot SHOULD initialize the Secret/Credential access infrastructure.
+
+It SHOULD NOT eagerly resolve every raw secret.
+
+Preferred:
+
+```text
+Configuration
+    contains SecretReference
+        |
+        v
+Credential / Secret Boundary
+        |
+        v
+privileged Adapter resolves when needed
+```
+
+---
+
+# 13. Secret Reference Validation
+
+Boot MAY validate:
+
+* referenced secret store exists;
+* required credential reference exists;
+* access mechanism is operational;
+* required security policy can be evaluated.
+
+It SHOULD avoid exposing secret bytes.
+
+---
+
+# 14. Optional Credentials
+
+A missing credential for an optional remote integration SHOULD normally produce:
+
+```text
+integration unavailable/degraded
+```
+
+rather than global boot failure.
+
+---
+
+# 15. Storage / Persistence Foundation
+
+Initialize durable infrastructure required for boot.
+
+Possible actions:
+
+* open configured persistence backend;
+* validate storage schema;
+* run supported infrastructure migrations;
+* load configuration/administrative state;
+* load Registry state;
+* load safe recovery metadata.
+
+Storage MUST NOT infer or repair business semantics without owning-module rules.
+
+---
+
+# 16. Critical Storage
+
+Storage criticality MUST be capability/use-case aware.
+
+Examples:
+
+```text
+required Registry/config persistence unavailable
+    -> critical
+
+optional history unavailable
+    -> degraded
+
+optional durable cache unavailable
+    -> degraded
+```
+
+---
+
+# 17. Runtime Wiring / Container
+
+Create the explicit runtime dependency graph.
+
+Possible registered contracts:
+
+```text
+Runtime Configuration Snapshot
+Clock
+Event Bus
+Storage
+Telemetry
+Secret/Credential Boundary
+Plugin Registry
+Plugin Discovery
+Plugin Security
+Plugin Lifecycle services
+Execution State Store
+Artifact Store
+Runtime factories
+```
+
+A runtime container MUST NOT become an unrestricted global service locator.
+
+---
+
+# 18. Event Bus
+
+Initialize Event Bus before components that require asynchronous public/runtime events.
+
+Event Bus MAY start dispatch in a controlled/paused state.
+
+It MUST NOT depend on remote telemetry.
+
+---
+
+# 19. Plugin Registry / Discovery Foundation
+
+If plugins are enabled in the deployment, boot MAY initialize:
+
+```text
+Plugin Registry
+Plugin Discovery
+Compatibility Evaluator
+Security / Permission Evaluation
+Dependency Resolver
+```
+
+Discovery MUST NOT execute plugin code.
+
+---
+
+# 20. Plugin Boot Flow
+
+Recommended:
+
+```text
+Load Registry State
+        |
+        v
+Discover Installed/Built-In Candidates
+        |
+        v
+Validate Descriptor / Artifact
+        |
+        v
+Compatibility Evaluation
+        |
+        v
+Security / Permission Evaluation
+        |
+        v
+Dependency Resolution
+        |
+        v
+Eligible Plugin Set
+```
+
+No activation has occurred yet.
+
+---
+
+# 21. Plugin Activation
+
+Only plugins required/eager for current application runtime SHOULD be activated during boot.
+
+Others MAY remain:
+
+```text
+ENABLED + RESOLVED + UNLOADED
+```
+
+for lazy activation.
+
+---
+
+# 22. Plugin Lifecycle Boundary
+
+Boot requests lifecycle actions.
+
+Plugin Manager coordinates:
+
+```text
+RESOLVED
+    ->
+LOADING
+    ->
+INITIALIZED
+    ->
+ACTIVE
+```
+
+according to `PLUGIN_LIFECYCLE.md`.
+
+Boot MUST NOT implement plugin lifecycle logic independently.
+
+---
+
+# 23. Built-In Implementations
+
+Built-in capability providers MAY participate in the same capability registry/binding model without pretending to be third-party plugins.
+
+---
+
+# 24. Resource Manager
+
+Initialize Runtime physical resource management before shared leases are possible.
+
+Responsibilities MAY include:
+
+* resource registration;
+* lease tracking;
+* ownership transfer;
+* disposal eligibility;
+* cleanup coordination;
+* leak diagnostics;
+* resource-pressure projection.
+
+---
+
+# 25. Runtime Artifact Store
+
+Initialize Runtime Artifact infrastructure after required resource lifecycle foundations.
+
+Responsibilities MAY include:
+
+* Artifact registration;
+* Artifact references;
+* atomic publication;
+* Artifact lookup;
+* lease integration;
+* runtime retention;
+* disposal coordination.
+
+Runtime Artifact Store MUST NOT own durable Domain persistence.
+
+---
+
+# 26. Execution State Store
+
+Initialize storage/projection required for:
+
+```text
+ExecutionScope
+ExecutionRevision
+WorkItem
+Attempt lineage
+accepted execution outcome
+```
+
+This is Runtime execution metadata.
+
+It MUST remain distinct from Domain revisions/history.
+
+---
+
+# 27. Provider Management Boundary
+
+Canonical Provider Management MAY already have been initialized as an Application Module/infrastructure dependency.
+
+Boot consumes its validated projections.
+
+Runtime MUST NOT recreate Provider Management semantics.
+
+---
+
+# 28. Provider Runtime Gateway
+
+Initialize executable provider/adapter runtime access.
+
+Recommended:
+
+```text
+Provider / Plugin Capability Registry
+        |
+        v
+Executable Binding Resolution
+        |
+        v
+Provider Runtime Gateway
+```
+
+---
+
+# 29. Provider Runtime Gateway Responsibilities During Boot
+
+Boot-time initialization MAY:
+
+* construct required adapters;
+* connect executable bindings;
+* establish runtime concurrency controls;
+* expose initial availability observations;
+* perform bounded optional warmup.
+
+It MUST NOT:
+
+* choose AI models;
+* choose Translation/Recognition provider for business requests;
+* own Provider Configuration;
+* own credentials;
+* own canonical Provider Policy.
+
+---
+
+# 30. Provider Health
+
+Boot-time provider probes are observations.
+
+They MAY feed:
+
+```text
+Health Projection
+```
+
+but Runtime Gateway MUST NOT redefine canonical health architecture.
+
+---
+
+# 31. Provider Warmup
+
+Provider/model warmup SHOULD normally be:
+
+```text
+optional
+bounded
+timeout-controlled
+privacy-safe
+```
+
+unless a required local execution path cannot operate without it.
+
+---
+
+# 32. Scheduler Initialization
 
 Scheduler initializes:
 
-- admission policies;
-- current-Revision preference;
-- workload classes;
-- provider/resource capacity views;
-- retry admission rules;
-- replacement/obsolete-work rules;
-- pressure-aware decisions;
-- control-capacity reservation.
+* admission policy;
+* priorities;
+* capacity constraints;
+* ExecutionRevision freshness inputs;
+* retry admission;
+* replacement policy;
+* resource-pressure inputs.
 
-Scheduler begins in:
+Initial state:
 
 ```text
 ADMISSION_CLOSED
 ```
 
-It does not admit WorkItem until Runtime Control is ready.
-
 ---
 
-## 18. Stage 13 — Initialize Work Queue and Execution Pools
+# 33. Work Queues / Execution Pools
 
 Initialize:
 
-- logical queue registry;
-- bounded queue classes;
-- dispatchers;
-- CPU Execution Pool;
-- optional GPU/native serial contexts;
-- Provider I/O capacity bindings;
-- maintenance execution context.
+* bounded queues;
+* dispatchers;
+* CPU execution pools;
+* Provider I/O execution contexts;
+* optional GPU/native contexts;
+* maintenance/control execution capacity.
 
-Queues start empty.
-
-Dispatch remains paused until Runtime Control activation.
-
-Work Queue does not own payload.
+Dispatch MUST remain closed/paused until Runtime authority is ready.
 
 ---
 
-## 19. Stage 14 — Initialize Runtime Control
+# 34. Runtime Control
 
-Runtime Control initializes:
+Runtime Control initializes after its required execution dependencies.
 
-- serialized command processing;
-- authority registry;
-- Revision registry;
-- WorkItem state ownership;
-- Attempt lineage;
-- cancellation coordination;
-- retry coordination;
-- publication coordination;
-- shutdown state;
-- Scheduler/Queue integration.
+It SHOULD initialize:
 
-Runtime Control is the final authority owner before admission opens.
-
-Readiness checks:
-
-- Resource Manager ready;
-- Artifact Store ready;
-- Scheduler ready;
-- Queue ready;
-- Event Bus ready;
-- configuration snapshot active.
+* execution-command processing;
+* Execution Scope state;
+* Execution Revision authority;
+* WorkItem logical state;
+* Attempt lineage;
+* cancellation coordination;
+* Retry coordination;
+* accepted execution outcome state;
+* shutdown coordination;
+* Scheduler/Queue integration.
 
 ---
 
-## 20. Stage 15 — Initialize Session Manager
+# 35. Runtime Control Boundary
 
-Session Manager initializes:
-
-- Session registry;
-- Session factory;
-- Session configuration derivation;
-- source/capture adapter registry;
-- no-active-session initial state.
-
-Boot does not create a Reading Session automatically.
-
-User action or explicit startup policy creates Session later.
-
----
-
-## 21. Stage 16 — Initialize Presentation Runtime
-
-Presentation Runtime initializes:
-
-- presentation model factory;
-- UI commit adapter;
-- current/previous Presentation retention;
-- UI authority revalidation;
-- localization resources;
-- typography/layout services;
-- presentation diagnostics.
-
-No presentation commit occurs before UI Adapter is ready.
-
----
-
-## 22. Stage 17 — Initialize UI Adapter
-
-UI Adapter initializes:
-
-- application shell;
-- Settings and Diagnostics views;
-- theme/localization;
-- Session controls;
-- Presentation binding;
-- Runtime command bridge;
-- startup/degraded/safe-mode UI.
-
-UI may appear before full readiness, but processing interaction remains disabled until readiness validation passes.
-
----
-
-## 23. Stage 18 — Readiness Validation
-
-Readiness Validator checks:
+Runtime Control is NOT:
 
 ```text
-Configuration Snapshot Active
+owner of all runtime state
+```
+
+It is authority for:
+
+```text
+execution orchestration state
+```
+
+Scheduler, Configuration, Resource Manager, Plugin Runtime and other components retain their own state ownership.
+
+---
+
+# 36. Runtime Core Readiness
+
+`RUNTIME_READY` MAY be reached when required Runtime core components are operational.
+
+Typical checks:
+
+```text
+Runtime Configuration Snapshot Active
 Event Bus Ready
+Execution State Store Ready
 Resource Manager Ready
-Artifact Store Ready
+Runtime Artifact Store Ready
 Scheduler Ready
-Work Queue Ready
+Work Queues Ready
+Worker Execution Capacity Ready
 Runtime Control Ready
-Session Manager Ready
-Presentation Runtime Ready
-UI Adapter Ready
-Critical Storage Capability Ready
+Required Provider/Capability Runtime Available
 ```
 
-Optional degraded components are listed separately.
+---
 
-If checks pass:
+# 37. Opening Runtime Admission
+
+Preferred:
 
 ```text
+Runtime Core Validation
+        |
+        v
+RUNTIME_READY
+        |
+        v
 Open Scheduler Admission
-    ↓
-Enable Runtime Commands
-    ↓
-Enable User Processing Actions
-    ↓
-Publish APPLICATION_READY
 ```
 
----
-
-## 24. Application Ready
-
-`APPLICATION_READY` means:
-
-- Runtime may accept user commands;
-- Session may be created;
-- WorkItem may be admitted;
-- authority checks operational;
-- Candidate publication safe;
-- Resource Lease operational;
-- UI commit path ready;
-- critical diagnostics active.
-
-It does not mean every optional provider is healthy.
+However no Application work should arrive until an application-facing command boundary is enabled.
 
 ---
 
-## 25. Parallel Initialization
+# 38. Application Initialization
 
-Safe parallelism is allowed only after dependencies are satisfied.
+After `RUNTIME_READY`, application/module/UI concerns MAY initialize.
 
-Possible parallel groups:
+Examples:
 
-### Group A
+* Reading Module application services;
+* Presentation Module adapters;
+* UI shell;
+* user settings views;
+* diagnostics UI;
+* application command bridge.
 
-After validated config:
-
-- Storage open;
-- Secret Resolver init;
-- UI static assets preparation.
-
-### Group B
-
-After Runtime Container/Event Bus:
-
-- Provider adapter construction;
-- Resource Manager internal subcomponents;
-- Presentation static services.
-
-### Group C
-
-After Resource Manager:
-
-- Artifact Store;
-- optional provider warmup;
-- Execution Pool construction.
-
-Never parallelize operations with unresolved ownership/dependency order.
+These are not Runtime Components merely because boot initializes them.
 
 ---
 
-## 26. Critical vs Optional Components
+# 39. Reading Session Boundary
 
-### Critical
+Boot MUST NOT automatically create a Reading Session as part of Runtime initialization.
 
-Typical:
+A Reading Session is created through:
 
-- Bootstrap Configuration;
-- Configuration Service;
-- Runtime Container;
-- Event Bus;
-- Resource Manager;
-- Artifact Store;
-- Scheduler;
-- Work Queue;
-- Runtime Control;
-- UI Adapter;
-- required Storage capability.
+* explicit user action;
+* explicit resume policy;
+* explicit application startup workflow.
 
-Failure result:
+Reading owns its business lifecycle.
+
+---
+
+# 40. Presentation Boundary
+
+Boot MAY initialize Presentation infrastructure/application bindings.
+
+It MUST NOT define a Runtime-owned:
 
 ```text
-Safe Mode or BOOT_FAILED
+Presentation Runtime
 ```
 
-### Optional
+solely to mirror the Presentation Module.
 
-Typical:
+---
 
-- optional provider;
-- durable cache;
-- history;
-- remote telemetry exporter;
-- experimental component;
-- GPU acceleration.
+# 41. UI Initialization
 
-Failure result:
+UI MAY initialize before or after `RUNTIME_READY` depending on product UX.
+
+Processing actions MUST remain unavailable until required readiness checks pass.
+
+---
+
+# 42. Application Readiness
+
+`APPLICATION_READY` means the application's required interaction path is usable.
+
+Possible requirements:
+
+```text
+RUNTIME_READY
+Application command bridge ready
+required Business Modules ready
+Presentation/UI boundary ready where required
+critical Storage capabilities ready
+```
+
+---
+
+# 43. APPLICATION_READY Does Not Mean Everything Is Healthy
+
+Optional components MAY remain:
 
 ```text
 DEGRADED
+UNAVAILABLE
+LAZY
 ```
+
+while the application is still usable.
 
 ---
 
-## 27. Degraded Boot
+# 44. Readiness Profiles
 
-Application may reach Ready in degraded mode when:
-
-- local capability remains usable;
-- critical authority/publication/resource path works;
-- missing component is optional;
-- UI clearly reports limitation;
-- retry loop is not started indefinitely;
-- diagnostics preserve cause.
+CRAI MAY eventually support capability-specific readiness.
 
 Example:
 
 ```text
-Remote Translator unavailable
-    ↓
-Local reading/capture/settings still operational
-    ↓
-APPLICATION_READY with provider degraded state
+READING_READY
+LOCAL_TRANSLATION_READY
+REMOTE_AI_READY
 ```
 
----
-
-## 28. Safe Mode Boot
-
-Safe Mode uses:
-
-- built-in defaults;
-- remote providers disabled;
-- experimental features disabled;
-- conservative resource limits;
-- automatic capture disabled;
-- durable cache/history disabled;
-- diagnostics and configuration recovery enabled;
-- authority/publication invariants still enforced.
-
-Safe Mode is not a partially validated normal mode.
+MVP MAY use a simpler global Application readiness plus degraded capabilities.
 
 ---
 
-## 29. Boot Failure Handling
+# 45. Parallel Initialization
 
-On failure:
+Independent startup branches MAY run concurrently.
+
+Example after validated configuration:
 
 ```text
-Stop Admission if Open
-    ↓
-Revoke Boot/Runtime Authority
-    ↓
-Cancel Pending Initialization
-    ↓
-Drain Started Execution Contexts
-    ↓
-Release Leases
-    ↓
-Dispose Initialized Components in Reverse Order
-    ↓
-Flush Bounded Diagnostics
-    ↓
-Persist Safe Failure Marker
-    ↓
-Enter Safe Mode or Exit
+Storage Foundation
+Secret/Credential Foundation
+Plugin Descriptor Discovery
+UI Static Asset Preparation
 ```
 
-No partially initialized component should remain active.
+provided no ownership/dependency edge is violated.
 
 ---
 
-## 30. Reverse Cleanup Order
-
-Typical rollback order:
+# 46. Parallelism Rule
 
 ```text
-UI Adapter
-    ↓
-Presentation Runtime
-    ↓
-Session Manager
-    ↓
-Runtime Control
-    ↓
-Work Queue / Execution Pools
-    ↓
-Scheduler
-    ↓
-Provider Manager
-    ↓
-Artifact Store
-    ↓
-Resource Manager
-    ↓
-Event Bus
-    ↓
-Runtime Container
-    ↓
-Storage
-    ↓
-Configuration Service
-    ↓
-Diagnostics Flush
+dependency before concurrency
 ```
 
-Actual order follows initialized dependency graph.
+Parallel startup MUST NOT hide unresolved ordering requirements.
 
 ---
 
-## 31. Startup Events
+# 47. Critical Component
 
-Conceptual events:
+A component/dependency is critical only if required to preserve the selected application readiness profile.
+
+Typical Runtime-core critical dependencies MAY include:
+
+* valid configuration;
+* required Runtime state;
+* Resource Manager;
+* Runtime Artifact Store;
+* Scheduler;
+* Queue/Worker capacity;
+* Runtime Control;
+* required persistence boundary.
+
+---
+
+# 48. Optional Components
+
+Examples MAY include:
+
+* remote AI provider;
+* optional OCR engine;
+* history;
+* durable cache;
+* remote telemetry exporter;
+* GPU acceleration;
+* optional plugin.
+
+---
+
+# 49. Degraded Boot
+
+Application MAY become ready in degraded mode if:
+
+* runtime correctness invariants remain valid;
+* missing dependency is optional;
+* at least one supported useful capability remains available;
+* limitation is exposed to application/UI;
+* cause is observable;
+* no unbounded startup Retry occurs.
+
+---
+
+# 50. Degraded Example
 
 ```text
-BOOT_STARTED
-BOOTSTRAP_CONFIG_READY
-EARLY_DIAGNOSTICS_READY
-CONFIGURATION_READY
-SECRET_RESOLVER_READY
-STORAGE_READY
-RUNTIME_CONTAINER_READY
-EVENT_BUS_READY
-RESOURCE_MANAGER_READY
-ARTIFACT_STORE_READY
-PROVIDER_MANAGER_READY
-SCHEDULER_READY
-WORK_QUEUE_READY
-RUNTIME_CONTROL_READY
-SESSION_MANAGER_READY
-PRESENTATION_RUNTIME_READY
-UI_READY
-APPLICATION_DEGRADED
+Remote AI Provider Unavailable
+        |
+        v
+Local Recognition + Reading Still Available
+        |
+        v
 APPLICATION_READY
-BOOT_FAILED
-SAFE_MODE_ENTERED
+        +
+Remote Capability DEGRADED
 ```
 
-Final event names follow Event Standard.
+---
+
+# 51. Safe Mode
+
+Safe Mode is a separately validated restricted operating profile.
+
+Possible properties:
+
+```text
+remote providers disabled
+third-party plugins disabled
+experimental features disabled
+conservative resource limits
+automatic capture disabled
+diagnostics enabled
+configuration recovery enabled
+```
+
+Exact Safe Mode behavior is product/runtime policy.
 
 ---
 
-## 32. Startup Event Rules
+# 52. Safe Mode Invariants
 
-Events must:
+Safe Mode MUST preserve:
 
-- be content-free;
-- exclude secret values;
-- include `ApplicationInstanceId`;
-- include startup phase;
-- include duration;
-- include failure code when relevant;
-- not block boot;
-- not be required for correctness.
+* authorization;
+* Runtime execution authority;
+* publication ownership;
+* resource lifecycle;
+* Workspace isolation;
+* secret safety.
+
+It MUST NOT mean:
+
+```text
+ignore validation and continue anyway
+```
 
 ---
 
-## 33. Startup Metrics
+# 53. Boot Failure Handling
 
-Track:
+Recommended:
+
+```text
+Failure Detected
+        |
+        v
+Prevent New Activation / Admission
+        |
+        v
+Cancel Pending Boot Operations
+        |
+        v
+Quiesce Already Activated Components
+        |
+        v
+Drain / Cancel Active Startup Work
+        |
+        v
+Release Leases
+        |
+        v
+Dispose in Reverse Dependency Order
+        |
+        v
+Flush Bounded Critical Diagnostics
+        |
+        v
+Persist Safe Failure Marker
+        |
+        +--> SAFE_MODE
+        |
+        +--> PROCESS EXIT
+```
+
+---
+
+# 54. Reverse Cleanup
+
+Cleanup is based on the actual activated dependency graph.
+
+It MUST NOT rely only on a hard-coded textual list.
+
+Conceptually:
+
+```text
+Application/UI Bindings
+        |
+        v
+Runtime Control
+        |
+        v
+Queues / Workers / Scheduler
+        |
+        v
+Provider / Plugin Runtime Bindings
+        |
+        v
+Runtime Artifact / Execution State
+        |
+        v
+Resource Manager
+        |
+        v
+Event Bus
+        |
+        v
+Infrastructure
+        |
+        v
+Configuration / Persistence
+```
+
+Exact order depends on ownership.
+
+---
+
+# 55. Plugin Cleanup
+
+Activated plugins SHOULD be quiesced/stopped/disposed according to Plugin Lifecycle before their runtime resources disappear.
+
+Dependency shutdown order SHOULD be respected.
+
+---
+
+# 56. Provider Cleanup
+
+Provider Runtime Gateway SHOULD stop accepting new invocations before adapters/processes are disposed.
+
+Raw provider configuration/credentials remain owned elsewhere.
+
+---
+
+# 57. Shutdown During Boot
+
+If application shutdown occurs during boot:
+
+```text
+Boot Cancellation
+        |
+        v
+Stop Starting New Stages
+        |
+        v
+Cancel Safe In-Progress Initialization
+        |
+        v
+Rollback Activated Components
+        |
+        v
+Flush Bounded Diagnostics
+        |
+        v
+Exit
+```
+
+`APPLICATION_READY` MUST NOT subsequently be emitted.
+
+---
+
+# 58. Startup Events
+
+Possible normalized events:
+
+```text
+BootStarted
+BootstrapConfigurationReady
+EarlyDiagnosticsReady
+ConfigurationReady
+InfrastructureReady
+PluginDiscoveryCompleted
+PluginResolutionCompleted
+RuntimeArtifactStoreReady
+ExecutionStateStoreReady
+ProviderRuntimeReady
+SchedulerReady
+RuntimeControlReady
+RuntimeReady
+ApplicationDegraded
+ApplicationReady
+SafeModeEntered
+BootFailed
+```
+
+Exact names follow Event Standard.
+
+---
+
+# 59. Startup Event Boundary
+
+Startup events describe boot/runtime state.
+
+They are NOT Domain Events.
+
+---
+
+# 60. Startup Event Rules
+
+Startup events SHOULD:
+
+* contain no raw user content;
+* contain no secret values;
+* include `ApplicationInstanceId`;
+* include phase/stage;
+* include normalized status;
+* include duration when useful;
+* include failure code;
+* remain non-blocking for ordinary telemetry.
+
+---
+
+# 61. Audit Boundary
+
+Routine startup stage completion is telemetry.
+
+Material administrative/security actions MAY require Audit, such as:
+
+* Safe Mode forced by administrator;
+* untrusted plugin approved;
+* security block overridden;
+* migration forced;
+* incompatible component override attempted.
+
+---
+
+# 62. Startup Metrics
+
+Useful metrics MAY include:
 
 ```text
 boot.total_ms
-boot.bootstrap_config_ms
-boot.diagnostics_ms
 boot.configuration_ms
-boot.secret_resolver_ms
 boot.storage_ms
-boot.container_ms
-boot.event_bus_ms
-boot.resource_manager_ms
+boot.plugin_discovery_ms
+boot.plugin_resolution_ms
+boot.runtime_state_ms
 boot.artifact_store_ms
-boot.provider_manager_ms
+boot.provider_runtime_ms
 boot.scheduler_ms
-boot.work_queue_ms
 boot.runtime_control_ms
-boot.presentation_ms
-boot.ui_ms
+boot.application_init_ms
 boot.rollback_ms
-boot.safe_mode_total
 boot.failure_total
 boot.degraded_total
+boot.safe_mode_total
 ```
-
-Cold startup must be distinguished from provider/model warmup.
 
 ---
 
-## 34. Startup Diagnostics Snapshot
+# 63. Startup Diagnostics
 
-Snapshot may include:
+Recommended snapshot:
 
 ```text
 ApplicationInstanceId
@@ -859,283 +1202,373 @@ CompletedStages
 PendingStages
 FailedStage
 FailureCode
-DegradedComponents
-ActiveConfigurationSnapshotId
+DegradedCapabilities
+ActiveConfigurationRevision
 InitializedComponents
+ActivatedPlugins
 OpenResources
 ActiveLeases
 ElapsedTime
 ```
 
-No payload or secret.
+No raw payload or secret.
 
 ---
 
-## 35. Startup Health Checks
+# 64. Startup Health Probes
 
-Provider/resource health checks must be:
+Boot health probes MUST be:
 
-- bounded;
-- timeout-controlled;
-- optional where possible;
-- non-destructive;
-- privacy-safe;
-- not dependent on real reading content.
+* bounded;
+* timeout-controlled;
+* non-destructive;
+* privacy-safe;
+* optional where possible.
 
-Remote health check must not send captured content.
+They MUST NOT require real user reading content.
 
 ---
 
-## 36. Boot and Configuration Activation
+# 65. Configuration Activation
 
-Startup activation differs runtime config update:
+Boot activates one fully validated initial Runtime Configuration Snapshot.
+
+Runtime configuration update later uses:
 
 ```text
-Boot
-    → activate one fully validated initial snapshot
-
-Runtime Change
-    → impact analysis + safe activation boundary
+impact analysis
++
+activation boundary
 ```
 
-Initial boot must not expose partially merged config.
+rather than rerunning the entire boot sequence.
 
 ---
 
-## 37. Boot and Storage Recovery
+# 66. Registry / Plugin Reconciliation
 
-Storage recovery may:
-
-- restore valid configuration backup;
-- restore recovery marker;
-- discard corrupt optional cache;
-- enter Safe Mode;
-- preserve corrupt data for diagnostics.
-
-Storage recovery must not guess business data meaning.
-
----
-
-## 38. Boot and Observability
-
-Early diagnostics starts before full observability.
-
-After full Observability initialization:
+Boot MAY reconcile:
 
 ```text
-Early Startup Buffer
-    ↓
-Sanitize
-    ↓
-Import into Runtime Observability
+Plugin Discovery Snapshot
+        |
+        v
+Registry Snapshot
 ```
 
-Import is best-effort.
+before activating plugins.
+
+Discovery MUST NOT directly activate plugins.
 
 ---
 
-## 39. Boot and Shutdown
+# 67. Crash / Previous Runtime State
 
-If shutdown is requested during boot:
+Previous persisted:
 
 ```text
-Boot Cancellation Requested
-    ↓
-No New Stage Started
-    ↓
-Current Initialization Canceled if Safe
-    ↓
-Partial Components Rolled Back
-    ↓
-Diagnostics Flushed
-    ↓
-Process Exit
+ACTIVE
 ```
 
-Application must not continue to `APPLICATION_READY`.
+runtime/plugin state MUST NOT be trusted as proof of current activity after process restart.
+
+New runtime instances must be constructed.
 
 ---
 
-## 40. Startup Invariants
+# 68. ExecutionRevision State Recovery
 
-1. Boot order dependency-aware.
-2. Every initialized component has cleanup path.
-3. Diagnostics available before critical initialization.
-4. Active config fully validated.
-5. Secret value never appears in config snapshot.
-6. Storage and Artifact Store are distinct.
-7. Resource Manager starts before shared Lease.
-8. Artifact Store starts before publication.
-9. Scheduler starts before WorkItem admission.
-10. Queue starts before dispatch.
-11. Runtime Control starts before authority exists.
-12. Runtime Control starts before admission opens.
-13. Boot creates no active Reading Session.
-14. UI processing actions disabled before ready.
-15. Provider type not hard-coded into boot architecture.
-16. Optional provider failure may degrade, not necessarily abort.
-17. Critical component failure prevents Ready.
-18. Rollback occurs in reverse dependency order.
-19. Boot events do not control boot correctness.
-20. Event Bus does not depend on telemetry exporter.
-21. Admission opens only after readiness validation.
-22. No Candidate publication before Artifact Store ready.
-23. No Resource Lease before Resource Manager ready.
-24. No WorkItem before Runtime Control ready.
-25. Safe Mode retains authority/publication safety.
-26. Boot shutdown cancels remaining stages.
-27. Partial startup leaves no untracked resource.
-28. Startup metrics contain no reading content.
-29. ApplicationReady emitted once.
-30. BootFailed and ApplicationReady are mutually exclusive.
+If Runtime execution state is restored after crash:
+
+* stale previous attempts MUST NOT regain authority;
+* resource leases from prior process epoch MUST be reconciled;
+* accepted durable business results remain owned by their business/storage architecture.
+
+Exact recovery semantics belong to detailed Runtime documents.
 
 ---
 
-## 41. Testing Requirements
+# 69. Startup Invariants
 
-Test:
+1. Startup is dependency-aware.
 
-- normal deterministic boot;
-- optional provider degraded;
-- missing credential;
-- corrupt persisted configuration;
-- unsupported schema;
-- Storage unavailable;
-- Storage migration failure;
-- Resource Manager init failure;
-- Artifact Store init failure;
-- Scheduler init failure;
-- Runtime Control init failure;
-- UI init failure;
-- Safe Mode entry;
-- shutdown during boot;
-- rollback order;
-- parallel initialization dependency safety;
-- no Session created on boot;
-- admission closed until ready;
-- no WorkItem before Runtime Control;
-- no Lease before Resource Manager;
-- startup event privacy;
-- duplicate ready prevention;
-- telemetry failure during boot.
+2. Every initialized component has a cleanup path.
 
----
+3. Early diagnostics exist before critical initialization.
 
-## 42. MVP Boot Policy
+4. Initial configuration is fully validated before Runtime activation.
 
-MVP uses:
+5. Raw secret values do not enter normal Runtime configuration snapshots.
 
-- one process;
-- one Runtime Container;
-- local Configuration Service;
-- local Storage;
-- local Event Bus;
-- process-local Resource Manager;
-- process-local Artifact Store;
-- bounded execution pools;
-- optional remote provider adapters;
-- one Runtime Control context;
-- one UI Adapter;
-- no automatic Reading Session;
-- no cloud boot dependency;
-- no runtime plugin loading.
+6. Secret references and secret values remain distinct.
 
----
+7. Storage and Runtime Artifact Store are separate.
 
-## 43. Open Questions
+8. Resource Manager is ready before shared leases.
 
-- UI shell có hiển thị trước full Ready không?
-- Storage nào critical trong MVP?
-- Provider warmup eager hay lazy?
-- Local model load có nằm trên critical boot path không?
-- Safe Mode tự động sau bao nhiêu lần failure?
-- Early diagnostics được giữ bao lâu?
-- Runtime Container implementation cụ thể?
-- Readiness health check có timeout bao nhiêu?
-- Provider registry có lazy instantiate không?
-- Presentation assets có thể load song song đến mức nào?
-- Boot recovery marker nằm ở Storage use case nào?
+9. Runtime Artifact Store is ready before Runtime Artifact publication.
 
----
+10. Execution State Store is ready before Runtime authority becomes active.
 
-## 44. Related Documents
+11. Scheduler/Queues are initialized before admission opens.
 
-| Document | Relationship |
-|---|---|
-| `README.md` | Runtime overview |
-| `RUNTIME_COMPONENTS.md` | Component dependency and ownership |
-| `RUNTIME_CONFIG.md` | Bootstrap and active configuration |
-| `PIPELINE_RUNTIME.md` | Runtime Control and authority |
-| `SCHEDULER.md` | Admission opening |
-| `WORK_QUEUE.md` | Queue/dispatcher initialization |
-| `CANCELLATION.md` | Boot cancellation and shutdown |
-| `MEMORY_MODEL.md` | Resource budgets |
-| `RESOURCE_LIFECYCLE.md` | Rollback cleanup |
-| `THREADING_MODEL.md` | Execution context lifecycle |
-| `RUNTIME_OBSERVABILITY.md` | Startup metrics/events |
-| `ERROR_MODEL.md` | Boot failure normalization |
-| `../../modules/storage/README.md` | Storage startup/recovery |
-| `../core/EVENT_BUS.md` | Startup event semantics |
-| `../MODULE_DEPENDENCY.md` | Dependency graph |
+12. Runtime Control is ready before Runtime execution authority is used.
+
+13. Runtime Control is not the owner of every Runtime state.
+
+14. Boot does not create a Reading Session by default.
+
+15. Boot does not create mirror Runtime components for Business Modules.
+
+16. Provider Runtime Gateway is separate from Provider Management.
+
+17. Provider/model business selection is not performed by boot.
+
+18. Optional provider/plugin failure may degrade rather than abort boot.
+
+19. Required plugin dependencies resolve before plugin activation.
+
+20. Plugin Discovery executes no plugin implementation code.
+
+21. Enabled plugin does not imply active plugin.
+
+22. Plugin runtime instances are newly constructed after process restart.
+
+23. Scheduler admission stays closed until Runtime readiness.
+
+24. Application processing stays disabled until Application readiness.
+
+25. `RUNTIME_READY` and `APPLICATION_READY` are distinct.
+
+26. Runtime Artifact publication and Domain commit are distinct.
+
+27. Boot events do not determine boot correctness.
+
+28. Telemetry exporter failure does not automatically fail boot.
+
+29. Rollback follows actual dependency/ownership order.
+
+30. Partial startup leaves no untracked owned resource where technically possible.
+
+31. Startup telemetry contains no reading content by default.
+
+32. Safe Mode still enforces authority/security/resource invariants.
+
+33. Boot cancellation prevents later ApplicationReady.
+
+34. `ApplicationReady` is emitted at most once.
+
+35. `BootFailed` and successful `ApplicationReady` are mutually exclusive for one boot attempt.
 
 ---
 
-## 45. Completion Criteria
+# 70. Testing Requirements
 
-`BOOT_SEQUENCE.md` được xem là đồng bộ khi:
+Boot tests SHOULD include:
 
-- boot dùng Runtime v2 component graph;
-- Configuration Service và immutable snapshot rõ;
-- Resource Manager và Artifact Store có stage riêng;
-- Provider Manager capability-based;
-- Scheduler/Queue/Runtime Control order đúng;
-- boot không tạo active Session;
-- admission chỉ mở sau readiness;
-- degraded/safe mode tách rõ;
-- rollback reverse dependency;
-- startup events/metrics/privacy đầy đủ;
-- không hard-code OCR/Translation provider boot.
+* normal boot;
+* deterministic dependency ordering;
+* independent-stage parallelism;
+* invalid bootstrap config;
+* invalid main configuration;
+* configuration migration failure;
+* missing optional credential;
+* missing required credential reference;
+* Storage unavailable;
+* Registry unavailable;
+* plugin descriptor invalid;
+* plugin incompatible;
+* plugin required dependency unresolved;
+* optional plugin failure;
+* provider runtime unavailable;
+* Resource Manager failure;
+* Runtime Artifact Store failure;
+* Execution State Store failure;
+* Scheduler failure;
+* Runtime Control failure;
+* degraded startup;
+* Safe Mode;
+* shutdown during boot;
+* reverse cleanup;
+* no Reading Session created automatically;
+* admission remains closed before RuntimeReady;
+* no Artifact publication before Artifact Store;
+* no Lease before Resource Manager;
+* plugin Discovery executes no plugin code;
+* stale previous runtime state is not trusted;
+* startup telemetry privacy;
+* duplicate-ready prevention;
+* telemetry backend failure.
 
 ---
 
-## 46. Summary
+# 71. MVP Boot Policy
 
-CRAI Boot Sequence:
+CRAI MVP SHOULD support:
+
+* one application process;
+* local Configuration infrastructure;
+* local persistence;
+* local Event Bus;
+* process-local Runtime Control;
+* process-local Scheduler/Queues;
+* process-local Resource Manager;
+* process-local Runtime Artifact Store;
+* process-local Execution State Store;
+* bounded Worker execution;
+* one Provider Runtime Gateway;
+* built-in capability providers;
+* installed trusted plugin discovery/activation where configured;
+* lazy optional providers/plugins;
+* optional remote provider adapters;
+* one UI/Application shell;
+* no automatic Reading Session;
+* no mandatory cloud dependency.
+
+MVP MAY defer:
+
+* hot plugin discovery;
+* hot plugin loading/unloading;
+* remote plugin execution;
+* distributed boot;
+* multi-process Runtime authority;
+* distributed Scheduler;
+* automatic plugin marketplace installation;
+* zero-downtime component replacement.
+
+---
+
+# 72. Open Decisions
+
+The following SHOULD remain open until implementation/prototype validation:
+
+* exact boot state enum;
+* exact RuntimeReady definition;
+* exact ApplicationReady definition;
+* UI shell before RuntimeReady;
+* application-module initialization ordering;
+* which persistence capabilities are critical;
+* Safe Mode policy;
+* repeated boot-failure threshold;
+* plugin eager vs lazy activation;
+* provider eager vs lazy adapter construction;
+* provider/model warmup policy;
+* local model boot criticality;
+* Execution State recovery;
+* Registry reconciliation ownership;
+* Plugin Manager startup timing;
+* early diagnostics retention;
+* runtime wiring/container implementation;
+* readiness timeout;
+* capability-specific readiness;
+* parallel initialization groups;
+* rollback failure behavior;
+* shutdown timeout during boot.
+
+---
+
+# 73. Related Documents
+
+Runtime:
+
+* `README.md`
+* `RUNTIME_COMPONENTS.md`
+* `RUNTIME_CONFIG.md`
+* `PIPELINE_ORCHESTRATION.md`
+* `PIPELINE_RUNTIME.md`
+* `SCHEDULER.md`
+* `WORK_QUEUE.md`
+* `CANCELLATION.md`
+* `RETRY_POLICY.md`
+* `CACHE_POLICY.md`
+* `MEMORY_MODEL.md`
+* `THREADING_MODEL.md`
+* `RESOURCE_LIFECYCLE.md`
+* `PERFORMANCE_MODEL.md`
+* `ERROR_MODEL.md`
+* `RUNTIME_OBSERVABILITY.md`
+* `PROCESS_TOPOLOGY.md`
+
+Plugin:
+
+* `../plugin/PLUGIN_SYSTEM.md`
+* `../plugin/PLUGIN_DISCOVERY.md`
+* `../plugin/PLUGIN_REGISTRY.md`
+* `../plugin/PLUGIN_LIFECYCLE.md`
+* `../plugin/PLUGIN_DEPENDENCY.md`
+* `../plugin/PLUGIN_SECURITY.md`
+
+AI:
+
+* `../ai/MODELS.md`
+* `../ai/ROUTING.md`
+* `../ai/OBSERVABILITY.md`
+
+Modules:
+
+* `../../02-modules/provider-management/`
+* `../../02-modules/reading-session/`
+* `../../02-modules/presentation/`
+* `../../02-modules/storage/`
+
+Infrastructure:
+
+* `../../03-infrastructure/configuration/`
+* `../../03-infrastructure/event-bus/`
+* `../../03-infrastructure/secret-management/`
+* `../../03-infrastructure/storage/`
+* `../../03-infrastructure/telemetry/`
+
+---
+
+# 74. Summary
+
+The CRAI boot sequence follows this ownership order:
 
 ```text
-Bootstrap
-    ↓
-Observe
-    ↓
 Configure
-    ↓
-Persist/Recover
-    ↓
-Build Infrastructure
-    ↓
-Build Resource and Artifact Ownership
-    ↓
-Build Provider and Execution Infrastructure
-    ↓
-Build Runtime Authority
-    ↓
-Build Presentation/UI
-    ↓
-Validate Readiness
-    ↓
-Open Admission
+    |
+    v
+Establish Infrastructure
+    |
+    v
+Resolve Extensions
+    |
+    v
+Establish Runtime State / Resource Ownership
+    |
+    v
+Establish Execution Capacity
+    |
+    v
+Establish Runtime Authority
+    |
+    v
+RUNTIME_READY
+    |
+    v
+Establish Application Interaction
+    |
+    v
+APPLICATION_READY
 ```
 
-Điểm chốt:
+The critical rules are:
 
 ```text
-No authority before Runtime Control.
+No execution authority before Runtime Control.
 
-No publication before Artifact Store.
+No admission before Runtime readiness.
 
-No Lease before Resource Manager.
+No Runtime Artifact publication before Artifact Store.
 
-No WorkItem before Scheduler and Queue.
+No shared Lease before Resource Manager.
 
-No user processing before APPLICATION_READY.
+No plugin activation before validation/resolution.
+
+No raw secrets through Runtime contracts.
+
+No Business Module ownership inside Runtime boot.
+
+No user processing before Application readiness.
 ```

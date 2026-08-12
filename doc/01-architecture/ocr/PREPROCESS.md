@@ -1,7 +1,7 @@
 # Image Preprocessing
 
 > **Status:** Draft
-> **Version:** 1.1
+> **Version:** 1.2.0
 > **Layer:** OCR Architecture
 > **Depends On:** Image Source
 > **Next Layer:** Detection
@@ -92,8 +92,8 @@ Preprocessing không thực hiện:
 * final Layout Analysis
 * Reading Order
 * Runtime scheduling
-* Runtime retry
-* cache lifecycle management
+* Runtime same-work retry
+* global cache lifecycle management
 
 ---
 
@@ -660,7 +660,7 @@ Derived Image phải có:
 * transform metadata
 * content/version identity
 
-Artifact lifecycle thuộc Runtime/Resource ownership tương ứng.
+Processed/Derived Image semantic identity và transform lineage thuộc Preprocessing. Runtime Resource Lifecycle sở hữu physical resource ownership, Lease, retention và disposal của backing resource.
 
 ---
 
@@ -866,24 +866,34 @@ Region-specific preparation có thể nằm trong Recognition/OCR Pipeline flow.
 
 Preprocessing không sở hữu:
 
+* ExecutionScope hoặc ExecutionRevision
+* WorkItem hoặc Attempt lifecycle
 * execution queue
-* retry
+* Runtime Retry Policy hoặc retry budget
 * cancellation authority
-* WorkItem state
-* resource allocation
-* task scheduling
+* Scheduler behavior
+* execution authority
+* stale-result rejection
+* Runtime Artifact publication
+* physical resource lifecycle
 
-Preprocessing chỉ:
+Runtime sở hữu execution mechanics và execution authority trên.
+
+Preprocessing chỉ định nghĩa:
 
 ```text
-input image
+Source Image
     ↓
-processing semantics
+Preprocessing Semantics
     ↓
-processed image
+Processed Image Candidate
++
+Transform Metadata
 ```
 
-Runtime điều phối cách operation được thực thi.
+Khi Preprocessing execution hoàn thành, Runtime Control quyết định completion còn execution authority hay phải bị reject vì stale hoặc cancelled trước Runtime Artifact publication.
+
+Preprocessing không quyết định downstream Business continuation.
 
 ---
 
@@ -894,10 +904,23 @@ Image processing có thể sử dụng nhiều:
 * RAM
 * CPU
 * temporary buffers
+* native image handles
+* GPU resources khi implementation sử dụng GPU
 
-Preprocessing implementation phải release temporary buffers khi không còn cần thiết.
+Preprocessing sở hữu semantic requirement của image transformation.
 
-Tuy nhiên resource lifecycle contract thuộc Runtime/Infrastructure.
+Runtime Resource Lifecycle sở hữu:
+
+* physical resource ownership
+* Resource Lease
+* retention
+* disposal
+* cleanup coordination
+* resource accounting
+
+Attempt-local temporary buffers phải được release theo Runtime Resource Lifecycle và Worker ownership rules.
+
+Preprocessing không tự định nghĩa physical disposal policy.
 
 ---
 
@@ -919,7 +942,9 @@ Global cache:
 * retention
 * cleanup
 
-thuộc Runtime.
+thuộc Runtime Cache Policy.
+
+Preprocessing chỉ định nghĩa semantic compatibility và invalidation conditions của Processed Image result.
 
 ---
 
@@ -954,7 +979,7 @@ Useful measurements có thể gồm:
 * scaling ratio
 * warning count
 
-Telemetry transport thuộc Runtime/Infrastructure.
+Runtime Observability sở hữu execution correlation; telemetry transport và lifecycle thuộc Infrastructure.
 
 ---
 
@@ -966,8 +991,9 @@ Do đó:
 
 * không log raw image mặc định
 * diagnostics chỉ lưu metadata cần thiết
-* temporary image artifact phải tuân thủ retention policy
+* temporary image resource phải tuân Runtime Resource Lifecycle và resolved retention policy
 * local-only data phải giữ local boundary
+* Runtime Artifact publication hoặc cross-process transport không được làm mất resolved privacy constraints
 
 ---
 
@@ -1001,15 +1027,29 @@ Preprocessing phải luôn đảm bảo:
 
 13. Preprocessing không sở hữu Runtime scheduling.
 
-14. Preprocessing không sở hữu Runtime retry.
+14. Preprocessing không sở hữu Runtime Retry Policy hoặc retry budget.
 
 15. Preprocessing không sở hữu cancellation authority.
 
-16. Preprocessing không sở hữu global cache lifecycle.
+16. Preprocessing không sở hữu Runtime execution authority hoặc stale-result decision.
 
-17. Telemetry implementation không thuộc Preprocessing.
+17. Preprocessing không sở hữu Runtime Artifact publication.
 
-18. Published Processed Image không bị thay đổi âm thầm.
+18. Preprocessing không sở hữu downstream Business continuation.
+
+19. Preprocessing không sở hữu physical Runtime resource lifecycle.
+
+20. Preprocessing không sở hữu global cache lifecycle.
+
+21. Preprocessing semantic compatibility không bị Runtime Cache Policy redefine.
+
+22. Telemetry implementation không thuộc Preprocessing.
+
+23. Published Processed Image semantic result không bị thay đổi âm thầm.
+
+24. Processed Image semantic identity và Runtime physical-resource identity không được conflated.
+
+25. Provider-specific preference chỉ là processing hint và không biến Preprocessing thành Provider-specific implementation boundary.
 
 ---
 
@@ -1058,21 +1098,29 @@ Không cần ngay:
 
 # 51. Ownership References
 
-| Concern             | Owner                      |
-| ------------------- | -------------------------- |
-| Image Preprocessing | `PREPROCESS.md`            |
-| Text Detection      | `DETECTION.md`             |
-| Region              | `DETECTION.md`             |
-| Recognition         | `RECOGNITION.md`           |
-| Text Direction      | `TEXT_DIRECTION.md`        |
-| Layout              | `LAYOUT.md`                |
-| OCR Pipeline        | `PIPELINE.md`              |
-| Resource Lifecycle  | Runtime / Resource Manager |
-| Retry               | Runtime                    |
-| Cancellation        | Runtime                    |
-| Cache Lifecycle     | Runtime                    |
-| Telemetry Transport | Infrastructure             |
-| Event Transport     | Event Bus                  |
+| Concern | Owner |
+| --- | --- |
+| Image Preprocessing | `PREPROCESS.md` |
+| Processed Image semantic result | `PREPROCESS.md` |
+| Transform Metadata | `PREPROCESS.md` |
+| Preprocessing semantic compatibility | `PREPROCESS.md` |
+| Text Detection | `DETECTION.md` |
+| Region | `DETECTION.md` |
+| Recognition | `RECOGNITION.md` |
+| Text Direction | `TEXT_DIRECTION.md` |
+| Layout | `LAYOUT.md` |
+| OCR Pipeline | `PIPELINE.md` |
+| Same-work Retry | Runtime Retry Policy |
+| Cancellation Authority | Runtime Control / Cancellation |
+| Scheduling | Runtime Scheduler |
+| Execution Authority / stale-result rejection | Runtime Control |
+| Runtime Artifact publication | Runtime Artifact boundary |
+| Business continuation | Business Pipeline Orchestration |
+| Physical Resource Lifecycle | Runtime Resource Manager |
+| Cache Lifecycle | Runtime Cache Policy |
+| Runtime Execution Correlation | Runtime Observability |
+| Telemetry Transport | Infrastructure |
+| Event Transport | Event Bus |
 
 ---
 
@@ -1123,5 +1171,5 @@ Detection finds the text.
 
 Recognition reads the text.
 
-Runtime executes the work.
+Runtime executes the work and owns execution authority.
 ```

@@ -1,7 +1,7 @@
 # Text Block Domain
 
 * **Document:** Domain / Text Block
-* **Version:** 1.0.0
+* **Version:** 2.0.0
 * **Status:** Draft
 * **Owner:** CRAI Architecture
 
@@ -9,178 +9,270 @@
 
 # Purpose
 
-A Text Block represents one logically readable unit of source text within a Page.
+A `TextBlock` represents one stable logical unit of readable source text within CRAI.
 
-It connects visual or structured source content to downstream translation, review, presentation and export processes.
+A TextBlock bridges source content and downstream capabilities such as:
 
-Depending on the content source, a Text Block may represent:
+* translation,
+* review,
+* presentation,
+* reading,
+* search,
+* export.
 
-* A speech bubble
-* A narration box
-* A sound effect
-* A caption
-* A label
-* A paragraph
-* A heading
-* A dialogue line
-* A structured text fragment
-* A manually selected text region
+Depending on the source, a TextBlock may represent:
 
-A Text Block is not an independent aggregate root.
+* a speech bubble,
+* narration box,
+* thought bubble,
+* sound effect,
+* caption,
+* label,
+* paragraph,
+* heading,
+* dialogue line,
+* structured document fragment,
+* browser text fragment,
+* manually selected text region,
+* manually entered text.
 
-It belongs to exactly one Page and is managed within the Page aggregate.
+A TextBlock is an independently addressable domain resource when stable identity, revision history, translation linkage, geometry, or correction history matters.
+
+It is **not required to belong to a Page**.
+
+Image-derived TextBlocks normally reference a Page and Image.
+
+Text-native TextBlocks may instead belong directly to a Chapter or another structured-content scope.
 
 ---
 
 # Domain Role
 
-The Text Block is the canonical domain representation of readable source text after content extraction and text analysis.
+TextBlock is the canonical domain representation of readable source text after source-specific extraction has crossed into CRAI's normalized domain model.
+
+Image-oriented flow:
 
 ```text
-Image or Structured Source
-            │
-            ▼
-       Text Detection
-            │
-            ▼
-            OCR
-            │
-            ▼
-       Text Analysis
-            │
-            ▼
-        Text Block
-            │
-      ┌─────┼──────────┐
-      ▼     ▼          ▼
-Translation Review  Presentation
+Image
+  |
+  v
+Detection / Recognition
+  |
+  v
+Text Analysis
+  |
+  v
+TextBlock
+  |
+  +--> Translation
+  +--> Review
+  +--> Presentation
 ```
 
-OCR provider output must not be passed directly to Translation or Presentation.
-
-Provider-specific OCR results are normalized into Text Blocks before crossing the domain boundary.
-
----
-
-# Ownership Boundary
+Structured-text flow:
 
 ```text
-Page Aggregate
-├── Images
-├── OCR Results
-├── Layout
-├── Text Blocks
-│   ├── Source Text
-│   ├── Geometry
-│   ├── Reading Order
-│   ├── Classification
-│   ├── Confidence
-│   ├── Revisions
-│   └── Translation References
-├── Translation Results
-├── Render Layers
-└── Diagnostics
+Browser / Document / Native Text
+              |
+              v
+         Extraction
+              |
+              v
+          TextBlock
+              |
+              +--> Translation
+              +--> Review
+              +--> Presentation
 ```
 
-The Page owns:
+Provider-specific OCR or extraction payloads MUST NOT become the canonical representation consumed directly by downstream domain modules.
 
-* Text Block identity
-* Block ordering
-* Block geometry
-* Source-text revisions
-* Block relationships
-* Translation associations
-* Block lifecycle
-
-The Chapter may coordinate ordering and translation context across Pages, but it does not take ownership away from the Page.
+They are normalized into stable TextBlock resources first.
 
 ---
 
 # Responsibilities
 
-A Text Block is responsible for:
+A TextBlock is responsible for:
 
-* Identifying one readable source-text unit
-* Preserving normalized source text
-* Referencing its source artifact
-* Recording spatial geometry when applicable
-* Declaring reading order
-* Describing text orientation and direction
-* Classifying semantic role
-* Preserving OCR confidence
-* Tracking source-text revisions
-* Supporting manual correction
-* Linking translation results to the correct source revision
-* Supporting rendering and presentation alignment
-* Preserving derivation and processing lineage
+* stable logical identity,
+* source-text representation,
+* source provenance,
+* effective source text,
+* source revision,
+* semantic classification,
+* language metadata,
+* reading-order metadata,
+* optional visual geometry,
+* optional structural locator,
+* text orientation,
+* writing direction,
+* confidence metadata,
+* block relationships,
+* split/merge lineage,
+* correction history,
+* downstream revision compatibility.
 
-A Text Block is not responsible for:
+A TextBlock is NOT responsible for:
 
-* Capturing screen or browser content
-* Downloading source images
-* Executing OCR
-* Choosing an OCR provider
-* Translating text
-* Selecting a translation provider
-* Rendering translated text
-* Persisting binary image data
-* Managing provider-specific response formats
-* Orchestrating Page processing
+* source capture,
+* remote downloading,
+* OCR execution,
+* provider selection,
+* translation execution,
+* translation provider selection,
+* rendering execution,
+* Presentation execution,
+* storage of binary image data,
+* orchestration of Page or Chapter processing.
 
-Those responsibilities belong to Capture, OCR, Translation, Presentation, Rendering, Storage and Runtime components.
+Those responsibilities remain in the corresponding capabilities.
 
 ---
 
 # Identity
 
-Every Text Block has a stable identity within its Page.
+Every TextBlock has a stable logical identifier.
 
 Typical fields include:
 
-* Text Block ID
-* Page ID
-* Source Type
-* Source Artifact ID
-* Source Artifact Version
-* Block Type
-* Source Text
-* Normalized Text
-* Language
-* Geometry
-* Reading Order
-* Orientation
-* Writing Direction
-* OCR Confidence
-* Status
-* Revision
-* Created Time
-* Updated Time
+```text
+TextBlock
+├── textBlockId
+├── projectId
+├── chapterId?
+├── pageId?
+├── sourceType
+├── sourceArtifactId?
+├── sourceArtifactVersion?
+├── blockType
+├── language
+├── revision
+├── lifecycleStatus
+├── createdAt
+└── updatedAt
+```
 
-`Text Block ID` identifies the logical block.
+Optional content-specific fields include:
 
-It must not be replaced merely because its translation changes.
+```text
+geometry?
+structuralLocator?
+readingOrder?
+orientation?
+writingDirection?
+```
 
-When the block can still be recognized as the same logical content after OCR correction or user editing, its identity remains stable and its revision increases.
+`textBlockId` identifies the logical content unit.
+
+It MUST NOT change merely because:
+
+* translation changes,
+* classification changes,
+* user corrects OCR text,
+* reading order changes,
+* speaker association changes.
+
+When the content can still be reconciled as the same logical unit, identity remains stable and its revision changes.
+
+---
+
+# Scope
+
+A TextBlock MUST have an explicit valid content scope.
+
+Common scopes include:
+
+```text
+Project
+└── Chapter
+    └── TextBlock
+```
+
+or:
+
+```text
+Project
+└── Chapter
+    └── Page
+        └── TextBlock
+```
+
+A Page association is therefore optional.
+
+Typical fields:
+
+```text
+projectId
+chapterId?
+pageId?
+```
+
+When `pageId` is present:
+
+* the Page MUST exist,
+* its Chapter and Project scope MUST be compatible,
+* visual geometry MAY be present.
+
+When `pageId` is absent:
+
+* another stable source/scope reference MUST identify where the TextBlock belongs.
 
 ---
 
 # Source Types
 
-A Text Block may be created from different source forms.
+Recommended source types include:
 
-| Source Type     | Description                                                   |
-| --------------- | ------------------------------------------------------------- |
-| `image_ocr`     | Recognized from an image through OCR                          |
-| `browser_dom`   | Extracted from structured browser content                     |
-| `document_text` | Extracted from PDF, EPUB or another document                  |
-| `clipboard`     | Created from clipboard text                                   |
-| `manual_region` | Created from a user-selected visual region                    |
-| `manual_text`   | Entered directly by the user                                  |
-| `generated`     | Produced by segmentation, merging or another processing stage |
+| Source Type     | Meaning                                                           |
+| --------------- | ----------------------------------------------------------------- |
+| `IMAGE_OCR`     | Recognized from visual content                                    |
+| `BROWSER_DOM`   | Extracted from browser structure                                  |
+| `DOCUMENT_TEXT` | Extracted from EPUB, PDF text layer, document, etc.               |
+| `CLIPBOARD`     | Created from clipboard source                                     |
+| `MANUAL_REGION` | Created from a selected visual region                             |
+| `MANUAL_TEXT`   | Entered directly                                                  |
+| `GENERATED`     | Produced by segmentation, split, merge, or normalization workflow |
+| `OTHER`         | Explicitly supported unknown source                               |
 
-Source type describes origin only.
+Source type describes provenance.
 
-It must not couple the domain model to a specific adapter, provider or platform.
+It MUST NOT identify a provider or adapter implementation.
+
+---
+
+# Source Provenance
+
+A TextBlock SHOULD retain enough information to identify its source.
+
+Possible fields include:
+
+```text
+sourceType
+sourceArtifactId
+sourceArtifactVersion
+sourceLocator
+sourceRevision
+```
+
+Image-derived example:
+
+```text
+sourceType: IMAGE_OCR
+pageId: page_001
+imageId: image_004
+imageVersion: 2
+```
+
+Browser example:
+
+```text
+sourceType: BROWSER_DOM
+chapterId: chapter_100
+structuralLocator: ...
+```
+
+Source provenance MUST remain traceable when user correction changes effective text.
 
 ---
 
@@ -188,333 +280,473 @@ It must not couple the domain model to a specific adapter, provider or platform.
 
 Recommended semantic block types include:
 
-| Block Type     | Description                                                  |
-| -------------- | ------------------------------------------------------------ |
-| `dialogue`     | Spoken dialogue associated with a character or speech region |
-| `narration`    | Narrative text outside normal dialogue                       |
-| `thought`      | Internal thought or monologue                                |
-| `caption`      | Supporting caption or explanatory text                       |
-| `heading`      | Title, chapter heading or section heading                    |
-| `paragraph`    | Continuous prose paragraph                                   |
-| `sound_effect` | Visual or textual sound effect                               |
-| `label`        | Name, sign, interface label or object annotation             |
-| `footnote`     | Footnote, translator note or reference note                  |
-| `metadata`     | Publication or structural metadata                           |
-| `unknown`      | Unclassified readable text                                   |
+```text
+DIALOGUE
+NARRATION
+THOUGHT
+CAPTION
+HEADING
+PARAGRAPH
+SOUND_EFFECT
+LABEL
+FOOTNOTE
+METADATA
+UNKNOWN
+```
 
-Classification may be revised after OCR, layout analysis or user review.
+Classification MAY change after:
 
-Unknown classification must not prevent translation.
+* layout analysis,
+* source interpretation,
+* user correction,
+* context analysis.
+
+`UNKNOWN` MUST remain processable.
+
+Unknown classification MUST NOT block translation by itself.
 
 ---
 
 # Text Representations
 
-A Text Block may retain several text representations.
+A TextBlock MAY retain multiple source representations.
 
 ```text
-Raw OCR Text
-      │
-      ▼
+Raw Extracted Text
+        |
+        v
 Normalized Source Text
-      │
-      ▼
+        |
+        v
 User-Corrected Source Text
-      │
-      ▼
+        |
+        v
 Effective Source Text
 ```
 
-## Raw OCR Text
+Not every source type produces every layer.
 
-Text returned by the OCR stage before domain normalization.
-
-It may contain:
-
-* Incorrect whitespace
-* Broken punctuation
-* OCR control symbols
-* Character substitutions
-* Line-break artifacts
-* Provider-specific formatting
-
-Raw OCR text is diagnostic and should not automatically be treated as authoritative.
-
-## Normalized Source Text
-
-Text after deterministic normalization.
-
-Normalization may include:
-
-* Unicode normalization
-* Whitespace cleanup
-* Line-break normalization
-* Punctuation normalization
-* Script normalization
-* Removal of provider artifacts
-
-Normalization must preserve semantic meaning.
-
-## User-Corrected Source Text
-
-An optional correction explicitly made or approved by the user.
-
-User correction has higher authority than OCR and automatic normalization.
-
-## Effective Source Text
-
-The source text consumed by Translation and Presentation.
-
-Resolution order:
+For example:
 
 ```text
-User-Corrected Text
-        ↓ fallback
-Normalized Source Text
-        ↓ fallback
-Raw OCR Text
+MANUAL_TEXT
+    |
+    v
+Effective Source Text
 ```
 
-The effective source text must always be derived deterministically.
+may require no OCR layer.
+
+---
+
+# Raw Extracted Text
+
+Raw extracted text is the source text returned before CRAI normalization.
+
+For OCR this may contain:
+
+* whitespace errors,
+* punctuation errors,
+* recognition substitutions,
+* broken lines,
+* provider artifacts.
+
+For structured extraction it may contain:
+
+* source markup residue,
+* formatting artifacts,
+* unexpected whitespace.
+
+Raw extracted text is primarily provenance and diagnostic data.
+
+It SHOULD NOT automatically become authoritative source text.
+
+---
+
+# Normalized Source Text
+
+Normalized source text results from deterministic, semantics-preserving normalization.
+
+Possible normalization includes:
+
+* Unicode normalization,
+* whitespace cleanup,
+* line-break normalization,
+* punctuation normalization,
+* script normalization,
+* removal of extraction artifacts.
+
+Normalization MUST preserve intended source meaning.
+
+A semantics-changing rewrite is NOT ordinary normalization.
+
+---
+
+# User-Corrected Source Text
+
+Users MAY explicitly correct source text.
+
+A confirmed user correction has higher authority than automatically extracted text.
+
+Corrections MUST:
+
+* preserve prior revision traceability,
+* create a new processing-significant revision,
+* invalidate dependent results according to dependency rules.
+
+---
+
+# Effective Source Text
+
+The effective source text is the canonical source consumed by downstream capabilities.
+
+Recommended precedence:
+
+```text
+User-Corrected Source Text
+          |
+          v fallback
+Normalized Source Text
+          |
+          v fallback
+Raw Extracted Text
+```
+
+For sources without raw or normalized variants, the explicit source text MAY directly become effective text.
+
+Resolution MUST be deterministic.
+
+---
+
+# Revision Model
+
+TextBlock identity and TextBlock revision are separate.
+
+```text
+textBlockId
+    stable logical identity
+
+revision
+    processing-significant version
+```
+
+Revision MUST increase whenever a change can alter dependent processing behavior.
+
+Examples include changes to:
+
+* effective source text,
+* source language,
+* semantic block type,
+* geometry,
+* reading order,
+* orientation,
+* writing direction,
+* speaker association,
+* block relationships,
+* source mapping.
+
+---
+
+# Revision Compatibility
+
+Downstream artifacts MUST reference the TextBlock revision they consumed.
+
+Example:
+
+```text
+TextBlock
+    id: block_001
+    revision: 7
+
+Translation
+    textBlockId: block_001
+    sourceRevision: 7
+```
+
+When TextBlock revision becomes 8:
+
+```text
+Translation(sourceRevision=7)
+    -> STALE
+```
+
+The historical Translation MAY remain available.
+
+It MUST NOT be treated as current without compatibility validation.
+
+---
+
+# Content Hash
+
+A TextBlock SHOULD expose deterministic hashes for processing compatibility.
+
+A translation-oriented content hash MAY include:
+
+```text
+effectiveSourceText
+sourceLanguage
+blockType if translation-significant
+orientation if significant
+writingDirection if significant
+normalizationRevision
+```
+
+Geometry SHOULD NOT automatically be included unless translation behavior depends upon it.
+
+A separate structural hash MAY include:
+
+* geometry,
+* ordering,
+* structural locator,
+* relationships.
+
+This prevents unnecessary translation invalidation after presentation-only changes.
 
 ---
 
 # Geometry
 
-Image-derived Text Blocks must preserve their position in a stable image coordinate space.
+Image-derived TextBlocks MAY contain visual geometry.
 
-Recommended geometry representation:
+Recommended form:
 
 ```text
 Geometry
-├── Bounding Box
-├── Polygon
-├── Baseline
-├── Rotation
-└── Coordinate Reference
+├── imageId
+├── imageVersion
+├── coordinateWidth
+├── coordinateHeight
+├── boundingBox?
+├── polygon?
+├── baseline?
+├── rotation?
+└── transformReference?
 ```
 
-Typical fields include:
+Geometry MUST reference the exact Image identity/version whose coordinate system produced it.
 
-* Image ID
-* Image Version
-* Coordinate Width
-* Coordinate Height
-* Bounding Box
-* Polygon Points
-* Rotation Angle
-* Transform Reference
+Geometry MUST NOT be interpreted solely from `pageId`.
 
-Canonical coordinates use:
+---
+
+# Coordinate Space
+
+Canonical raster coordinate convention:
 
 ```text
 origin: top-left
-x-axis: left to right
-y-axis: top to bottom
-unit: source pixels
+x-axis: left -> right
+y-axis: top -> bottom
+unit: pixels
 ```
 
-A Text Block geometry is valid only for the referenced image version.
+A geometry-bearing TextBlock MUST retain enough coordinate metadata to prevent accidental reuse against incompatible Images.
 
-Geometry must not be reused against another image version without a verified transform.
-
-Structured text blocks such as browser paragraphs may not require pixel geometry. They may instead contain a structural locator.
+Mapping geometry to another Image requires an explicit or lineage-derived transform.
 
 ---
 
 # Structural Locator
 
-Non-image Text Blocks may use a structural locator instead of visual geometry.
+Text-native TextBlocks MAY use structural location rather than image geometry.
 
-Possible locator forms include:
+Possible forms include:
 
-* DOM node reference
-* CSS selector
-* XPath
-* Document element ID
-* Paragraph index
-* Character range
-* Source fragment identifier
-* Adapter-defined stable locator
+* DOM node identity,
+* selector,
+* XPath,
+* document element ID,
+* paragraph index,
+* character range,
+* text anchor,
+* fragment identity,
+* adapter-defined stable locator.
 
-A locator is descriptive metadata.
+A structural locator is not guaranteed to remain valid forever.
 
-The domain must not rely on a locator remaining valid forever.
-
-When source structure changes, the locator may be invalidated while the Text Block content remains available.
+Locator invalidation MUST NOT automatically destroy already preserved TextBlock content.
 
 ---
 
-# Text Orientation
+# Geometry vs Locator
 
-Supported orientations may include:
+A TextBlock MAY contain:
 
-| Orientation  | Description                                  |
-| ------------ | -------------------------------------------- |
-| `horizontal` | Text flows primarily along a horizontal axis |
-| `vertical`   | Text flows primarily along a vertical axis   |
-| `rotated`    | Text uses a non-standard rotation            |
-| `mixed`      | Several orientations exist inside one block  |
-| `unknown`    | Orientation has not been determined          |
+```text
+geometry
+```
 
-Orientation is different from writing direction.
+or:
 
-For example, a vertical Chinese block may still preserve a defined character and line progression.
+```text
+structuralLocator
+```
+
+or, when useful:
+
+```text
+both
+```
+
+The domain MUST NOT require pixel geometry for text-native content.
+
+---
+
+# Orientation
+
+Text orientation describes the visual orientation of the text unit.
+
+Recommended values:
+
+```text
+HORIZONTAL
+VERTICAL
+ROTATED
+MIXED
+UNKNOWN
+```
+
+Orientation is distinct from writing direction.
 
 ---
 
 # Writing Direction
 
-Supported writing directions may include:
+Possible writing-direction values include:
 
-* Left to right
-* Right to left
-* Top to bottom
-* Bottom to top
-* Mixed
-* Unknown
+```text
+LEFT_TO_RIGHT
+RIGHT_TO_LEFT
+TOP_TO_BOTTOM
+BOTTOM_TO_TOP
+MIXED
+UNKNOWN
+```
 
-Writing direction affects:
+Writing direction MAY influence:
 
-* OCR interpretation
-* Line reconstruction
-* Reading order
-* Translation grouping
-* Rendering strategy
-* User navigation
+* recognition,
+* line reconstruction,
+* reading-order inference,
+* translation grouping,
+* Presentation behavior.
 
-Writing direction must be explicit when provider inference is unreliable.
+Automatic inference MAY be corrected by the user.
 
 ---
 
 # Reading Order
 
-Each Text Block has a reading-order position within its Page.
+Reading order MUST be explicit when ordering matters.
 
-Typical fields:
+Possible representation:
 
-* Group ID
-* Sequence Index
-* Parent Block ID
-* Previous Block ID
-* Next Block ID
-* Reading-Order Confidence
+```text
+ReadingOrder
+├── groupId?
+├── sequence
+├── confidence?
+└── source
+```
 
-Reading order may be produced by:
+Possible sources:
 
-* OCR provider
-* Layout analysis
-* Domain ordering rules
-* Source document structure
-* User correction
+```text
+OCR_PROVIDER
+LAYOUT_ANALYSIS
+DOCUMENT_STRUCTURE
+DOMAIN_RULE
+USER
+```
 
-Reading order must be unique within an ordering group.
+Physical geometry alone MUST NOT automatically be treated as canonical reading order.
 
-The physical position of a block alone must not be treated as guaranteed reading order.
+---
+
+# Ordering Scope
+
+Reading order is defined within a compatible ordering scope.
+
+Possible scopes include:
+
+* Page,
+* Chapter,
+* structural container,
+* translation group.
+
+The architecture MUST NOT assume Page is the only possible ordering scope.
+
+This is required for text-native Chapters.
 
 ---
 
 # Block Relationships
 
-Text Blocks may have explicit relationships.
+TextBlocks MAY have explicit relationships.
 
-Supported relationships may include:
+Examples:
 
-| Relationship     | Description                                   |
-| ---------------- | --------------------------------------------- |
-| `continues`      | Text continues into another block             |
-| `continued_by`   | Another block continues this text             |
-| `parent_of`      | Block contains smaller logical blocks         |
-| `child_of`       | Block belongs to a larger logical block       |
-| `overlaps`       | Visual regions overlap                        |
-| `alternative_of` | Competing detection of the same source region |
-| `speaker_of`     | Block is associated with a detected speaker   |
-| `annotation_of`  | Block annotates another block                 |
-| `derived_from`   | Block was created from another block          |
+```text
+CONTINUES
+CONTINUED_BY
+PARENT_OF
+CHILD_OF
+OVERLAPS
+ALTERNATIVE_OF
+ANNOTATION_OF
+DERIVED_FROM
+```
 
-Relationships must reference Text Blocks within a compatible ownership boundary.
+Relationships MUST reference compatible domain resources.
 
-Cross-Page relationships may be allowed for continuation and reading context, but they must not transfer ownership.
+Cross-Page relationships MAY exist.
+
+Cross-scope relationships MUST NOT imply aggregate ownership.
 
 ---
 
-# Grouping
+# Character and Speaker Association
 
-Several Text Blocks may be grouped for translation without being permanently merged.
+Dialogue-like TextBlocks MAY reference Character-domain identities.
 
-```text
-Text Block A ─┐
-Text Block B ─┼──► Translation Group
-Text Block C ─┘
-```
-
-Grouping may improve:
-
-* Dialogue context
-* Pronoun resolution
-* Terminology consistency
-* Paragraph reconstruction
-* Translation quality
-* Request efficiency
-
-A Translation Group is a processing structure.
-
-It does not replace the identity of its member Text Blocks.
-
-Translation output must remain mappable back to individual blocks.
-
----
-
-# Split and Merge
-
-OCR and layout analysis may produce blocks with incorrect boundaries.
-
-CRAI must support splitting and merging.
-
-## Split
+Possible metadata includes:
 
 ```text
-Text Block A
-    │
-    ├──► Text Block A1
-    └──► Text Block A2
+characterId
+speakerConfidence
+associationSource
+associationRevision
 ```
 
-A split creates new logical blocks and records derivation from the original block.
+Association sources MAY include:
 
-The original block becomes superseded rather than silently overwritten.
+* user assignment,
+* visual inference,
+* layout inference,
+* conversation inference,
+* imported metadata.
 
-## Merge
+User-confirmed associations SHOULD take precedence over inferred associations.
 
-```text
-Text Block A ─┐
-              ├──► Text Block C
-Text Block B ─┘
-```
-
-A merge creates a new logical block whose lineage references every source block.
-
-Merged source blocks become superseded.
-
-Translations associated with superseded blocks must be invalidated or explicitly remapped.
+Unknown speaker identity MUST NOT block translation.
 
 ---
 
 # Confidence
 
-Confidence represents uncertainty in automatically derived properties.
+Different inferred properties SHOULD preserve independent confidence values.
 
-A Text Block may contain separate confidence values for:
+Examples:
 
-* Region detection
-* Text recognition
-* Language detection
-* Orientation detection
-* Reading order
-* Block classification
-* Character association
-
-Confidence should not be compressed into one value when separate values are available.
+```text
+detectionConfidence
+recognitionConfidence
+languageConfidence
+orientationConfidence
+readingOrderConfidence
+classificationConfidence
+speakerConfidence
+```
 
 Recommended normalized range:
 
@@ -522,618 +754,823 @@ Recommended normalized range:
 0.0 <= confidence <= 1.0
 ```
 
-Provider-specific confidence formats must be normalized before entering the domain.
+`unknown` confidence MUST remain distinguishable from numeric zero.
 
-Missing confidence is different from zero confidence.
+Provider-specific confidence formats MUST be normalized before entering domain state.
 
 ---
 
-# Language
+# Split
 
-Each Text Block may declare:
-
-* Detected Language
-* Effective Source Language
-* Script
-* Language Confidence
-* Mixed-Language Flag
-
-The effective source language may be resolved from:
+A TextBlock MAY be split when one detected/extracted unit contains multiple logical units.
 
 ```text
-Explicit Block Override
-        ↓ fallback
-Page Configuration
-        ↓ fallback
-Chapter Configuration
-        ↓ fallback
-Project Configuration
-        ↓ fallback
-Detected Language
+Block A
+  |
+  +--> Block A1
+  |
+  +--> Block A2
 ```
 
-Mixed-language Text Blocks should preserve the original text and may be segmented when required by translation policy.
+Split creates new TextBlock identities.
 
-Language detection must not modify the source text.
+The source TextBlock becomes:
+
+```text
+SUPERSEDED
+```
+
+rather than being silently rewritten into an unrelated logical shape.
+
+Derivation lineage MUST remain available.
 
 ---
 
-# Character and Speaker Association
+# Merge
 
-Dialogue or thought blocks may reference a Character.
+Multiple TextBlocks MAY be merged.
 
-Typical fields:
+```text
+Block A ---\
+            > Block C
+Block B ---/
+```
 
-* Character ID
-* Speaker Confidence
-* Association Source
-* Association Revision
+The resulting TextBlock receives a new logical identity.
 
-Association source may be:
+Source TextBlocks become superseded.
 
-* User selection
-* Layout inference
-* Visual analysis
-* Conversation inference
-* Imported metadata
+Dependent artifacts MUST either:
 
-User-confirmed association takes precedence over inferred association.
+* become stale,
+* be invalidated,
+* or be explicitly remapped through a validated reconciliation process.
 
-A Text Block must remain translatable when no speaker is known.
+---
+
+# Regeneration and Reconciliation
+
+TextBlocks MAY be regenerated when source extraction changes.
+
+Possible causes:
+
+* OCR provider change,
+* OCR configuration change,
+* source Image change,
+* preprocessing change,
+* layout algorithm change,
+* language configuration change,
+* source document update,
+* user-requested reprocessing.
+
+Regeneration SHOULD use reconciliation when practical.
+
+Possible matching signals include:
+
+* geometry overlap,
+* text similarity,
+* structural locator,
+* reading-order proximity,
+* source identity,
+* content hash.
+
+Successful reconciliation preserves stable logical identity.
+
+Unmatched new content receives new TextBlock identities.
+
+Unmatched prior TextBlocks become superseded or invalidated according to domain rules.
 
 ---
 
 # Lifecycle
 
+TextBlock lifecycle represents validity of the logical source-text resource.
+
+Recommended lifecycle:
+
 ```text
-Detected
-    │
-    ▼
-Recognized
-    │
-    ▼
-Normalized
-    │
-    ▼
-Ready
-    │
-    ├──► Translating
-    │         │
-    │         ▼
-    │      Translated
-    │
-    ├──► Needs Review
-    │
-    ├──► Superseded
-    │
-    └──► Invalidated
+Created
+   |
+   v
+Active
+   |
+   +--> Superseded
+   |
+   +--> Invalidated
+   |
+   v
+Archived
 ```
 
-Lifecycle meaning:
+Recommended statuses:
 
-* `Detected`: A source region or structured fragment exists.
-* `Recognized`: Source text has been extracted.
-* `Normalized`: Deterministic text normalization has completed.
-* `Ready`: The block is valid for translation.
-* `Translating`: A translation request currently references the block.
-* `Translated`: A compatible translation result exists.
-* `Needs Review`: Confidence or validation rules require attention.
-* `Superseded`: The block was replaced by a split, merge or regeneration.
-* `Invalidated`: The source reference or block data is no longer valid.
+```text
+CREATED
+ACTIVE
+SUPERSEDED
+INVALIDATED
+ARCHIVED
+```
 
-A block may return from `Translated` to `Ready` when its effective source text changes.
+Optional deletion lifecycle MAY include:
+
+```text
+DELETING
+DELETED
+```
 
 ---
 
-# Revision Model
+# Processing State Is Separate
 
-Text Block identity and Text Block revision are separate concepts.
+The following MUST NOT be core TextBlock lifecycle states:
 
 ```text
-Text Block ID: stable logical identity
-Revision:      version of mutable source data
+DETECTED
+RECOGNIZED
+NORMALIZED
+TRANSLATING
+TRANSLATED
+NEEDS_REVIEW
 ```
 
-A revision must increase when changing information that can affect downstream processing, including:
+These describe:
 
-* Effective source text
-* Language
-* Reading order
-* Geometry
-* Orientation
-* Classification
-* Speaker association
-* Block relationships
+* derivation stages,
+* Translation workflow,
+* Review workflow,
+* processing projections.
 
-Presentation-only annotations that do not affect processing may be stored separately.
+A TextBlock MAY be Active while Translation is:
 
-Every Translation must reference the exact Text Block revision used as input.
+```text
+NOT_REQUESTED
+RUNNING
+COMPLETED
+FAILED
+STALE
+```
+
+without changing the TextBlock's lifecycle.
 
 ---
 
-# Mutability
+# Derivation Stage
 
-The following information may be edited:
+When useful, source derivation metadata MAY record how the TextBlock reached canonical domain form.
 
-* Corrected source text
-* Block type
-* Reading order
-* Language override
-* Speaker association
-* Review status
-* User annotation
+Example:
 
-The following changes require regeneration, supersession or explicit revision:
+```text
+sourceDerivation:
+    DETECTED
+    RECOGNIZED
+    NORMALIZED
+```
 
-* Source artifact replacement
-* Image coordinate-space change
-* Block split
-* Block merge
-* OCR result replacement
-* Geometry remapping
-* Source fragment relocation
+This is provenance, not the TextBlock lifecycle.
 
-Historical source revisions should be retained when required for auditing, correction rollback or translation comparison.
+A browser paragraph can become a valid TextBlock without passing through `DETECTED` or `RECOGNIZED`.
 
 ---
 
 # Translation Association
 
-A Translation does not overwrite Text Block source text.
+Translation MUST remain a separate domain resource.
 
 Recommended relationship:
 
 ```text
-Text Block
-├── Source Revision 1
-│   └── Translation Revision A
-├── Source Revision 2
-│   ├── Translation Revision B
-│   └── Translation Revision C
-└── Active Translation Reference
+TextBlock Revision
+       |
+       +--> Translation A
+       |
+       +--> Translation B
 ```
 
-A Translation must reference:
+Translation SHOULD reference:
 
-* Text Block ID
-* Text Block Revision
-* Source Language
-* Target Language
-* Effective Source Text Hash
-* Translation Profile Revision
-* Context Revision
-* Translation Revision
+```text
+textBlockId
+textBlockRevision
+sourceLanguage
+targetLanguage
+effectiveSourceTextHash
+translationProfileRevision
+contextRevision
+translationRevision
+```
 
-A translation becomes stale when any required input revision changes.
+Translation MUST NOT overwrite source text.
 
-Stale translations may remain available for history but must not be treated as current.
+---
+
+# Translation Staleness
+
+A Translation becomes stale when a processing-significant input changes.
+
+Examples:
+
+* effective source text revision,
+* source language,
+* translation profile,
+* required context,
+* terminology dependencies.
+
+Stale Translation resources MAY remain available for:
+
+* history,
+* comparison,
+* rollback,
+* diagnostics.
+
+They MUST NOT automatically be presented as current.
+
+---
+
+# Translation Grouping
+
+Multiple TextBlocks MAY be grouped temporarily for contextual translation.
+
+```text
+Block A ---\
+Block B ----> Translation Group
+Block C ---/
+```
+
+A Translation Group is a Translation-processing construct.
+
+It MUST NOT replace member TextBlock identities.
+
+Results MUST remain mappable to logical source units.
 
 ---
 
 # Presentation Association
 
-Presentation consumes Text Blocks and compatible Translation results.
+Presentation consumes TextBlocks and compatible Translation resources.
 
-A presentation mapping may include:
-
-* Text Block ID
-* Translation ID
-* Source Geometry
-* Display Geometry
-* Presentation Mode
-* Font Profile
-* Overflow Strategy
-* Visibility
-* Layer Order
-
-Presentation-specific layout must not modify Text Block source geometry.
-
-For example:
+Presentation MAY maintain:
 
 ```text
-Source Geometry
-      │
-      ├──► Overlay Placement
-      ├──► Side-Panel Marker
-      └──► Export Placement
+textBlockId
+textBlockRevision
+translationId?
+sourceGeometry?
+displayGeometry
+fontProfile
+overflowStrategy
+visibility
+layerOrder
 ```
 
-Each presentation mode may derive its own display geometry.
+Presentation-specific geometry MUST NOT overwrite canonical source geometry.
 
 ---
 
 # Manual Correction
 
-Users may correct:
+Users MAY correct:
 
-* OCR text
-* Block boundary
-* Reading order
-* Block type
-* Language
-* Speaker association
+* source text,
+* geometry,
+* ordering,
+* block type,
+* language,
+* speaker association.
 
-Correction rules:
+A processing-significant correction MUST:
 
-1. The original OCR result remains traceable.
-2. The correction creates a new revision.
-3. The user-corrected value becomes authoritative.
-4. Dependent translations are marked stale.
-5. Dependent render outputs are invalidated.
-6. Unaffected blocks remain valid.
-7. Correction events identify the actor and changed fields.
+1. preserve prior revision history where required,
+2. create a new TextBlock revision,
+3. make the corrected value authoritative,
+4. mark incompatible dependent Translation resources stale,
+5. invalidate incompatible Presentation artifacts,
+6. leave unrelated resources unchanged.
 
-Manual correction must invalidate only dependent artifacts.
-
-It must not restart the entire Chapter unless the change affects chapter-level context.
+Correction SHOULD invalidate only dependencies affected by the change.
 
 ---
 
-# Regeneration
+# Review
 
-Text Blocks may be regenerated when:
+Review is not TextBlock lifecycle.
 
-* OCR provider changes
-* OCR configuration changes
-* Source image changes
-* Image preprocessing changes
-* Layout algorithm changes
-* Language settings change
-* User requests reprocessing
+Different review domains MAY exist:
 
-Regeneration must use reconciliation rather than blind replacement when possible.
+```text
+OCR Review
+Source Text Review
+Translation Review
+Presentation Review
+```
 
-Reconciliation may match blocks using:
+The TextBlock MAY expose derived review indicators.
 
-* Geometry overlap
-* Source-text similarity
-* Reading-order proximity
-* Structural locator
-* Content hash
-* Stable adapter identity
-
-Successful reconciliation preserves logical identity.
-
-Unmatched old blocks become superseded.
-
-Unmatched new blocks receive new identities.
-
----
-
-# Deduplication
-
-Duplicate Text Blocks may be detected by combining:
-
-* Page ID
-* Source Artifact Version
-* Geometry
-* Structural Locator
-* Effective Source Text
-* Reading Order
-* Content Hash
-
-Text equality alone is insufficient.
-
-Two speech bubbles may contain identical text while representing different logical blocks.
-
-Deduplication must never merge blocks solely because their source strings match.
-
----
-
-# Content Hash
-
-A Text Block should expose a deterministic source-content hash.
-
-The hash may include:
-
-* Effective source text
-* Source language
-* Block type when translation-significant
-* Text orientation
-* Writing direction
-* Normalization revision
-
-The hash may support:
-
-* Translation cache lookup
-* Stale-result detection
-* Idempotent processing
-* Duplicate request prevention
-* Diagnostics
-* Revision comparison
-
-Geometry should not automatically be included in the translation-content hash unless translation behavior depends on it.
-
-A separate structural hash may include geometry and ordering data.
-
----
-
-# Validation
-
-Before entering the `Ready` state, a Text Block should satisfy:
-
-* Text Block ID is present
-* Page ID is present
-* Source reference is valid
-* Effective source text is not empty
-* Language representation is valid
-* Revision is valid
-* Reading order does not conflict
-* Geometry references a compatible image version
-* Coordinates are within valid bounds
-* Confidence values are within valid ranges
-* Relationships reference valid blocks
-* Superseded blocks are not selected as active input
-
-Structured text blocks without image geometry must contain a valid structural or source reference.
-
----
-
-# Error Conditions
-
-Typical domain-level errors include:
-
-* Text block not found
-* Page ownership mismatch
-* Empty effective source text
-* Unsupported language
-* Invalid geometry
-* Coordinate version mismatch
-* Invalid reading order
-* Duplicate reading-order position
-* Invalid block relationship
-* Circular block relationship
-* Source artifact unavailable
-* Source revision mismatch
-* Translation revision mismatch
-* Superseded block used as active input
-* Invalid split operation
-* Invalid merge operation
-* Confidence value out of range
-* Structural locator invalid
-* User correction conflict
-
-Provider-specific errors must be translated into stable module or domain errors before crossing architecture boundaries.
-
----
-
-# Events
-
-Typical domain events include:
-
-* `TextBlockDetected`
-* `TextBlockRecognized`
-* `TextBlockCreated`
-* `TextBlockNormalized`
-* `TextBlockReady`
-* `TextBlockUpdated`
-* `TextBlockCorrected`
-* `TextBlockReordered`
-* `TextBlockClassified`
-* `TextBlockSpeakerAssigned`
-* `TextBlockSplit`
-* `TextBlocksMerged`
-* `TextBlockSuperseded`
-* `TextBlockInvalidated`
-* `TextBlockTranslationStale`
-* `TextBlockReviewRequested`
-
-Events should contain identifiers, revisions and changed-field metadata.
-
-Events should not carry raw image bytes or provider-specific OCR payloads.
-
-Large source text should be omitted from general event envelopes unless explicitly required by the consumer contract.
+Those indicators MUST NOT replace authoritative Review workflow state.
 
 ---
 
 # Persistence
 
-Recommended persistent separation:
+Recommended conceptual separation:
 
 ```text
-Text Block Record
+TextBlock
 ├── identity
-├── page ownership
-├── source reference
-├── effective text
+├── scope
+├── current revision
+├── effective source representation
+└── lifecycle
+```
+
+```text
+TextBlockRevision
+├── revision
+├── changed fields
+├── source representations
+├── geometry / locator
 ├── language
 ├── classification
-├── geometry or locator
-├── reading order
-├── confidence
-├── status
-└── current revision
+├── ordering
+├── relationships
+├── hashes
+├── actor/source
+└── timestamp
+```
 
-Text Block Revision
-├── revision number
-├── changed fields
-├── previous revision
-├── correction source
-├── actor
-├── timestamp
-└── content hashes
-
-Translation Record
-├── text block reference
-├── source revision
-├── target language
-├── translated text
+```text
+Translation
+├── textBlockId
+├── textBlockRevision
+├── targetLanguage
+├── translatedText
 └── translation metadata
 ```
 
-Raw OCR provider payloads may be retained separately for diagnostics or reproducibility.
+Raw provider payloads MAY be retained separately for diagnostics or reproducibility.
 
-They must not become the canonical Text Block representation.
+They MUST NOT become canonical TextBlock state.
 
 ---
 
 # Retention
 
-Suggested retention policy:
+Possible retention policy:
 
-* Active Text Blocks: retain while the Page exists
-* User corrections: retain as durable domain history
-* Superseded blocks: retain while referenced by revisions or diagnostics
-* Raw OCR text: retain according to privacy and diagnostic policy
-* Provider payloads: short-lived unless required for debugging
-* Geometry history: retain when required for reconciliation or auditing
-* Temporary grouping metadata: cacheable and regenerable
-* Stale translations: retain according to translation-history policy
+* Active TextBlocks: retain while source content remains relevant.
+* User corrections: durable domain history.
+* Superseded TextBlocks: retain while referenced or required for reconciliation/history.
+* Raw OCR/extraction text: policy-controlled.
+* Provider payloads: short-lived unless explicitly retained.
+* Geometry revisions: retain when required for reconciliation or audit.
+* stale Translation resources: Translation retention policy.
 
-Removing a Text Block must not leave dangling Translation, Presentation or Revision references.
+Deleting TextBlocks MUST NOT leave invalid durable references.
 
 ---
 
 # Privacy
 
-Text Blocks may contain private or copyrighted content.
+TextBlocks may contain copyrighted, private, or sensitive source material.
 
-Requirements:
+Default rules SHOULD include:
 
-* Do not log source text by default.
-* Avoid sending unrelated blocks to external providers.
-* Apply provider-retention policy before remote processing.
-* Protect user corrections and reading history.
-* Allow temporary-session processing without durable persistence.
-* Store only content required by configured retention policy.
-* Exclude source text from telemetry unless explicitly permitted.
+* do not log raw source text,
+* do not include source text in telemetry by default,
+* send only necessary context to external providers,
+* respect provider-retention policy,
+* support temporary processing modes,
+* persist only according to configured retention policy.
 
-Diagnostics should prefer hashes, identifiers, sizes and confidence values over raw content.
+Diagnostics SHOULD prefer:
+
+```text
+textBlockId
+revision
+hash
+size
+language
+confidence
+```
+
+over raw content.
 
 ---
 
-# Processing Example: Comic Page
+# Events
+
+Typical TextBlock domain events include:
 
 ```text
-Page Image
-    │
-    ▼
-Detect three visual text regions
-    │
-    ▼
-OCR each region
-    │
-    ▼
-Create Text Blocks
-    │
-    ├── Block 1: narration
-    ├── Block 2: dialogue
-    └── Block 3: sound effect
-    │
-    ▼
-Determine reading order
-    │
-    ▼
-Normalize Chinese source text
-    │
-    ▼
-Group Blocks 1 and 2 for contextual translation
-    │
-    ▼
-Store translations per Text Block
-    │
-    ▼
-Present in side panel or overlay
+TextBlockCreated
+TextBlockUpdated
+TextBlockCorrected
+TextBlockReordered
+TextBlockClassified
+TextBlockSpeakerAssigned
+TextBlockSplit
+TextBlocksMerged
+TextBlockSuperseded
+TextBlockInvalidated
+TextBlockArchived
+TextBlockRestored
+```
+
+Events MAY identify:
+
+* TextBlock identity,
+* revision,
+* changed fields,
+* actor,
+* source.
+
+Domain events SHOULD NOT contain:
+
+* raw Image bytes,
+* provider payloads,
+* unnecessarily large source text.
+
+Processing events such as:
+
+```text
+TextDetected
+TextRecognized
+TranslationStarted
+TranslationCompleted
+ReviewRequested
+```
+
+belong to their responsible modules/workflows unless they correspond to an actual TextBlock domain mutation.
+
+---
+
+# Validation
+
+An Active TextBlock SHOULD satisfy:
+
+* valid TextBlock identity,
+* valid Project/content scope,
+* valid effective source text,
+* valid revision,
+* valid source provenance,
+* valid language representation,
+* valid relationship references,
+* valid ordering when required.
+
+Image-derived TextBlocks MUST additionally validate:
+
+* Image reference,
+* Image version,
+* coordinate compatibility,
+* geometry bounds.
+
+Structured TextBlocks SHOULD have a valid structural/source locator when required by their source model.
+
+---
+
+# Error Conditions
+
+Possible stable domain errors include:
+
+```text
+TEXT_BLOCK_NOT_FOUND
+TEXT_BLOCK_SCOPE_INVALID
+TEXT_BLOCK_SOURCE_INVALID
+TEXT_BLOCK_EMPTY_SOURCE
+TEXT_BLOCK_REVISION_MISMATCH
+TEXT_BLOCK_GEOMETRY_INVALID
+TEXT_BLOCK_COORDINATE_MISMATCH
+TEXT_BLOCK_READING_ORDER_INVALID
+TEXT_BLOCK_RELATIONSHIP_INVALID
+TEXT_BLOCK_RELATIONSHIP_CYCLE
+TEXT_BLOCK_SUPERSEDED
+TEXT_BLOCK_INVALIDATED
+TEXT_BLOCK_SPLIT_INVALID
+TEXT_BLOCK_MERGE_INVALID
+TEXT_BLOCK_CORRECTION_CONFLICT
+TEXT_BLOCK_CONFIDENCE_INVALID
+```
+
+Provider-specific failures MUST be translated before crossing domain/module boundaries.
+
+---
+
+# Aggregate Boundary
+
+TextBlock SHOULD be treated as an independently addressable domain resource when its stable identity and revision history matter.
+
+Recommended ownership:
+
+```text
+TextBlock Domain
+
+owns
+    TextBlock identity
+    source provenance
+    source representations
+    effective source text
+    revision
+    classification
+    language metadata
+    reading-order metadata
+    optional geometry
+    optional locator
+    source relationships
+    split/merge lineage
+    correction history
+    lifecycle
+```
+
+It does NOT own:
+
+```text
+Page state
+Image state
+OCR execution
+Translation execution
+Review execution
+Presentation execution
+Rendering execution
+provider/runtime state
 ```
 
 ---
 
-# Processing Example: Browser Novel
+# Transactional Consistency
+
+TextBlock-domain mutations include:
 
 ```text
-Browser Document
-    │
-    ▼
-Locate chapter content
-    │
-    ▼
-Extract headings and paragraphs
-    │
-    ▼
-Create Text Blocks
-    │
-    ├── Heading
-    ├── Paragraph 1
-    ├── Paragraph 2
-    └── Paragraph 3
-    │
-    ▼
-Preserve DOM reading order
-    │
-    ▼
-Translate in contextual groups
-    │
-    ▼
-Map translations back to paragraphs
-    │
-    ▼
-Present formatted Vietnamese text
+Correct source text
+    -> TextBlock revision transaction
 ```
 
-Image geometry is not required in this flow.
+```text
+Change classification
+    -> TextBlock revision transaction
+```
 
-Structural locators and source order provide alignment.
+```text
+Split TextBlock
+    -> TextBlock lineage operation
+```
+
+```text
+Merge TextBlocks
+    -> TextBlock lineage operation
+```
+
+Translation remains separate:
+
+```text
+Translate TextBlock
+    -> Translation workflow
+```
+
+Presentation remains separate:
+
+```text
+Present TextBlock
+    -> Presentation workflow
+```
 
 ---
 
 # Architecture Invariants
 
-1. Every Text Block belongs to exactly one Page.
-2. Text Block ID represents stable logical identity.
-3. Every processing-significant change creates a new revision.
-4. Translation never overwrites source text.
-5. Every Translation references an exact Text Block revision.
-6. Provider-specific OCR data is normalized before entering the domain.
-7. Image-derived geometry references an exact image version.
-8. Structured Text Blocks may use locators instead of pixel geometry.
-9. Reading order is explicit and versioned.
-10. User-corrected source text takes precedence over automatic text.
-11. Split and merge operations preserve lineage.
-12. Superseded blocks are not used as active processing input.
-13. Duplicate text does not imply duplicate Text Blocks.
-14. Presentation layout does not modify source geometry.
-15. Text Block changes invalidate only dependent artifacts.
-16. Confidence values preserve the distinction between unknown and zero.
-17. Text Blocks remain provider and storage independent.
-18. Raw source text is excluded from logs by default.
-19. A Text Block cannot outlive its Page.
-20. Cross-Page relationships never transfer ownership.
+1. `textBlockId` represents stable logical identity.
+
+2. A TextBlock MUST belong to a valid Project/content scope.
+
+3. A TextBlock is NOT required to belong to a Page.
+
+4. Image-derived TextBlocks MUST reference compatible Image/Page scope where required.
+
+5. Text-native TextBlocks MAY use structural/source scope without pixel geometry.
+
+6. Processing-significant mutation MUST create a new TextBlock revision.
+
+7. Translation MUST NOT overwrite source text.
+
+8. Every Translation MUST reference the exact compatible TextBlock revision.
+
+9. Provider-specific extraction/OCR payloads MUST NOT become canonical TextBlock representation.
+
+10. Image-derived geometry MUST reference the exact Image identity/version that produced it.
+
+11. Geometry MUST NOT be reused against another Image without an explicit valid transform.
+
+12. Reading order MUST be explicit when ordering affects semantics.
+
+13. User-corrected source text takes precedence over automatic extraction when explicitly accepted.
+
+14. Split and merge operations MUST preserve lineage.
+
+15. Superseded TextBlocks MUST NOT be selected as current processing input.
+
+16. Duplicate text does not imply duplicate TextBlock identity.
+
+17. Presentation layout MUST NOT mutate canonical source geometry.
+
+18. TextBlock mutations SHOULD invalidate only dependent artifacts.
+
+19. Unknown confidence MUST remain distinguishable from zero confidence.
+
+20. TextBlocks MUST remain provider- and storage-independent.
+
+21. Raw source text SHOULD be excluded from ordinary logs and telemetry.
+
+22. Cross-Page relationships MUST NOT transfer ownership.
+
+23. TextBlock lifecycle MUST remain independent from Translation, Review, and Presentation lifecycle.
+
+24. Detection, recognition, and normalization stages MUST NOT be mandatory lifecycle states for text-native sources.
+
+---
+
+# Example: Comic Page
+
+```text
+Page
+  |
+  v
+Source Image
+  |
+  v
+Detection
+  |
+  v
+Recognition
+  |
+  v
+Text Analysis
+  |
+  +--> TextBlock 1: narration
+  +--> TextBlock 2: dialogue
+  +--> TextBlock 3: sound effect
+             |
+             v
+     contextual translation
+             |
+             v
+         Presentation
+```
+
+Each visual TextBlock references the relevant Image coordinate space.
+
+---
+
+# Example: Browser Novel
+
+```text
+Chapter
+   |
+   v
+Browser Content Extraction
+   |
+   +--> Heading TextBlock
+   +--> Paragraph TextBlock
+   +--> Paragraph TextBlock
+   +--> Paragraph TextBlock
+              |
+              v
+       contextual translation
+              |
+              v
+      formatted presentation
+```
+
+No Page entity or Image geometry is required.
+
+---
+
+# Example: Manual Text
+
+```text
+Chapter
+   |
+   v
+Manual Text
+   |
+   v
+TextBlock
+   |
+   v
+Translation
+```
+
+This TextBlock never passes through OCR.
+
+It is still a first-class TextBlock.
+
+---
+
+# Ownership Summary
+
+```text
+TextBlock Domain
+
+owns
+    logical text identity
+    content scope
+    source provenance
+    source text representations
+    effective source text
+    revision history
+    semantic classification
+    language metadata
+    reading order
+    optional geometry
+    optional structural locator
+    relationships
+    split/merge lineage
+    correction state
+    lifecycle
+
+references
+    Project
+    optional Chapter
+    optional Page
+    optional Image
+    optional Character
+    source artifacts
+
+consumed by
+    Translation
+    Review
+    Presentation
+    Reading
+    Export
+
+does not own
+    OCR execution
+    Translation execution
+    Review workflow
+    Presentation execution
+    Image lifecycle
+    Page lifecycle
+    provider state
+```
+
+TextBlock therefore represents a stable logical source-text unit across both visual and text-native CRAI workflows.
 
 ---
 
 # Open Decisions
 
-The following decisions should remain open until prototype validation:
+The following decisions SHOULD remain open until prototype validation:
 
-* Whether raw OCR text is stored by default
-* Whether all Text Block revisions are persisted
-* Which geometry representation becomes canonical
-* Whether polygons are required for the MVP
-* How OCR blocks are reconciled after recapture
-* Whether sound effects are translated automatically
-* How vertical Chinese text is segmented
-* How mixed-language blocks are handled
-* How much surrounding context is grouped for translation
-* Whether browser locators should use DOM identity, text anchors or both
-* How long stale translations are retained
-* Whether speaker association belongs in the initial MVP
-* Which corrections should be promoted into reusable OCR knowledge
+* whether raw OCR/extracted text is persisted by default,
+* whether every TextBlock revision is persisted,
+* canonical geometry representation,
+* whether polygons are required for MVP,
+* reconciliation strategy after re-OCR or recapture,
+* sound-effect translation policy,
+* segmentation of vertical Chinese text,
+* mixed-language segmentation behavior,
+* Translation grouping/context size,
+* browser structural-locator strategy,
+* stale Translation retention,
+* speaker association scope for MVP,
+* whether some corrections become reusable recognition knowledge,
+* whether text-native content requires a dedicated parent document/content entity,
+* whether reading order uses integer sequence, fractional ordering, or stable sort keys.
 
 ---
 
 # Related Documents
 
-* README.md
-* PROJECT.md
-* BOOK.md
-* CHAPTER.md
-* PAGE.md
-* IMAGE.md
-* TRANSLATION.md
-* LANGUAGE.md
-* GLOSSARY.md
-* CHARACTER.md
-* SESSION.md
+Domain:
+
+* `README.md`
+* `PROJECT.md`
+* `BOOK.md`
+* `CHAPTER.md`
+* `PAGE.md`
+* `IMAGE.md`
+* `TRANSLATION.md`
+* `LANGUAGE.md`
+* `GLOSSARY.md`
+* `CHARACTER.md`
+* `SESSION.md`
+
+Architecture:
+
+* `docs/architecture/CAPABILITY_MAP.md`
+* `docs/architecture/OWNERSHIP_MAP.md`
 * `docs/architecture/STATE_MACHINE.md`
 * `docs/architecture/EVENT_BUS.md`
+* `docs/architecture/MODULE_DEPENDENCY.md`
 * `docs/architecture/DATA_FLOW.md`
+
+OCR:
+
+* `01-architecture/ocr/PIPELINE.md`
+* `01-architecture/ocr/DETECTION.md`
+* `01-architecture/ocr/RECOGNITION.md`
+* `01-architecture/ocr/LAYOUT.md`
+* `01-architecture/ocr/TEXT_DIRECTION.md`
+* `01-architecture/ocr/POSTPROCESS.md`
+
+Module contracts remain authoritative for module-specific execution ownership and runtime behavior.

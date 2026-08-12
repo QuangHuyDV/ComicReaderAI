@@ -1,7 +1,7 @@
 # Text Direction
 
 > **Status:** Draft
-> **Version:** 1.1
+> **Version:** 1.2.0
 > **Layer:** OCR Architecture
 > **Depends On:** Detection, Recognition
 > **Next Layer:** Layout Analysis, OCR Postprocessing, Reading Order
@@ -56,8 +56,8 @@ Text Direction không chịu trách nhiệm:
 * semantic text analysis
 * Rendering
 * Runtime scheduling
-* Runtime retry
-* Runtime cancellation
+* Runtime same-work retry
+* Runtime cancellation authority
 * Event Bus semantics
 * global cache lifecycle
 
@@ -877,9 +877,11 @@ Direction Profile có thể định nghĩa:
 * provider-hint priority
 * rotation handling
 * mixed-mode behavior
-* fallback strategy
+* semantic fallback strategy for unresolved direction evidence
 
 Profile phải versioned nếu thay đổi semantics.
+
+Semantic fallback tại đây chỉ là cách Direction Strategy xử lý evidence không đủ hoặc mâu thuẫn; nó không phải Provider Fallback hay alternative execution.
 
 ---
 
@@ -925,7 +927,7 @@ Direction Result có thể không còn tương thích khi:
 
 Text Direction chỉ định nghĩa semantic compatibility.
 
-Global cache lifecycle thuộc Runtime.
+Global cache lifecycle thuộc Runtime Cache Policy.
 
 ---
 
@@ -949,7 +951,7 @@ changed scope
     → recompute affected direction
 ```
 
-Execution orchestration thuộc Runtime.
+Text Direction sở hữu incremental recomputation semantics. Runtime sở hữu scheduling, execution authority và execution mechanics của recomputation work.
 
 ---
 
@@ -957,20 +959,33 @@ Execution orchestration thuộc Runtime.
 
 Text Direction không sở hữu:
 
+* ExecutionScope hoặc ExecutionRevision
+* WorkItem hoặc Attempt lifecycle
 * queue
 * execution state
-* retry attempt
+* Runtime Retry Policy hoặc retry budget
 * cancellation authority
-* Scheduler
-* stale-result authority
+* Scheduler behavior
+* execution authority
+* stale-result rejection
+* Runtime Artifact publication
 
-Runtime sở hữu execution.
+Runtime sở hữu execution mechanics và execution authority trên.
 
-Text Direction chỉ tạo semantic result/failure information.
+Text Direction chỉ tạo:
+
+* semantic Direction Result candidate
+* Direction-specific semantic failure information
+* semantic compatibility information
+* execution hoặc resource hints khi contract cho phép
+
+Khi Direction execution hoàn thành, Runtime Control quyết định completion còn execution authority hay phải bị reject vì stale hoặc cancelled trước Runtime publication.
+
+Text Direction không quyết định downstream Business continuation.
 
 ---
 
-# 49. Retry Integration
+# 49. Retry and Recovery Integration
 
 Text Direction có thể báo:
 
@@ -978,10 +993,30 @@ Text Direction có thể báo:
 * ambiguous direction
 * unsupported writing mode
 * invalid geometry
+* Retry hint
+* Recovery recommendation
 
-Quality/Runtime có thể dùng các signal này để quyết định bước tiếp.
+Quality hoặc authoritative policy owner có thể sử dụng các signal này làm evidence.
 
-Text Direction không tự retry.
+Text Direction không tự schedule Retry và không tự chọn alternative execution.
+
+Ownership:
+
+```text
+Same-work Retry
+    → Runtime Retry Policy
+
+Alternative execution / Fallback
+    → AI Routing / Recovery
+
+Downstream Business continuation
+    → Business Pipeline Orchestration
+
+Scheduling
+    → Runtime Scheduler
+```
+
+Semantic direction fallback bên trong Direction Strategy không được nhầm với Provider Fallback.
 
 ---
 
@@ -1028,9 +1063,11 @@ DirectionResultInvalid
 StrategyUnavailable
 ```
 
-Provider-specific errors phải được normalize trước khi crossing boundary.
+Provider-specific errors phải được normalize thành Direction/provider-neutral failure trước khi crossing Text Direction boundary.
 
-Runtime Error Model sở hữu execution normalization.
+Text Direction sở hữu semantic meaning của Direction-specific errors.
+
+Runtime Error Model sở hữu execution-level normalization và cross-runtime failure representation.
 
 ---
 
@@ -1047,7 +1084,7 @@ Useful measurements có thể gồm:
 * rotation distribution
 * Strategy Version
 
-Telemetry transport thuộc Runtime/Infrastructure.
+Runtime Observability sở hữu execution correlation; telemetry transport và lifecycle thuộc Infrastructure.
 
 ---
 
@@ -1057,7 +1094,7 @@ Text Direction chủ yếu thao tác metadata và recognized structure.
 
 Tuy nhiên Diagnostics không nên log raw recognized text khi không cần thiết.
 
-Privacy policy của OCR Document vẫn phải được giữ.
+Resolved privacy/policy constraints của OCR execution và OCR Document phải được giữ; Diagnostics không được làm rò rỉ recognized content ngoài policy.
 
 ---
 
@@ -1095,15 +1132,29 @@ Text Direction phải luôn đảm bảo:
 
 15. Rerun tạo revision mới.
 
-16. Direction entity phải giữ mapping về Region/Line/Paragraph nguồn.
+16. Direction entity phải giữ mapping về Region, Line hoặc Paragraph nguồn.
 
 17. Text Direction không sở hữu Runtime scheduling.
 
-18. Text Direction không sở hữu Runtime retry.
+18. Text Direction không sở hữu Runtime Retry Policy hoặc Retry budget.
 
 19. Text Direction không sở hữu cancellation authority.
 
-20. Text Direction không sở hữu global cache lifecycle.
+20. Text Direction không sở hữu Runtime execution authority hoặc stale-result decision.
+
+21. Text Direction không sở hữu Runtime Artifact publication.
+
+22. Text Direction không sở hữu downstream Business continuation.
+
+23. Text Direction không sở hữu global cache lifecycle.
+
+24. Direction semantic compatibility không bị Runtime Cache Policy redefine.
+
+25. Text Direction không tự chọn Provider hoặc Provider Fallback.
+
+26. Semantic direction fallback bên trong Direction Strategy không phải alternative provider execution.
+
+27. Incremental recomputation phải giữ compatible direction metadata cho unchanged scopes khi có thể.
 
 ---
 
@@ -1149,26 +1200,32 @@ Không bắt buộc ngay:
 
 # 57. Ownership References
 
-| Concern                      | Owner               |
-| ---------------------------- | ------------------- |
-| Region                       | `DETECTION.md`      |
-| Region Geometry              | `DETECTION.md`      |
-| Character / Line / Paragraph | `RECOGNITION.md`    |
-| Writing Mode                 | `TEXT_DIRECTION.md` |
-| Line Direction               | `TEXT_DIRECTION.md` |
-| Paragraph Direction          | `TEXT_DIRECTION.md` |
-| Character Flow               | `TEXT_DIRECTION.md` |
-| Rotation Metadata            | `TEXT_DIRECTION.md` |
-| Layout Tree                  | `LAYOUT.md`         |
-| Reading Order                | `READING_ORDER.md`  |
-| OCR Document                 | `POSTPROCESS.md`    |
-| Quality                      | `QUALITY.md`        |
-| Retry                        | Runtime             |
-| Cancellation                 | Runtime             |
-| Scheduling                   | Runtime             |
-| Cache Lifecycle              | Runtime             |
-| Event Transport              | Event Bus           |
-| Telemetry Transport          | Infrastructure      |
+| Concern | Owner |
+| --- | --- |
+| Region | `DETECTION.md` |
+| Region Geometry | `DETECTION.md` |
+| Character / Line / Paragraph | `RECOGNITION.md` |
+| Writing Mode | `TEXT_DIRECTION.md` |
+| Line Direction | `TEXT_DIRECTION.md` |
+| Paragraph Direction | `TEXT_DIRECTION.md` |
+| Character Flow | `TEXT_DIRECTION.md` |
+| Rotation Metadata | `TEXT_DIRECTION.md` |
+| Direction semantic compatibility | `TEXT_DIRECTION.md` |
+| Layout Tree | `LAYOUT.md` |
+| Reading Order | `READING_ORDER.md` |
+| OCR Document | `POSTPROCESS.md` |
+| Quality | `QUALITY.md` |
+| Same-work Retry | Runtime Retry Policy |
+| Alternative execution / Provider Fallback | AI Routing / Recovery |
+| Cancellation Authority | Runtime Control / Cancellation |
+| Scheduling | Runtime Scheduler |
+| Execution Authority / stale-result rejection | Runtime Control |
+| Runtime Artifact publication | Runtime Artifact boundary |
+| Business continuation | Business Pipeline Orchestration |
+| Cache Lifecycle | Runtime Cache Policy |
+| Event Transport | Event Bus |
+| Execution Error Normalization | Runtime Error Model |
+| Telemetry Transport | Infrastructure |
 
 ---
 
@@ -1232,5 +1289,5 @@ Layout owns spatial structure.
 
 Reading Order owns precedence.
 
-Runtime owns execution.
+Runtime owns execution mechanics and execution authority.
 ```

@@ -1,290 +1,430 @@
-# runtime/RUNTIME_CONFIG.md
+# Runtime Configuration
 
-# CRAI Runtime Configuration
-
-> Project: CRAI  
-> Version: 1.0  
-> Status: Architecture Draft
-
----
-
-## 1. Purpose
-
-Tài liệu này định nghĩa cách CRAI tải, hợp nhất, xác thực, snapshot, kích hoạt, thay đổi và persist configuration của Runtime.
-
-Runtime Configuration kiểm soát behavior mà không cần sửa source code hoặc rebuild application.
-
-Ví dụ:
-
-- source/target language;
-- capture/observation policy;
-- Business Module policy;
-- provider selection;
-- execution timeout;
-- Scheduler admission;
-- Work Queue capacity;
-- retry budget;
-- cancellation grace period;
-- authority validation;
-- Artifact publication;
-- Resource Lease;
-- retention/cache;
-- memory/GPU/native budget;
-- presentation;
-- Storage;
-- privacy;
-- diagnostics;
-- feature flags.
-
-Tài liệu này không định nghĩa UI layout cuối cùng của Settings.
-
-Provider-specific option vẫn phải cô lập sau provider configuration contract.
+* **Document:** Runtime Architecture / Runtime Configuration
+* **Version:** 2.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 2. Core Principles
+# 1. Purpose
 
-1. Configuration là data, không phải executable code.
-2. Defaults phải tạo được một Runtime hợp lệ.
-3. Configuration phải validate trước activation.
-4. Active configuration luôn là immutable snapshot.
-5. Module chỉ nhận typed view cần thiết.
-6. Secret chỉ tồn tại dưới dạng reference trong normal config.
-7. Activation boundary phải explicit.
-8. Existing Attempt không bị mutation bởi config mới.
-9. Runtime authority không được tự thay đổi bởi config file.
-10. Config change có thể yêu cầu admission freeze, drain hoặc restart.
-11. Persistence phải atomic.
-12. Migration phải deterministic.
-13. Invalid config không được partially activate.
-14. Privacy restriction có precedence cao hơn provider preference.
-15. Configuration event không chứa secret.
-16. Config diagnostics không chứa reading content mặc định.
+This document defines the configuration semantics owned by CRAI Runtime.
+
+Runtime Configuration controls execution behavior such as:
+
+* execution capacity,
+* Scheduler admission,
+* Work Queue limits,
+* Retry execution,
+* cancellation timing,
+* Runtime Artifact retention,
+* Resource/Lease limits,
+* shutdown behavior,
+* Runtime diagnostics,
+* process/runtime execution options.
+
+Runtime Configuration consumes resolved inputs from other CRAI configuration owners.
+
+It MUST NOT become the canonical configuration system for:
+
+* Workspace,
+* Project,
+* Profile,
+* Reading Session,
+* Translation,
+* Recognition,
+* Presentation,
+* Provider Management,
+* Plugin Configuration,
+* AI Routing,
+* Safety/Privacy Policy.
 
 ---
 
-## 3. Configuration Categories
+# 2. Core Principle
+
+```text
+Canonical Configuration Owners
+        |
+        v
+Configuration Resolution
+        |
+        v
+Runtime-Relevant Projection
+        |
+        v
+RuntimeConfigurationSnapshot
+        |
+        v
+Runtime Components
+```
+
+Runtime Components consume immutable resolved snapshots.
+
+They MUST NOT independently read or merge arbitrary CRAI configuration.
+
+---
+
+# 3. Ownership Boundary
+
+Critical distinction:
+
+```text
+Canonical Configuration
+    = owned by the relevant CRAI architecture/module
+```
 
 ```text
 Runtime Configuration
-├── Bootstrap Configuration
-├── Application Configuration
-├── User Preferences
-├── Session Configuration
-├── Provider Configuration
-└── Diagnostic Configuration
+    = execution-specific projection
 ```
 
-### Bootstrap Configuration
-
-Giá trị cần trước khi main Runtime container được tạo.
-
-### Application Configuration
-
-System-wide Runtime policy.
-
-### User Preferences
-
-User-facing preferences không làm thay đổi architecture.
-
-### Session Configuration
-
-Temporary configuration cho một Reading Session.
-
-### Provider Configuration
-
-Selection, capability và provider-specific options.
-
-### Diagnostic Configuration
-
-Logs, metrics, traces, snapshots và development diagnostics.
-
----
-
-## 4. Activation Modes
-
-Mỗi field phải định nghĩa một activation mode:
+Examples:
 
 ```text
-IMMEDIATE
-NEW_WORK_ONLY
-SESSION_RESTART
-COMPONENT_RESTART
-APPLICATION_RESTART
-IMMUTABLE
+Workspace privacy policy
+    -> Workspace/Governance
+
+Translation style
+    -> Profile / Translation
+
+Provider credentials
+    -> Provider Management / Secret Management
+
+Plugin settings
+    -> Plugin Configuration
+
+AI model routing
+    -> AI Routing
+
+Runtime worker count
+    -> Runtime Configuration
 ```
-
-### IMMEDIATE
-
-Có thể apply ngay mà không phá active work.
-
-### NEW_WORK_ONLY
-
-Chỉ WorkItem/Attempt tạo sau activation dùng snapshot mới.
-
-### SESSION_RESTART
-
-Session hiện tại giữ snapshot cũ; config mới dùng cho Session sau.
-
-### COMPONENT_RESTART
-
-Cần drain và recreate Runtime Component.
-
-### APPLICATION_RESTART
-
-Chỉ có hiệu lực sau application restart.
-
-### IMMUTABLE
-
-Không thay đổi qua normal runtime settings.
 
 ---
 
-## 5. Top-Level Schema
+# 4. Runtime Configuration Responsibilities
+
+Runtime Configuration owns semantics for:
+
+```text
+execution
+scheduler
+queues
+retry
+cancellation
+resource limits
+leases
+runtime-artifact retention
+runtime cache implementation limits
+shutdown
+runtime diagnostics
+process/runtime execution
+```
+
+---
+
+# 5. Non-Responsibilities
+
+Runtime Configuration does NOT own:
+
+```text
+sourceLanguage
+targetLanguage
+translationStyle
+readingDirection
+captureMode
+presentationMode
+provider preference
+AI model preference
+Workspace privacy policy
+Safety policy
+Glossary policy
+Character policy
+Session lifecycle
+Plugin-specific config
+Provider credentials
+```
+
+These MAY influence a Runtime projection after their owning architecture resolves them.
+
+---
+
+# 6. Runtime Configuration Layers
+
+Recommended layers:
+
+```text
+BootstrapRuntimeConfiguration
+RuntimeSystemConfiguration
+RuntimeEnvironmentProjection
+RuntimeOperationOverrides
+```
+
+Not every value supports every layer.
+
+---
+
+# 7. Bootstrap Runtime Configuration
+
+Bootstrap configuration contains only information needed before full configuration infrastructure exists.
+
+Possible:
+
+```text
+environment
+runtimeProfile
+dataDirectory
+configurationLocation
+secretStoreBackend
+recoveryMode
+safeModeFlag
+earlyDiagnosticsDestination
+pluginDiscoveryRoots?
+```
+
+Bootstrap configuration MUST remain small.
+
+---
+
+# 8. Runtime System Configuration
+
+Runtime System Configuration defines application-instance execution limits and behavior.
+
+Examples:
+
+```text
+worker capacity
+queue capacity
+Scheduler policy
+Retry limits
+cancellation grace
+resource budgets
+shutdown timeout
+diagnostics
+```
+
+---
+
+# 9. Runtime Environment Projection
+
+Some values are derived from current host capabilities.
+
+Examples:
+
+```text
+available CPU
+available memory
+GPU capability
+process isolation support
+OS/runtime constraints
+provider/runtime availability
+```
+
+These values are runtime observations/projections, not persisted user preference.
+
+---
+
+# 10. Runtime Operation Overrides
+
+An operation MAY carry bounded execution overrides such as:
+
+```text
+deadline
+priority
+execution class
+resource hint
+```
+
+when the relevant contract permits it.
+
+Operation override MUST NOT bypass:
+
+* Security,
+* Workspace Policy,
+* hard Runtime safety limits,
+* capability constraints.
+
+---
+
+# 11. Immutable Runtime Configuration Snapshot
+
+Recommended:
+
+```text
+RuntimeConfigurationSnapshot
+├── runtimeConfigurationSnapshotId
+├── schemaVersion
+├── configurationRevision
+├── createdAt
+├── runtimeSettings
+├── environmentProjectionReference?
+├── policyReferences[]
+├── sourceReferences[]
+├── contentHash
+└── activationMetadata
+```
+
+---
+
+# 12. Snapshot Content
+
+The snapshot SHOULD contain only Runtime-relevant resolved values.
+
+It SHOULD NOT contain an entire copy of:
+
+```text
+Workspace
+Project
+Profile
+Provider Configuration
+Plugin Configuration
+Reading Session
+Presentation Configuration
+```
+
+---
+
+# 13. Immutable Execution Rule
+
+Once an Attempt starts:
+
+```text
+Attempt
+    -> RuntimeConfigurationSnapshot A
+```
+
+that Attempt continues with A.
+
+Activation of Snapshot B MUST NOT mutate the in-flight Attempt.
+
+---
+
+# 14. Runtime Identity
+
+Asynchronous Runtime execution SHOULD preserve:
+
+```text
+ApplicationInstanceId
+ExecutionScopeId
+ExecutionRevisionId
+WorkItemId
+AttemptId
+RuntimeConfigurationSnapshotId
+```
+
+Optional business correlation MAY include:
+
+```text
+sessionId
+projectId
+requestId
+correlationId
+```
+
+These identities MUST NOT be conflated.
+
+---
+
+# 15. ExecutionRevision Terminology
+
+Runtime MUST use:
+
+```text
+ExecutionRevision
+ExecutionRevisionId
+```
+
+rather than ambiguous:
+
+```text
+Revision
+RevisionId
+```
+
+because CRAI Domain contains independent revisions such as TranslationRevision.
+
+---
+
+# 16. Configuration Schema
+
+Recommended top-level Runtime schema:
 
 ```yaml
-schemaVersion: 1
-
-bootstrap:
-  environment: production
-  profile: desktop-mvp
-  dataDirectory: auto
-  secretStore: operating-system
-  recoveryMode: safe
-
-application:
-  modules: {}
-  runtime: {}
-  scheduling: {}
+runtime:
+  execution: {}
+  scheduler: {}
   queues: {}
   retry: {}
   cancellation: {}
-  authority: {}
-  publication: {}
   resources: {}
   leases: {}
+  artifacts: {}
   cache: {}
-  storage: {}
-  security: {}
-  features: {}
+  shutdown: {}
+  diagnostics: {}
+```
 
+Optional implementation-specific sections MAY exist when Runtime owns them.
+
+---
+
+# 17. What Is Deliberately Absent
+
+The Runtime schema SHOULD NOT directly contain:
+
+```yaml
 preferences:
-  language: {}
-  reading: {}
-  capture: {}
-  presentation: {}
-  accessibility: {}
-
 providers:
-  profiles: {}
-  instances: {}
-
-diagnostics:
-  logging: {}
-  tracing: {}
-  metrics: {}
-  snapshots: {}
-  debug: {}
-```
-
-Session config được giữ riêng:
-
-```yaml
 session:
-  sessionId: generated
-  configurationSnapshotId: generated
-  source: {}
-  language: {}
-  reading: {}
-  providers: {}
-  presentation: {}
-  privacy: {}
-  quality: {}
+presentation:
+translation:
+recognition:
+workspace:
+project:
+profile:
+```
+
+Those belong to their owning configuration architectures.
+
+---
+
+# 18. Execution Configuration
+
+Example:
+
+```yaml
+runtime:
+  execution:
+    maxCpuWorkers: auto
+    maxGpuExecutions: 1
+    maxNativeSerialExecutions: 1
+    maxExternalIoExecutions: 4
 ```
 
 ---
 
-## 6. Bootstrap Configuration
+# 19. Auto Values
 
-Ví dụ:
+`auto` means:
 
-```yaml
-bootstrap:
-  environment: production
-  profile: desktop-mvp
-  dataDirectory: auto
-  configFile: auto
-  secretStore: operating-system
-  recoveryMode: safe
+```text
+derive within safe Runtime limits
+from current environment profile
 ```
 
-Bootstrap config phải:
-
-- nhỏ;
-- valid trước Runtime creation;
-- không chứa secret value;
-- không phụ thuộc Business Module;
-- phần lớn yêu cầu application restart.
+It MUST NOT mean arbitrary adaptive behavior without explicit bounds.
 
 ---
 
-## 7. Application Runtime Configuration
+# 20. Scheduler Configuration
+
+Example:
 
 ```yaml
-application:
-  runtime:
-    execution:
-      defaultExecutionClass: auto
-      maxCpuWorkers: auto
-      maxGpuExecutions: 1
-      maxNativeSerialExecutions: 1
-      maxProviderRequests: 4
-
-    control:
-      commandQueueCapacity: 256
-      commandWarningThreshold: 128
-      maxCommandProcessingMs: 50
-
-    shutdown:
-      totalTimeoutMs: 10000
-      drainTimeoutMs: 5000
-      telemetryFlushTimeoutMs: 1000
-```
-
-`auto` nghĩa là Runtime chọn giá trị từ device capability và runtime profile.
-
----
-
-## 8. Module Configuration
-
-```yaml
-application:
-  modules:
-    capture: true
-    observation: true
-    classification: true
-    recognition: true
-    structuring: true
-    translation: true
-    presentation: true
-    knowledge: true
-    storage: true
-    diagnostics: true
-```
-
-Feature flag không thay module dependency rule.
-
-Module disabled phải được semantic validation với dependent capability.
-
----
-
-## 9. Scheduler Configuration
-
-```yaml
-application:
-  scheduling:
-    currentRevisionFirst: true
-
+runtime:
+  scheduler:
     priority:
       control: 1000
       interactive: 100
@@ -293,33 +433,38 @@ application:
       maintenance: 1
 
     admission:
-      enabled: true
-      rejectWhenCriticalPressure: true
-      deferWhenProviderUnavailable: true
+      rejectAtCriticalPressure: true
       preserveControlCapacity: true
 
     replacement:
       removeObsoleteQueuedWork: true
-      replacePendingEquivalentWork: true
-
-    fairness:
-      enabled: true
-      maxInteractiveBurst: 16
-
-    aging:
-      enabled: false
 ```
-
-Scheduler config không được cấp authority.
-
-Nó chỉ định admission policy.
 
 ---
 
-## 10. Work Queue Configuration
+# 21. Scheduler Boundary
+
+Scheduler Configuration controls:
+
+```text
+Runtime admission behavior
+```
+
+It does NOT:
+
+* grant execution authority;
+* decide business workflow;
+* choose AI model/provider;
+* define Domain priority semantics.
+
+---
+
+# 22. Work Queue Configuration
+
+Example:
 
 ```yaml
-application:
+runtime:
   queues:
     control:
       capacity: 128
@@ -332,30 +477,32 @@ application:
     background:
       capacity: 32
       overflow: reject
-
-    maintenance:
-      capacity: 16
-      overflow: reject
-
-    dispatch:
-      validateAuthorityBeforeDispatch: true
-      validateDeadlineBeforeDispatch: true
-
-    drain:
-      removeCanceledWork: true
-      removeObsoleteWork: true
 ```
 
-Không dùng một `maxQueuedJobs` duy nhất cho mọi workload class.
+Queue capacities MUST remain bounded.
 
 ---
 
-## 11. Retry Configuration
+# 23. Queue Correctness
 
-Retry là Runtime policy độc lập, không nằm hoàn toàn trong provider config.
+The following are architecture rules, not optional config toggles:
+
+```text
+queued work is lightweight
+large payloads use ArtifactRef
+cancelled/stale work is not accepted as current
+```
+
+---
+
+# 24. Retry Configuration
+
+Retry remains a Runtime execution policy.
+
+Example:
 
 ```yaml
-application:
+runtime:
   retry:
     enabled: true
 
@@ -364,12 +511,6 @@ application:
       maxConcurrentRetries: 2
       maxDelayedRetries: 16
 
-    strategies:
-      immediate: true
-      delayed: true
-      providerFallback: true
-      resourceWait: true
-
     backoff:
       initialDelayMs: 500
       maximumDelayMs: 5000
@@ -377,146 +518,204 @@ application:
       jitter: true
 
     budgets:
-      perRevision: 8
-      perSession: 32
+      perExecutionRevision: 8
       globalRuntime: 64
-
-    behavior:
-      recheckArtifactReuse: true
-      cancelWhenAuthorityRevoked: true
-      respectRetryAfter: true
 ```
-
-Exact values phải được benchmark.
 
 ---
 
-## 12. Cancellation Configuration
+# 25. Retry vs Fallback
+
+Runtime Retry MUST NOT contain:
+
+```text
+providerFallback
+modelFallback
+routeFallback
+```
+
+as Retry strategies.
+
+Critical rule:
+
+```text
+Retry
+    = same logical WorkItem
+      + compatible execution binding
+      + new Attempt
+```
+
+```text
+Fallback
+    = new execution binding/route
+      chosen by the owning recovery/routing architecture
+```
+
+---
+
+# 26. Retry-After
+
+Runtime Retry MAY respect normalized:
+
+```text
+RetryAfter
+```
+
+from provider/runtime execution.
+
+Provider-specific headers MUST remain normalized behind adapters.
+
+---
+
+# 27. Cancellation Configuration
+
+Example:
 
 ```yaml
-application:
+runtime:
   cancellation:
-    cooperative: true
-    revokeAuthorityImmediately: true
-    removeQueuedWork: true
-
     grace:
       defaultMs: 1000
-      providerMs: 2000
+      externalIoMs: 2000
       shutdownMs: 5000
 
-    abandoned:
-      trackPhysicalExecution: true
-      retainProviderCapacity: true
-
-    checkpoints:
-      beforeExpensiveExecution: true
-      afterExternalCall: true
-      beforeCompletion: true
-      beforeUiCommit: true
+    drain:
+      removeQueuedCancelledWork: true
 ```
-
-Config không được cho phép hard thread kill trong primary process.
 
 ---
 
-## 13. Authority Configuration
+# 28. Cancellation Invariants
 
-```yaml
-application:
-  authority:
-    validation:
-      completion: required
-      publication: required
-      uiCommit: required
+These SHOULD NOT be configurable off:
 
-    staleCompletion:
-      accept: false
-      recordDiagnostics: true
-
-    duplicateCompletion:
-      firstAcceptedWins: true
-      recordDiagnostics: true
-
-    revokedScope:
-      denyNewLease: true
-      denyPublication: true
-      denyDownstreamScheduling: true
+```text
+cancelled execution loses acceptance authority
+new cancelled work is not admitted
+cancelled stale completion cannot overwrite current state
 ```
-
-Authority rule là safety invariant.
-
-User settings không được disable các validation bắt buộc.
 
 ---
 
-## 14. Publication Configuration
+# 29. Authority Is Not User Configuration
+
+Runtime authority correctness MUST NOT be represented as optional settings such as:
 
 ```yaml
-application:
-  publication:
-    requireAcceptedCandidate: true
-    requireOwnershipTransfer: true
-    atomicPublication: true
-    rejectDuplicatePublication: true
-    cleanupRejectedCandidates: true
-
-    partialArtifact:
-      enabled: false
-      requireExplicitContract: true
-
-    latePublication:
-      allowed: false
+acceptStaleCompletion: true
+requireAuthorityValidation: false
 ```
 
-Publication config không cho phép Worker publish trực tiếp.
+These are invalid production concepts.
 
 ---
 
-## 15. Resource Configuration
+# 30. Hard Runtime Invariants
+
+The following are architecture invariants:
+
+```text
+stale result cannot become current
+duplicate logical completion cannot overwrite accepted result
+cancelled result cannot regain authority
+Worker cannot grant itself authority
+```
+
+They MUST NOT be disabled by normal configuration.
+
+---
+
+# 31. Runtime Artifact Configuration
+
+Runtime MAY configure operational Artifact limits.
+
+Example:
 
 ```yaml
-application:
+runtime:
+  artifacts:
+    memoryBudgetMb: auto
+    temporaryRetentionMs: 30000
+    cleanupBatchSize: 64
+```
+
+---
+
+# 32. Artifact Publication Is Not a Toggle
+
+Architecture invariants such as:
+
+```text
+immutable published Artifact
+explicit ownership transfer
+atomic publication
+accepted execution authority
+```
+
+MUST NOT be configurable off.
+
+---
+
+# 33. Runtime Artifact vs Domain Commit
+
+Runtime Config may control Runtime Artifact retention.
+
+It MUST NOT control:
+
+```text
+whether TranslationRevision becomes canonical
+whether Character state is committed
+whether Glossary truth changes
+```
+
+Those decisions belong to Business Modules.
+
+---
+
+# 34. Resource Configuration
+
+Example:
+
+```yaml
+runtime:
   resources:
-    budgets:
-      managedMemoryMb: auto
-      nativeMemoryMb: auto
-      gpuMemoryMb: auto
-      artifactMemoryMb: auto
-      diagnosticsMemoryMb: 32
+    managedMemoryMb: auto
+    nativeMemoryMb: auto
+    gpuMemoryMb: auto
+    artifactMemoryMb: auto
 
     pressure:
       elevatedRatio: 0.70
       highRatio: 0.85
       criticalRatio: 0.95
       hysteresisRatio: 0.05
-
-    disposal:
-      logicalDisposalImmediate: true
-      physicalDisposalTimeoutMs: 5000
-      cleanupRetryCount: 2
-
-    draining:
-      warningAfterMs: 5000
-      leakSuspectAfterMs: 30000
 ```
-
-User-provided values phải bị clamp vào supported safe range.
 
 ---
 
-## 16. Lease Configuration
+# 35. Resource Safety
+
+User/config values MUST be bounded by Runtime hard limits.
+
+Configuration MUST NOT permit:
+
+```text
+negative limits
+unbounded queues
+unbounded worker pools
+unsafe GPU allocation
+```
+
+---
+
+# 36. Lease Configuration
+
+Example:
 
 ```yaml
-application:
+runtime:
   leases:
-    enabled: true
-    defaultMaximumHoldMs: diagnostic
-    denyAfterLogicalDisposal: true
-    trackAcquisitionSite: development-only
-
-    leakDetection:
-      enabled: true
+    leakDiagnostics:
       warningAfterMs: 10000
       criticalAfterMs: 60000
 
@@ -525,1270 +724,1183 @@ application:
       timeoutMs: 3000
 ```
 
-`diagnostic` nghĩa là không hard-expire resource đang dùng; chỉ phát hiện và báo.
+---
+
+# 37. Lease Invariants
+
+The following are architecture rules:
+
+```text
+shared resource requires explicit ownership/lease semantics
+disposed resource cannot issue new valid lease
+physical cleanup waits for eligibility where required
+```
+
+They MUST NOT be optional production toggles.
 
 ---
 
-## 17. Cache Configuration
+# 38. Runtime Cache Configuration
 
-Cache theo Artifact reuse/retention, không theo architecture stage cố định.
+Runtime MAY configure implementation-level cache/resource limits.
+
+Example:
 
 ```yaml
-application:
+runtime:
   cache:
-    runtimeMemory:
+    memory:
       enabled: true
       maximumEntries: 2000
       maximumMemoryMb: auto
-      policy: weighted-lru
-
-    scopes:
-      revisionLocal: true
-      session: true
-      runtime: true
-      durable: false
-
-    promotion:
-      acceptedArtifactOnly: true
-      allowPartialArtifact: false
-      allowStaleArtifact: false
-      allowCanceledArtifact: false
-
-    privacy:
-      partitionByProfile: true
-      disableDurableInEphemeralMode: true
-
-    inflightReuse:
-      enabled: false
 ```
-
-Business Module định nghĩa compatibility dependency.
-
-Cache Policy định nghĩa reuse/retention behavior.
 
 ---
 
-## 18. Storage Configuration
+# 39. Cache Policy Boundary
 
-```yaml
-application:
-  storage:
-    backend: local
-    configurationPersistence: true
-    historyEnabled: false
-    glossaryEnabled: true
-    correctionMemoryEnabled: true
-    durableCacheEnabled: false
+Canonical cache compatibility and semantic reuse remain owned by `CACHE_POLICY.md` and the owning capability architecture.
 
-    recovery:
-      enabled: true
-      retainRecoveryPoints: 3
-```
-
-Storage config không tự thay business ownership.
-
----
-
-## 19. Security and Privacy Configuration
-
-```yaml
-application:
-  security:
-    allowRemoteTextProcessing: true
-    allowRemoteImageProcessing: false
-
-    persistence:
-      persistRawCapture: false
-      persistRecognizedText: false
-      persistTranslationCache: false
-
-    diagnostics:
-      includeReadingContent: false
-      exportContentFingerprint: false
-
-    cleanup:
-      clearTemporaryDataOnExit: true
-```
-
-Provider config không được override global privacy restriction.
-
----
-
-## 20. Provider Configuration
-
-Provider config chia thành:
+Runtime Config does NOT define:
 
 ```text
-Provider Selection
-Provider Capability Requirement
-Provider Execution Declaration
-Provider-Specific Options
-Credential Reference
+whether Translation result A is semantically reusable for request B
 ```
-
-Ví dụ:
-
-```yaml
-providers:
-  profiles:
-    recognition-default:
-      primary: local-recognition
-      fallback: null
-
-      requirements:
-        languages: [zh-Hans, en]
-        verticalText: preferred
-        regionDetection: required
-
-      execution:
-        timeoutMs: 10000
-        concurrency: 1
-        executionClass: CPU
-        cancellationSupport: cooperative
-        processIsolation: false
-
-    translation-default:
-      primary: remote-translator
-      fallback: remote-translator-secondary
-
-      requirements:
-        targetLanguages: [vi]
-        batchTranslation: required
-        cancellation: preferred
-
-      execution:
-        timeoutMs: 20000
-        concurrency: 2
-        executionClass: REMOTE_IO
-        cancellationSupport: provider-dependent
-
-  instances:
-    local-recognition:
-      type: local
-      credentialRef: null
-      options:
-        device: auto
-        modelProfile: chinese-comic
-
-    remote-translator:
-      type: remote
-      credentialRef: secret://translation/primary
-      options:
-        model: configured-provider-model
-```
-
-Retry count không nên được lặp ở từng provider nếu Runtime Retry Policy đã sở hữu nó, trừ provider-specific hard limit.
 
 ---
 
-## 21. User Preferences
+# 40. Storage Boundary
 
-```yaml
-preferences:
-  language:
-    source: auto
-    target: vi
-    preferredSources: [zh-Hans, zh-Hant, en]
+Runtime Configuration MAY reference runtime-required persistence capabilities.
 
-  reading:
-    contentMode: auto
-    translationStyle: natural
-    autoProcessStableContent: true
-
-  capture:
-    mode: selected-region
-    frameIntervalMs: 250
-    captureCursor: false
-
-  presentation:
-    mode: side-panel
-    fontSize: 18
-    lineHeight: 1.6
-    showSourceText: true
-```
-
-User Preferences không chứa Runtime identity hoặc internal lifecycle state.
-
----
-
-## 22. Session Configuration
-
-```yaml
-session:
-  sessionId: generated
-  configurationSnapshotId: config-snapshot-42
-
-  source:
-    type: screen-region
-    sourceRef: runtime-managed
-
-  language:
-    source: zh-Hans
-    target: vi
-
-  providers:
-    profile: balanced
-
-  privacy:
-    mode: EPHEMERAL
-
-  quality:
-    profile: interactive
-```
-
-Session-only value không tự overwrite persisted preference.
-
----
-
-## 23. Diagnostic Configuration
-
-```yaml
-diagnostics:
-  mode: LOCAL_ONLY
-
-  logging:
-    level: info
-    structured: true
-    includeReadingContent: false
-
-  tracing:
-    enabled: true
-    revisionTrace: true
-    sampleRate: 1.0
-
-  metrics:
-    enabled: true
-    authority: true
-    publication: true
-    queue: true
-    provider: true
-    lease: true
-    resourceLifecycle: true
-    resourcePressure: true
-
-  snapshots:
-    enabled: true
-    recentEventBufferSize: 512
-
-  debug:
-    overlay: false
-    showAuthority: false
-    showPublication: false
-    showLeases: false
-    showRetention: false
-```
-
-Remote export disabled mặc định trong MVP.
-
----
-
-## 24. Configuration Sources
-
-Precedence thấp đến cao:
+It MUST NOT contain business storage feature switches such as:
 
 ```text
-Built-In Defaults
-    ↓
+glossaryEnabled
+correctionMemoryEnabled
+translationHistoryEnabled
+```
+
+Those belong to owning modules/features.
+
+---
+
+# 41. Provider Management Boundary
+
+Canonical Provider Configuration is NOT Runtime Configuration.
+
+Provider Management owns:
+
+```text
+provider registration
+provider enablement
+ProviderConfiguration
+credential references
+provider policy
+provider metadata
+```
+
+---
+
+# 42. Runtime Provider Projection
+
+Runtime MAY consume a provider execution projection such as:
+
+```text
+deployment/binding reference
+concurrency limit
+attempt timeout
+execution class
+runtime isolation mode
+```
+
+after the owning provider/routing architecture has resolved it.
+
+---
+
+# 43. Provider Selection
+
+Runtime Config MUST NOT directly define:
+
+```yaml
+primary: provider-a
+fallback: provider-b
+```
+
+for business execution.
+
+Selection belongs to:
+
+```text
+AI Routing
+Recognition selection policy
+Translation/provider-selection architecture
+```
+
+as appropriate.
+
+---
+
+# 44. AI Model Selection
+
+Runtime Configuration MUST NOT contain canonical:
+
+```text
+model preference
+AI provider preference
+RoutePlan
+Fallback Model
+```
+
+Those belong to AI architecture.
+
+---
+
+# 45. Plugin Configuration Boundary
+
+Plugin-specific configuration belongs to:
+
+```text
+Plugin Configuration
+```
+
+Runtime Config MAY consume only runtime consequences such as:
+
+```text
+process isolation requirement
+worker capacity
+runtime resource requirements
+```
+
+---
+
+# 46. Workspace / Project / Profile Boundary
+
+Runtime Configuration MUST NOT duplicate:
+
+```text
+Workspace Policy
+Project configuration
+Profile processing intent
+```
+
+Resolved policy constraints MAY produce Runtime limits.
+
+Example:
+
+```text
+Workspace disallows remote execution
+    ->
+Runtime receives no eligible remote execution binding
+```
+
+rather than:
+
+```text
+runtime.allowRemote = false
+```
+
+being a second policy source.
+
+---
+
+# 47. Privacy Boundary
+
+Privacy policy is authoritative outside Runtime.
+
+Runtime MUST enforce received privacy constraints.
+
+Runtime Config MAY contain implementation safeguards such as:
+
+```text
+temporary cleanup interval
+diagnostic content disabled
+```
+
+but MUST NOT override the governing privacy policy.
+
+---
+
+# 48. Presentation Boundary
+
+Runtime Configuration does NOT own:
+
+```text
+font size
+line height
+side panel mode
+show source text
+```
+
+These are Presentation/Preferences concerns.
+
+Runtime MAY receive only performance/runtime consequences if applicable.
+
+---
+
+# 49. Capture Boundary
+
+Runtime Configuration does NOT own:
+
+```text
+capture mode
+capture cursor
+capture interval
+screen-region semantics
+```
+
+Capture owns these settings.
+
+Runtime may own only scheduling/resource limits used while executing Capture work.
+
+---
+
+# 50. Reading Session Boundary
+
+Session Configuration is not Runtime Configuration.
+
+A Reading Session MAY resolve business settings into execution inputs.
+
+Runtime receives:
+
+```text
+ExecutionScope
+configuration references
+operation constraints
+```
+
+not ownership of Session configuration.
+
+---
+
+# 51. Diagnostic Configuration
+
+Runtime MAY own runtime-specific diagnostic settings such as:
+
+```yaml
+runtime:
+  diagnostics:
+    logLevel: info
+    tracingEnabled: true
+    runtimeSnapshotEnabled: true
+```
+
+---
+
+# 52. Diagnostic Privacy
+
+Runtime diagnostics MUST NOT enable raw reading content merely through an ordinary Runtime setting.
+
+Sensitive diagnostic mode requires the appropriate Privacy/Security authorization.
+
+---
+
+# 53. Configuration Sources
+
+Runtime Configuration SHOULD consume resolved configuration layers rather than define a universal CRAI precedence stack.
+
+Possible Runtime-owned sources:
+
+```text
+Built-In Runtime Defaults
 Runtime Profile
-    ↓
-Persisted Application Configuration
-    ↓
-Environment Overrides
-    ↓
-Command-Line Overrides
-    ↓
-Session Overrides
-    ↓
-Temporary User Actions
+Persisted Runtime Configuration
+Environment / CLI Overrides
+Authorized Runtime Operation Override
 ```
-
-Higher layer chỉ override field được cung cấp rõ ràng.
 
 ---
 
-## 25. Merge Rules
+# 54. Business Configuration Sources
 
-### Scalar
+Workspace/Project/Profile/Plugin/Provider configuration precedence belongs to those configuration owners.
 
-Higher precedence replaces lower.
-
-### Object
-
-Recursive merge trừ object `replace-only`.
-
-### Array
-
-Mỗi array phải khai báo:
-
-```text
-REPLACE
-APPEND
-UNIQUE_APPEND
-MERGE_BY_ID
-```
-
-Default là `REPLACE`.
-
-### Null
-
-Phân biệt:
-
-```text
-ABSENT
-EXPLICIT_NULL
-CONCRETE_VALUE
-```
-
-Meaning của `null` phải định nghĩa theo field.
+Runtime MUST NOT merge them independently.
 
 ---
 
-## 26. Validation Levels
+# 55. Merge Rules
+
+Runtime-owned configuration MAY define standard merge semantics:
+
+```text
+Scalar:
+    replace
+
+Object:
+    recursive or replace-only by schema
+
+Array:
+    REPLACE
+    APPEND
+    UNIQUE_APPEND
+    MERGE_BY_ID
+
+Value:
+    ABSENT
+    EXPLICIT_NULL
+    CONCRETE_VALUE
+```
+
+Rules MUST be schema-defined.
+
+---
+
+# 56. Validation Levels
+
+Recommended:
 
 ```text
 Syntax Validation
-    ↓
+        |
+        v
 Schema Validation
-    ↓
-Semantic Validation
-    ↓
-Capability Validation
-    ↓
-Runtime Validation
-```
-
-### Syntax
-
-Parse và document structure.
-
-### Schema
-
-Type, required, range, unknown fields.
-
-### Semantic
-
-Cross-field relationship.
-
-### Capability
-
-Provider/module có đáp ứng yêu cầu không.
-
-### Runtime
-
-Resource, permission, model, secret store, endpoint.
-
----
-
-## 27. Runtime v2 Semantic Validation
-
-Ví dụ:
-
-```text
-Publication requires ownership transfer
-    → ownership transfer cannot be disabled
-
-Stale completion acceptance enabled
-    → validation error
-
-Durable cache enabled
-    → Storage durable-cache capability required
-
-EPHEMERAL privacy
-    → durable Artifact retention disabled
-
-Provider executionClass = GPU
-    → GPU capability required
-
-Lease tracking disabled
-    → shared Artifact processing rejected
-
-Current-revision-first disabled
-    → allowed only in test profile
-
-Remote image processing enabled
-    → explicit security policy required
+        |
+        v
+Runtime Semantic Validation
+        |
+        v
+Environment Validation
+        |
+        v
+Activation Validation
 ```
 
 ---
 
-## 28. Immutable Configuration Snapshot
+# 57. Runtime Semantic Validation
+
+Examples:
 
 ```text
-EffectiveConfigurationSnapshot
-├── ConfigurationSnapshotId
-├── SchemaVersion
-├── CreatedAt
-├── SourceVersions
-├── ValidatedConfiguration
-├── ActivationMetadata
-└── SanitizedSummary
+queue capacity <= supported maximum
+
+worker count compatible with Runtime profile
+
+critical pressure > high pressure
+
+Retry budget non-negative
+
+shutdown deadline >= required minimum
+
+Artifact memory budget <= Runtime resource envelope
 ```
-
-Mỗi Session, WorkItem và Attempt phải reference snapshot phù hợp.
-
-Snapshot không chứa resolved secret.
 
 ---
 
-## 29. Configuration and Work Identity
+# 58. What Runtime Validation Must Not Do
 
-Mỗi asynchronous execution reference:
+Runtime validation MUST NOT reimplement:
 
 ```text
-ApplicationInstanceId
-SessionId
-RevisionId
-WorkItemId
-AttemptId
-ConfigurationSnapshotId
+AI model compatibility
+Workspace privacy policy
+Plugin trust
+Provider credential validity
+Translation Profile semantics
 ```
 
-Không dùng `JobId` làm vocabulary chuẩn.
-
-Existing Attempt tiếp tục dùng original snapshot.
+It consumes results/references from those owners.
 
 ---
 
-## 30. Configuration Change Flow
+# 59. Environment Validation
+
+Runtime MAY validate:
 
 ```text
-User submits proposed changes
-        ↓
-Candidate Snapshot created
-        ↓
-Syntax / Schema / Semantic validation
-        ↓
-Capability and Runtime validation
-        ↓
+memory availability
+CPU availability
+GPU/runtime availability
+filesystem runtime path
+process isolation support
+required runtime service presence
+```
+
+---
+
+# 60. Activation Modes
+
+Recommended Runtime activation modes:
+
+```text
+IMMEDIATE_RUNTIME
+NEW_ATTEMPT_ONLY
+NEW_WORK_ITEM_ONLY
+EXECUTION_SCOPE_RESTART
+COMPONENT_RESTART
+APPLICATION_RESTART
+IMMUTABLE
+```
+
+---
+
+# 61. IMMEDIATE_RUNTIME
+
+Used only for settings whose update cannot alter execution semantics of in-flight work.
+
+Examples:
+
+```text
+runtime log level
+diagnostic sampling
+```
+
+---
+
+# 62. NEW_ATTEMPT_ONLY
+
+New Attempts use the new snapshot.
+
+Existing Attempt keeps the previous snapshot.
+
+Use carefully because one WorkItem may then contain Attempts with different Runtime config provenance.
+
+---
+
+# 63. NEW_WORK_ITEM_ONLY
+
+New WorkItems use the new snapshot.
+
+Existing WorkItems/Attempts preserve their existing snapshot.
+
+This SHOULD be preferred for many execution-policy changes.
+
+---
+
+# 64. EXECUTION_SCOPE_RESTART
+
+A change requires creation of another Execution Scope/business execution boundary.
+
+Use only where the owning workflow explicitly supports restart.
+
+Runtime MUST NOT redefine Reading Session lifecycle to implement this.
+
+---
+
+# 65. COMPONENT_RESTART
+
+Requires:
+
+```text
+stop admission
+quiesce affected component
+drain/cancel work
+dispose runtime instance
+create replacement
+validate
+activate new snapshot
+resume admission
+```
+
+---
+
+# 66. APPLICATION_RESTART
+
+Examples:
+
+```text
+data directory
+process topology
+secret-store implementation
+core Event Bus implementation
+```
+
+---
+
+# 67. IMMUTABLE
+
+An immutable setting cannot be changed by ordinary Runtime configuration update.
+
+---
+
+# 68. Activation Impact Analysis
+
+A candidate change SHOULD determine:
+
+```text
+affected Runtime components
+affected Execution Scopes
+affected WorkItems
+affected Attempts
+admission impact
+resource impact
+restart requirement
+drain requirement
+rollback strategy
+```
+
+---
+
+# 69. Impact Analysis Boundary
+
+Impact Analysis SHOULD NOT make Business Module decisions such as:
+
+```text
+restart Reading Session automatically
+change Translation Profile
+change provider preference
+```
+
+It reports runtime consequences to the owning application/orchestrator.
+
+---
+
+# 70. Configuration Change Flow
+
+Recommended:
+
+```text
+Proposed Runtime Change
+        |
+        v
+Build Candidate Snapshot
+        |
+        v
+Validate
+        |
+        v
 Impact Analysis
-        ↓
-Affected Runtime Components identified
-        ↓
-Activation Mode calculated
-        ↓
-User informed
-        ↓
-Configuration persisted
-        ↓
-Optional Admission Freeze
-        ↓
-Optional Authority Revocation / Drain
-        ↓
-Component replacement if needed
-        ↓
-Snapshot activated
-        ↓
-Events published
-```
-
-Active snapshot giữ nguyên cho đến khi activation thành công.
-
----
-
-## 31. Impact Analysis
-
-Impact Analysis phải xác định:
-
-- changed sections;
-- affected components;
-- affected Session;
-- current WorkItem compatibility;
-- authority impact;
-- publication compatibility;
-- provider replacement;
-- queue/admission impact;
-- resource drain requirement;
-- restart requirement;
-- rollback strategy.
-
----
-
-## 32. Immediate and New-Work Changes
-
-Immediate examples:
-
-- font size;
-- side-panel visibility;
-- logging level;
-- local diagnostic UI.
-
-New-work-only examples:
-
-- timeout;
-- Retry Policy;
-- queue priority;
-- context size;
-- provider batching.
-
-Existing WorkItem/Attempt không bị mutate.
-
----
-
-## 33. Session-Restart Changes
-
-Ví dụ:
-
-- source;
-- source language override;
-- reading direction;
-- privacy mode;
-- provider profile;
-- processing mode.
-
-New config được persist nhưng pending cho Session mới.
-
----
-
-## 34. Component-Restart Changes
-
-Ví dụ:
-
-- local model;
-- provider endpoint;
-- CPU pool size;
-- capture backend;
-- GPU backend;
-- Artifact Store implementation.
-
-Flow:
-
-```text
-Stop Admission for affected capability
-    ↓
-Revoke or preserve authority according to policy
-    ↓
-Drain Attempts
-    ↓
-Release Leases
-    ↓
-Dispose Component Resources
-    ↓
-Create Replacement
-    ↓
-Health/Capability Validation
-    ↓
-Activate New Snapshot
-    ↓
+        |
+        v
+Persist Candidate State
+        |
+        v
+Prepare Activation
+        |
+        v
+Freeze Affected Admission if Required
+        |
+        v
+Drain / Replace Runtime Components
+        |
+        v
+Activate Snapshot
+        |
+        v
 Resume Admission
 ```
 
 ---
 
-## 35. Application-Restart Changes
+# 71. Activation Atomicity
 
-Ví dụ:
+A candidate Runtime snapshot MUST NOT become partially active.
 
-- data directory;
-- bootstrap profile;
-- secure storage implementation;
-- graphics backend;
-- Event Bus implementation;
-- process topology.
-
-Settings UI phải ghi rõ pending restart.
-
----
-
-## 36. Configuration Events
-
-Conceptual events:
+From an affected component's perspective:
 
 ```text
-CONFIG_CHANGE_REQUESTED
-CONFIG_VALIDATION_SUCCEEDED
-CONFIG_VALIDATION_FAILED
-CONFIG_PERSISTED
-CONFIG_ACTIVATION_DEFERRED
-CONFIG_ACTIVATION_STARTED
-CONFIG_ACTIVATED
-CONFIG_ACTIVATION_FAILED
-CONFIG_ROLLBACK_STARTED
-CONFIG_ROLLBACK_COMPLETED
+old valid snapshot
+or
+new valid snapshot
 ```
 
-Event payload không chứa secret hoặc reading content.
+not a mixture.
 
 ---
 
-## 37. Configuration Persistence
+# 72. Existing Attempts
 
-Config persistence đi qua Storage capability.
+Existing Attempts MUST retain their original configuration identity.
 
-Conceptual flow:
+They MUST NOT observe an in-place mutable configuration object.
+
+---
+
+# 73. Persistence Ownership
+
+Configuration architecture owns:
 
 ```text
-Serialize Validated Snapshot
-    ↓
-Write Temporary Record
-    ↓
-Flush
-    ↓
-Validate Serialized Result
-    ↓
-Atomic Replace
-    ↓
-Retain Bounded Backup
+meaning
+schema
+revision
+activation
 ```
 
-Storage implementation chi tiết không thuộc Runtime Config.
-
----
-
-## 38. Secrets
-
-Configuration chỉ chứa reference:
+Storage provides:
 
 ```text
-secret://translation/primary
-os-keychain://crai/translation/primary
-env://CRAI_TRANSLATION_API_KEY
-memory://session/provider-token
+persistence implementation
 ```
 
-Plain secret trong persisted config phải bị reject.
-
-Secret Resolution qua dedicated service.
-
----
-
-## 39. Redaction
-
-Mọi config output cho:
-
-- logs;
-- events;
-- snapshots;
-- diagnostics;
-- UI preview;
-- support bundle;
-
-phải redact:
-
-- credential value;
-- token;
-- authorization header;
-- signed URL;
-- embedded credential;
-- reading content;
-- private path khi cần.
-
----
-
-## 40. Versioning and Migration
-
-Root:
-
-```yaml
-schemaVersion: 1
-```
-
-Migration:
+Therefore:
 
 ```text
-Read Version
-    ↓
-Find Supported Path
-    ↓
-Create Backup
-    ↓
-Migrate In Memory
-    ↓
+Configuration
+    owns semantic state
+
+Storage
+    stores it
+```
+
+---
+
+# 74. Configuration Persistence
+
+Persistence SHOULD support:
+
+* atomic write;
+* revision identity;
+* bounded backup;
+* recovery;
+* unsupported-version protection.
+
+---
+
+# 75. Secret Handling
+
+Normal Runtime configuration stores only:
+
+```text
+SecretReference
+CredentialReference
+```
+
+where a runtime-owned concern genuinely needs such a reference.
+
+Raw secret values MUST NOT be persisted.
+
+---
+
+# 76. Secret Resolution
+
+Runtime components SHOULD NOT resolve arbitrary secrets.
+
+Preferred:
+
+```text
+Execution Adapter
+    |
+    v
+Credential / Secret Host Boundary
+```
+
+when privileged execution requires it.
+
+---
+
+# 77. Versioning
+
+Distinguish:
+
+```text
+RuntimeConfigurationSchemaVersion
+RuntimeConfigurationRevision
+RuntimeConfigurationSnapshotId
+```
+
+These are separate identities.
+
+---
+
+# 78. Migration
+
+Schema migration SHOULD be:
+
+* deterministic;
+* explicit;
+* validated before persistence;
+* non-destructive to unsupported future versions;
+* rollback-aware.
+
+---
+
+# 79. Rollback
+
+Runtime configuration rollback means:
+
+```text
+reactivate previous compatible Runtime configuration revision
+```
+
+It does NOT automatically rollback:
+
+* Domain state;
+* Provider Configuration;
+* Plugin Configuration;
+* Storage schema;
+* Reading Session business state.
+
+---
+
+# 80. Rollback Flow
+
+Recommended:
+
+```text
+Activation Failed
+        |
+        v
+Stop Affected Admission
+        |
+        v
+Drain Candidate Runtime
+        |
+        v
+Restore Previous Runtime Snapshot
+        |
+        v
+Recreate Affected Runtime Components
+        |
+        v
 Validate
-    ↓
-Persist Atomically
-    ↓
-Record Diagnostics
-```
-
-Unsupported future version:
-
-- không overwrite;
-- không đoán semantic;
-- safe mode hoặc stop activation;
-- yêu cầu application version phù hợp.
-
----
-
-## 41. Rollback
-
-Rollback khi:
-
-- component init fail;
-- provider validation fail;
-- Session không khởi tạo;
-- repeated crash;
-- explicit user request.
-
-```text
-Activation fails
-    ↓
-Stop affected admission
-    ↓
-Drain replacement attempt
-    ↓
-Restore previous valid snapshot
-    ↓
-Recreate affected components
-    ↓
-Publish rollback event
+        |
+        v
+Resume Admission
 ```
 
 ---
 
-## 42. Safe Mode
+# 81. Safe Mode Runtime Configuration
 
-Safe Mode:
+Safe Mode MAY use a dedicated validated Runtime profile such as:
 
-- built-in defaults;
-- remote providers disabled;
-- experimental feature disabled;
-- automatic continuous capture disabled;
-- conservative budget;
-- no runtime plugins;
-- diagnostics and config recovery available;
-- raw persistence disabled;
-- strict authority/publication validation vẫn bật.
+```text
+conservative worker limits
+remote execution unavailable
+third-party plugin activation restricted
+diagnostics enabled
+temporary retention minimized
+```
 
 ---
 
-## 43. Typed Configuration Views
+# 82. Safe Mode Boundary
 
-Conceptual API:
+Safe Mode MUST NOT weaken:
+
+* stale-result rejection;
+* cancellation authority;
+* ownership transfer;
+* Artifact immutability;
+* Workspace isolation;
+* permission enforcement.
+
+---
+
+# 83. Typed Runtime Views
+
+Recommended:
 
 ```text
-RuntimeConfigService
-├── getBootstrapConfig()
-├── getRuntimeExecutionConfig()
+RuntimeConfigurationService
+├── getExecutionConfig()
 ├── getSchedulerConfig()
 ├── getQueueConfig()
 ├── getRetryConfig()
 ├── getCancellationConfig()
-├── getAuthorityConfig()
-├── getPublicationConfig()
 ├── getResourceConfig()
 ├── getLeaseConfig()
-├── getCacheConfig()
-├── getStorageConfig()
-├── getSecurityConfig()
-├── getProviderProfile()
-├── getPresentationConfig()
-└── getDiagnosticsConfig()
-```
-
-Business Module nhận typed view riêng của mình.
-
-Module không:
-
-- parse file;
-- read env trực tiếp;
-- mutate snapshot;
-- read all config vì convenience;
-- resolve arbitrary secret.
-
----
-
-## 44. Configuration Ownership
-
-| Section | Owner |
-|---|---|
-| `bootstrap` | Application Bootstrap |
-| `application.runtime` | Runtime Control / Infrastructure |
-| `application.scheduling` | Scheduler |
-| `application.queues` | Work Queue |
-| `application.retry` | Retry Policy |
-| `application.cancellation` | Cancellation Coordinator |
-| `application.authority` | Runtime Control |
-| `application.publication` | Artifact Store / Runtime Control |
-| `application.resources` | Resource Manager |
-| `application.leases` | Resource Manager / Artifact Store |
-| `application.cache` | Cache Policy |
-| `application.storage` | Storage |
-| `application.security` | Security/Privacy |
-| `application.features` | Feature Registry |
-| `preferences.*` | Owning Business Module |
-| `providers.*` | Provider Manager/Adapter |
-| `diagnostics` | Runtime Observability |
-
-Configuration Service sở hữu load, merge, validation, persistence, snapshot và activation coordination.
-
----
-
-## 45. Observability
-
-Config diagnostics phải report:
-
-- schema version;
-- active snapshot;
-- pending snapshot;
-- selected profile;
-- loaded sources;
-- overridden field;
-- validation warning;
-- disabled component;
-- provider availability;
-- activation mode;
-- authority-impacting change;
-- drain requirement;
-- rollback result.
-
-Không report resolved secret.
-
----
-
-## 46. MVP Configuration
-
-MVP quyết định:
-
-1. Một persisted local config.
-2. Built-in defaults + user overrides.
-3. OS credential store nếu có.
-4. Immutable typed snapshot.
-5. Validation trước activation.
-6. Current Session giữ snapshot cũ.
-7. Provider/source/privacy change yêu cầu Session restart.
-8. Bootstrap change yêu cầu application restart.
-9. Remote configuration disabled.
-10. Runtime plugin loading disabled.
-11. Raw capture memory-only mặc định.
-12. Durable Artifact cache disabled mặc định.
-13. Authority validation bắt buộc.
-14. Atomic publication bắt buộc.
-15. Resource Lease enabled.
-16. Conservative resource budget.
-17. Local diagnostics, no content.
-18. Bounded config backups.
-19. Safe Mode supported.
-
----
-
-## 47. Example MVP Configuration
-
-```yaml
-schemaVersion: 1
-
-bootstrap:
-  environment: production
-  profile: desktop-mvp
-  dataDirectory: auto
-  secretStore: operating-system
-  recoveryMode: safe
-
-application:
-  modules:
-    capture: true
-    observation: true
-    recognition: true
-    translation: true
-    presentation: true
-    storage: true
-    diagnostics: true
-
-  runtime:
-    execution:
-      maxCpuWorkers: auto
-      maxGpuExecutions: 1
-      maxProviderRequests: 2
-
-    shutdown:
-      totalTimeoutMs: 10000
-      drainTimeoutMs: 5000
-
-  scheduling:
-    currentRevisionFirst: true
-    priority:
-      control: 1000
-      interactive: 100
-      retry: 50
-      background: 10
-
-  queues:
-    control:
-      capacity: 128
-      overflow: reject
-    interactive:
-      capacity: 64
-      overflow: replace-obsolete
-    background:
-      capacity: 32
-      overflow: reject
-
-  retry:
-    enabled: true
-    attempts:
-      maxAttemptsPerWorkItem: 2
-      maxConcurrentRetries: 2
-    backoff:
-      initialDelayMs: 500
-      maximumDelayMs: 5000
-
-  cancellation:
-    revokeAuthorityImmediately: true
-    grace:
-      defaultMs: 1000
-      providerMs: 2000
-
-  authority:
-    validation:
-      completion: required
-      publication: required
-      uiCommit: required
-    staleCompletion:
-      accept: false
-
-  publication:
-    requireAcceptedCandidate: true
-    requireOwnershipTransfer: true
-    atomicPublication: true
-    allowLatePublication: false
-
-  resources:
-    budgets:
-      managedMemoryMb: auto
-      nativeMemoryMb: auto
-      gpuMemoryMb: auto
-    pressure:
-      elevatedRatio: 0.70
-      highRatio: 0.85
-      criticalRatio: 0.95
-
-  leases:
-    enabled: true
-    denyAfterLogicalDisposal: true
-    leakDetection:
-      enabled: true
-      warningAfterMs: 10000
-
-  cache:
-    runtimeMemory:
-      enabled: true
-      maximumEntries: 2000
-      policy: weighted-lru
-    scopes:
-      revisionLocal: true
-      session: true
-      runtime: true
-      durable: false
-
-  storage:
-    backend: local
-    configurationPersistence: true
-    glossaryEnabled: true
-    correctionMemoryEnabled: true
-    durableCacheEnabled: false
-
-  security:
-    allowRemoteTextProcessing: true
-    allowRemoteImageProcessing: false
-    persistence:
-      persistRawCapture: false
-      persistRecognizedText: false
-      persistTranslationCache: false
-    diagnostics:
-      includeReadingContent: false
-
-preferences:
-  language:
-    source: auto
-    target: vi
-    preferredSources: [zh-Hans, zh-Hant, en]
-
-  reading:
-    contentMode: auto
-    translationStyle: natural
-    autoProcessStableContent: true
-
-  capture:
-    frameIntervalMs: 250
-    stableDurationMs: 450
-    minimumChangeRatio: 0.03
-
-  presentation:
-    mode: side-panel
-    fontSize: 18
-    lineHeight: 1.6
-    showSourceText: true
-
-providers:
-  profiles:
-    recognition-default:
-      primary: local-recognition
-      fallback: null
-      execution:
-        timeoutMs: 10000
-        concurrency: 1
-        executionClass: CPU
-
-    translation-default:
-      primary: primary-translator
-      fallback: null
-      execution:
-        timeoutMs: 20000
-        concurrency: 2
-        executionClass: REMOTE_IO
-
-  instances:
-    local-recognition:
-      type: local
-      credentialRef: null
-      options:
-        device: auto
-
-    primary-translator:
-      type: remote
-      credentialRef: secret://translation/primary
-      options:
-        model: configured-provider-model
-
-diagnostics:
-  mode: LOCAL_ONLY
-
-  logging:
-    level: info
-    structured: true
-    includeReadingContent: false
-
-  tracing:
-    enabled: true
-    revisionTrace: true
-
-  metrics:
-    enabled: true
-    authority: true
-    publication: true
-    queue: true
-    provider: true
-    lease: true
-    resourceLifecycle: true
-
-  snapshots:
-    enabled: true
-    recentEventBufferSize: 512
+├── getArtifactConfig()
+├── getRuntimeCacheConfig()
+├── getShutdownConfig()
+└── getRuntimeDiagnosticsConfig()
 ```
 
 ---
 
-## 48. Error Codes
+# 84. What Is Removed from Runtime Config Service
+
+It SHOULD NOT expose generic ownership APIs such as:
 
 ```text
-CONFIG_PARSE_FAILED
-CONFIG_SCHEMA_UNSUPPORTED
-CONFIG_FIELD_UNKNOWN
-CONFIG_FIELD_REQUIRED
-CONFIG_VALUE_INVALID
-CONFIG_RELATION_INVALID
-CONFIG_CAPABILITY_MISSING
-CONFIG_PROVIDER_NOT_REGISTERED
-CONFIG_SECRET_REFERENCE_INVALID
-CONFIG_SECRET_NOT_FOUND
-CONFIG_PERSIST_FAILED
-CONFIG_MIGRATION_FAILED
-CONFIG_ACTIVATION_DEFERRED
-CONFIG_ACTIVATION_FAILED
-CONFIG_DRAIN_FAILED
-CONFIG_ROLLBACK_FAILED
-CONFIG_RESTART_REQUIRED
+getProviderProfile()
+getPresentationConfig()
+getUserPreference()
+getSessionConfig()
+getTranslationConfig()
 ```
 
-Errors normalize theo `ERROR_MODEL.md`.
+Those belong elsewhere.
 
 ---
 
-## 49. Testing Requirements
+# 85. Runtime Config Consumers
 
-Tests phải bao phủ:
-
-### Defaults
-
-- valid schema;
-- no credential required;
-- safe privacy;
-- authority/publication validation enabled;
-- durable raw cache disabled.
-
-### Merge
-
-- deterministic precedence;
-- array strategy;
-- null semantics;
-- Session override isolation.
-
-### Validation
-
-- type/range;
-- semantic relation;
-- provider capability;
-- authority invariant;
-- publication invariant;
-- Lease requirement;
-- privacy precedence.
-
-### Activation
-
-- immediate;
-- new-work-only;
-- Session restart;
-- Component restart;
-- Application restart;
-- admission freeze;
-- drain;
-- rollback.
-
-### Persistence
-
-- atomic write;
-- bounded backup;
-- corrupt file recovery;
-- old valid snapshot retained.
-
-### Security
-
-- secret reference only;
-- no secret in event/log/snapshot;
-- remote provider cannot bypass privacy.
-
-### Runtime v2
-
-- existing Attempt keeps old snapshot;
-- new Attempt uses activated snapshot;
-- authority-impacting config revokes correctly;
-- publication config cannot disable safety;
-- Lease config leak detection;
-- resource drain timeout;
-- Scheduler/Queue config consistency;
-- retry budget validation.
+| Runtime Concern                     | Configuration Owner          |
+| ----------------------------------- | ---------------------------- |
+| Worker/execution limits             | Runtime Execution            |
+| Scheduler                           | Scheduler                    |
+| Work Queue                          | Queue                        |
+| Retry                               | Retry Policy                 |
+| Cancellation                        | Cancellation                 |
+| Runtime Artifact operational limits | Runtime Artifact Store       |
+| Resource budgets                    | Resource Manager             |
+| Lease diagnostics/timeouts          | Resource Lifecycle           |
+| Runtime Cache limits                | Cache Runtime implementation |
+| Shutdown                            | Runtime Control / Bootstrap  |
+| Runtime diagnostics                 | Runtime Observability        |
 
 ---
 
-## 50. Architecture Invariants
+# 86. External Configuration Owners
 
-1. Active configuration immutable.
-2. Invalid configuration không activate.
-3. Existing Attempt không bị mutation.
-4. Every WorkItem/Attempt references ConfigurationSnapshotId.
-5. Config không cấp runtime authority.
-6. Authority safety validation không disable trong production.
-7. Publication yêu cầu ownership transfer.
-8. Worker không được configured để publish trực tiếp.
-9. Retry config tách provider config.
-10. Queue capacity bounded.
-11. Scheduler preserves control capacity.
-12. Cancellation revoke authority trước drain.
-13. Resource budget bounded.
-14. Lease tracking required cho shared resource.
-15. Cache optional cho correctness.
-16. Durable cache đi qua Storage.
-17. Privacy restriction thắng provider preference.
-18. Secret không nằm trong persisted normal config.
-19. Secret không nằm trong event/log/snapshot.
-20. Component restart theo dependency graph.
-21. Config activation có rollback path khi cần.
-22. Migration deterministic.
-23. Unsupported future schema không overwrite.
-24. Persistence atomic.
-25. Safe Mode giữ authority/publication safety.
-26. Module chỉ nhận typed config view.
-27. Configuration Service không sở hữu business semantics.
-28. Config event content-free.
-29. Runtime diagnostics dùng sanitized snapshot.
-30. Config change during shutdown không activate.
+| Concern                   | Canonical Owner        |
+| ------------------------- | ---------------------- |
+| Workspace Policy          | Workspace / Governance |
+| Project settings          | Project                |
+| Reading Session semantics | Reading Session        |
+| Translation Profile       | Profile / Translation  |
+| Recognition settings      | Recognition            |
+| Presentation settings     | Presentation           |
+| Provider Configuration    | Provider Management    |
+| Plugin Configuration      | Plugin Architecture    |
+| AI Routing                | AI Architecture        |
+| Safety Policy             | Safety / Governance    |
+| Secrets                   | Secret Management      |
 
 ---
 
-## 51. Open Questions
+# 87. Configuration Events
 
-- YAML hay JSON?
-- OS secret store implementation nào?
-- Số backup config?
-- Provider health check startup hay first use?
-- Component change nên cancel hay drain?
-- User có tạo custom runtime profile không?
-- Website/series-specific preference profile?
-- Adaptive tuning có được tạo temporary override không?
-- Hard Lease timeout hay diagnostic-only?
-- Resource budget tính theo device profile thế nào?
-- Durable cache encryption policy?
-- Config rollback có rollback Storage migration không?
-- Authority-impacting config nào được phép NEW_WORK_ONLY?
-
----
-
-## 52. Related Documents
-
-| Document | Relationship |
-|---|---|
-| `PIPELINE_RUNTIME.md` | WorkItem, Attempt, authority and snapshot identity |
-| `RUNTIME_COMPONENTS.md` | Config consumers and owners |
-| `SCHEDULER.md` | Admission configuration |
-| `WORK_QUEUE.md` | Queue classes and capacity |
-| `CANCELLATION.md` | Grace and revocation settings |
-| `RETRY_POLICY.md` | Retry budgets and strategy |
-| `ERROR_MODEL.md` | Config error normalization |
-| `MEMORY_MODEL.md` | Resource budgets |
-| `CACHE_POLICY.md` | Reuse and retention settings |
-| `RESOURCE_LIFECYCLE.md` | Lease, drain and disposal |
-| `THREADING_MODEL.md` | Execution contexts and pools |
-| `PERFORMANCE_MODEL.md` | Budget targets |
-| `RUNTIME_OBSERVABILITY.md` | Diagnostic settings |
-| `BOOT_SEQUENCE.md` | Startup, activation and shutdown |
-| `../../modules/storage/README.md` | Configuration persistence |
-| `../core/EVENT_BUS.md` | Configuration events |
-
----
-
-## 53. Completion Criteria
-
-`RUNTIME_CONFIG.md` được xem là đồng bộ khi:
-
-- categories và activation modes rõ;
-- immutable snapshot được giữ;
-- WorkItem/Attempt dùng ConfigurationSnapshotId;
-- Scheduler và Queue config tách riêng;
-- Retry không còn chỉ nằm trong provider;
-- Authority và Publication safety config tồn tại;
-- Resource/Lease/Retention config đầy đủ;
-- cache theo Artifact reuse;
-- config persistence đi qua Storage;
-- component restart có admission freeze và drain;
-- events theo Runtime Event Standard;
-- typed views khớp Runtime v2;
-- MVP config và tests đầy đủ.
-
----
-
-## 54. Summary
-
-CRAI Runtime Configuration dùng flow:
+Recommended Runtime events:
 
 ```text
-Sources
-    ↓
-Merge
-    ↓
+RuntimeConfigurationValidationSucceeded
+RuntimeConfigurationValidationFailed
+RuntimeConfigurationActivationStarted
+RuntimeConfigurationActivated
+RuntimeConfigurationActivationDeferred
+RuntimeConfigurationActivationFailed
+RuntimeConfigurationRollbackStarted
+RuntimeConfigurationRollbackCompleted
+```
+
+---
+
+# 88. Event Boundary
+
+Runtime configuration events describe Runtime configuration state.
+
+They are NOT Domain Events.
+
+---
+
+# 89. Audit Boundary
+
+Material administrative configuration changes MAY require Audit.
+
+Routine activation telemetry does not automatically become durable Audit.
+
+---
+
+# 90. Observability
+
+Runtime Configuration diagnostics SHOULD expose:
+
+```text
+schema version
+active revision
+pending revision
+snapshot ID
+source references
+changed Runtime fields
+activation mode
+affected Runtime components
+drain/restart requirements
+rollback result
+```
+
+---
+
+# 91. Privacy
+
+Diagnostics MUST NOT expose:
+
+* secret values;
+* reading content;
+* raw Prompt/Context;
+* arbitrary Business configuration content.
+
+---
+
+# 92. Error Categories
+
+Possible:
+
+```text
+RUNTIME_CONFIG_PARSE_FAILED
+RUNTIME_CONFIG_SCHEMA_UNSUPPORTED
+RUNTIME_CONFIG_FIELD_UNKNOWN
+RUNTIME_CONFIG_FIELD_REQUIRED
+RUNTIME_CONFIG_VALUE_INVALID
+RUNTIME_CONFIG_RELATION_INVALID
+RUNTIME_CONFIG_ENVIRONMENT_UNSUPPORTED
+RUNTIME_CONFIG_ACTIVATION_DEFERRED
+RUNTIME_CONFIG_ACTIVATION_FAILED
+RUNTIME_CONFIG_DRAIN_FAILED
+RUNTIME_CONFIG_ROLLBACK_FAILED
+RUNTIME_CONFIG_RESTART_REQUIRED
+RUNTIME_CONFIG_WRITE_CONFLICT
+RUNTIME_CONFIG_PERSISTENCE_FAILED
+RUNTIME_CONFIG_MIGRATION_FAILED
+```
+
+Provider/plugin/business-specific failures SHOULD retain their owning taxonomy.
+
+---
+
+# 93. Runtime Configuration Invariants
+
+1. Active Runtime Configuration is immutable.
+
+2. Invalid Runtime Configuration does not activate.
+
+3. Existing Attempts are not mutated by configuration changes.
+
+4. Runtime execution retains RuntimeConfigurationSnapshot identity.
+
+5. Runtime Configuration does not grant execution authority.
+
+6. Runtime correctness invariants cannot be disabled by normal configuration.
+
+7. Stale-result rejection cannot be configured off.
+
+8. Cancellation authority cannot be configured off.
+
+9. Artifact ownership transfer cannot be configured off.
+
+10. Runtime Artifact immutability cannot be configured off.
+
+11. Queue/concurrency remain bounded.
+
+12. Retry and Fallback remain separate.
+
+13. Runtime Retry does not select another provider/model route.
+
+14. Runtime Configuration does not own Provider Configuration.
+
+15. Runtime Configuration does not own Plugin Configuration.
+
+16. Runtime Configuration does not own Workspace Policy.
+
+17. Runtime Configuration does not own Project/Profile semantics.
+
+18. Runtime Configuration does not own Reading Session business state.
+
+19. Runtime Configuration does not own Presentation settings.
+
+20. Runtime Configuration does not own source/target Language.
+
+21. Runtime Configuration does not own AI Routing.
+
+22. Raw secrets are absent from persisted normal Runtime configuration.
+
+23. Runtime Components consume typed views only.
+
+24. Runtime Components do not parse arbitrary config sources independently.
+
+25. Runtime merge rules apply only to Runtime-owned configuration.
+
+26. Runtime activation is explicit.
+
+27. Partial activation is forbidden.
+
+28. Component restart follows dependency/lifecycle rules.
+
+29. Configuration rollback does not imply Business/Domain rollback.
+
+30. Unsupported future schema is never overwritten blindly.
+
+31. Runtime persistence is atomic where supported.
+
+32. Migration semantics are deterministic.
+
+33. Runtime configuration events contain no secret or reading content.
+
+34. Runtime diagnostics use sanitized snapshots.
+
+35. Configuration changes during shutdown do not activate.
+
+36. ExecutionRevision and Domain revisions remain distinct.
+
+37. Runtime Configuration Snapshot and Plugin Configuration Revision remain distinct.
+
+38. Runtime Configuration Snapshot and Provider Configuration remain distinct.
+
+39. Runtime Safety limits outrank ordinary Runtime overrides.
+
+40. External authoritative Policy cannot be weakened by Runtime config.
+
+---
+
+# 94. Recommended MVP
+
+CRAI MVP SHOULD support:
+
+* one Runtime configuration schema;
+* built-in Runtime defaults;
+* persisted local Runtime settings;
+* immutable Runtime Configuration snapshots;
+* Runtime configuration revisions;
+* typed Runtime views;
+* Scheduler configuration;
+* bounded Queue configuration;
+* same-binding Retry configuration;
+* cancellation grace configuration;
+* resource budgets;
+* lease diagnostics;
+* Runtime Artifact limits;
+* Runtime cache limits;
+* shutdown timing;
+* local Runtime diagnostics;
+* atomic persistence;
+* bounded backups;
+* Safe Mode Runtime profile.
+
+MVP SHOULD NOT place into Runtime Configuration:
+
+```text
+Provider selection
+AI model selection
+Translation style
+source/target Language
+Reading preferences
+Presentation preferences
+Plugin configuration
+Workspace privacy policy
+raw credentials
+```
+
+MVP MAY defer:
+
+* remote Runtime configuration;
+* live distributed configuration;
+* complex adaptive Runtime tuning;
+* per-Workspace Runtime worker pools;
+* per-principal Runtime settings;
+* distributed snapshot activation;
+* automatic component replacement.
+
+---
+
+# 95. Open Decisions
+
+The following remain open:
+
+* YAML vs JSON;
+* exact Runtime schema;
+* schema-version strategy;
+* RuntimeConfigurationSnapshot schema;
+* revision format;
+* configuration hash algorithm;
+* Runtime profile representation;
+* Runtime-owned source precedence;
+* environment override policy;
+* operation override policy;
+* activation-mode taxonomy;
+* NEW_ATTEMPT vs NEW_WORK_ITEM default;
+* Runtime component restart mechanism;
+* runtime configuration persistence backend;
+* rollback retention;
+* resource auto-sizing algorithm;
+* hard Runtime safety limits;
+* queue defaults;
+* Retry defaults;
+* Safe Mode Runtime limits;
+* diagnostics defaults.
+
+---
+
+# 96. Related Documents
+
+Runtime:
+
+* `README.md`
+* `RUNTIME_COMPONENTS.md`
+* `BOOT_SEQUENCE.md`
+* `PIPELINE_ORCHESTRATION.md`
+* `PIPELINE_RUNTIME.md`
+* `SCHEDULER.md`
+* `WORK_QUEUE.md`
+* `CANCELLATION.md`
+* `RETRY_POLICY.md`
+* `CACHE_POLICY.md`
+* `MEMORY_MODEL.md`
+* `THREADING_MODEL.md`
+* `RESOURCE_LIFECYCLE.md`
+* `PERFORMANCE_MODEL.md`
+* `ERROR_MODEL.md`
+* `RUNTIME_OBSERVABILITY.md`
+* `PROCESS_TOPOLOGY.md`
+
+Architecture:
+
+* `../domain/WORKSPACE.md`
+* `../domain/PROJECT.md`
+* `../domain/PROFILE.md`
+* `../ai/ROUTING.md`
+* `../ai/RETRY.md`
+* `../plugin/PLUGIN_CONFIGURATION.md`
+
+Modules:
+
+* `../../02-modules/provider-management/`
+* `../../02-modules/reading-session/`
+* `../../02-modules/recognition/`
+* `../../02-modules/translation/`
+* `../../02-modules/presentation/`
+
+Infrastructure:
+
+* `../../03-infrastructure/configuration/`
+* `../../03-infrastructure/secret-management/`
+* `../../03-infrastructure/storage/`
+
+---
+
+# 97. Completion Criteria
+
+`RUNTIME_CONFIG.md` is synchronized when:
+
+* Runtime Configuration ownership is narrow and explicit;
+* business/provider/plugin configuration is external;
+* immutable Runtime snapshots remain;
+* ExecutionRevision terminology is used;
+* Scheduler/Queue/Retry/Cancellation configuration is Runtime-owned;
+* Retry no longer contains Fallback;
+* correctness invariants are not ordinary config toggles;
+* Artifact/Lease safety rules remain architectural invariants;
+* Provider selection is removed;
+* Presentation/User Preferences/Session configuration are removed;
+* raw secrets remain outside snapshots;
+* activation/rollback semantics preserve in-flight execution;
+* Runtime Config does not become a second CRAI configuration architecture.
+
+---
+
+# 98. Summary
+
+CRAI Runtime Configuration follows:
+
+```text
+Authoritative Configuration Owners
+        |
+        v
+Resolved Constraints / Inputs
+        |
+        v
+Runtime Projection
+        |
+        v
 Validate
-    ↓
-Immutable Candidate Snapshot
-    ↓
-Impact Analysis
-    ↓
-Persist
-    ↓
-Activate at Safe Boundary
-    ↓
+        |
+        v
+Immutable RuntimeConfigurationSnapshot
+        |
+        v
+Activate at Explicit Boundary
+        |
+        v
 Typed Runtime Views
 ```
 
-Ranh giới cốt lõi:
+The central boundary is:
 
 ```text
-Configuration controls policy.
+Runtime Configuration
+    controls execution mechanics.
 
-Runtime Control owns authority.
-
-Artifact Store owns publication.
-
-Scheduler owns admission.
-
-Resource Manager owns lifecycle.
-
-Storage owns persistence.
+It does not own business intent.
 ```

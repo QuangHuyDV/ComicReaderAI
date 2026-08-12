@@ -1,10 +1,10 @@
 # OCR Providers
 
 > **Status:** Draft
-> **Version:** 1.1
+> **Version:** 1.2.0
 > **Layer:** OCR Provider Integration
 > **Used By:** OCR Pipeline
-> **Related:** Detection, Recognition, OCR Profile, Runtime Provider Selection
+> **Related:** Detection, Recognition, OCR Profile, AI Routing, Provider Management, Runtime Execution
 
 ---
 
@@ -60,7 +60,7 @@ OCR Provider Layer không chịu trách nhiệm:
 * business workflow
 * Runtime scheduling
 * Runtime retry execution
-* Runtime failover execution
+* alternative execution or fallback selection
 * Runtime cancellation
 * global resource lifecycle
 * Event Bus semantics
@@ -149,9 +149,25 @@ Metadata mô tả một Provider đã được đăng ký.
 
 ## Provider Registry
 
-Danh sách các Provider Descriptor có sẵn trong runtime.
+Danh sách các Provider Descriptor có sẵn cho discovery.
 
 Registry không mặc định là decision authority.
+
+---
+
+## Execution Binding
+
+Resolved executable binding mô tả Provider, capability, adapter/model/configuration references và execution constraints đã được lựa chọn để Runtime thực thi.
+
+ExecutionBinding không được Provider Adapter tự tạo như một routing decision.
+
+---
+
+## Provider Runtime
+
+Physical hoặc logical runtime environment dùng để thực thi Provider implementation, ví dụ model session, worker process, SDK client hoặc remote invocation channel.
+
+Provider Runtime khác với Provider Management và khác với Provider Adapter.
 
 ---
 
@@ -277,7 +293,7 @@ Provider
 declares Capabilities
 ```
 
-Runtime/Pipeline chỉ sử dụng capability được Provider khai báo hỗ trợ.
+Pipeline và routing layers chỉ sử dụng capability được Provider khai báo hỗ trợ.
 
 ---
 
@@ -336,7 +352,7 @@ Không nhất thiết trả lời:
 Which Provider must execute this task?
 ```
 
-Execution selection authority thuộc Runtime/provider-selection policy tương ứng.
+Execution selection authority thuộc AI Routing hoặc Provider Management policy tương ứng. Runtime chỉ thực thi resolved ExecutionBinding.
 
 ---
 
@@ -513,7 +529,7 @@ Provider selection có thể xem xét:
 
 Provider Layer chỉ cung cấp metadata.
 
-Selection execution thuộc owner của Runtime/provider routing.
+Selection decision thuộc AI Routing hoặc Provider Management policy tương ứng. Provider Layer chỉ cung cấp metadata; Runtime thực thi resolved ExecutionBinding.
 
 ---
 
@@ -522,10 +538,12 @@ Selection execution thuộc owner của Runtime/provider routing.
 Provider Routing trả lời:
 
 ```text
-Which available Provider is suitable?
+Which eligible Provider or execution option should be selected?
 ```
 
-Nhưng Provider Adapter không tự điều phối toàn bộ pipeline.
+Provider Layer chỉ cung cấp discovery, capability, health và provider metadata làm input cho quyết định này.
+
+Provider Adapter không tự chọn Provider và không tự điều phối toàn bộ pipeline.
 
 Routing strategy có thể là:
 
@@ -538,7 +556,25 @@ Routing strategy có thể là:
 * Performance-aware
 * Privacy-aware
 
-Strategy execution phải giữ Runtime authority.
+Canonical ownership:
+
+```text
+Provider Layer
+    -> declares provider facts and capabilities
+
+Provider Management
+    -> manages provider availability/configuration state
+
+AI Routing / Recovery
+    -> selects compatible execution alternative when policy requires
+
+Runtime
+    -> executes resolved ExecutionBinding
+```
+
+Routing decision phải tạo hoặc chọn một resolved ExecutionBinding phù hợp.
+
+Runtime giữ execution authority đối với execution của binding đó nhưng không trở thành provider-selection authority.
 
 ---
 
@@ -583,7 +619,7 @@ Recognition Candidate B
 
 Việc so sánh hoặc lựa chọn output cuối cùng không mặc định thuộc Adapter.
 
-Nó phải do OCR strategy/Quality/Runtime policy tương ứng sở hữu.
+Nó phải do OCR strategy, Quality hoặc Routing/Recovery owner tương ứng quyết định; Adapter không sở hữu quyết định này.
 
 ---
 
@@ -761,9 +797,11 @@ UnsupportedCapability
 Degraded
 ```
 
-Runtime có thể dùng các signal đó để fallback.
+Routing/Recovery có thể dùng các signal đó để chọn alternative execution hoặc fallback.
 
-Provider Adapter không tự chuyển toàn bộ workflow sang Provider khác.
+Runtime không tự chọn fallback; Runtime chỉ thực thi resolved alternative ExecutionBinding.
+
+Provider Adapter không tự chuyển workflow sang Provider khác.
 
 ---
 
@@ -828,7 +866,7 @@ Hybrid
 
 hoặc capability tương đương.
 
-Runtime có thể từ chối Remote Provider khi input được đánh dấu local-only.
+Resolved Privacy/Policy constraints phải loại Remote Provider khỏi eligible execution khi input được đánh dấu local-only. Runtime enforce constraint trên resolved ExecutionBinding.
 
 Provider Adapter không được bỏ qua privacy classification.
 
@@ -913,7 +951,7 @@ Provider Descriptor có thể chứa hints như:
 * GPU support
 * streaming support
 
-Những hints hỗ trợ Runtime selection.
+Những hints hỗ trợ AI Routing hoặc Provider Management selection policy.
 
 Chúng không phải hard performance guarantees.
 
@@ -1031,15 +1069,31 @@ Health/capability status nên đủ granular nếu implementation hỗ trợ.
 
 Provider Layer không sở hữu:
 
+* ExecutionScope
+* ExecutionRevision
 * WorkItem
 * Attempt
 * Scheduler
 * retry budget
 * cancellation authority
-* stale-result authority
-* final provider routing authority
+* execution authority
+* stale-result rejection
+* provider routing authority
+* fallback decision
 
-Runtime sở hữu execution.
+Runtime sở hữu:
+
+* WorkItem và Attempt execution mechanics
+* Scheduler admission
+* same-work Retry mechanics
+* cancellation execution
+* execution authority
+* stale-result rejection
+* Runtime resource coordination
+
+Provider selection, provider eligibility policy và fallback hoặc alternative execution decision thuộc AI Routing, Provider Management hoặc Recovery owner tương ứng.
+
+Provider Runtime Gateway hoặc equivalent Runtime execution boundary chỉ invoke resolved ExecutionBinding; nó không tự chọn business execution strategy.
 
 ---
 
@@ -1170,7 +1224,7 @@ OCR Provider Layer phải luôn đảm bảo:
 
 21. Provider result phải normalize về CRAI contract trước khi downstream sử dụng.
 
-22. Runtime có thể compose nhiều Provider theo capability.
+22. Multi-provider composition phải được quyết định bởi Business/OCR strategy hoặc Routing owner; Runtime chỉ thực thi resolved bindings.
 
 ---
 
@@ -1223,26 +1277,31 @@ Không cần ngay:
 
 # 61. Ownership References
 
-| Concern               | Owner                      |
-| --------------------- | -------------------------- |
-| OCR Pipeline          | `PIPELINE.md`              |
-| Detection Contract    | `DETECTION.md`             |
-| Recognition Contract  | `RECOGNITION.md`           |
-| Text Direction        | `TEXT_DIRECTION.md`        |
-| Layout                | `LAYOUT.md`                |
-| OCR Document          | `POSTPROCESS.md`           |
-| Quality               | `QUALITY.md`               |
-| Provider Contract     | `PROVIDERS.md`             |
-| Provider Adapter      | `PROVIDERS.md`             |
-| Provider Capabilities | `PROVIDERS.md`             |
-| Retry Execution       | Runtime                    |
-| Failover Execution    | Runtime                    |
-| Scheduling            | Runtime                    |
-| Resource Lifecycle    | Runtime / Resource Manager |
-| Secret Storage        | Secret Management          |
-| Cache Lifecycle       | Runtime                    |
-| Event Transport       | Event Bus                  |
-| Telemetry Transport   | Infrastructure             |
+| Concern | Owner |
+| --- | --- |
+| OCR Pipeline | `PIPELINE.md` |
+| Detection Contract | `DETECTION.md` |
+| Recognition Contract | `RECOGNITION.md` |
+| Text Direction | `TEXT_DIRECTION.md` |
+| Layout | `LAYOUT.md` |
+| OCR Document | `POSTPROCESS.md` |
+| Quality | `QUALITY.md` |
+| Provider Contract | `PROVIDERS.md` |
+| Provider Adapter | `PROVIDERS.md` |
+| Provider Capabilities | `PROVIDERS.md` |
+| Provider discovery metadata | `PROVIDERS.md` |
+| Provider configuration/availability management | Provider Management architecture |
+| Provider selection/routing | AI Routing / Provider Management policy |
+| Fallback / alternative execution | AI Routing / Recovery |
+| ExecutionBinding execution | Runtime / Provider Runtime Gateway |
+| Retry Execution | Runtime Retry Policy |
+| Scheduling | Runtime Scheduler |
+| Execution Authority | Runtime Control |
+| Resource Lifecycle | Runtime Resource Manager |
+| Secret Storage | Secret Management |
+| Cache Lifecycle | Runtime Cache Policy |
+| Event Transport | Event Bus |
+| Telemetry Transport | Infrastructure |
 
 ---
 
@@ -1299,16 +1358,18 @@ provider-specific integration
 Runtime chịu trách nhiệm:
 
 ```text
-selection execution
+execution of resolved bindings
 +
-retry
-+
-failover
+same-work retry mechanics
 +
 scheduling
 +
+execution authority
++
 resource coordination
 ```
+
+AI Routing, Provider Management và Recovery chịu trách nhiệm cho provider eligibility, selection và alternative execution hoặc fallback theo policy tương ứng.
 
 Nguyên tắc cốt lõi:
 
@@ -1319,5 +1380,7 @@ Adapter translates representation.
 
 OCR Architecture defines semantics.
 
-Runtime decides execution.
+Routing resolves execution choice.
+
+Runtime executes the resolved binding.
 ```

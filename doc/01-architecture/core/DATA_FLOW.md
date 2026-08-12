@@ -1,1786 +1,1918 @@
 # CRAI Data Flow Architecture
 
 > **Project:** CRAI
-> **Document:** Data Flow Architecture
-> **Version:** 0.1
+> **Path:** `doc/01-architecture/core/DATA_FLOW.md`
+> **Version:** 2.0.0
 > **Status:** Architecture Draft
-> **Last Updated:** 2026-07-21
+> **Runtime Model:** Runtime v2
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-10
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-This document defines how data moves through CRAI from content acquisition to translated presentation.
+This document defines how authoritative data moves through CRAI from a reading source to user-visible translated presentation.
 
 It describes:
 
-* the major data representations used by CRAI;
-* the transformation stages applied to source content;
-* the ownership of data at each stage;
-* how image-based and text-based flows differ;
-* how asynchronous processing results are correlated;
-* how stale or cancelled data is prevented from reaching the UI;
-* where temporary, cached, session, and persistent data may exist;
-* how privacy-sensitive content moves through local and remote providers.
+```text
+data ownership
+data representations
+Artifact boundaries
+Runtime execution references
+Candidate and Published result flow
+image-based reading flow
+structured-text reading flow
+translation preparation
+presentation flow
+stale-result protection
+cache interaction
+storage/retention
+provider boundaries
+privacy
+correlation
+```
 
-This document does not define:
-
-* the complete runtime state machine;
-* the full event catalog;
-* source-code package structure;
-* provider-specific API formats;
-* database schemas;
-* concrete IPC or network protocols;
-* UI component implementation.
-
-Those concerns are described in their respective architecture documents.
-
-Relevant documents:
+It does not define:
 
 ```text
-.meta/AI_BOOT.md
-.meta/PROJECT_RULE.md
-.meta/MODULES_RULE.md
-.meta/MODULES.md
+complete Runtime state machines
+module implementation APIs
+provider-native schemas
+database schemas
+Event Bus implementation
+native UI rendering
+```
 
-docs/architecture/CAPABILITY_MAP.md
-docs/architecture/STATE_MACHINE.md
-docs/architecture/EVENT_BUS.md
-docs/architecture/MODULE_DEPENDENCY.md
+Those belong to their owning documents.
+
+---
+
+# 2. Central Data-Flow Rule
+
+CRAI v2 uses:
+
+```text
+Domain Authority
+    ↓
+Runtime Planning
+    ↓
+Execution
+    ↓
+Candidate Result
+    ↓
+Authority Validation
+    ↓
+Published Artifact
+    ↓
+Next Consumer / Projection
+```
+
+A result does not become authoritative merely because computation completed.
+
+---
+
+# 3. Authority Before Movement
+
+Every important data movement must answer:
+
+```text
+Who owns this data?
+
+What authority/revision produced it?
+
+Is it Candidate or Published?
+
+Which consumer contract may accept it?
+```
+
+Data movement without ownership is prohibited.
+
+---
+
+# 4. High-Level Architecture
+
+The primary flow is:
+
+```text
+Reading Source
+    ↓
+Reading Session / Application Context
+    ↓
+ReadingContextRevision
+    ↓
+Business Execution Planning
+    ↓
+RuntimeRevision
+    ↓
+WorkItems / Attempts
+    ↓
+Module Candidate Artifacts
+    ↓
+Authority Validation
+    ↓
+Published Artifacts
+    ↓
+Presentation
+    ↓
+UI Adapter Projection
+    ↓
+Native UI
 ```
 
 ---
 
-## 2. Data Flow Goals
+# 5. Business Data vs Runtime Data
 
-The CRAI data flow must support the following product goals.
-
-### 2.1 Minimal Reading Interruption
-
-The user should not need to repeatedly select, copy, upload, or manually trigger translation while reading.
-
-Once a reading source has been selected, CRAI should process new content with minimal additional interaction.
-
-### 2.2 Prefer the Best Available Source Representation
-
-CRAI should avoid OCR whenever reliable structured text is available.
-
-Preferred source order:
+CRAI separates:
 
 ```text
-Structured document or webpage text
-    ↓
-Extracted document text
-    ↓
-Image with known metadata
-    ↓
-Raw image
-    ↓
-Screen capture
+Business / Domain Data
 ```
 
-A lower-quality representation must not replace a higher-quality representation without a justified reason.
-
-### 2.3 Preserve Traceability
-
-Each visible translation should remain traceable to:
-
-* its reading session;
-* its source revision;
-* its source region or text segment;
-* its OCR or extraction output;
-* its translation request;
-* the provider and configuration used;
-* any user correction applied afterward.
-
-### 2.4 Reject Stale Results
-
-A slow OCR or translation result must not overwrite newer content.
-
-Every asynchronous result must be validated against the currently active session and source revision before it is accepted.
-
-### 2.5 Separate Processing from Presentation
-
-Translation data must not depend on whether the UI uses:
-
-* a side panel;
-* an overlay;
-* a reader view;
-* a debug view;
-* an exported representation.
-
-Presentation consumes translation results but does not define their semantic structure.
-
-### 2.6 Minimize Sensitive Data Retention
-
-Raw captures, source text, OCR output, translation requests, and user corrections may contain private content.
-
-CRAI must explicitly distinguish between:
-
-* in-memory temporary data;
-* temporary local files;
-* reusable cache entries;
-* reading-session data;
-* persistent user knowledge;
-* diagnostic metadata.
-
----
-
-## 3. High-Level Data Flow
-
-The general CRAI data flow is:
+from:
 
 ```text
-Content Source
-    ↓
-Source Acquisition
-    ↓
-Source Observation or Import
-    ↓
-Source Revision Creation
-    ↓
-Content Classification
-    ↓
-Extraction
-    ↓
-Normalization and Structure Reconstruction
-    ↓
-Translation Unit Construction
-    ↓
-Context and Knowledge Enrichment
-    ↓
-Translation
-    ↓
-Result Validation
-    ↓
-Presentation Model Construction
-    ↓
-User Presentation
-    ↓
-Optional Correction, Cache, or Persistence
+Runtime Execution Data
 ```
 
-Not every flow uses every stage.
-
-For example:
-
-* browser text does not normally require OCR;
-* a manually pasted sentence may not require observation;
-* an image file import may not require stable-frame detection;
-* a cached source revision may not require another provider request;
-* a translated side panel does not require image rendering.
-
----
-
-## 4. Data Flow Layers
-
-CRAI data is divided into five conceptual layers.
+Business data describes:
 
 ```text
-External Data
-    ↓
-Source Data
-    ↓
-Processing Data
-    ↓
-Result Data
-    ↓
-Presentation Data
+what content means
+what source is selected
+what configuration is authoritative
+what Artifact was published
 ```
 
-### 4.1 External Data
-
-Data that exists outside CRAI.
-
-Examples:
-
-* browser DOM content;
-* browser-rendered images;
-* application windows;
-* screen pixels;
-* clipboard content;
-* imported files;
-* OCR provider responses;
-* translation provider responses.
-
-External data is not trusted automatically.
-
-It must be normalized into CRAI-owned representations before entering core processing.
-
-### 4.2 Source Data
-
-Data representing what the user is currently reading.
-
-Examples:
-
-* a captured frame;
-* extracted webpage text;
-* imported image;
-* selected screen bounds;
-* webpage metadata;
-* chapter identifier;
-* source revision identifier.
-
-Source data should preserve enough information to reproduce or explain later processing.
-
-### 4.3 Processing Data
-
-Intermediate representations created during extraction, OCR, normalization, ordering, grouping, and context construction.
-
-Examples:
-
-* detected text regions;
-* recognized lines;
-* normalized segments;
-* reading order;
-* translation batches;
-* provider request envelopes.
-
-Processing data may be short-lived unless it provides reusable cache or diagnostic value.
-
-### 4.4 Result Data
-
-Semantic outputs that can be reused independently of a specific UI.
-
-Examples:
-
-* translated segments;
-* aligned source and target text;
-* translation metadata;
-* provider information;
-* user corrections;
-* confidence and warning information.
-
-### 4.5 Presentation Data
-
-UI-ready structures derived from result data.
-
-Examples:
-
-* side-panel entries;
-* overlay labels;
-* reader paragraphs;
-* highlighted regions;
-* loading indicators;
-* partial-result markers;
-* error messages.
-
-Presentation data is disposable and can be rebuilt from result data.
-
----
-
-## 5. Core Data Identity
-
-Data from concurrent operations must never be correlated by timing or array position alone.
-
-CRAI should use explicit identifiers.
-
-### 5.1 Required Identity Hierarchy
+Runtime data describes:
 
 ```text
-ReadingSessionId
-    └── SourceId
-          └── SourceRevisionId
-                ├── RegionId
-                ├── SegmentId
-                ├── TranslationUnitId
-                └── ProcessingAttemptId
-```
-
-### 5.2 Reading Session ID
-
-`ReadingSessionId` identifies one active or historical reading session.
-
-A new session should normally be created when:
-
-* the user selects a new reading source;
-* the user explicitly starts a new session;
-* the previous session has ended;
-* the source mode changes incompatibly;
-* recovery cannot safely continue an earlier session.
-
-### 5.3 Source ID
-
-`SourceId` identifies the logical source being read.
-
-Examples:
-
-* selected browser tab;
-* selected application window;
-* selected screen region;
-* imported image;
-* imported text file;
-* copied text input.
-
-The same source may produce many revisions.
-
-### 5.4 Source Revision ID
-
-`SourceRevisionId` identifies a specific observable version of the source.
-
-Examples:
-
-* a stable comic frame after scrolling;
-* a newly loaded chapter;
-* an updated DOM extraction;
-* a changed image;
-* a new clipboard value.
-
-All processing results must reference the revision that produced them.
-
-### 5.5 Region ID
-
-`RegionId` identifies a spatial region within visual content.
-
-A region may represent:
-
-* a speech bubble;
-* a narration box;
-* a text line;
-* a manually selected area;
-* a detected text block.
-
-Region identity should remain stable within one source revision.
-
-Cross-revision region matching may be attempted, but must not be assumed.
-
-### 5.6 Segment ID
-
-`SegmentId` identifies a semantic source-text segment.
-
-A segment may be derived from:
-
-* one OCR region;
-* several OCR lines;
-* one webpage paragraph;
-* part of a long paragraph;
-* grouped comic dialogue;
-* manually corrected source text.
-
-### 5.7 Translation Unit ID
-
-`TranslationUnitId` identifies the unit sent to the translation stage.
-
-One translation unit may contain:
-
-* one segment;
-* several adjacent comic segments;
-* one paragraph;
-* several short paragraphs;
-* a bounded portion of a long chapter.
-
-A translation unit must retain alignment with its source segments.
-
-### 5.8 Processing Attempt ID
-
-`ProcessingAttemptId` distinguishes retries, fallback providers, and manual reprocessing of the same source revision.
-
-This prevents an older failed or delayed attempt from being confused with a newer attempt.
-
----
-
-## 6. Canonical Data Representations
-
-The structures in this section are conceptual contracts, not final programming-language definitions.
-
----
-
-## 6.1 Source Descriptor
-
-A source descriptor explains where content comes from.
-
-```text
-SourceDescriptor
-├── sourceId
-├── sourceType
-├── displayName
-├── originMetadata
-├── captureOrExtractionConfig
-├── privacyClassification
-└── createdAt
-```
-
-Possible `sourceType` values:
-
-```text
-screen-region
-application-window
-browser-tab
-browser-structured-text
-clipboard-text
-clipboard-image
-image-file
-text-file
-folder-images
-document
-```
-
-Provider-specific or operating-system-specific handles must remain inside integration adapters whenever possible.
-
-Core modules should receive normalized source descriptors.
-
----
-
-## 6.2 Source Revision
-
-A source revision represents one version of readable content.
-
-```text
-SourceRevision
-├── sessionId
-├── sourceId
-├── revisionId
-├── revisionSequence
-├── contentKind
-├── contentReference
-├── sourceHash
-├── dimensionsOrStructure
-├── capturedAt
-├── stabilityMetadata
-└── previousRevisionId
-```
-
-Possible `contentKind` values:
-
-```text
-structured-text
-plain-text
-image
-screen-frame
-document-page
-mixed
-```
-
-The source revision should contain either:
-
-* the source content itself;
-* an immutable local reference to it;
-* or a controlled handle that remains valid for the required processing lifetime.
-
----
-
-## 6.3 Visual Frame
-
-A visual frame is the normalized representation of image-based source content.
-
-```text
-VisualFrame
-├── revisionId
-├── pixelDataReference
-├── width
-├── height
-├── pixelFormat
-├── scaleFactor
-├── cropBounds
-├── coordinateSpace
-├── frameHash
-└── captureMetadata
-```
-
-`coordinateSpace` must be explicit.
-
-Possible coordinate spaces include:
-
-```text
-captured-frame
-screen
-application-window
-browser-viewport
-source-image
-rendered-display
-```
-
-Regions must not be projected into another coordinate space without a recorded transform.
-
----
-
-## 6.4 Structured Text Snapshot
-
-A structured text snapshot represents extracted text with document structure.
-
-```text
-StructuredTextSnapshot
-├── revisionId
-├── title
-├── languageHint
-├── blocks[]
-├── sourceStructureMetadata
-└── extractionMetadata
-```
-
-Each block may contain:
-
-```text
-TextBlock
-├── blockId
-├── blockType
-├── text
-├── order
-├── hierarchy
-├── sourceLocator
-└── formattingHints
-```
-
-Possible block types:
-
-```text
-title
-heading
-paragraph
-dialogue
-quote
-caption
-footnote
-list-item
-unknown
-```
-
-Source HTML must not be passed directly into translation providers unless a specific provider contract requires it and sanitization rules have been applied.
-
----
-
-## 6.5 Detected Region
-
-A detected region represents a potential visual text area.
-
-```text
-DetectedRegion
-├── regionId
-├── revisionId
-├── bounds
-├── polygon
-├── detectionConfidence
-├── regionType
-├── orientation
-├── probableLanguage
-├── provisionalOrder
-└── detectionMetadata
-```
-
-Possible `regionType` values:
-
-```text
-speech
-narration
-caption
-sound-effect
-body-text
-unknown
-```
-
-The MVP should not require accurate semantic region classification.
-
-At minimum, detected regions must preserve:
-
-* spatial bounds;
-* detection confidence;
-* orientation;
-* relation to the source revision.
-
----
-
-## 6.6 OCR Result
-
-OCR output must remain separate from translation data.
-
-```text
-OcrResult
-├── revisionId
-├── attemptId
-├── regions[]
-├── provider
-├── model
-├── languageConfiguration
-├── startedAt
-├── completedAt
-├── warnings[]
-└── failureMetadata
-```
-
-Each OCR region result may contain:
-
-```text
-OcrRegionResult
-├── regionId
-├── rawText
-├── normalizedText
-├── lines[]
-├── charactersOrTokens[]
-├── recognitionConfidence
-├── orientation
-└── providerMetadata
-```
-
-Provider-native confidence values may not be directly comparable across providers.
-
-CRAI may normalize them only if the normalization method is documented.
-
----
-
-## 6.7 Source Segment
-
-A source segment is the normalized unit used to construct translation input.
-
-```text
-SourceSegment
-├── segmentId
-├── revisionId
-├── sourceRegionIds[]
-├── sourceBlockIds[]
-├── rawText
-├── normalizedText
-├── language
-├── readingOrder
-├── segmentType
-├── contextHints
-├── confidence
-└── correctionStatus
-```
-
-The segment must preserve both:
-
-* the original extracted or recognized text;
-* the normalized text used for translation.
-
-User OCR corrections must not silently replace the original OCR result.
-
----
-
-## 6.8 Translation Unit
-
-A translation unit groups one or more source segments.
-
-```text
-TranslationUnit
-├── translationUnitId
-├── revisionId
-├── sourceSegmentIds[]
-├── sourceLanguage
-├── targetLanguage
-├── sourceText
-├── alignmentMarkers
-├── contextEnvelope
-├── glossarySnapshot
-├── styleProfile
-├── providerPolicy
-└── requestConstraints
-```
-
-The unit should contain only the context needed for useful translation.
-
-It should not automatically include the entire reading history.
-
----
-
-## 6.9 Translation Result
-
-```text
-TranslationResult
-├── translationUnitId
-├── revisionId
-├── attemptId
-├── translatedSegments[]
-├── provider
-├── model
-├── requestMetadata
-├── startedAt
-├── completedAt
-├── cacheStatus
-├── warnings[]
-└── failureMetadata
-```
-
-Each translated segment may contain:
-
-```text
-TranslatedSegment
-├── segmentId
-├── sourceText
-├── translatedText
-├── alignment
-├── confidenceOrQualityHints
-├── terminologyApplied[]
-└── correctionStatus
-```
-
-Translation alignment must use segment identifiers or explicit markers.
-
-It must not rely only on response order when the provider can merge, split, or omit content.
-
----
-
-## 6.10 Presentation Model
-
-```text
-PresentationModel
-├── sessionId
-├── revisionId
-├── mode
-├── entries[]
-├── sourceGeometry
-├── displayConfiguration
-├── status
-├── warnings[]
-└── generatedAt
-```
-
-Possible presentation modes:
-
-```text
-side-panel
-overlay
-reader
-debug
-export-preview
-```
-
-A presentation entry may contain:
-
-```text
-PresentationEntry
-├── entryId
-├── sourceSegmentIds[]
-├── sourceRegionIds[]
-├── sourceText
-├── translatedText
-├── displayOrder
-├── displayBounds
-├── emphasis
-├── loadingState
-├── correctionState
-└── warningState
+what work should execute
+what Attempt is running
+retry
+deadline
+queueing
+cancellation
+supersession
 ```
 
 ---
 
-## 7. Image-Based Reading Flow
+# 6. No Global Mutable Pipeline Context
 
-The initial CRAI MVP is expected to prioritize an image-based desktop reading flow.
-
----
-
-## 7.1 Image Flow Overview
+Do not use:
 
 ```text
-User selects source
-    ↓
-Source descriptor is created
-    ↓
-Observation starts
-    ↓
-Candidate frames are captured
-    ↓
-Unstable and duplicate frames are rejected
-    ↓
-A stable source revision is created
-    ↓
-Text regions are detected
-    ↓
-OCR recognizes region text
-    ↓
-Reading order is reconstructed
-    ↓
-Text is normalized and grouped
-    ↓
-Translation units are created
-    ↓
-Context and glossary are attached
-    ↓
-Translation is requested
-    ↓
-The result is validated
-    ↓
-A side-panel or overlay model is created
-    ↓
-The result is displayed
+GlobalProcessingContext
+├── frame
+├── OCR result
+├── Translation result
+├── UI state
+├── retry state
+├── cancellation state
+├── credentials
+└── cache
 ```
 
----
-
-## 7.2 Source Selection
-
-The user selects one of the supported visual sources.
-
-Initial expected options:
-
-```text
-Screen region
-Application window
-Image from clipboard
-Image file
-```
-
-The acquisition layer creates a normalized `SourceDescriptor`.
-
-Operating-system window handles, browser implementation details, and capture-library objects must not escape into core processing modules.
+Instead, use explicit immutable contracts and references.
 
 ---
 
-## 7.3 Continuous Observation
+# 7. Core Data Flow Goals
 
-For continuously observed sources, the observation layer produces candidate frames.
+CRAI data flow must provide:
 
-```text
-Capture tick
-    ↓
-Candidate frame
-    ↓
-Cheap change comparison
-    ↓
-Potentially changed?
-    ├── No  → discard
-    └── Yes → wait for stability
-                  ↓
-             stable comparison
-                  ↓
-             duplicate check
-                  ↓
-             create source revision
-```
-
-Candidate frames are not automatically source revisions.
-
-A source revision is created only when the observation policy accepts a frame.
+1. minimal reading interruption;
+2. best available input representation;
+3. explicit ownership;
+4. end-to-end traceability;
+5. stale-result rejection;
+6. bounded execution;
+7. Presentation independence;
+8. provider isolation;
+9. privacy-safe retention;
+10. cache correctness.
 
 ---
 
-## 7.4 Stability Detection
-
-Scrolling, page animation, loading indicators, advertisements, and cursor movement may change pixels without representing readable new content.
-
-Stability processing should use bounded heuristics such as:
-
-* time since the last significant change;
-* difference between consecutive frames;
-* motion amount;
-* repeated-frame count;
-* detected text-area stability;
-* source-specific signals when available.
-
-The observer should emit accepted stable frames, not every captured frame.
-
----
-
-## 7.5 Duplicate Detection
-
-Duplicate detection should prevent repeated OCR and translation of content already processed.
-
-Possible levels:
-
-```text
-Exact pixel hash
-Perceptual image hash
-Region-aware comparison
-Extracted-text comparison
-Translation-input hash
-```
-
-The MVP may begin with a combination of:
-
-* frame hash;
-* perceptual similarity;
-* active-session revision history.
-
-A duplicate decision must include its scope.
-
-Examples:
-
-```text
-Duplicate within current source
-Duplicate within current session
-Duplicate found in reusable cache
-```
-
----
-
-## 7.6 Revision Acceptance
-
-Once a stable non-duplicate frame is accepted:
-
-1. a new `SourceRevisionId` is assigned;
-2. the revision sequence is incremented;
-3. older pending work may be marked stale or cancelled;
-4. the accepted frame becomes immutable for that processing attempt;
-5. extraction begins.
-
-The active session may continue observing newer frames while the accepted revision is processed.
-
-This creates a pipeline rather than a strictly sequential blocking flow.
-
----
-
-## 7.7 Region Detection and OCR
-
-The extraction flow may use either:
-
-```text
-Full-frame OCR
-```
-
-or:
-
-```text
-Text-region detection
-    ↓
-Per-region OCR
-```
-
-The architecture must support both.
-
-The selected provider may internally combine detection and recognition, but CRAI should still normalize its output into:
-
-* detected regions;
-* recognized text;
-* confidence;
-* geometry;
-* ordering hints.
-
----
-
-## 7.8 Reading-Order Reconstruction
-
-Comic text order may depend on:
-
-* horizontal or vertical writing;
-* top-to-bottom placement;
-* right-to-left or left-to-right panel conventions;
-* speech-bubble positions;
-* page layout;
-* source language;
-* manual correction.
-
-The ordering stage produces an ordered list of source segments.
-
-The original geometric positions must remain available after ordering.
-
-Ordering does not change region identity.
-
----
-
-## 7.9 Segment Construction
-
-Recognized lines may need to be:
-
-* joined;
-* split;
-* normalized;
-* grouped by speech bubble;
-* grouped by nearby context;
-* excluded if likely decorative;
-* marked as uncertain.
-
-Example:
-
-```text
-OCR lines
-    ↓
-Line normalization
-    ↓
-Region text reconstruction
-    ↓
-Reading-order assignment
-    ↓
-Source segments
-```
-
-Sound effects and decorative text may be retained with a distinct segment type rather than silently deleted.
-
----
-
-## 7.10 Translation Batch Construction
-
-Comic translations are often too ambiguous when translated region by region.
-
-CRAI should support bounded contextual batching.
-
-```text
-Ordered source segments
-    ↓
-Batching policy
-    ↓
-Translation units
-```
-
-Batching may consider:
-
-* maximum character count;
-* maximum token estimate;
-* spatial neighborhood;
-* panel boundary;
-* narration versus dialogue;
-* provider limits;
-* expected response latency;
-* glossary size.
-
-Translation units must preserve segment boundaries using explicit alignment metadata.
-
----
-
-## 7.11 Image Presentation
-
-The initial presentation direction should be non-destructive.
+# 8. Prefer Highest-Quality Source Representation
 
 Preferred order:
 
 ```text
-Side panel
-    ↓
-Region-linked translation list
-    ↓
-Simple overlay
+Structured webpage/document data
+        ↓
+Extracted semantic text
+        ↓
+Imported text
+        ↓
+Image with known structure
+        ↓
+Raw image
+        ↓
+Screen capture
 ```
 
-The side panel can be built using:
-
-* segment order;
-* translated text;
-* region references;
-* loading status;
-* warning status.
-
-Overlay presentation additionally requires:
-
-* source geometry;
-* coordinate transforms;
-* current source scale;
-* current source offset;
-* clipping and overflow rules.
-
-A translation result should remain valid even when overlay positioning temporarily becomes invalid.
+OCR should not be used when reliable structured text is already available.
 
 ---
 
-## 8. Structured Text Reading Flow
+# 9. Source Quality Does Not Transfer Ownership
 
-Text-based reading should avoid image capture and OCR when structured text is available.
-
----
-
-## 8.1 Text Flow Overview
+Whether content came from:
 
 ```text
-User selects browser or text source
+DOM
+screen
+clipboard
+image file
+document
+```
+
+does not change ownership of downstream Artifacts.
+
+All source integrations normalize into CRAI contracts before processing.
+
+---
+
+# 10. Main Data Layers
+
+CRAI separates data into:
+
+```text
+External Data
     ↓
-Structured text is extracted
+Normalized Source/Input Data
     ↓
-Relevant reading content is isolated
+Published Processing Artifacts
     ↓
-A source revision is created
+Translation Data
     ↓
-Document structure is normalized
+Presentation Artifacts
     ↓
-Paragraphs are divided into translation units
-    ↓
-Context and glossary are attached
-    ↓
-Translation is performed incrementally
-    ↓
-Translated paragraphs are aligned
-    ↓
-A reader or in-page presentation model is built
+UI Projections
+```
+
+Runtime metadata flows alongside these layers rather than becoming their semantic contents.
+
+---
+
+# 11. External Data
+
+Examples:
+
+```text
+browser DOM
+screen pixels
+window surface
+clipboard
+imported file
+provider response
+```
+
+External data is untrusted.
+
+It must pass adapter/provider normalization before entering stable core contracts.
+
+---
+
+# 12. Reading Context
+
+Reading Session owns the current reading context.
+
+Conceptually:
+
+```text
+ReadingContext
+├── source
+├── sourceMode
+├── selectedArea?
+├── language settings
+├── session configuration
+└── other session-owned context
+```
+
+A committed context change creates:
+
+```text
+ReadingContextRevision
+```
+
+according to Reading Session contracts.
+
+---
+
+# 13. ReadingContextRevision
+
+`ReadingContextRevision` identifies domain/session authority.
+
+Examples that may create a new revision:
+
+```text
+selected source changed
+capture region changed
+session-specific language changed
+relevant session configuration changed
+```
+
+It is not an execution Attempt identity.
+
+---
+
+# 14. Removed Generic `SourceRevisionId` Authority
+
+v1 used:
+
+```text
+SourceRevisionId
+```
+
+as a universal parent for almost all downstream processing.
+
+v2 uses the actual typed owner authority.
+
+For continuously changing source content, Capture/source-observation may still expose source/capture revision concepts if defined by that module.
+
+They must not replace:
+
+```text
+ReadingContextRevision
+RuntimeRevisionId
+ArtifactId
+```
+
+with one generic revision hierarchy.
+
+---
+
+# 15. RuntimeRevision
+
+Business/Application planning converts authoritative context into Runtime execution authority.
+
+Conceptually:
+
+```text
+ReadingContextRevision
++
+resolved configuration
++
+business execution requirements
+        ↓
+RuntimeRevision
+```
+
+Runtime owns:
+
+```text
+RuntimeRevisionId
 ```
 
 ---
 
-## 8.2 Browser Extraction
+# 16. RuntimeRevision Is Not Data Content
 
-A browser connector may collect:
+A RuntimeRevision describes execution authority.
 
-* document title;
-* page URL or safe origin metadata;
-* selected article or chapter container;
-* headings;
-* paragraphs;
-* dialogue blocks;
-* visible text;
-* reading progress;
-* source element locators;
-* page revision signals.
+It should not contain all processing data as one mutable object.
 
-The connector should send normalized content rather than unrestricted browser internals.
-
-Scripts, hidden elements, navigation text, comments, and unrelated page content should be excluded where possible.
+WorkItems refer to immutable inputs/Artifacts.
 
 ---
 
-## 8.3 Content Isolation
+# 17. WorkItem
 
-Webpages may contain:
-
-* navigation;
-* advertisements;
-* comments;
-* menus;
-* recommendations;
-* chapter content;
-* hidden text;
-* duplicated mobile and desktop layouts.
-
-The content isolation stage identifies the likely reading body.
-
-Possible strategies:
+Runtime creates schedulable logical work:
 
 ```text
-User-selected content container
-Site adapter
-Semantic article extraction
-Density-based extraction
-Visible-selection extraction
-Fallback manual selection
+WorkItem
+├── WorkItemId
+├── RuntimeRevisionId
+├── workType
+├── inputRefs
+├── dependencyRefs
+├── priority
+└── execution policy
 ```
 
-The MVP should prefer predictable extraction over claims of universal automatic support.
-
 ---
 
-## 8.4 Text Revision Detection
+# 18. Attempt
 
-A new source revision may be created when:
-
-* the chapter URL changes;
-* the chapter identifier changes;
-* the selected container content changes materially;
-* the user opens a new source;
-* the browser connector reports navigation;
-* the user requests re-extraction.
-
-Minor layout changes should not automatically invalidate the semantic text revision.
-
----
-
-## 8.5 Paragraph Normalization
-
-Text normalization may include:
-
-* Unicode normalization;
-* whitespace cleanup;
-* paragraph-boundary preservation;
-* dialogue-line preservation;
-* punctuation normalization;
-* removal of known website artifacts;
-* optional Simplified and Traditional Chinese normalization;
-* source-language detection.
-
-Formatting should be preserved as semantic hints rather than raw CSS.
-
----
-
-## 8.6 Long-Content Chunking
-
-Entire chapters may exceed provider limits or create unacceptable latency.
-
-CRAI should translate long content incrementally.
+Each concrete execution is represented by:
 
 ```text
-Structured blocks
-    ↓
-Semantic grouping
-    ↓
-Size-bounded chunks
-    ↓
-Translation queue
-    ↓
-Partial reader updates
+Attempt
+├── AttemptId
+├── WorkItemId
+├── provider/config selection
+├── deadline
+├── execution state
+└── diagnostics context
 ```
 
-Chunking should avoid splitting:
-
-* sentences;
-* dialogue turns;
-* short related paragraphs;
-* headings from their immediate content.
-
-The reader may display completed translated blocks while later blocks continue processing.
+Retry creates another Attempt.
 
 ---
 
-## 8.7 Reader Presentation
+# 19. Removed `ProcessingAttemptId`
 
-Reader presentation should preserve:
-
-* heading hierarchy;
-* paragraph separation;
-* dialogue formatting;
-* reading order;
-* chapter title;
-* source and target alignment when enabled.
-
-Reader typography is presentation data and must not modify the stored semantic translation result.
-
----
-
-## 9. Manual Input Flows
-
-CRAI may support direct user input without an observed reading source.
-
----
-
-## 9.1 Clipboard Text
+The generic v1:
 
 ```text
-Clipboard text
+ProcessingAttemptId
+```
+
+is replaced by:
+
+```text
+WorkItemId
+AttemptId
+```
+
+owned by Runtime.
+
+Provider-level request IDs may exist additionally inside module/provider adapters.
+
+---
+
+# 20. No `ProcessingEnvelope`
+
+The v1 `ProcessingEnvelope` combining:
+
+```text
+sessionId
+sourceId
+revisionId
+attemptId
+operationType
+priority
+deadline
+cancellationToken
+```
+
+is removed as a core data contract.
+
+These concerns now belong to:
+
+```text
+RuntimeRevision
+WorkItem
+Attempt
+Runtime cancellation/deadline contracts
+```
+
+---
+
+# 21. Candidate Artifact
+
+A Candidate Artifact is output produced by execution but not yet accepted as current authoritative output.
+
+Examples:
+
+```text
+Candidate Capture Artifact
+Candidate Recognition Artifact
+Candidate SourceDocument Artifact
+Candidate Translation Artifact
+Candidate Presentation Artifact
+```
+
+---
+
+# 22. Candidate Does Not Mean Published
+
+Execution:
+
+```text
+Attempt SUCCEEDED
+```
+
+does not automatically mean:
+
+```text
+Artifact Published
+```
+
+A Candidate must still pass authority and contract validation.
+
+---
+
+# 23. Published Artifact
+
+A Published Artifact is:
+
+```text
+validated
+immutable
+owner-approved
+provenance-linked
+safe for downstream consumption
+```
+
+Published Artifacts become stable module boundaries.
+
+---
+
+# 24. Publication Flow
+
+Canonical:
+
+```text
+WorkItem
     ↓
-Input validation
+Attempt
     ↓
-Text source revision
+Candidate Artifact
     ↓
-Normalization
+validate structure
     ↓
-Translation unit construction
+validate provenance
+    ↓
+validate current Runtime authority
+    ↓
+publish
+    ↓
+Published Artifact
+```
+
+---
+
+# 25. Artifact Provenance
+
+Each Published Artifact should preserve enough provenance to answer:
+
+```text
+which input produced it?
+which RuntimeRevision accepted it?
+which configuration mattered?
+which module/provider produced it?
+which Artifact(s) preceded it?
+```
+
+---
+
+# 26. Artifact Identity
+
+Use:
+
+```text
+ArtifactId
+```
+
+for canonical Artifact identity.
+
+Artifact-specific revisions/versions may exist according to owner contracts.
+
+---
+
+# 27. Core Artifact Flow — Image Source
+
+Architecture-level flow:
+
+```text
+ReadingContext
+    ↓
+Capture
+    ↓
+Capture Artifact
+    ↓
+Recognition
+    ↓
+RecognitionArtifact
+    ↓
+Text Processing
+    ↓
+SourceDocumentArtifact
     ↓
 Translation
     ↓
-Quick result presentation
+TranslationArtifact
+    ↓
+Presentation
+    ↓
+PresentationArtifact
+    ↓
+Application / UI Adapter
+    ↓
+ViewModel
 ```
-
-Clipboard text should be treated as a new revision unless the normalized content is a known duplicate.
 
 ---
 
-## 9.2 Clipboard Image
+# 28. Core Artifact Flow — Structured Text Source
+
+When structured text is reliable:
 
 ```text
-Clipboard image
+Structured Source
     ↓
-Visual source revision
+normalized source/input boundary
     ↓
-Image extraction flow
+Text Processing
     ↓
-Translation presentation
+SourceDocumentArtifact
+    ↓
+Translation
+    ↓
+TranslationArtifact
+    ↓
+Presentation
 ```
 
-Continuous observation is not required.
+Recognition may be skipped entirely.
 
 ---
 
-## 9.3 Image File
+# 29. Core Artifact Flow — Manual Text
 
 ```text
-Selected image file
+Manual Text Input
     ↓
-Safe file decoding
+input validation
     ↓
-Visual source revision
+normalized source input
     ↓
-Image extraction flow
+Text Processing
+    ↓
+SourceDocumentArtifact
+    ↓
+Translation
+    ↓
+TranslationArtifact
+    ↓
+Presentation
 ```
 
-The original file should remain immutable.
-
-CRAI should process a decoded or controlled internal representation.
-
 ---
 
-## 10. Context and Knowledge Flow
-
-Translation context must be deliberately constructed.
-
-It must not be an uncontrolled dump of all previous user data.
-
----
-
-## 10.1 Context Sources
-
-A translation unit may receive context from:
-
-* neighboring source segments;
-* previous segments in the same revision;
-* recent translated segments in the same session;
-* chapter title;
-* series metadata;
-* language profile;
-* user glossary;
-* corrected names and terms;
-* selected style profile.
-
----
-
-## 10.2 Context Envelope
+# 30. Core Artifact Flow — Manual Image
 
 ```text
-ContextEnvelope
-├── localContext
-├── previousContext
-├── documentContext
-├── terminologyContext
-├── styleContext
-├── sourceMetadata
-└── contextPolicy
+Image File / Clipboard Image
+    ↓
+Capture/import normalization
+    ↓
+Capture Artifact
+    ↓
+Recognition
+    ↓
+Text Processing
+    ↓
+Translation
+    ↓
+Presentation
 ```
 
-Each context item should identify:
-
-* where it came from;
-* why it was included;
-* whether it may be sent to a remote provider;
-* its maximum retention scope.
+Continuous source observation is not required.
 
 ---
 
-## 10.3 Glossary Snapshot
+# 31. Capture Ownership
 
-Translation requests should use an immutable glossary snapshot.
+Capture owns source acquisition/capture semantics.
+
+Possible Capture-owned concepts include:
 
 ```text
-Current glossary
-    ↓
-Relevant-term selection
-    ↓
-Glossary snapshot
-    ↓
-Translation request
+CaptureSource
+Capture Candidate
+Capture Artifact
+geometry
+pixel representation
+capture metadata
 ```
 
-If the user changes the glossary while a request is running:
-
-* the active request may finish using the old snapshot;
-* the result records which glossary snapshot was used;
-* the user may request retranslation using the updated glossary.
+Exact contracts belong to `02-modules/capture/`.
 
 ---
 
-## 10.4 Correction Flow
+# 32. Capture Artifact
 
-User corrections may apply to:
+A Capture Artifact may represent:
 
-* OCR source text;
-* segment ordering;
-* translated text;
-* a name;
-* a recurring term;
-* a style preference.
+```text
+accepted visual content
+source geometry
+coordinate space
+capture provenance
+bounded metadata
+```
+
+It must not expose platform-native capture handles downstream.
+
+---
+
+# 33. Capture Candidate Stability
+
+For continuous screen reading:
+
+```text
+raw observations
+    ↓
+change detection
+    ↓
+stability policy
+    ↓
+candidate
+    ↓
+acceptance
+```
+
+Not every captured frame becomes a Published Artifact.
+
+---
+
+# 34. Continuous Observation
+
+Continuous observation may generate many temporary candidates.
+
+These should remain:
+
+```text
+bounded
+short-lived
+discardable
+```
+
+until Capture/source policy determines meaningful content.
+
+---
+
+# 35. Duplicate Detection
+
+Potential strategies:
+
+```text
+exact hash
+perceptual hash
+region-aware similarity
+semantic text fingerprint
+```
+
+Duplicate detection is an optimization/policy decision.
+
+It must not bypass Artifact compatibility/authority validation.
+
+---
+
+# 36. Recognition Ownership
+
+Recognition consumes its accepted input and owns Recognition semantics such as:
+
+```text
+recognized blocks
+recognized lines
+recognized tokens
+geometry
+confidence
+text direction
+reading hints
+provider provenance
+```
+
+---
+
+# 37. RecognitionArtifact
+
+Architecture-level representation:
+
+```text
+RecognitionArtifact
+├── artifactId
+├── sourceArtifactRef
+├── regions/blocks
+├── recognized text
+├── geometry
+├── reading hints
+├── confidence
+├── provenance
+└── warnings
+```
+
+Exact schema belongs to Recognition contracts.
+
+---
+
+# 38. Removed `OcrResult` as Cross-Module Core Type
+
+v1 used:
+
+```text
+OcrResult
+```
+
+as a core architecture data representation.
+
+v2 uses:
+
+```text
+RecognitionArtifact
+```
+
+as the stable Recognition → Text Processing boundary.
+
+Provider/OCR-specific results remain internal to Recognition/provider adapters.
+
+---
+
+# 39. Recognition Provider Data
+
+Provider-native response may contain:
+
+```text
+provider tokens
+provider bounding boxes
+provider confidence
+provider metadata
+```
+
+Recognition normalizes these before publication.
+
+Provider-native structures must not become downstream contracts.
+
+---
+
+# 40. Text Processing Ownership
+
+Text Processing consumes:
+
+```text
+RecognitionArtifact
+```
+
+or normalized structured-text source input.
+
+It owns:
+
+```text
+normalization
+structural reconstruction
+reading-order normalization
+grouping
+semantic segmentation
+source-document preparation
+```
+
+---
+
+# 41. SourceDocument Candidate
+
+Text Processing may produce:
+
+```text
+Candidate SourceDocument
+```
+
+containing normalized semantic text structure.
+
+---
+
+# 42. SourceDocumentArtifact
+
+After validation/publication:
+
+```text
+SourceDocumentArtifact
+```
+
+is the stable Text Processing → Translation boundary.
+
+---
+
+# 43. SourceDocument Structure
+
+Conceptually:
+
+```text
+SourceDocumentArtifact
+├── artifactId
+├── sourceRefs
+├── language
+├── blocks[]
+├── semantic order
+├── geometry refs?
+├── source provenance
+├── confidence/warnings
+└── normalization metadata
+```
+
+Exact schema remains Text Processing-owned.
+
+---
+
+# 44. Removed Generic `SourceSegment` Authority
+
+v1 used `SourceSegment` as a cross-pipeline universal object.
+
+v2 may still have text-processing segment/block types.
+
+But their identity and meaning belong to:
+
+```text
+Text Processing
+```
+
+not to a global architecture hierarchy.
+
+Translation must consume the published SourceDocument contract, not generic mutable segments.
+
+---
+
+# 45. Translation Ownership
+
+Translation owns:
+
+```text
+TranslationUnit construction
+TranslationBatch planning
+translation context assembly
+provider request semantics
+provider response normalization
+source-target alignment
+Translation Artifact
+```
+
+---
+
+# 46. TranslationUnit Ownership
+
+`TranslationUnit` belongs to Translation.
+
+It must not be created as a Text Processing output.
+
+Flow:
+
+```text
+SourceDocumentArtifact
+    ↓
+Translation
+    ↓
+TranslationUnit / TranslationBatch
+```
+
+---
+
+# 47. Translation Unit
+
+Conceptually:
+
+```text
+TranslationUnit
+├── translationUnitId
+├── sourceDocumentRef
+├── sourceBlockRefs[]
+├── sourceLanguage
+├── targetLanguage
+├── sourceText
+├── alignment metadata
+├── context
+├── glossary snapshot
+├── style/config snapshot
+└── constraints
+```
+
+---
+
+# 48. Translation Context
+
+Context is deliberately constructed.
+
+Possible inputs:
+
+```text
+nearby SourceDocument blocks
+chapter/document metadata
+recent accepted Translation Artifacts
+glossary
+terminology
+style configuration
+```
+
+Do not send the whole reading history automatically.
+
+---
+
+# 49. Context Provenance
+
+Context items should preserve:
+
+```text
+source
+reason for inclusion
+privacy classification
+retention scope
+remote-send eligibility
+```
+
+where relevant.
+
+---
+
+# 50. Glossary Snapshot
+
+A translation execution should use immutable glossary/configuration snapshots.
 
 Example:
 
 ```text
-User edits translated text
+current glossary
     ↓
-Correction record is created
+relevant-term selection
     ↓
-Presentation updates immediately
+GlossarySnapshot
     ↓
-Optional glossary proposal is generated
-    ↓
-Future translation context may use the accepted correction
+Translation Attempt
 ```
 
-A local correction must not silently mutate historical provider output.
+---
 
-Both values should remain distinguishable:
+# 51. Glossary Change During Execution
+
+If glossary changes while an Attempt runs:
 
 ```text
-Provider translation
-User-corrected translation
+Attempt may finish using old snapshot
 ```
 
----
+but Candidate provenance records the old snapshot.
 
-## 11. Asynchronous Processing Flow
-
-OCR and translation are asynchronous and may complete out of order.
-
----
-
-## 11.1 Processing Envelope
-
-Each asynchronous request should carry a processing envelope.
+New authority may decide the Candidate is:
 
 ```text
-ProcessingEnvelope
-├── sessionId
-├── sourceId
-├── revisionId
-├── attemptId
-├── operationType
-├── priority
-├── createdAt
-├── deadline
-├── cancellationToken
-└── correlationMetadata
+acceptable
+stale
+or requires retranslation
 ```
 
+according to policy.
+
 ---
 
-## 11.2 Result Acceptance Rule
-
-A result may update active presentation only when all required checks pass.
+# 52. Translation Provider Boundary
 
 ```text
-Result received
+Translation canonical input
     ↓
-Session still exists?
-    ├── No → discard or retain only diagnostics
-    └── Yes
-         ↓
-Revision still relevant?
-    ├── No → mark stale
-    └── Yes
-         ↓
-Attempt still accepted?
-    ├── No → discard
-    └── Yes
-         ↓
-Result structurally valid?
-    ├── No → report processing error
-    └── Yes → commit result
+Provider Adapter
+    ↓
+data minimization
+    ↓
+credentials attached internally
+    ↓
+remote/local provider
+    ↓
+provider-native response
+    ↓
+validation
+    ↓
+canonical Translation result
 ```
 
 ---
 
-## 11.3 Stale Result
+# 53. Credentials
 
-A result is stale when it belongs to valid historical work but is no longer eligible to update the active view.
+Credentials must remain inside:
+
+```text
+Secret Management
+Provider Management / Adapter
+```
+
+They must never appear in:
+
+```text
+TranslationUnit
+Artifact
+Event
+ViewModel
+cache key
+diagnostic bundle
+```
+
+---
+
+# 54. Translation Candidate
+
+Provider completion creates a Translation execution result.
+
+Translation normalizes/alignment-validates it into:
+
+```text
+Candidate TranslationArtifact
+```
+
+---
+
+# 55. TranslationArtifact
+
+After authority validation/publication:
+
+```text
+TranslationArtifact
+```
+
+contains semantic translation output independent from UI mode.
+
+It remains valid whether UI shows:
+
+```text
+side panel
+overlay
+reader
+export preview
+```
+
+---
+
+# 56. Translation Alignment
+
+Source-target alignment must use explicit identity/markers.
+
+Do not rely solely on array ordering when provider responses may:
+
+```text
+merge
+split
+omit
+reorder
+```
+
+content.
+
+---
+
+# 57. Translation Correction
+
+Provider output and user-corrected output must remain distinguishable.
+
+Conceptually:
+
+```text
+Published provider translation
+    +
+Correction Record
+    ↓
+effective user-facing translation projection
+```
+
+Do not silently mutate historical provider output.
+
+---
+
+# 58. Presentation Ownership
+
+Presentation consumes accepted semantic translation results.
+
+It owns:
+
+```text
+presentation layout
+semantic display structure
+geometry mapping
+text fitting
+Presentation Artifact
+Presentation Revision
+```
+
+---
+
+# 59. PresentationArtifact
+
+Conceptually:
+
+```text
+PresentationArtifact
+├── artifactId
+├── translationArtifactRef
+├── mode-independent semantic presentation
+├── layout
+├── geometry
+├── fitting decisions
+├── warnings
+└── provenance
+```
+
+Exact contract belongs to Presentation.
+
+---
+
+# 60. Presentation Is Not UI Rendering
+
+Presentation may define what should be displayed.
+
+UI Adapter/native UI defines how it is rendered on a platform.
+
+Flow:
+
+```text
+PresentationArtifact
+    ↓
+Application projection
+    ↓
+UI Adapter
+    ↓
+ViewModel
+    ↓
+Native Renderer
+```
+
+---
+
+# 61. UI Adapter Projection
+
+UI Adapter creates disposable immutable ViewModels.
+
+ViewModels are not processing Artifacts and are not domain authority.
+
+---
+
+# 62. ViewModel Flow
+
+```text
+Application/Module snapshots
+        ↓
+UI Adapter
+        ↓
+Candidate ViewModel
+        ↓
+validation
+        ↓
+Published local ViewModel
+```
+
+A ViewModel may be rebuilt without re-running Translation.
+
+---
+
+# 63. Geometry Flow
+
+Visual geometry should remain traceable through processing.
+
+Conceptually:
+
+```text
+Capture coordinate space
+    ↓
+Recognition geometry
+    ↓
+SourceDocument geometry refs
+    ↓
+Presentation transforms
+    ↓
+UI coordinates
+```
+
+---
+
+# 64. Coordinate Spaces
 
 Examples:
 
-* the user scrolled to a newer frame;
-* the source selection changed;
-* a manual retranslation superseded the automatic request;
-* a fallback provider returned before the original provider;
-* the session ended;
-* the user changed the source language and restarted processing.
-
-Stale results may be used for bounded cache or diagnostics only when privacy rules allow it.
-
----
-
-## 11.4 Cancellation
-
-Cancellation should flow downstream from the session or scheduler.
-
 ```text
-Session or revision cancelled
-    ↓
-Pending acquisition work stops
-    ↓
-Extraction requests receive cancellation
-    ↓
-Translation requests receive cancellation
-    ↓
-Late results fail acceptance checks
-    ↓
-Temporary data becomes eligible for cleanup
+captured-frame
+source-image
+screen
+application-window
+browser-viewport
+presentation-space
+display-space
 ```
 
-Cancellation is cooperative.
-
-A remote provider request may not always be physically stoppable.
-
-Therefore, result validation remains mandatory even when cancellation is supported.
+Transforms must be explicit.
 
 ---
 
-## 11.5 Backpressure
+# 65. Geometry Failure Independence
 
-Continuous capture can produce data faster than OCR and translation can process it.
+If overlay geometry becomes invalid:
 
-The scheduler must apply backpressure.
+```text
+Presentation overlay
+    → degraded/suspended
+```
+
+while:
+
+```text
+TranslationArtifact
+    → remains valid
+```
+
+Do not rerun Recognition/Translation merely because a display transform changed.
+
+---
+
+# 66. Runtime Correlation
+
+Every execution Candidate should be traceable to Runtime authority.
+
+Relevant references may include:
+
+```text
+RuntimeRevisionId
+WorkItemId
+AttemptId
+```
+
+These do not become semantic content ownership.
+
+---
+
+# 67. Candidate Acceptance
+
+Canonical validation:
+
+```text
+Candidate received
+    ↓
+Artifact structurally valid?
+    ├── No → reject
+    └── Yes
+         ↓
+RuntimeRevision still authoritative?
+    ├── No → stale/superseded
+    └── Yes
+         ↓
+WorkItem/Attempt result accepted?
+    ├── No → reject
+    └── Yes
+         ↓
+input/provenance compatible?
+    ├── No → reject
+    └── Yes
+         ↓
+publish Artifact
+```
+
+---
+
+# 68. Stale Result
+
+A result is stale when it belongs to legitimate historical execution but no longer has authority to become current published state.
+
+Examples:
+
+```text
+new RuntimeRevision superseded old work
+ReadingContext changed
+manual retranslation superseded auto translation
+new provider Attempt already won
+session stopped
+```
+
+---
+
+# 69. Stale Is Not Failure
+
+Staleness/supersession may be expected control flow.
+
+Do not report every stale Candidate as a user-visible error.
+
+---
+
+# 70. Late Provider Result
+
+Remote execution may return after cancellation.
+
+Therefore:
+
+```text
+cancellation
+```
+
+never replaces:
+
+```text
+authority validation
+```
+
+---
+
+# 71. Cancellation
+
+Cancellation authority belongs to Runtime.
+
+Possible origin:
+
+```text
+session stopped
+ReadingContextRevision changed
+RuntimeRevision superseded
+user cancelled
+deadline
+shutdown
+resource policy
+```
+
+---
+
+# 72. Cancellation Flow
+
+```text
+Application/owner condition
+    ↓
+Runtime cancellation request
+    ↓
+WorkItem/Attempt authority changes
+    ↓
+provider cancellation attempted where supported
+    ↓
+late Candidate still validated before publication
+```
+
+---
+
+# 73. Removed “Cancellation Flows Down the Pipeline”
+
+Do not model:
+
+```text
+Session
+    ↓
+Capture cancel
+    ↓
+OCR cancel
+    ↓
+Translation cancel
+```
+
+as module-to-module propagation.
+
+Runtime owns execution cancellation across affected work.
+
+---
+
+# 74. Retry
+
+Retry belongs to Runtime execution.
+
+Flow:
+
+```text
+Attempt 1
+    ↓
+FAILED / TIMED_OUT
+    ↓
+Runtime retry policy
+    ↓
+Attempt 2
+```
+
+No data Artifact is mutated backward.
+
+---
+
+# 75. Provider Fallback
+
+Fallback may cause a new Attempt with another provider/configuration.
+
+Both Attempts retain separate identities/provenance.
+
+Only the accepted Candidate may publish current output.
+
+---
+
+# 76. Backpressure
+
+Runtime/Scheduler/Resource Manager own processing backpressure.
+
+Potential policies:
+
+```text
+latest-authority preference
+bounded pending WorkItems
+visible-content priority
+manual request priority
+provider concurrency limits
+memory/GPU limits
+prefetch deprioritization
+```
+
+---
+
+# 77. No Global “One Pending Revision” Invariant
+
+MVP may configure:
+
+```text
+one latest pending visual work item
+```
+
+but this is Runtime policy.
+
+It is not a universal data-model rule.
+
+---
+
+# 78. Concurrency
+
+CRAI permits concurrent WorkItems.
+
+Example:
+
+```text
+Capture WorkItem A
+Recognition WorkItem B
+Translation WorkItem C
+Presentation Artifact N still visible
+```
+
+Data correctness comes from provenance and authority, not serialized global stages.
+
+---
+
+# 79. Structured Text Flow
+
+Preferred structured-text flow:
+
+```text
+Browser / Document Adapter
+    ↓
+sanitized structured source
+    ↓
+Text Processing
+    ↓
+SourceDocumentArtifact
+    ↓
+Translation
+    ↓
+TranslationArtifact
+    ↓
+Presentation
+```
+
+OCR is skipped.
+
+---
+
+# 80. Browser Boundary
+
+Browser integration may provide:
+
+```text
+chapter/body content
+headings
+paragraphs
+dialogue blocks
+safe source locators
+safe metadata
+```
+
+Do not expose:
+
+```text
+DOM nodes
+browser objects
+scripts
+unrestricted HTML
+```
+
+as stable core types.
+
+---
+
+# 81. Content Isolation
+
+Browser/document adapters should remove unrelated content such as:
+
+```text
+navigation
+ads
+comments
+menus
+recommendations
+hidden duplicate layouts
+```
+
+before stable source processing where possible.
+
+---
+
+# 82. Text Normalization
+
+Text Processing may handle:
+
+```text
+Unicode normalization
+whitespace cleanup
+paragraph preservation
+dialogue preservation
+punctuation normalization
+structure reconstruction
+language hints
+```
+
+Exact responsibilities remain Text Processing-owned.
+
+---
+
+# 83. Long Text
+
+Long chapters should be processed incrementally.
+
+Translation owns TranslationUnit/Batch construction according to:
+
+```text
+semantic boundaries
+provider limits
+context requirements
+latency targets
+```
+
+---
+
+# 84. Incremental Translation
+
+Different Translation Units may complete independently.
+
+They may produce:
+
+```text
+partial Translation Artifacts/projections
+```
+
+only if Translation/Presentation contracts explicitly support completeness metadata.
+
+---
+
+# 85. Partial Results
+
+Partial success must be explicit.
+
+Possible completeness:
+
+```text
+Complete
+Partial
+Incomplete
+Degraded
+```
+
+or owner-defined equivalent.
+
+Partial output must never appear indistinguishable from complete output.
+
+---
+
+# 86. Presentation Incrementality
+
+Presentation may expose incremental accepted results without making UI Adapter infer Translation execution state.
+
+Flow:
+
+```text
+accepted Translation output
+    ↓
+Presentation Artifact N
+    ↓
+later accepted output
+    ↓
+Presentation Artifact N+1
+```
+
+---
+
+# 87. Cache Role
+
+Cache is an optimization.
+
+It is not authority.
+
+---
+
+# 88. Cache Flow
+
+```text
+WorkItem input
+    ↓
+cache lookup
+    ↓
+compatible entry?
+    ├── No → execute
+    └── Yes
+         ↓
+      Candidate cached Artifact
+         ↓
+      compatibility + authority validation
+         ↓
+      publish/reuse
+```
+
+---
+
+# 89. Cache Hit Must Be Revalidated
+
+A cache hit must still match relevant:
+
+```text
+input fingerprint
+language configuration
+model/provider compatibility
+normalization version
+context fingerprint
+glossary snapshot
+style/configuration
+privacy scope
+current Runtime authority
+```
+
+---
+
+# 90. Recognition Cache
+
+Possible key inputs:
+
+```text
+image/region fingerprint
+provider/model class
+language configuration
+detection configuration
+preprocessing version
+recognition normalization version
+```
+
+Exact cache ownership belongs to cache/module architecture.
+
+---
+
+# 91. Translation Cache
+
+Possible key inputs:
+
+```text
+normalized source content
+source language
+target language
+context fingerprint
+glossary fingerprint
+style/configuration
+provider/model policy
+prompt/adapter version
+```
+
+Source text alone is insufficient for context-sensitive reuse.
+
+---
+
+# 92. Cache Scope
 
 Possible policies:
 
-* process only the latest stable revision;
-* keep at most one pending revision;
-* discard intermediate frames;
-* pause capture-triggered processing while scrolling;
-* prioritize visible content;
-* deprioritize prefetch work;
-* limit concurrent provider calls;
-* preserve manual requests over automatic work.
-
-Default MVP direction:
-
 ```text
-Active revision
-    +
-At most one latest pending revision
-```
-
-Intermediate obsolete revisions should be discarded before expensive processing whenever possible.
-
----
-
-## 12. Cache Data Flow
-
-Caching can reduce latency and provider cost but must not weaken privacy or correctness.
-
----
-
-## 12.1 Cache Layers
-
-Possible cache layers:
-
-```text
-Frame comparison cache
-OCR result cache
-Normalized segment cache
-Translation result cache
-Presentation model cache
-```
-
-Presentation-model caching is optional because presentation data is comparatively cheap to rebuild.
-
----
-
-## 12.2 OCR Cache Key
-
-An OCR cache key may include:
-
-```text
-Image or region content hash
-OCR provider
-OCR model
-Language configuration
-Detection configuration
-Image preprocessing version
-Normalization version
-```
-
-Changing one of these inputs may invalidate reuse.
-
----
-
-## 12.3 Translation Cache Key
-
-A translation cache key may include:
-
-```text
-Normalized source text
-Source language
-Target language
-Context fingerprint
-Glossary snapshot fingerprint
-Style profile
-Translation provider
-Translation model
-Prompt or adapter version
-```
-
-Source text alone is insufficient for context-sensitive translation caching.
-
----
-
-## 12.4 Cache Scope
-
-Cache entries must declare a scope.
-
-Possible scopes:
-
-```text
-processing-attempt
-source-revision
-reading-session
-local-user
-series
+Attempt-local
+RuntimeRevision-local
+Reading Session
+local user
+series/work
 global-local
 ```
 
-The MVP should default to conservative scopes.
+Privacy policy constrains reuse.
 
-Suggested initial direction:
+---
+
+# 93. Storage Lifetimes
+
+Architecture recognizes:
 
 ```text
-Frame comparison cache → reading session
-OCR cache              → local user with retention limit
-Translation cache      → local user with retention limit
-Presentation cache     → active reading session
+Operation
+Runtime/Revision
+Session
+Cache
+Persistent
+Diagnostic
+```
+
+Different data types need different retention.
+
+---
+
+# 94. Raw Visual Content
+
+Default:
+
+```text
+memory first
+short retention
+no normal persistence
+no logs
+release obsolete buffers quickly
+```
+
+Persistent screenshots require explicit policy/user action.
+
+---
+
+# 95. Source Text Retention
+
+Source text may support:
+
+```text
+alignment
+correction
+retranslation
+context
+cache
+recovery
+```
+
+Persistence depends on privacy policy.
+
+---
+
+# 96. Persistent Knowledge
+
+Potential persistent user data:
+
+```text
+preferences
+glossary
+accepted terminology
+style settings
+source profiles
+optional reading history
+explicit corrections
+```
+
+Keep it separate from transient captured content.
+
+---
+
+# 97. Provider Boundary
+
+All external provider processing follows:
+
+```text
+canonical CRAI input
+    ↓
+Provider Adapter
+    ↓
+validation/minimization
+    ↓
+credential attachment
+    ↓
+provider
+    ↓
+provider-native result
+    ↓
+normalization
+    ↓
+module Candidate
 ```
 
 ---
 
-## 12.5 Cache Lookup Flow
+# 98. Provider Response Is Not Artifact
+
+A provider response must be checked for:
 
 ```text
-Processing input created
-    ↓
-Cache key constructed
-    ↓
-Eligible cache entry found?
-    ├── No → provider or processor execution
-    └── Yes
-         ↓
-     Privacy scope valid?
-         ├── No → ignore entry
-         └── Yes
-              ↓
-          Version compatible?
-              ├── No → ignore entry
-              └── Yes → return cached result
+schema
+size
+alignment
+missing data
+duplicate data
+rate limits
+timeouts
+content filtering
+malformed output
 ```
 
-Cache hits must still pass revision and attempt acceptance checks.
+Only normalized validated module output may become Candidate Artifact.
 
 ---
 
-## 13. Storage and Retention Flow
+# 99. Remote Data Minimization
 
-CRAI should distinguish several storage lifetimes.
-
-| Lifetime   | Purpose                                        | Example                    |
-| ---------- | ---------------------------------------------- | -------------------------- |
-| Immediate  | Exists only during one operation.              | Decoded image buffer       |
-| Revision   | Exists while one source revision is processed. | Detected regions           |
-| Session    | Exists during the reading session.             | Recent translation context |
-| Cache      | Reusable with expiration and key validation.   | OCR result                 |
-| Persistent | Explicitly retained for future sessions.       | User glossary              |
-| Diagnostic | Retained according to logging policy.          | Stage duration             |
-
----
-
-## 13.1 Raw Screen Captures
-
-Default architecture direction:
-
-* keep raw captures in memory where practical;
-* avoid writing continuous screen captures to disk;
-* release obsolete frames promptly;
-* exclude raw pixels from normal logs;
-* require explicit policy for persisted screenshots;
-* clear temporary representations after cancellation or session completion.
-
----
-
-## 13.2 Source Text
-
-Source text may be needed for:
-
-* alignment;
-* correction;
-* retranslation;
-* cache lookup;
-* session recovery;
-* diagnostics.
-
-Its retention must follow the selected privacy mode.
-
-Private-session mode may disable persistent source-text storage.
-
----
-
-## 13.3 Persistent Knowledge
-
-The following may be intentionally persistent:
-
-* glossary entries;
-* preferred name translations;
-* style settings;
-* provider configuration;
-* UI preferences;
-* explicitly saved corrections;
-* optional reading history.
-
-Persistent knowledge must be separated from temporary captured content.
-
----
-
-## 14. Remote Provider Data Flow
-
-Some OCR or translation implementations may send content outside the local device.
-
----
-
-## 14.1 Remote Processing Boundary
-
-```text
-CRAI internal representation
-    ↓
-Provider adapter
-    ↓
-Data minimization
-    ↓
-Credential attachment
-    ↓
-Remote request
-    ↓
-Provider-native response
-    ↓
-Response validation
-    ↓
-CRAI canonical result
-```
-
-Provider-native objects must not flow directly into core modules or presentation.
-
----
-
-## 14.2 Data Minimization
-
-Before sending content remotely, CRAI should send only what is required.
+Send only required information.
 
 Examples:
 
-* crop text regions instead of sending the full screen when supported;
-* send selected chapter content rather than the whole webpage;
-* include only relevant glossary entries;
-* remove unrelated metadata;
-* avoid sending window titles or URLs unless necessary;
-* omit historical context beyond the configured context policy.
-
----
-
-## 14.3 Credential Flow
-
-Credentials should flow only through:
-
 ```text
-Secure configuration
-    ↓
-Provider adapter
-    ↓
-Remote request
+region crop instead of whole screen
+selected chapter content instead of whole webpage
+relevant glossary entries only
+bounded context
+safe metadata only
 ```
 
-Credentials must not be attached to:
+---
 
-* canonical translation units;
-* event payloads;
-* logs;
-* presentation models;
-* cache keys;
-* diagnostic exports.
+# 100. Event Bus Relationship
+
+Event Bus reports committed facts.
+
+It does not move data through the execution pipeline by request events.
 
 ---
 
-## 14.4 Provider Response Validation
+# 101. Removed v1 Event-Driven Pipeline
 
-Provider responses should be checked for:
-
-* successful status;
-* expected schema;
-* response size;
-* segment alignment;
-* missing segments;
-* duplicated segments;
-* unsupported language behavior;
-* safety or content filtering notices;
-* rate limiting;
-* timeout;
-* malformed text;
-* unexpected HTML or binary content.
-
-A provider response is not automatically a valid CRAI result.
-
----
-
-## 15. Event-Driven Data Movement
-
-The event bus may notify modules that data is available, but it should not become uncontrolled shared storage.
-
-Events should contain:
-
-* identifiers;
-* bounded immutable payloads;
-* references to controlled data;
-* status metadata.
-
-Events should not normally contain:
-
-* large raw frame buffers;
-* provider credentials;
-* mutable module-owned objects;
-* unrestricted browser DOM trees;
-* complete persistent stores.
-
-Example event progression:
+Deprecated:
 
 ```text
 source.revision.accepted
@@ -1798,917 +1930,902 @@ translation.completed
 presentation.updated
 ```
 
-The authoritative event names and payload rules belong to:
+Execution does not use Event Bus stage chaining.
+
+---
+
+# 102. Runtime-Driven Movement
+
+Preferred:
 
 ```text
-docs/architecture/EVENT_BUS.md
+BusinessExecutionPlan
+    ↓
+Runtime WorkItems
+    ↓
+dependencies satisfied
+    ↓
+Attempts
+    ↓
+Artifacts
+```
+
+Events may notify consumers after publication.
+
+---
+
+# 103. Artifact Event Example
+
+```text
+TranslationArtifact published
+    ↓
+TranslationArtifactPublished
+    ↓
+Event Bus
+```
+
+The event does not itself create Presentation execution authority.
+
+---
+
+# 104. State Machine Relationship
+
+State machine answers:
+
+```text
+who owns current state and authority?
+```
+
+Data flow answers:
+
+```text
+what data exists and how does it cross boundaries?
+```
+
+Runtime state and module Artifact data must remain separate.
+
+---
+
+# 105. No Global `TRANSLATING` Data Flow State
+
+A TranslationUnit existing does not imply:
+
+```text
+application state = TRANSLATING
+```
+
+A Translation Attempt may run while other Runtime work also exists.
+
+---
+
+# 106. Ownership Table
+
+Architecture-level ownership:
+
+| Data                                    | Owner                                 |
+| --------------------------------------- | ------------------------------------- |
+| ReadingContext / ReadingContextRevision | Reading Session                       |
+| RuntimeRevision                         | Runtime                               |
+| WorkItem                                | Runtime                               |
+| Attempt                                 | Runtime                               |
+| Capture Artifact                        | Capture                               |
+| RecognitionArtifact                     | Recognition                           |
+| SourceDocumentArtifact                  | Text Processing                       |
+| TranslationUnit / TranslationBatch      | Translation                           |
+| TranslationArtifact                     | Translation                           |
+| PresentationArtifact                    | Presentation                          |
+| ViewModel                               | UI Adapter                            |
+| Diagnostic Observation/Snapshot         | Diagnostics                           |
+| Credentials                             | Secret Management / provider boundary |
+| Physical cache/storage representation   | Infrastructure                        |
+
+---
+
+# 107. No “Translation Orchestration” Pseudo-Owner
+
+v1 used conceptual owners such as:
+
+```text
+Translation orchestration
+Presentation orchestration
+Text understanding
+```
+
+v2 uses actual module ownership:
+
+```text
+translation
+presentation
+text-processing
 ```
 
 ---
 
-## 16. State Machine Relationship
+# 108. Mutation Rules
 
-The data flow and state machine describe different concerns.
+Published canonical Artifacts are immutable.
 
-```text
-State machine:
-What lifecycle state is the session or operation in?
-
-Data flow:
-What data exists, who owns it, and where does it move?
-```
-
-Example:
+Corrections create:
 
 ```text
-State: TRANSLATING
+new correction record
+new revision
+or new Artifact
 ```
 
-may involve:
-
-```text
-TranslationUnit
-ProcessingEnvelope
-GlossarySnapshot
-ProviderRequest
-PartialTranslationResult
-```
-
-State transitions must not be inferred only from the presence of data.
-
-Similarly, data may remain available after a state changes for cache, correction, or diagnostic purposes.
-
-The authoritative state definitions belong to:
-
-```text
-docs/architecture/STATE_MACHINE.md
-```
+according to owner semantics.
 
 ---
 
-## 17. Module Ownership Rules
+# 109. Correction Provenance
 
-Every canonical data type must have one owning module or bounded responsibility.
+Always preserve:
 
-Ownership means responsibility for:
+```text
+original provider/module result
++
+user correction
+```
 
-* creating the canonical object;
-* validating its invariants;
-* controlling mutation;
-* determining its lifecycle;
-* publishing safe read models or events.
-
-Suggested conceptual ownership:
-
-| Data                   | Owning responsibility                               |
-| ---------------------- | --------------------------------------------------- |
-| SourceDescriptor       | Source or acquisition management                    |
-| SourceRevision         | Reading-session and source-observation coordination |
-| VisualFrame            | Capture or image acquisition                        |
-| StructuredTextSnapshot | Browser or document extraction                      |
-| DetectedRegion         | Visual text extraction                              |
-| OcrResult              | OCR processing                                      |
-| SourceSegment          | Text understanding                                  |
-| TranslationUnit        | Translation orchestration                           |
-| TranslationResult      | Translation orchestration                           |
-| GlossarySnapshot       | Knowledge and consistency                           |
-| PresentationModel      | Presentation orchestration                          |
-| ProcessingTrace        | Diagnostics                                         |
-
-The final mapping must match `.meta/MODULES.md`.
+as distinguishable data.
 
 ---
 
-## 17.1 No Shared Mutable Pipeline Object
+# 110. Error Data Flow
 
-CRAI should not pass one large mutable context object through every module.
-
-Avoid:
-
-```text
-GlobalProcessingContext
-├── frame
-├── OCR data
-├── translation data
-├── UI data
-├── settings
-├── credentials
-├── cache
-└── mutable status
-```
-
-This creates hidden coupling and makes stale-result protection difficult.
-
-Prefer explicit immutable stage outputs:
-
-```text
-SourceRevision
-    ↓
-ExtractionResult
-    ↓
-PreparedSegments
-    ↓
-TranslationResult
-    ↓
-PresentationModel
-```
-
----
-
-## 17.2 Mutation Rules
-
-Canonical processing results should be immutable after publication.
-
-Corrections should create a new revision or correction record.
+Errors retain original module ownership.
 
 Examples:
 
 ```text
-OCR result
-    +
-OCR correction
-    ↓
-Corrected source segment
+CAP-*
+REC-*
+TXT-*
+TRN-*
+PRES-*
+RUN-*
+SES-*
 ```
 
-```text
-Provider translation
-    +
-User translation correction
-    ↓
-Effective translated segment
-```
-
-This preserves traceability.
+UI/Diagnostics may project/observe them without replacing ownership.
 
 ---
 
-## 18. Error Data Flow
+# 111. Attempt Error vs Artifact Error
 
-Errors should be represented as structured processing outcomes.
-
----
-
-## 18.1 Error Categories
+Example:
 
 ```text
-Source unavailable
-Capture failure
-Source changed
-Unsupported content
-Extraction failure
-OCR failure
-Normalization failure
-Ordering failure
-Translation failure
 Provider timeout
-Provider rate limit
-Provider authentication failure
-Cancellation
-Stale result
-Presentation alignment failure
-Storage failure
-Configuration failure
+    ↓
+AttemptTimedOut
+```
+
+does not necessarily mean:
+
+```text
+Translation module unavailable
+```
+
+and does not necessarily publish a failed Translation Artifact.
+
+---
+
+# 112. Partial Module Output
+
+A module may publish partial output only if its contract explicitly defines:
+
+```text
+completeness
+missing sections
+warnings
+provenance
 ```
 
 ---
 
-## 18.2 Recoverable and Terminal Errors
+# 113. Diagnostics Data Flow
 
-A recoverable error may allow:
+Diagnostics observes:
 
-* bounded retry;
-* fallback provider;
-* reduced processing mode;
-* manual correction;
-* manual retranslate;
-* source reselection.
+```text
+Runtime identity
+module operation
+Artifact publication
+errors
+duration
+queue delay
+retry
+cancellation
+capability health
+```
 
-A terminal error ends the current processing path but does not necessarily end the entire reading session.
+through observability abstractions.
+
+---
+
+# 114. Diagnostics Does Not Own Data Flow
+
+Diagnostics may correlate:
+
+```text
+ReadingContextRevision
+RuntimeRevisionId
+WorkItemId
+AttemptId
+ArtifactId
+```
+
+but does not own or mutate them.
+
+---
+
+# 115. Diagnostic Privacy
+
+Normal diagnostics exclude:
+
+```text
+raw screenshots
+full OCR text
+full source chapter
+full translated content
+provider prompts/responses
+credentials
+clipboard contents
+```
+
+unless an explicit support/debug contract permits otherwise.
+
+---
+
+# 116. Product Performance Flow
+
+Important end-to-end measurement:
+
+```text
+Readable source change
+    ↓
+authoritative source/context accepted
+    ↓
+Runtime processing
+    ↓
+Published Translation/Presentation
+    ↓
+useful Vietnamese content visible
+```
+
+This remains a primary product metric.
+
+---
+
+# 117. Presentation Update Strategy
+
+CRAI may support:
+
+```text
+atomic presentation
+incremental presentation
+```
+
+depending on content type and latency.
+
+---
+
+# 118. Atomic Presentation
+
+Useful for:
+
+```text
+short comic page
+small contextual batch
+manual short input
+```
+
+when stability matters more than earliest partial output.
+
+---
+
+# 119. Incremental Presentation
+
+Useful for:
+
+```text
+long chapter
+large document
+slow provider
+streaming Translation
+```
+
+Each published increment must preserve provenance/completeness.
+
+---
+
+# 120. UI Must Not Reorder Authoritative Meaning
+
+UI may render incrementally but must not reinterpret:
+
+```text
+source ordering
+translation alignment
+presentation semantics
+```
+
+defined by owner Artifacts.
+
+---
+
+# 121. Security Boundaries
+
+Important boundaries:
+
+```text
+OS capture
+browser connector
+file import
+IPC/process boundary
+provider network
+persistent storage
+clipboard
+UI/system notification
+export
+```
+
+---
+
+# 122. Boundary Requirements
+
+At each security boundary define:
+
+```text
+accepted types
+size limits
+validation
+sanitization
+authentication
+privacy classification
+timeout
+cancellation
+logging restrictions
+```
+
+---
+
+# 123. Initial MVP — Screen Reading
+
+Recommended logical MVP:
+
+```text
+User selects region/window
+    ↓
+Reading Session commits context
+    ↓
+Capture observes source
+    ↓
+stable Capture Artifact published
+    ↓
+RecognitionArtifact published
+    ↓
+SourceDocumentArtifact published
+    ↓
+Translation creates Units/Batches
+    ↓
+TranslationArtifact published
+    ↓
+PresentationArtifact published
+    ↓
+UI Adapter builds Reader ViewModel
+    ↓
+user sees Vietnamese translation
+```
+
+---
+
+# 124. Runtime View of Same MVP
+
+Execution perspective:
+
+```text
+RuntimeRevision
+    ↓
+Capture WorkItem / Attempt
+    ↓
+Recognition WorkItem / Attempt
+    ↓
+Text Processing WorkItem / Attempt
+    ↓
+Translation WorkItem / Attempt
+    ↓
+Presentation WorkItem / operation
+```
+
+Dependencies may allow overlap.
+
+---
+
+# 125. Source Change During Translation
 
 Example:
 
 ```text
-Overlay alignment failure
+ReadingContextRevision 10
     ↓
-Fallback to side panel
+RuntimeRevision A
+    ↓
+Translation Attempt running
+
+User scrolls / source changes
+    ↓
+ReadingContextRevision 11
+    ↓
+RuntimeRevision B
+    ↓
+A superseded/cancelled
 ```
 
-The translation result remains usable.
-
----
-
-## 18.3 Partial Results
-
-Partial success should be preserved when useful.
-
-Examples:
-
-* five of seven OCR regions succeeded;
-* translation completed for earlier paragraphs;
-* one translation batch failed;
-* overlay positioning failed but side-panel rendering succeeded.
-
-Partial data must contain explicit completeness status.
-
-It must not appear indistinguishable from a complete result.
-
----
-
-## 19. Diagnostics Data Flow
-
-Diagnostics should observe processing without becoming part of the business pipeline.
-
----
-
-## 19.1 Processing Trace
-
-A processing trace may link:
+Late Candidate from A:
 
 ```text
-Session
+arrives
     ↓
-Source revision
+authority check fails
     ↓
-Extraction attempt
-    ↓
-OCR attempt
-    ↓
-Translation units
-    ↓
-Provider attempts
-    ↓
-Presentation update
+not published
 ```
 
-Suggested trace metadata:
-
-* identifiers;
-* stage names;
-* timestamps;
-* duration;
-* queue delay;
-* provider;
-* retry count;
-* cache status;
-* cancellation reason;
-* stale-result reason;
-* content sizes;
-* warning codes.
-
 ---
 
-## 19.2 Sensitive Diagnostic Exclusions
-
-Normal diagnostics should exclude:
-
-* raw screenshots;
-* full chapter contents;
-* full OCR text;
-* complete translation prompts;
-* provider credentials;
-* personal tokens;
-* unrestricted URLs;
-* clipboard contents.
-
-Debug modes that expose content must be explicit and locally controlled.
-
----
-
-## 19.3 Performance Measurements
-
-Important data-flow timings include:
+# 126. Cache + Glossary Example
 
 ```text
-Source change to accepted revision
-Accepted revision to OCR start
-OCR duration
-Segment preparation duration
-Translation queue delay
-Translation provider duration
-Result validation duration
-Presentation construction duration
-Time to first visible translation
-Time to complete visible translation
+SourceDocumentArtifact
+    ↓
+Translation builds cache identity
+    ↓
+matching source exists
+    ↓
+glossary fingerprint differs
+    ↓
+cache entry incompatible
+    ↓
+new Attempt
 ```
 
-The most important product measurement is not provider latency alone.
+---
 
-It is:
+# 127. Overlay Misalignment Example
 
 ```text
-Source content becomes readable
+PresentationArtifact valid
     ↓
-Useful Vietnamese translation becomes visible
+window/zoom changes
+    ↓
+overlay geometry invalid
+    ↓
+overlay suspended/rebuilt
 ```
 
----
-
-## 20. Presentation Update Strategy
-
-The UI should consume revision-aware updates.
+TranslationArtifact remains valid.
 
 ---
 
-## 20.1 Atomic Revision Presentation
-
-For short comic pages, the UI may wait until all expected segments are ready and then publish one complete presentation model.
-
-Advantages:
-
-* stable ordering;
-* reduced UI movement;
-* easier source-to-translation matching.
-
-Disadvantages:
-
-* higher time to first result;
-* one slow segment delays the whole page.
-
----
-
-## 20.2 Incremental Presentation
-
-For long text or slow translation, the UI may update incrementally.
+# 128. Remote Provider Failure Example
 
 ```text
-Revision accepted
+Translation Attempt 1
     ↓
-Loading presentation
+remote timeout
     ↓
-First translated units
+Attempt 1 TIMED_OUT
     ↓
-Partial presentation
+Runtime/provider policy
     ↓
-Additional translated units
-    ↓
-Complete presentation
+Attempt 2
 ```
 
-Each update must reference the same revision and contain completeness metadata.
+No duplicate visible result is published.
 
 ---
 
-## 20.3 Recommended Initial Policy
-
-Suggested MVP behavior:
+# 129. Manual Correction Example
 
 ```text
-Comic image:
-Prefer small contextual batches and bounded incremental updates.
-
-Long text:
-Use paragraph or chunk-level incremental updates.
-
-Manual short input:
-Return one atomic result.
+Published TranslationArtifact
+    ↓
+user correction
+    ↓
+Correction Record
+    ↓
+Presentation/Application projection updates
 ```
 
-The UI must avoid excessive reordering after entries have become visible.
+Optional accepted terminology may update persistent glossary through its owner.
 
 ---
 
-## 21. Coordinate Transformation Flow
+# 130. Core Data Invariants
 
-Image overlays require controlled geometry transformation.
+1. Every canonical data type has one owner.
+
+2. Runtime identities do not replace domain identities.
+
+3. ReadingContextRevision is not RuntimeRevisionId.
+
+4. WorkItemId is not AttemptId.
+
+5. Attempt success does not imply Artifact publication.
+
+6. Candidate Artifact is not authoritative.
+
+7. Published Artifacts are immutable.
+
+8. Published Artifact provenance is explicit.
+
+9. Stale Candidates cannot publish.
+
+10. Cancellation does not replace authority validation.
+
+11. Retry creates a new Attempt.
+
+12. Provider responses are normalized before becoming Candidates.
+
+13. Structured text is preferred over OCR when available.
+
+14. RecognitionArtifact is the stable Recognition output.
+
+15. SourceDocumentArtifact is the stable Text Processing output.
+
+16. TranslationUnit belongs to Translation.
+
+17. TranslationArtifact remains independent from UI mode.
+
+18. PresentationArtifact remains independent from native rendering framework.
+
+19. ViewModel is non-authoritative and disposable.
+
+20. Event Bus does not control data execution flow.
+
+21. Cache is optimization, not authority.
+
+22. Cached output requires compatibility/authority validation.
+
+23. Raw captures do not enter normal logs.
+
+24. Credentials never enter Artifacts/events/ViewModels/cache keys.
+
+25. User corrections remain distinguishable from original outputs.
+
+26. Geometry failure does not invalidate semantic Translation output.
+
+27. Continuous sources remain bounded by Runtime resource/backpressure policy.
+
+28. Diagnostics observes but does not own pipeline data.
+
+---
+
+# 131. Deprecated v1 Core Types
+
+The following v1 architecture-wide concepts are deprecated as universal core contracts:
 
 ```text
-Source-image coordinates
-    ↓
-Capture crop transform
-    ↓
-Window or viewport transform
-    ↓
-Display scale transform
-    ↓
-Presentation coordinates
+SourceRevisionId hierarchy
+ProcessingAttemptId
+ProcessingEnvelope
+OcrResult
+SourceSegment as universal cross-module object
+TranslationResult as generic pipeline object
+PresentationModel as global semantic authority
 ```
 
-Each transformation should be explicit.
-
-An overlay entry must identify:
-
-* the coordinate space of its source region;
-* the target coordinate space;
-* the transform version;
-* whether the transform is still valid.
-
-Overlay geometry may become invalid when:
-
-* the user scrolls;
-* the window moves;
-* the browser zoom changes;
-* display scale changes;
-* the source image resizes;
-* the selected region changes.
-
-Invalid geometry should suspend or rebuild the overlay.
-
-It must not invalidate the underlying translation result.
+Equivalent concepts may still exist locally inside owner modules.
 
 ---
 
-## 22. Data Flow Security Boundaries
+# 132. Preserved v1 Principles
 
-Main security boundaries:
+The following v1 principles remain valid:
 
 ```text
-Operating system capture boundary
-Browser connector boundary
-File import boundary
-Local process or IPC boundary
-Provider network boundary
-Persistent storage boundary
-Export boundary
+prefer structured text over OCR
+preserve geometry
+preserve source-target alignment
+protect against stale results
+minimize sensitive data retention
+avoid provider-native leakage
+use bounded contextual translation
+separate Translation from Presentation
+preserve correction provenance
+support incremental long-text presentation
 ```
-
-At each boundary, CRAI should define:
-
-* accepted data types;
-* size limits;
-* validation;
-* sanitization;
-* authentication where required;
-* privacy classification;
-* logging restrictions;
-* timeout and cancellation behavior.
 
 ---
 
-## 23. Initial MVP Data Flow
+# 133. Architecture Review Checklist
 
-The recommended initial MVP data flow is:
+Before accepting a data flow, verify:
+
+* Is every canonical object owned by one module?
+* Is the current ReadingContextRevision explicit where relevant?
+* Is Runtime execution represented by RuntimeRevision/WorkItem/Attempt?
+* Does each Candidate carry provenance?
+* Does publication require authority validation?
+* Can stale work complete without changing current state?
+* Is retry Runtime-owned?
+* Is cancellation Runtime-owned?
+* Does Translation own TranslationUnit construction?
+* Does Text Processing publish SourceDocumentArtifact?
+* Does Presentation consume TranslationArtifact rather than provider output?
+* Can UI projection be rebuilt without rerunning processing?
+* Are provider-native objects isolated?
+* Are cache entries compatibility-checked?
+* Are large/sensitive values retained minimally?
+* Are credentials isolated?
+* Can errors/partial results preserve original ownership?
+* Does Event Bus report facts rather than control execution?
+
+---
+
+# 134. Validation Scenarios
+
+Required scenarios include:
 
 ```text
-User selects a screen region or application window
-    ↓
-CRAI creates a reading session and source descriptor
-    ↓
-The capture adapter produces candidate frames
-    ↓
-Observation accepts a stable non-duplicate frame
-    ↓
-A source revision is created
-    ↓
-The previous obsolete revision is cancelled
-    ↓
-Text regions are detected
-    ↓
-Simplified Chinese or English text is recognized
-    ↓
-Regions are ordered and converted into source segments
-    ↓
-Nearby segments are grouped into bounded translation units
-    ↓
-Relevant glossary entries are attached
-    ↓
-Translation is requested
-    ↓
-The result is correlated with the active revision
-    ↓
-A region-linked side-panel model is created
-    ↓
-The translation is displayed
-    ↓
-The user may retranslate or correct a term
-    ↓
-Reusable results may be cached locally
+continuous comic scrolling
+vertical Chinese comic text
+long web novel chapter
+source changes during Translation
+user correction
+provider timeout/fallback
+overlay geometry failure
+cache hit with changed glossary
+application shutdown during remote request
+late result after RuntimeRevision supersession
 ```
 
 ---
 
-## 23.1 MVP Data Kept in Memory
+# 135. Validation — Continuous Comic
 
-Expected memory-only data:
-
-* active raw frames;
-* candidate unstable frames;
-* decoded provider request bodies;
-* cancellation tokens;
-* transient presentation calculations;
-* obsolete pending revisions;
-* temporary coordinate transforms.
-
----
-
-## 23.2 MVP Data Eligible for Local Cache
-
-Potentially cacheable with retention controls:
-
-* image or region fingerprints;
-* OCR results;
-* normalized source segments;
-* translation results;
-* provider-independent alignment data.
-
----
-
-## 23.3 MVP Persistent Data
-
-Expected persistent data:
-
-* user settings;
-* language settings;
-* provider configuration references;
-* protected credentials;
-* glossary entries;
-* accepted terminology corrections;
-* cache metadata;
-* optional diagnostic aggregates.
-
-Raw continuous screen captures should not be persistent by default.
-
----
-
-## 23.4 MVP Deferred Data Flows
-
-The first MVP should not require:
-
-* downloading complete online series;
-* cloud synchronization;
-* account-based reading history;
-* permanent screenshot libraries;
-* translated-image generation;
-* background inpainting;
-* permanent replacement of text inside speech bubbles;
-* EPUB library management;
-* PDF reader management;
-* public plugin data exchange;
-* cross-device glossary synchronization.
-
----
-
-## 24. Data Flow Invariants
-
-The following invariants must hold.
-
-### Invariant 1
-
-Every processing result belongs to exactly one source revision.
-
-### Invariant 2
-
-Every source revision belongs to one source and one reading session.
-
-### Invariant 3
-
-No asynchronous result may update active presentation without revision validation.
-
-### Invariant 4
-
-Provider-native data must be normalized before entering core processing.
-
-### Invariant 5
-
-Presentation models must not become the authoritative source of translation data.
-
-### Invariant 6
-
-Original OCR and provider translation outputs must remain distinguishable from user corrections.
-
-### Invariant 7
-
-Translation results must preserve alignment with source segments.
-
-### Invariant 8
-
-Raw captured content must not enter normal logs.
-
-### Invariant 9
-
-Credentials must remain inside secure configuration and provider boundaries.
-
-### Invariant 10
-
-Cancellation does not remove the need for stale-result validation.
-
-### Invariant 11
-
-A duplicate cache result must pass the same revision and scope checks as a new result.
-
-### Invariant 12
-
-Overlay geometry failure must not destroy an otherwise valid translation result.
-
-### Invariant 13
-
-Structured text must be preferred over OCR when it is reliable and available.
-
-### Invariant 14
-
-Large continuous sources must be bounded by backpressure and concurrency limits.
-
-### Invariant 15
-
-Each canonical data representation must have one clear owner.
-
----
-
-## 25. Example: New Comic Frame During Translation
+Verify:
 
 ```text
-Revision 10 accepted
-    ↓
-OCR for revision 10 starts
-    ↓
-Translation for revision 10 starts
-    ↓
-User scrolls
-    ↓
-Revision 11 accepted
-    ↓
-Revision 10 is marked obsolete
-    ↓
-Cancellation is requested for revision 10
-    ↓
-OCR and translation for revision 11 start
-    ↓
-Translation result for revision 10 arrives late
-    ↓
-Result validation detects inactive revision
-    ↓
-Revision 10 result is marked stale
-    ↓
-Active presentation is not updated
-    ↓
-Revision 11 result arrives
-    ↓
-Result validation succeeds
-    ↓
-Revision 11 presentation is displayed
+candidate capture remains bounded
+stable content is accepted
+duplicate content does not create unnecessary expensive work
+late old Artifacts cannot publish
+latest content receives appropriate priority
 ```
-
-This is a required behavior, not an optional optimization.
 
 ---
 
-## 26. Example: Cached Translation with Updated Glossary
+# 136. Validation — Vertical Chinese
+
+Verify:
 
 ```text
-Source segments are prepared
-    ↓
-Translation cache key is calculated
-    ↓
-Matching source-text cache entry exists
-    ↓
-Glossary fingerprint differs
-    ↓
-Cache entry is not considered equivalent
-    ↓
-A new translation request is created
-    ↓
-The result records the current glossary snapshot
+geometry survives Capture → Recognition
+text direction survives Recognition → Text Processing
+reading order remains traceable
+translation alignment remains explicit
+Presentation can map output correctly
 ```
-
-A translation produced without the current terminology rules must not be treated as an exact reusable result.
 
 ---
 
-## 27. Example: Overlay Becomes Misaligned
+# 137. Validation — Long Novel
+
+Verify:
 
 ```text
-Translation result is displayed as overlay
-    ↓
-Browser zoom changes
-    ↓
-Existing coordinate transform becomes invalid
-    ↓
-Overlay presentation is suspended
-    ↓
-Side-panel translation remains available
-    ↓
-New source geometry is captured
-    ↓
-Presentation model is rebuilt
-    ↓
-Overlay resumes
+structured source avoids OCR
+semantic document structure preserved
+Translation creates bounded units
+partial accepted output is explicit
+earlier visible content remains stable
 ```
 
-Translation processing does not need to run again unless the readable source content changed.
-
 ---
 
-## 28. Open Decisions
+# 138. Validation — Supersession
 
-The following decisions require prototype evidence.
-
-### 28.1 Frame Observation
-
-* Which frame-difference algorithm is sufficient for the MVP?
-* How long must content remain stable before OCR begins?
-* Should cursor movement be ignored?
-* Should OCR begin during slow scrolling or only after scrolling stops?
-* How many pending source revisions may exist?
-
-### 28.2 Image Processing
-
-* Should the MVP use full-frame OCR or separate text detection and recognition?
-* Which preprocessing steps improve Chinese comic OCR?
-* Should region crops be cached separately?
-* How should vertical and horizontal regions be grouped?
-
-### 28.3 Translation
-
-* What is the ideal contextual batch size for comics?
-* How should provider-specific context limits be normalized?
-* Should partial streaming results update the side panel?
-* Which context fields may be sent remotely by default?
-* How should automatic provider fallback affect cache identity?
-
-### 28.4 Text Reading
-
-* Should a browser connector send full chapter snapshots or incremental block changes?
-* How should website adapters identify chapter revisions?
-* Should translated chapters be retained after the session?
-* How much prior chapter context should be reusable?
-
-### 28.5 Storage
-
-* What are the default OCR and translation cache retention periods?
-* Should cache storage be content-addressed?
-* Should private sessions disable all disk cache writes?
-* Should session recovery persist source text?
-* Which corrections should become permanent glossary entries?
-
-### 28.6 Presentation
-
-* Should comic results appear atomically or incrementally?
-* How much UI movement is acceptable during incremental updates?
-* When should overlay automatically fall back to a side panel?
-* Should source-region numbering persist after the result is complete?
-
----
-
-## 29. Validation Scenarios
-
-The data-flow architecture should be validated with representative scenarios.
-
-### Scenario A — Continuous Comic Scrolling
-
-Validate that:
-
-* only stable frames create revisions;
-* duplicate pages are ignored;
-* stale OCR and translation are rejected;
-* CPU and memory remain bounded;
-* the latest page becomes readable quickly.
-
-### Scenario B — Vertical Chinese Comic Text
-
-Validate that:
-
-* geometry is preserved;
-* vertical orientation survives provider normalization;
-* region order can be corrected;
-* translated segments remain aligned.
-
-### Scenario C — Long Web Novel Chapter
-
-Validate that:
-
-* unrelated webpage text is excluded;
-* paragraph structure remains readable;
-* translation occurs incrementally;
-* earlier results stay stable while later chunks complete;
-* provider limits are respected.
-
-### Scenario D — User Scrolls During Translation
-
-Validate that:
-
-* cancellation propagates;
-* late results cannot replace the current page;
-* obsolete frame data is cleaned up;
-* the latest revision receives priority.
-
-### Scenario E — User Corrects a Name
-
-Validate that:
-
-* the visible result updates;
-* the provider result remains traceable;
-* a glossary entry may be created explicitly;
-* later requests use the updated glossary;
-* earlier cache entries are not incorrectly reused.
-
-### Scenario F — Remote Provider Failure
-
-Validate that:
-
-* the failure is classified;
-* retry is bounded;
-* fallback does not duplicate visible results;
-* credentials are not logged;
-* the reading session remains recoverable.
-
-### Scenario G — Overlay Alignment Failure
-
-Validate that:
-
-* translation data remains available;
-* presentation can fall back to a side panel;
-* geometry can be rebuilt independently;
-* OCR and translation are not unnecessarily repeated.
-
----
-
-## 30. Architecture Review Checklist
-
-Before implementing a data flow, verify:
-
-* Does the flow use the highest-quality available source representation?
-* Is every result associated with a session, source, revision, and attempt?
-* Is the owner of each data structure clear?
-* Can stale results be detected?
-* Can pending work be cancelled?
-* Is backpressure defined?
-* Are source and translated segments aligned explicitly?
-* Are provider-native structures isolated in adapters?
-* Are credentials excluded from events and logs?
-* Is raw captured content retained only as long as necessary?
-* Are cache keys sensitive to context, glossary, model, and configuration?
-* Can presentation be rebuilt without repeating translation?
-* Can partial results be represented honestly?
-* Can user corrections be traced separately from original outputs?
-* Does the flow remain usable when overlay presentation fails?
-* Are failure and fallback behaviors defined?
-* Is private-session behavior respected?
-* Can the complete flow be measured from source change to visible translation?
-
----
-
-## 31. Next Architecture Work
-
-After this document, the next useful step is to define concrete end-to-end flow specifications.
-
-Recommended documents:
+Verify:
 
 ```text
-docs/architecture/flows/SCREEN_COMIC_FLOW.md
-docs/architecture/flows/BROWSER_TEXT_FLOW.md
-docs/architecture/flows/MANUAL_INPUT_FLOW.md
+RuntimeRevision A
+    ↓
+late Candidate
+
+RuntimeRevision B current
 ```
 
-Recommended order:
-
-```text
-DATA_FLOW.md
-    ↓
-SCREEN_COMIC_FLOW.md
-    ↓
-Prototype gates for capture, OCR, and translation
-    ↓
-BROWSER_TEXT_FLOW.md
-    ↓
-Detailed module contracts
-```
-
-`SCREEN_COMIC_FLOW.md` should be the immediate next document because it represents the recommended first MVP and exercises the most important CRAI architecture concerns:
-
-* continuous observation;
-* stable-frame detection;
-* duplicate rejection;
-* OCR;
-* reading order;
-* contextual translation;
-* stale-result cancellation;
-* side-panel presentation;
-* user corrections;
-* privacy-sensitive captured data.
+does not permit Candidate A to publish current output.
 
 ---
 
-## 32. Summary
+# 139. Validation — Provider Failure
 
-CRAI should use a revision-aware, traceable, cancellable data pipeline.
-
-The essential flow is:
+Verify:
 
 ```text
-Source
-    ↓
-Immutable source revision
-    ↓
-Canonical extraction result
-    ↓
-Prepared source segments
-    ↓
-Context-bound translation units
-    ↓
-Validated translation results
-    ↓
-Disposable presentation models
+bounded retry
+separate Attempt identities
+fallback provenance
+no duplicate publication
+credentials never logged
+session remains usable
 ```
 
-The architecture must ensure that:
+---
 
-* structured text is preferred over OCR;
-* continuous capture does not create unbounded work;
-* every asynchronous result is correlated explicitly;
-* stale results never overwrite newer content;
-* translation remains independent from visual presentation;
-* source data and corrections remain traceable;
-* remote processing is isolated behind provider adapters;
-* sensitive reading content is retained only according to explicit policy.
+# 140. Validation — Presentation Failure
 
-The success of CRAI depends not merely on OCR or translation quality in isolation, but on whether the entire data flow produces useful Vietnamese content quickly and unobtrusively during continuous reading.
+Verify Presentation/UI failure cannot destroy valid TranslationArtifact.
+
+---
+
+# 141. Open Decisions
+
+Prototype evidence is still needed for:
+
+```text
+frame-change/stability heuristics
+Capture cadence
+full-frame vs region Recognition
+Recognition preprocessing
+Translation contextual batch sizing
+streaming presentation
+browser extraction granularity
+cache retention durations
+overlay fallback UX
+```
+
+These decisions do not change core ownership boundaries.
+
+---
+
+# 142. Related Documents
+
+```text
+doc/01-architecture/core/
+├── DATA_FLOW.md
+├── STATE_MACHINE.md
+├── EVENT_BUS.md
+├── EVENT_CONVENTION.md
+├── CAPABILITY_MAP.md
+└── README.md
+
+doc/01-architecture/runtime/
+├── BUSINESS_PIPELINE_ORCHESTRATION.md
+├── PIPELINE_RUNTIME.md
+├── CANCELLATION.md
+├── RETRY_POLICY.md
+├── SCHEDULER.md
+├── WORK_QUEUE.md
+└── RUNTIME_OBSERVABILITY.md
+
+doc/01-architecture/modules/
+├── MODULE_MAP.md
+├── MODULE_DEPENDENCY.md
+└── OWNERSHIP_MAP.md
+
+doc/02-modules/
+├── reading-session/
+├── capture/
+├── recognition/
+├── text-processing/
+├── translation/
+├── presentation/
+├── preferences/
+├── diagnostics/
+└── ui-adapter/
+```
+
+---
+
+# 143. Documentation Authority
+
+This file defines:
+
+```text
+architecture-wide data movement
+Artifact boundary conventions
+data ownership relationships
+Runtime/data separation
+Candidate/Published flow
+provider/cache/storage boundaries
+cross-module data traceability
+```
+
+Module contracts remain authoritative for exact schemas.
+
+---
+
+# 144. Completion Criteria
+
+This document is synchronized when:
+
+* `ProcessingEnvelope` is removed as core execution authority;
+* generic `ProcessingAttemptId` is replaced by Runtime WorkItem/Attempt identities;
+* generic SourceRevision hierarchy no longer owns all downstream identity;
+* ReadingContextRevision and RuntimeRevision are distinct;
+* Capture → Recognition → Text Processing → Translation → Presentation Artifact boundaries are explicit;
+* RecognitionArtifact replaces generic core `OcrResult`;
+* SourceDocumentArtifact is the Text Processing output;
+* TranslationUnit belongs to Translation;
+* Candidate and Published Artifacts are distinct;
+* publication requires authority validation;
+* Runtime owns retry/cancellation/backpressure;
+* Event Bus no longer moves work by requested/completed stage chain;
+* cache results still pass compatibility/authority validation;
+* Presentation and native UI rendering remain separate;
+* provider-native objects and credentials remain isolated;
+* privacy and retention principles remain explicit.
+
+---
+
+# 145. Summary
+
+CRAI v1 broadly modeled:
+
+```text
+Source Revision
+    ↓
+OCR Result
+    ↓
+Source Segments
+    ↓
+Translation Units
+    ↓
+Translation Result
+    ↓
+Presentation Model
+```
+
+CRAI Runtime v2 models:
+
+```text
+ReadingContextRevision
+        ↓
+Business Execution Planning
+        ↓
+RuntimeRevision
+        ↓
+WorkItems / Attempts
+        ↓
+Candidate Artifacts
+        ↓
+Authority Validation
+        ↓
+Published Artifacts
+```
+
+The semantic processing chain is:
+
+```text
+Capture Artifact
+    ↓
+RecognitionArtifact
+    ↓
+SourceDocumentArtifact
+    ↓
+TranslationArtifact
+    ↓
+PresentationArtifact
+    ↓
+UI Adapter ViewModel
+```
+
+The central invariant is:
+
+```text
+Runtime owns execution.
+
+Modules own semantic data.
+
+Artifacts cross module boundaries.
+
+Candidates are provisional.
+
+Published Artifacts are authoritative.
+
+UI projections are disposable.
+```

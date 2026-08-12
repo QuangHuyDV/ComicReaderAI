@@ -1,3005 +1,4065 @@
-# Text Model
+# CRAI Text Model
 
-> Status: Draft
-> Version: 1.0
-> Layer: Text Processing
-> Depends On: OCR Postprocessing, Reading Order
-> Used By: Segmentation, Context Management, Translation, Presentation, Search, Export
-> Next Layer: Text Segmentation
+> **Project:** CRAI
+> **Path:** `doc/01-architecture/text/TEXT_MODEL.md`
+> **Version:** 2.0.0
+> **Status:** Architecture Draft
+> **Architecture Owner:** Text Processing
+> **Public Artifact:** `SourceDocumentArtifact`
+> **Runtime Model:** Runtime v2 aligned
+> **Last Updated:** 2026-08-10
 
 ---
 
 # 1. Purpose
 
-## Overview
+Text Model defines the canonical semantic representation of source-language text inside CRAI Text Processing.
 
-Text Model định nghĩa mô hình dữ liệu văn bản chuẩn được sử dụng xuyên suốt CRAI sau khi OCR Pipeline hoàn tất.
-
-OCR Document mô tả văn bản theo góc nhìn của hình ảnh:
-
-* vùng chữ nằm ở đâu
-* hình học như thế nào
-* bố cục ra sao
-* hướng chữ thế nào
-* thứ tự đọc là gì
-
-Text Document mô tả cùng nội dung đó theo góc nhìn ngôn ngữ:
-
-* văn bản thuộc tài liệu nào
-* đoạn nào đứng trước đoạn nào
-* câu nào thuộc đoạn nào
-* nội dung nào có thể dịch cùng nhau
-* kết quả dịch phải ánh xạ về vùng ảnh nào
-
-Text Model là ranh giới giữa:
+It provides a provider-neutral representation for text originating from:
 
 ```text
-Visual Domain
+RecognitionArtifact
+
+Structured browser content
+
+Plain text
+
+Clipboard text
+
+Imported documents
+
+User-authored source text
+
+Future structured source adapters
 ```
 
-và:
+The public cross-module output is:
 
 ```text
+SourceDocumentArtifact
+```
+
+whose semantic document body is based on the Text Model defined here.
+
+---
+
+# 2. Central Architecture Position
+
+CRAI v2 does not define Text Model only as:
+
+```text
+OCR Domain
+    ↓
 Language Domain
 ```
 
----
+because not all source text originates from OCR.
 
-## Core Principle
-
-Text Model không được làm mất liên kết với dữ liệu OCR gốc.
-
-Mọi thành phần văn bản được tạo từ OCR phải có khả năng truy ngược về:
-
-* Page
-* Panel
-* Container
-* Region
-* Paragraph
-* Line
-* Word
-* Geometry
-
-Ngược lại, Presentation phải có khả năng dùng Text Model để xác định nội dung dịch thuộc vị trí nào trên ảnh.
-
----
-
-## Objectives
-
-Text Model phải:
-
-* cung cấp Contract văn bản thống nhất
-* tách xử lý ngôn ngữ khỏi OCR Provider
-* duy trì thứ tự đọc
-* duy trì liên kết với OCR Entity
-* hỗ trợ truyện tranh
-* hỗ trợ tiểu thuyết
-* hỗ trợ Webtoon
-* hỗ trợ văn bản hỗn hợp
-* hỗ trợ chỉnh sửa thủ công
-* hỗ trợ dịch và ánh xạ ngược
-* hỗ trợ versioning
-* hỗ trợ incremental processing
-
----
-
-## Responsibilities
-
-Text Model chịu trách nhiệm định nghĩa:
-
-* Text Document
-* Text Page
-* Text Section
-* Text Block
-* Text Paragraph
-* Text Sentence
-* Text Span
-* Text Token
-* Source Reference
-* Text Relationship
-* Text Metadata
-* Text Version
-
-Text Model không chịu trách nhiệm:
-
-* OCR
-* xác định Reading Order
-* tự động dịch
-* sửa ngữ pháp
-* nhận diện người nói
-* render chữ
-* chọn Translation Provider
-
----
-
-# 2. Scope
-
-Text Model mô tả dữ liệu văn bản sau khi:
-
-* OCR đã nhận dạng nội dung
-* OCR Document đã được chuẩn hóa
-* Reading Order đã được xác định
-
-Text Model có thể chứa:
-
-* Source Text
-* Normalized Text
-* Translated Text Reference
-* Annotation
-* Language Metadata
-* Structural Relationship
-* Visual Source Reference
-
-Text Model không trực tiếp chứa:
-
-* ảnh nhị phân
-* OCR SDK Response nguyên bản
-* Translation Provider Response nguyên bản
-* dữ liệu render cuối cùng
-
----
-
-# 3. Terminology
-
-## Text Document
-
-Mô hình văn bản chuẩn đại diện cho một tài liệu hoặc một đơn vị đọc hoàn chỉnh.
-
-Ví dụ:
-
-* một trang truyện
-* một chương truyện
-* một ảnh Webtoon
-* một trang tiểu thuyết
-* một tài liệu nhiều trang
-
----
-
-## Text Node
-
-Tên chung cho một thành phần trong Text Document.
-
-Ví dụ:
-
-* Section
-* Block
-* Paragraph
-* Sentence
-* Span
-* Token
-
----
-
-## Source Text
-
-Nội dung được lấy từ OCR hoặc nguồn văn bản ban đầu.
-
----
-
-## Normalized Text
-
-Nội dung đã được chuẩn hóa về Unicode, khoảng trắng, dấu câu hoặc quy ước hiển thị nhưng chưa thay đổi ý nghĩa.
-
----
-
-## Display Text
-
-Nội dung được chuẩn bị cho việc hiển thị.
-
-Display Text có thể khác Normalized Text do:
-
-* xuống dòng
-* thêm dấu ngắt
-* định dạng
-* rút gọn hiển thị
-* thay thế ký tự tương thích
-
----
-
-## Source Reference
-
-Liên kết từ Text Node về Entity trong OCR Document hoặc nguồn đầu vào khác.
-
----
-
-## Text Span
-
-Một đoạn văn bản liên tục có chung thuộc tính.
-
-Ví dụ:
-
-* cùng ngôn ngữ
-* cùng kiểu chữ
-* cùng Source Region
-* cùng vai trò ngữ nghĩa sơ bộ
-
----
-
-## Token
-
-Đơn vị nhỏ phục vụ xử lý ngôn ngữ.
-
-Token không bắt buộc phải trùng với Word của OCR.
-
----
-
-## Structural Node
-
-Node thể hiện cấu trúc tài liệu.
-
-Ví dụ:
-
-* Page
-* Section
-* Block
-* Paragraph
-
----
-
-## Linguistic Node
-
-Node thể hiện cấu trúc ngôn ngữ.
-
-Ví dụ:
-
-* Sentence
-* Span
-* Token
-
----
-
-# 4. Goals
-
-Text Model hướng tới:
-
-* Provider Independence
-* Structural Consistency
-* Traceability
-* Extensibility
-* Deterministic Mapping
-* Incremental Update
-* Translation Compatibility
-* Presentation Compatibility
-
----
-
-# 5. Non-Goals
-
-Text Model không:
-
-* quyết định cách OCR
-* tự sửa lỗi nhận dạng
-* xác định bản dịch tốt nhất
-* xác định font hiển thị
-* tự động suy luận người nói
-* tự động chia Translation Batch
-* thay thế Translation Memory
-* thay thế Glossary
-
----
-
-# 6. Architecture Position
+The broader model is:
 
 ```text
-Image
-
-↓
-
-OCR Pipeline
-
-↓
-
-OCR Document
-
-↓
-
-Reading Order
-
-↓
-
-Text Model Builder
-
-↓
-
-Text Document
-
-↓
-
-Text Segmentation
-
-↓
-
-Context Assembly
-
-↓
-
-Translation
-
-↓
-
-Presentation
-```
-
-Text Model Builder chuyển dữ liệu từ OCR Domain sang Text Domain.
-
----
-
-# 7. High-Level Transformation
-
-```text
-OCR Document
-+
-Reading Sequence
-+
-Source Metadata
-
-↓
-
-Entity Mapping
-
-↓
-
-Structural Construction
-
-↓
-
-Text Normalization
-
-↓
-
-Language Metadata Attachment
-
-↓
-
-Source Reference Construction
-
-↓
-
-Text Validation
-
-↓
-
-Text Document
-```
-
----
-
-# 8. Text Model Lifecycle
-
-## Stage 1: Input Validation
-
-Kiểm tra:
-
-* OCR Document
-* Reading Sequence
-* Entity Reference
-* Language Metadata
-* Document Metadata
-
----
-
-## Stage 2: Structural Mapping
-
-Chuyển cấu trúc OCR sang cấu trúc văn bản.
-
----
-
-## Stage 3: Text Extraction
-
-Lấy Source Text theo Reading Order.
-
----
-
-## Stage 4: Text Normalization
-
-Chuẩn hóa nội dung nhưng không thay đổi ý nghĩa.
-
----
-
-## Stage 5: Node Construction
-
-Tạo:
-
-* Page
-* Section
-* Block
-* Paragraph
-* Sentence
-* Span
-* Token
-
----
-
-## Stage 6: Source Linking
-
-Liên kết Text Node với OCR Entity.
-
----
-
-## Stage 7: Validation
-
-Kiểm tra cấu trúc, thứ tự và khả năng ánh xạ.
-
----
-
-## Stage 8: Version Assignment
-
-Gắn Contract Version và Document Version.
-
----
-
-# 9. Inputs
-
-Text Model Builder nhận:
-
-* OCR Document
-* Main Reading Sequence
-* Auxiliary Reading Sequence
-* OCR Language Metadata
-* Document Metadata
-* Text Profile
-
-Thông tin tùy chọn:
-
-* Manual Correction
-* Source URL
-* Chapter Metadata
-* Page Metadata
-* Existing Text Document
-* Previous Version
-* User Preference
-
----
-
-# 10. Outputs
-
-Đầu ra chính:
-
-* Text Document
-
-Đầu ra phụ:
-
-* Mapping Report
-* Validation Result
-* Diagnostics
-* Statistics
-
----
-
-# 11. Text Document Hierarchy
-
-Cấu trúc chuẩn:
-
-```text
-Text Document
-
-├── Metadata
-
-├── Pages
-
-│   └── Page
-
-│       └── Sections
-
-│           └── Section
-
-│               └── Blocks
-
-│                   └── Block
-
-│                       └── Paragraphs
-
-│                           └── Paragraph
-
-│                               └── Sentences
-
-│                                   └── Sentence
-
-│                                       └── Spans
-
-│                                           └── Span
-
-│                                               └── Tokens
-
-├── Auxiliary Content
-
-├── Relationships
-
-├── Source Mapping
-
-├── Annotations
-
-└── Diagnostics
-```
-
-Không phải mọi tài liệu đều cần sử dụng đầy đủ mọi cấp.
-
-Ví dụ Speech Bubble ngắn có thể là:
-
-```text
-Block
-└── Paragraph
-    └── Sentence
-        └── Span
-```
-
----
-
-# 12. Text Document Model
-
-Text Document nên bao gồm:
-
-* Document ID
-* Contract Version
-* Document Version
-* Source Document ID
-* Document Type
-* Primary Language
-* Languages
-* Reading Mode
-* Pages
-* Auxiliary Content
-* Relationships
-* Metadata
-* Created At
-* Updated At
-
-Document Type có thể là:
-
-* Comic
-* Manga
-* Manhua
-* Manhwa
-* Webtoon
-* Novel
-* Plain Text
-* Scanned Document
-* Mixed
-* Unknown
-
----
-
-# 13. Document Identity
-
-Text Document ID phải ổn định trong vòng đời của cùng một tài liệu.
-
-Document Version thay đổi khi:
-
-* Source Text thay đổi
-* cấu trúc Node thay đổi
-* Reading Order thay đổi
-* Source Mapping thay đổi
-* Manual Correction thay đổi
-
-Không cần tăng Document Version khi chỉ có:
-
-* Runtime Metrics mới
-* Cache Metadata mới
-* Diagnostic không ảnh hưởng nội dung
-
----
-
-# 14. Text Page Model
-
-Text Page đại diện cho một đơn vị trang logic.
-
-Một Text Page nên chứa:
-
-* Page ID
-* Page Index
-* Source Page ID
-* Page Type
-* Reading Mode
-* Sections
-* Page Metadata
-* Source References
-* Confidence
-* Diagnostics
-
-Page Type có thể là:
-
-* Single Page
-* Left Spread Page
-* Right Spread Page
-* Webtoon Segment
-* Continuous Page
-* Virtual Page
-* Unknown
-
----
-
-# 15. Virtual Page
-
-Với Webtoon hoặc ảnh dài, hệ thống có thể tạo Virtual Page.
-
-Virtual Page không nhất thiết tương ứng với một ảnh vật lý.
-
-Nó có thể đại diện cho:
-
-* một đoạn cuộn
-* một nhóm Panel
-* một viewport
-* một đơn vị xử lý
-
-Virtual Page phải giữ liên kết với:
-
-* Source Image
-* Source Coordinates
-* Global Offset
-
----
-
-# 16. Text Section Model
-
-Section là nhóm logic của nhiều Block.
-
-Ví dụ:
-
-* một Panel
-* một chương nhỏ
-* phần hội thoại
-* phần chú thích
-* phần nội dung chính
-* phần phụ lục
-
-Section nên chứa:
-
-* Section ID
-* Section Type
-* Order Index
-* Blocks
-* Parent Section ID
-* Source References
-* Metadata
-* Confidence
-
----
-
-# 17. Section Types
-
-Section Type có thể gồm:
-
-* Panel
-* Scene
-* Dialogue Group
-* Narration Group
-* Chapter Header
-* Body
-* Footnote
-* Caption Group
-* Auxiliary
-* Unknown
-
-Section Type không bắt buộc phải mang ý nghĩa ngữ nghĩa sâu.
-
-Ở giai đoạn đầu, Section có thể chỉ ánh xạ từ Panel hoặc Layout Container.
-
----
-
-# 18. Text Block Model
-
-Block là đơn vị cấu trúc văn bản gắn với một vùng nội dung tương đối độc lập.
-
-Ví dụ:
-
-* Speech Bubble
-* Narration Box
-* Caption
-* SFX
-* Sign
-* UI Text
-* Paragraph Block
-
-Block nên chứa:
-
-* Block ID
-* Block Type
-* Order Index
-* Parent Section ID
-* Paragraphs
-* Source References
-* Geometry Reference
-* Reading Role
-* Language
-* Confidence
-* Metadata
-
----
-
-# 19. Block Types
-
-Các Block Type khuyến nghị:
-
-* Dialogue
-* Narration
-* Caption
-* SFX
-* Background Text
-* Sign
-* Title
-* Subtitle
-* Header
-* Footer
-* Footnote
-* UI
-* Watermark
-* Advertisement
-* Body Text
-* Unknown
-
-Block Type có thể được ánh xạ từ Region Type của OCR Document.
-
----
-
-# 20. Reading Role
-
-Reading Role quyết định Block tham gia luồng nào.
-
-Các giá trị có thể gồm:
-
-* Main
-* Auxiliary
-* Excluded
-* Reference
-* Decorative
-* Unknown
-
-Reading Role phải được kế thừa từ Reading Order Result khi có thể.
-
-Text Model không nên tự quyết định lại việc một Region thuộc Main hay Auxiliary nếu Reading Order đã đưa ra kết luận.
-
----
-
-# 21. Text Paragraph Model
-
-Paragraph là một nhóm Sentence có quan hệ gần nhau trong cùng Block.
-
-Paragraph nên chứa:
-
-* Paragraph ID
-* Order Index
-* Parent Block ID
-* Sentences
-* Source Text
-* Normalized Text
-* Language
-* Direction
-* Source References
-* Confidence
-* Metadata
-
-Một Speech Bubble có thể chứa:
-
-* một Paragraph
-* nhiều Paragraph
-* hoặc không xác định được Paragraph rõ ràng
-
----
-
-# 22. Paragraph Boundaries
-
-Paragraph Boundary có thể đến từ:
-
-* OCR Paragraph
-* khoảng cách dòng
-* dấu ngắt đoạn
-* Layout
-* Bubble Structure
-* Manual Correction
-
-Paragraph Boundary không được suy ra chỉ từ ký tự xuống dòng do OCR trả về.
-
-OCR Line Break có thể chỉ phản ánh bố cục hình ảnh, không phải ranh giới đoạn ngôn ngữ.
-
----
-
-# 23. Text Sentence Model
-
-Sentence là đơn vị ngôn ngữ dùng cho:
-
-* Translation
-* Context
-* Search
-* Annotation
-* Alignment
-
-Sentence nên chứa:
-
-* Sentence ID
-* Order Index
-* Parent Paragraph ID
-* Source Text
-* Normalized Text
-* Spans
-* Language
-* Sentence Boundary Confidence
-* Source References
-* Metadata
-
----
-
-# 24. Sentence Boundaries
-
-Sentence Boundary có thể dựa trên:
-
-* dấu câu
-* ngôn ngữ
-* Writing System
-* OCR Line
-* Bubble Boundary
-* Context
-* Rule-based Segmenter
-* Language Model
-* Manual Override
-
-Sentence Boundary chưa chắc được xác định ngay khi xây dựng Text Document.
-
-Text Model phải cho phép:
-
-* Sentence tạm thời
-* Sentence chưa xác định
-* Sentence được cập nhật sau Segmentation
-
----
-
-# 25. Provisional Sentence
-
-Trong bản dựng đầu tiên, một Paragraph có thể được tạo với một Provisional Sentence chứa toàn bộ nội dung.
-
-Sau đó Segmentation Module sẽ:
-
-* tách câu
-* gộp câu
-* sửa Boundary
-* giữ Source Mapping
-
-Cơ chế này giúp Text Model Builder không phụ thuộc chặt vào NLP.
-
----
-
-# 26. Text Span Model
-
-Span là đoạn văn bản liên tục có cùng đặc điểm.
-
-Span nên chứa:
-
-* Span ID
-* Order Index
-* Parent Sentence ID
-* Source Text
-* Normalized Text
-* Language
-* Script
-* Style Hint
-* Source References
-* Character Range
-* Confidence
-* Metadata
-
-Span hữu ích khi một Sentence chứa:
-
-* nhiều ngôn ngữ
-* nhiều Region
-* nhiều Style
-* tên riêng
-* Ruby Text
-* Emphasis
-* Inline SFX
-
----
-
-# 27. Span Boundaries
-
-Span Boundary có thể được tạo khi thay đổi:
-
-* Language
-* Script
-* Source Region
-* Text Style
-* Annotation
-* Semantic Role
-* OCR Confidence Group
-
-Không nên tạo quá nhiều Span nếu không có nhu cầu xử lý.
-
-Một Span cho mỗi ký tự sẽ làm mô hình quá nặng và khó sử dụng.
-
----
-
-# 28. Text Token Model
-
-Token là đơn vị nhỏ phục vụ xử lý ngôn ngữ.
-
-Token có thể là:
-
-* Word
-* Character
-* Punctuation
-* Number
-* Symbol
-* Subword
-* Whitespace
-* Unknown
-
-Token nên chứa:
-
-* Token ID
-* Token Type
-* Surface Text
-* Normalized Text
-* Parent Span ID
-* Character Range
-* Source References
-* Language
-* Confidence
-* Metadata
-
----
-
-# 29. OCR Word vs Text Token
-
-OCR Word và Text Token là hai khái niệm khác nhau.
-
-OCR Word phụ thuộc vào:
-
-* OCR Engine
-* Geometry
-* Detection
-* Recognition
-
-Text Token phụ thuộc vào:
-
-* ngôn ngữ
-* tokenizer
-* mục đích xử lý
-* mô hình dịch
-
-Ví dụ tiếng Trung:
-
-```text
-OCR Word:
-我喜欢看漫画
-```
-
-có thể trở thành:
-
-```text
-Text Token:
-我 | 喜欢 | 看 | 漫画
-```
-
-Hoặc với Character-based Tokenization:
-
-```text
-我 | 喜 | 欢 | 看 | 漫 | 画
-```
-
-Text Model phải giữ cả Source Reference thay vì giả định OCR Word bằng Token.
-
----
-
-# 30. Character Range
-
-Mỗi Sentence, Span và Token nên có Character Range trong Parent Text.
-
-Ví dụ:
-
-```text
-Sentence:
-"Hello world!"
-
-Span A:
-start = 0
-end = 5
-
-Span B:
-start = 6
-end = 12
-```
-
-Quy ước `end` nên là exclusive:
-
-```text
-[start, end)
-```
-
-Quy ước này phải thống nhất trong toàn hệ thống.
-
----
-
-# 31. Unicode Indexing
-
-Character Index cần chỉ rõ đang sử dụng:
-
-* Unicode Code Point
-* UTF-16 Code Unit
-* UTF-8 Byte Offset
-* Grapheme Cluster
-
-Contract nội bộ nên ưu tiên một chuẩn duy nhất.
-
-Khuyến nghị:
-
-* dùng Unicode Code Point hoặc Grapheme Cluster cho Text Model
-* chỉ chuyển sang UTF-16 khi tích hợp UI cần thiết
-* không dùng Byte Offset làm chỉ số ngôn ngữ mặc định
-
----
-
-# 32. Grapheme Cluster
-
-Một ký tự hiển thị có thể gồm nhiều Unicode Code Point.
-
-Ví dụ:
-
-* ký tự có dấu tổ hợp
-* emoji
-* variation selector
-* chữ phức hợp
-
-Text Model không nên giả định:
-
-```text
-1 ký tự hiển thị = 1 byte
-```
-
-hoặc:
-
-```text
-1 ký tự hiển thị = 1 UTF-16 code unit
-```
-
----
-
-# 33. Text Layers
-
-Text Model nên phân biệt các lớp nội dung:
-
-```text
-Raw Text
+Visual Source
     ↓
-Source Text
+Capture
     ↓
-Normalized Text
-    ↓
-Corrected Text
-    ↓
-Display Text
+RecognitionArtifact
+       \
+        \
+         ↓
+      Text Processing
+         ↑
+        /
+       /
+Structured Source
 ```
 
-Không phải mọi Node đều cần có đủ tất cả lớp.
-
----
-
-# 34. Raw Text
-
-Raw Text là nội dung gần nhất với OCR Provider Result.
-
-Raw Text chỉ nên được giữ khi cần:
-
-* Debug
-* Benchmark
-* so sánh Provider
-* phục hồi dữ liệu
-
-Raw Text không nên là đầu vào mặc định cho Translation.
-
----
-
-# 35. Source Text
-
-Source Text là nội dung chuẩn được chấp nhận từ OCR Document.
-
-Source Text phải:
-
-* giữ nguyên ý nghĩa
-* giữ ký tự quan trọng
-* giữ liên kết với OCR Entity
-* không tự động sửa nội dung theo phỏng đoán
-
----
-
-# 36. Normalized Text
-
-Normalized Text có thể áp dụng:
-
-* Unicode Normalization
-* chuẩn hóa khoảng trắng
-* chuẩn hóa newline
-* chuẩn hóa dấu câu tương thích
-* loại ký tự điều khiển không hợp lệ
-* sửa encoding artifact rõ ràng
-
-Normalized Text không được:
-
-* thay từ
-* sửa ngữ pháp
-* đoán ký tự OCR sai
-* dịch nội dung
-
----
-
-# 37. Corrected Text
-
-Corrected Text là nội dung đã được:
-
-* người dùng sửa
-* spell checker sửa
-* OCR correction module sửa
-* rule-based correction sửa
-
-Corrected Text phải lưu:
-
-* Correction Source
-* Previous Value
-* Confidence
-* Timestamp
-* Actor
-* Reason
-
-Không được ghi đè Source Text mà không giữ lịch sử.
-
----
-
-# 38. Display Text
-
-Display Text là dạng nội dung được Presentation sử dụng.
-
-Display Text có thể áp dụng:
-
-* xuống dòng
-* whitespace trình bày
-* typographic punctuation
-* Ruby Annotation
-* abbreviation
-* layout-specific formatting
-
-Display Text không phải nguồn chính để Translation hoặc Search xử lý.
-
----
-
-# 39. Canonical Text
-
-Mỗi Node cần có quy tắc xác định Canonical Text.
-
-Khuyến nghị:
+Text Processing produces:
 
 ```text
-Corrected Text nếu tồn tại
+SourceDocumentArtifact
+```
+
+which becomes the common source-language boundary for downstream semantic processing.
+
+---
+
+# 3. Public Boundary
+
+The architecture boundary is:
+
+```text
+RecognitionArtifact
+or
+Normalized Structured Source Input
         ↓
-Normalized Text
+Text Processing
         ↓
-Source Text
+Candidate SourceDocumentArtifact
+        ↓
+Authority Validation
+        ↓
+Published SourceDocumentArtifact
 ```
 
-Raw Text và Display Text không nên trở thành Canonical Text mặc định.
+Translation consumes the Published Artifact.
+
+It does not consume Text Processing internals directly.
 
 ---
 
-# 40. Language Model
+# 4. Text Model vs SourceDocumentArtifact
 
-Language Metadata có thể tồn tại ở:
-
-* Document
-* Page
-* Section
-* Block
-* Paragraph
-* Sentence
-* Span
-* Token
-
-Metadata nên gồm:
-
-* Language Code
-* Script
-* Confidence
-* Detection Source
-* Is Inherited
-* Is Mixed
-
----
-
-# 41. Language Inheritance
-
-Node con có thể kế thừa Language từ Node cha.
-
-Ví dụ:
+These concepts are related but distinct.
 
 ```text
-Document: zh-Hans
+Text Model
+    = semantic document model owned by Text Processing
+
+SourceDocumentArtifact
+    = immutable published boundary carrying
+      an authoritative Text Model snapshot
+      plus Artifact identity/provenance
 ```
 
-thì Block không cần lặp lại Language nếu không khác.
-
-Nếu một Span là tiếng Anh trong Sentence tiếng Trung, Span có thể ghi đè:
+Therefore:
 
 ```text
-Sentence: zh-Hans
-Span: en
+TextDocument
+```
+
+is not an independent architecture authority competing with:
+
+```text
+SourceDocumentArtifact
 ```
 
 ---
 
-# 42. Language Code
+# 5. Core Principle
 
-Language Code nên tuân theo tiêu chuẩn thống nhất.
+Text Model must preserve meaning and provenance while separating text semantics from source-specific implementations.
 
-Khuyến nghị:
-
-* BCP 47 cho Language Tag
-* ISO 15924 cho Script khi cần
-* không tạo mã ngôn ngữ nội bộ tùy ý
-
-Ví dụ:
+For source-derived text, the system should be able to answer:
 
 ```text
-vi
-en
-zh-Hans
-zh-Hant
-ja
-ko
+Where did this text come from?
+
+What source entities contributed to it?
+
+What transformations were applied?
+
+What is its canonical source-language representation?
+
+What structural order does it have?
+
+What geometry/source location can it map back to?
 ```
 
 ---
 
-# 43. Script Metadata
+# 6. Objectives
 
-Script có thể gồm:
-
-* Latin
-* Han
-* Hiragana
-* Katakana
-* Hangul
-* Arabic
-* Cyrillic
-* Mixed
-* Unknown
-
-Script hỗ trợ:
-
-* Tokenization
-* Font Selection
-* Translation Routing
-* Text Direction
-* Normalization
-
----
-
-# 44. Direction Metadata
-
-Text Node có thể lưu:
-
-* Writing Mode
-* Text Direction
-* Line Direction
-* Block Direction
-* Rotation
-
-Direction trong Text Model nên tham chiếu kết quả từ Text Direction Module.
-
-Text Model không nên tự suy luận lại Geometry Direction.
-
----
-
-# 45. Source Reference Model
-
-Source Reference liên kết Text Node với nguồn tạo ra nó.
-
-Một Source Reference nên chứa:
-
-* Source Type
-* Source Document ID
-* Source Entity ID
-* Source Entity Type
-* Character Range
-* Geometry Reference
-* Page ID
-* Confidence
-* Mapping Type
-* Metadata
-
----
-
-# 46. Source Types
-
-Source Type có thể là:
-
-* OCR Document
-* Plain Text Import
-* EPUB
-* HTML
-* PDF Text Layer
-* User Input
-* External Subtitle
-* Unknown
-
-Thiết kế này giúp Text Model không bị giới hạn chỉ cho OCR.
-
----
-
-# 47. Mapping Types
-
-Mapping Type có thể gồm:
-
-* Exact
-* Merged
-* Split
-* Derived
-* Approximate
-* Manual
-* Unknown
-
-Ví dụ:
-
-* một Text Sentence từ một OCR Region: `Exact`
-* một Sentence gộp từ ba Region: `Merged`
-* nhiều Sentence tách từ một Bubble: `Split`
-
----
-
-# 48. Many-to-Many Mapping
-
-Text Model phải hỗ trợ:
+Text Model must support:
 
 ```text
-N OCR Entity
-        ↕
-M Text Node
+provider independence
+
+source independence
+
+structural consistency
+
+traceability
+
+deterministic mapping
+
+source-language preservation
+
+manual correction
+
+incremental reconstruction
+
+serialization
+
+versioning
+
+Translation compatibility
+
+Presentation compatibility
+
+Search/Export compatibility
+
+comic text
+
+novel text
+
+webtoon text
+
+mixed structured content
 ```
 
-Không được giả định ánh xạ luôn là 1:1.
-
-Ví dụ:
-
-* một câu bị chia qua hai Bubble
-* hai dòng OCR tạo thành một câu
-* một Bubble chứa ba câu
-* nhiều Region bị Merge thành một Paragraph
-
 ---
 
-# 49. Source Mapping Index
+# 7. Non-Goals
 
-Text Document nên có Source Mapping Index riêng.
-
-Index hỗ trợ truy vấn:
+Text Model does not own:
 
 ```text
-OCR Region ID
-    → Text Nodes
+Capture
+
+OCR provider execution
+
+Runtime WorkItem/Attempt lifecycle
+
+Runtime retry
+
+Runtime cancellation
+
+TranslationUnit construction
+
+TranslationBatch construction
+
+Translation context assembly
+
+Translation provider selection
+
+translated-output authority
+
+Presentation layout authority
+
+native UI rendering
 ```
 
-và:
+---
+
+# 8. Ownership
+
+Text Model semantics belong to:
 
 ```text
-Text Node ID
-    → OCR Entities
+Text Processing
 ```
 
-Việc này cần thiết cho:
-
-* Highlight
-* Overlay
-* Manual Edit
-* Debug
-* Translation Alignment
-* Presentation
-
----
-
-# 50. Geometry Reference
-
-Text Node không nhất thiết sao chép toàn bộ Geometry.
-
-Thay vào đó có thể lưu:
-
-* Geometry Entity ID
-* Bounding Box Reference
-* Polygon Reference
-* Coordinate Space
-* Source Image ID
-
-Geometry gốc vẫn thuộc OCR Document.
-
-Text Model chỉ giữ Reference hoặc Snapshot tối thiểu khi cần.
-
----
-
-# 51. Coordinate Space
-
-Mọi Geometry Reference phải chỉ rõ Coordinate Space.
-
-Ví dụ:
-
-* Original Image Pixels
-* Preprocessed Image Pixels
-* Normalized Coordinates
-* Viewport Coordinates
-* Page Coordinates
-
-Không được trộn các hệ tọa độ mà không có Transformation Metadata.
-
----
-
-# 52. Order Model
-
-Mỗi Node có thứ tự trong Parent Scope.
-
-Các trường khuyến nghị:
-
-* Order Index
-* Previous Node ID
-* Next Node ID
-* Reading Sequence ID
-
-Order Index phải:
-
-* xác định
-* ổn định
-* không phụ thuộc Map Iteration
-* phản ánh Reading Order Result
-
----
-
-# 53. Global Text Order
-
-Text Document phải cho phép duyệt toàn bộ nội dung chính theo thứ tự tuyến tính.
-
-Ví dụ:
+Specifically, Text Processing owns:
 
 ```text
-Document
-    → Page
-        → Section
-            → Block
-                → Paragraph
-                    → Sentence
+SourceDocument
+
+Text Node structure
+
+source-language normalization
+
+source mapping
+
+semantic source ordering
+
+document reconstruction
+
+text provenance
+
+document-level corrections
 ```
 
-Global Order không được làm mất cấu trúc phân cấp.
-
 ---
 
-# 54. Auxiliary Content
+# 9. Downstream Ownership
 
-Auxiliary Content chứa các Node không thuộc Main Reading Flow.
-
-Ví dụ:
-
-* SFX
-* Watermark
-* UI
-* Advertisement
-* Decorative Text
-* Metadata Text
-
-Auxiliary Content vẫn phải giữ:
-
-* Source Reference
-* Language
-* Geometry
-* Order cục bộ nếu có
-
----
-
-# 55. Relationship Model
-
-Ngoài cấu trúc Parent-Child, Text Model có thể có các quan hệ khác.
-
-Ví dụ:
-
-* continues
-* references
-* overlaps
-* alternative
-* annotation_of
-* translation_of
-* reply_to
-* belongs_to_speaker
-* visually_near
-* derived_from
-
-Các quan hệ ngữ nghĩa chưa chắc được tạo ở giai đoạn Text Model Builder.
-
----
-
-# 56. Relationship Entity
-
-Relationship nên chứa:
-
-* Relationship ID
-* Relationship Type
-* Source Node ID
-* Target Node ID
-* Direction
-* Confidence
-* Source
-* Metadata
-
-Relationship không được thay thế cấu trúc Parent-Child cơ bản.
-
----
-
-# 57. Annotation Model
-
-Annotation dùng để gắn thông tin bổ sung mà không thay đổi Text.
-
-Ví dụ:
-
-* tên riêng
-* thuật ngữ
-* speaker candidate
-* emphasis
-* uncertainty
-* translation note
-* correction suggestion
-* glossary match
-
-Annotation nên chứa:
-
-* Annotation ID
-* Annotation Type
-* Target Node ID
-* Character Range
-* Value
-* Confidence
-* Source
-* Metadata
-
----
-
-# 58. Annotation Separation
-
-Annotation không được ghi trực tiếp vào Source Text.
-
-Ví dụ, tên nhân vật không nên được chèn vào chuỗi:
+Translation owns:
 
 ```text
-[Character A]: Xin chào
+TranslationUnit
+TranslationBatch
+Translation context assembly
+TranslationArtifact
 ```
 
-Thay vào đó:
+Presentation owns:
 
 ```text
-Text:
-Xin chào
-
-Annotation:
-speaker_candidate = Character A
+PresentationArtifact
+semantic presentation
+layout/fitting decisions
 ```
 
-Điều này tránh làm sai nội dung gốc.
-
----
-
-# 59. Style Hint Model
-
-Style Hint có thể lưu thông tin hỗ trợ Presentation:
-
-* Bold
-* Italic
-* Emphasis
-* Handwritten
-* Font Size Estimate
-* Text Color
-* Alignment
-* Ruby
-* Vertical
-* Outline
-* Decorative
-
-Style Hint không phải Style cuối cùng.
-
-Presentation có thể ghi đè tùy thiết bị hoặc chế độ hiển thị.
-
----
-
-# 60. Text Confidence
-
-Confidence có thể tồn tại ở:
-
-* Document
-* Page
-* Block
-* Paragraph
-* Sentence
-* Span
-* Token
-* Source Mapping
-
-Confidence trong Text Model có thể tổng hợp từ:
-
-* OCR Confidence
-* Reading Order Confidence
-* Normalization Confidence
-* Boundary Confidence
-* Language Detection Confidence
-
----
-
-# 61. Confidence Separation
-
-Không nên chỉ lưu một Confidence duy nhất.
-
-Ví dụ Sentence có thể có:
-
-* Recognition Confidence
-* Boundary Confidence
-* Order Confidence
-* Language Confidence
-* Mapping Confidence
-
-Một câu có Recognition Confidence cao nhưng Sentence Boundary Confidence thấp.
-
----
-
-# 62. Text Quality Flags
-
-Node có thể mang Quality Flag như:
-
-* Low Recognition Confidence
-* Ambiguous Order
-* Unknown Language
-* Broken Mapping
-* Missing Source
-* Suspected Duplicate
-* Incomplete Text
-* Manual Review Required
-
-Quality Flag không được tự động sửa nội dung.
-
----
-
-# 63. Text Profile
-
-Text Profile điều khiển cách xây dựng Text Document.
-
-Có thể bao gồm:
-
-* Document Type
-* Normalization Rules
-* Node Granularity
-* Language Policy
-* Auxiliary Content Policy
-* Tokenization Policy
-* Source Mapping Policy
-* Sentence Initialization Policy
-
----
-
-# 64. Profile Examples
-
-## Comic Profile
-
-Ưu tiên:
-
-* Panel Section
-* Bubble Block
-* Dialogue/Narration Type
-* Geometry Mapping
-* Main/Auxiliary Separation
-
----
-
-## Novel Profile
-
-Ưu tiên:
-
-* Page
-* Column
-* Paragraph
-* Sentence
-* Header/Footer Exclusion
-
----
-
-## Webtoon Profile
-
-Ưu tiên:
-
-* Continuous Order
-* Virtual Page
-* Vertical Position
-* Incremental Update
-
----
-
-## Plain Text Profile
-
-Không cần Geometry bắt buộc.
-
-Tập trung vào:
-
-* Paragraph
-* Sentence
-* Span
-* Source Offset
-
----
-
-# 65. Text Model Builder
-
-Text Model Builder chịu trách nhiệm chuyển:
+UI Adapter owns:
 
 ```text
+ViewModel
+frontend projection
+```
+
+Text Model must not absorb those concerns.
+
+---
+
+# 10. Inputs
+
+Text Processing may construct Text Model from multiple source families.
+
+## Visual/Recognition Input
+
+```text
+RecognitionArtifact
+```
+
+may provide:
+
+```text
+recognized text
+
+blocks/regions
+
+geometry
+
+reading hints/order
+
+direction
+
+language hints
+
+confidence
+
+source provenance
+```
+
+---
+
+# 11. Structured Text Input
+
+Structured input may provide:
+
+```text
+text blocks
+
+paragraph structure
+
+source locators
+
+ordering information
+
+language hints
+
+semantic markup
+
+safe source metadata
+```
+
+It must be platform-neutral before entering Text Processing.
+
+---
+
+# 12. No OCR-Only Input Contract
+
+Deprecated assumption:
+
+```text
+Text Model Builder requires:
+
 OCR Document
 +
 Reading Order Result
 ```
 
-thành:
+Current rule:
 
 ```text
-Text Document
+Text Processing accepts
+an owner-defined normalized source input
+appropriate to the source family.
 ```
 
-Builder phải triển khai một Contract thống nhất.
+RecognitionArtifact is the visual-source public boundary.
 
 ---
 
-# 66. Builder Contract
+# 13. Canonical Output
 
-Builder nên hỗ trợ:
-
-* Build Document
-* Rebuild Scope
-* Update Node
-* Validate Document
-* Resolve Source Mapping
-* Serialize
-* Deserialize
-
-Các thao tác chỉnh sửa nội dung người dùng không nên nằm trực tiếp trong Builder Contract chính.
-
----
-
-# 67. Structural Mapping Rules
-
-Ví dụ ánh xạ mặc định:
+The canonical processing result is:
 
 ```text
-OCR Page
-→ Text Page
-
-OCR Panel
-→ Text Section
-
-OCR Container hoặc Region
-→ Text Block
-
-OCR Paragraph
-→ Text Paragraph
-
-OCR Line
-→ Source Reference hoặc Provisional Span
+SourceDocument
 ```
 
-Mapping Rule có thể thay đổi theo Document Type.
-
----
-
-# 68. Comic Mapping
-
-Cấu trúc khuyến nghị:
+embedded in:
 
 ```text
-Text Document
-
-└── Page
-
-    └── Panel Section
-
-        └── Bubble Block
-
-            └── Paragraph
-
-                └── Provisional Sentence
+SourceDocumentArtifact
 ```
 
-SFX và Background Text có thể được đưa vào Auxiliary Content tùy Profile.
-
----
-
-# 69. Novel Mapping
-
-Cấu trúc khuyến nghị:
+The Artifact adds:
 
 ```text
-Text Document
+ArtifactId
 
-└── Page
+schema/version information
 
-    └── Body Section
+input provenance
 
-        └── Column Block
+runtime provenance where applicable
 
-            └── Paragraph
-
-                └── Sentence
+publication metadata
 ```
 
-Header, Footer và Footnote có thể nằm trong Section riêng.
+according to the Text Processing contract.
 
 ---
 
-# 70. Webtoon Mapping
+# 14. Semantic Model Overview
 
-Cấu trúc khuyến nghị:
+Conceptually:
 
 ```text
-Text Document
-
-└── Virtual Page
-
-    └── Scene hoặc Panel Section
-
-        └── Bubble Block
-
-            └── Paragraph
+SourceDocument
+├── Metadata
+├── Pages / Logical Ranges?
+├── Sections
+├── Blocks
+├── Paragraphs
+├── Sentences?
+├── Spans?
+├── Tokens?
+├── Auxiliary Content
+├── Relationships
+├── Source Mapping
+├── Annotations
+└── Quality Metadata
 ```
 
-Virtual Page không được làm thay đổi Global Reading Order.
+Not every document requires every layer.
 
 ---
 
-# 71. Normalization Pipeline
+# 15. Flexible Hierarchy
 
-Normalization có thể gồm:
+The hierarchy is intentionally flexible.
+
+A comic Bubble may require:
 
 ```text
-Input Text
+Block
+└── Paragraph
+    └── Provisional Sentence
+```
 
-↓
+A novel chapter may use:
 
+```text
+Document
+└── Section
+    └── Block
+        └── Paragraph
+```
+
+Fine-grained linguistic nodes are constructed only when useful.
+
+---
+
+# 16. Document Node
+
+`SourceDocument` represents one coherent source-language document scope.
+
+Examples:
+
+```text
+comic page
+
+stable comic viewport
+
+webtoon range
+
+novel chapter
+
+selected article body
+
+plain-text import
+
+document page range
+```
+
+Its exact scope is determined by upstream/application processing requirements.
+
+---
+
+# 17. Document Identity
+
+A SourceDocument must have stable semantic identity within its own version lineage.
+
+Do not derive identity solely from:
+
+```text
+memory address
+
+Runtime AttemptId
+
+provider index
+
+current order index
+```
+
+---
+
+# 18. Document Version
+
+Document semantic version/revision changes when relevant source semantics change.
+
+Examples:
+
+```text
+canonical source text changes
+
+document structure changes
+
+source mapping changes
+
+semantic order changes
+
+confirmed source correction changes
+```
+
+It does not change merely because:
+
+```text
+new Runtime metrics arrive
+
+logging changes
+
+cache metadata changes
+
+Telemetry changes
+```
+
+---
+
+# 19. Artifact Version vs Document Version
+
+Do not confuse:
+
+```text
+SourceDocument schema version
+
+SourceDocument semantic revision
+
+SourceDocumentArtifact identity/version
+
+RuntimeRevisionId
+```
+
+These represent different authorities.
+
+---
+
+# 20. Text Node
+
+`TextNode` is a generic semantic text element.
+
+Possible node kinds:
+
+```text
+Page / Logical Range
+
+Section
+
+Block
+
+Paragraph
+
+Sentence
+
+Span
+
+Token
+```
+
+Each kind must have explicit semantics.
+
+---
+
+# 21. Structural vs Linguistic Nodes
+
+Structural nodes describe document organization.
+
+Examples:
+
+```text
+Section
+
+Block
+
+Paragraph
+```
+
+Linguistic nodes describe language-processing structure.
+
+Examples:
+
+```text
+Sentence
+
+Span
+
+Token
+```
+
+The same hierarchy must not imply all linguistic layers are eagerly available.
+
+---
+
+# 22. Logical Page
+
+A logical Page may represent:
+
+```text
+physical page
+
+comic page
+
+webtoon range
+
+viewport range
+
+virtual processing range
+```
+
+A Page is optional when the source has no meaningful page semantics.
+
+---
+
+# 23. Virtual Page
+
+For continuous content, a Virtual Page may represent:
+
+```text
+webtoon range
+
+scroll segment
+
+logical viewport
+
+processing window
+```
+
+It must not be confused with:
+
+```text
+Runtime WorkItem
+```
+
+A semantic document range is not execution identity.
+
+---
+
+# 24. Section
+
+A Section groups coherent Blocks.
+
+Possible types:
+
+```text
+Panel
+
+Scene
+
+DialogueGroup
+
+NarrationGroup
+
+ChapterHeader
+
+Body
+
+Footnote
+
+CaptionGroup
+
+Auxiliary
+
+Unknown
+```
+
+Section type may remain shallow; deep semantic interpretation is not mandatory.
+
+---
+
+# 25. Block
+
+Block is a relatively independent semantic source-text structure.
+
+Examples:
+
+```text
+Dialogue
+
+Narration
+
+Caption
+
+SFX
+
+BackgroundText
+
+Sign
+
+Title
+
+Subtitle
+
+Header
+
+Footer
+
+Footnote
+
+BodyText
+
+Unknown
+```
+
+---
+
+# 26. Block Source
+
+For recognition-derived input, Block may correspond to:
+
+```text
+Recognition block
+
+OCR region/container
+
+speech bubble
+
+layout container
+```
+
+For structured input it may correspond to:
+
+```text
+DOM paragraph
+
+document block
+
+source paragraph
+
+semantic HTML block
+```
+
+Downstream consumers should not need source-native types.
+
+---
+
+# 27. Reading Role
+
+A Block may carry a reading role such as:
+
+```text
+Main
+
+Auxiliary
+
+Excluded
+
+Reference
+
+Decorative
+
+Unknown
+```
+
+If trustworthy upstream ordering/classification exists, Text Processing should preserve it rather than re-infer without reason.
+
+---
+
+# 28. Paragraph
+
+Paragraph represents source-language text that belongs together structurally.
+
+Possible fields:
+
+```text
+ParagraphId
+
+OrderIndex
+
+ParentBlockId
+
+SourceText
+
+NormalizedText
+
+CorrectedText?
+
+Language
+
+Direction?
+
+SourceReferences[]
+
+Confidence/Quality
+
+Metadata
+```
+
+---
+
+# 29. Paragraph Boundary
+
+Paragraph boundaries may derive from:
+
+```text
+structured-source paragraph boundary
+
+Recognition paragraph
+
+line spacing
+
+layout grouping
+
+bubble structure
+
+source markup
+
+manual correction
+```
+
+OCR newline alone is not sufficient semantic evidence.
+
+---
+
+# 30. Sentence
+
+Sentence is an optional/progressive linguistic node useful for:
+
+```text
+Translation preparation
+
+Search
+
+Annotation
+
+Alignment
+
+language analysis
+```
+
+Text Model must not require perfect sentence boundaries during initial SourceDocument construction.
+
+---
+
+# 31. Provisional Sentence
+
+Initial construction may use:
+
+```text
+ProvisionalSentence
+```
+
+covering one Paragraph or other safe scope.
+
+Later Text Processing segmentation may:
+
+```text
+split
+
+merge
+
+adjust boundaries
+```
+
+while preserving source provenance.
+
+---
+
+# 32. Segmentation Ownership
+
+Sentence/semantic segmentation belongs to:
+
+```text
+Text Processing
+```
+
+Detailed rules are defined by:
+
+```text
+01-architecture/text/SEGMENTATION.md
+```
+
+Segmentation does not create TranslationUnit.
+
+---
+
+# 33. Span
+
+Span represents a continuous range sharing relevant properties.
+
+Possible reasons to split:
+
+```text
+language change
+
+script change
+
+source mapping change
+
+style hint
+
+annotation
+
+semantic role
+
+confidence group
+```
+
+Do not create unnecessary spans.
+
+---
+
+# 34. Token
+
+Token is an optional linguistic processing unit.
+
+Possible token kinds:
+
+```text
+Word
+
+Character
+
+Punctuation
+
+Number
+
+Symbol
+
+Subword
+
+Whitespace
+
+Unknown
+```
+
+Tokenization should be lazy unless required.
+
+---
+
+# 35. Recognition Word vs Text Token
+
+Recognition/OCR word and Text Token are different concepts.
+
+Recognition word is influenced by:
+
+```text
+OCR engine
+
+visual geometry
+
+provider segmentation
+```
+
+Text Token is influenced by:
+
+```text
+language
+
+tokenizer
+
+processing purpose
+```
+
+Therefore:
+
+```text
+Recognition Word
+    ≠
+Text Token
+```
+
+---
+
+# 36. CJK Tokenization
+
+Example source:
+
+```text
+我喜欢看漫画
+```
+
+may be tokenized as:
+
+```text
+我 | 喜欢 | 看 | 漫画
+```
+
+or:
+
+```text
+我 | 喜 | 欢 | 看 | 漫 | 画
+```
+
+depending on the linguistic operation.
+
+Text Model must not hardcode OCR provider word boundaries as linguistic token boundaries.
+
+---
+
+# 37. Character Range
+
+Sentence, Span, Token, Annotation and Source Mapping may use ranges.
+
+Recommended range semantics:
+
+```text
+[start, end)
+```
+
+where `end` is exclusive.
+
+The convention must be globally consistent inside Text Model contracts.
+
+---
+
+# 38. Unicode Indexing
+
+Every text range contract must define its indexing unit.
+
+Possible units include:
+
+```text
+Unicode Code Point
+
+Grapheme Cluster
+
+UTF-16 Code Unit
+
+UTF-8 Byte Offset
+```
+
+Do not leave the unit implicit.
+
+---
+
+# 39. Recommended Internal Range Unit
+
+Prefer:
+
+```text
+Unicode Code Point
+```
+
+or a well-defined grapheme-aware abstraction for semantic text operations.
+
+UTF-16 conversion should occur at UI/platform boundaries where necessary.
+
+Do not use UTF-8 byte offset as the default linguistic index.
+
+---
+
+# 40. Grapheme Awareness
+
+Never assume:
+
+```text
+1 displayed character
+=
+1 byte
+```
+
+or:
+
+```text
+1 displayed character
+=
+1 UTF-16 code unit
+```
+
+Combining marks, emoji, variation selectors and complex graphemes must remain valid.
+
+---
+
+# 41. Text Layers
+
+Text Model distinguishes source-language representations.
+
+Recommended conceptual layers:
+
+```text
+Raw Text?
+    ↓
+Source Text
+    ↓
+Normalized Text
+    ↓
+Corrected Text?
+```
+
+`Display Text` should not be a core authoritative source-language layer by default.
+
+---
+
+# 42. Raw Text
+
+Raw Text is the nearest retained representation of source/provider text before canonical normalization.
+
+For OCR-derived content it may preserve provider-normalized recognition output for:
+
+```text
+debugging
+
+benchmarking
+
+correction comparison
+```
+
+Raw Text should normally have limited retention.
+
+---
+
+# 43. Source Text
+
+Source Text is the source-language text accepted from the upstream semantic input.
+
+It must preserve:
+
+```text
+source meaning
+
+important punctuation
+
+important script distinctions
+
+source provenance
+```
+
+It must not include translation.
+
+---
+
+# 44. Normalized Text
+
+Normalized Text may apply semantics-preserving transformations such as:
+
+```text
+Unicode normalization
+
+whitespace normalization
+
+newline normalization
+
+invalid control cleanup
+
+safe punctuation compatibility normalization
+
+known encoding-artifact cleanup
+```
+
+---
+
+# 45. Normalization Must Not
+
+Default normalization must not:
+
+```text
+translate text
+
+change terminology
+
+rewrite grammar
+
+guess uncertain Recognition errors
+
+convert Simplified ↔ Traditional Chinese automatically
+
+silently delete meaningful punctuation
+```
+
+---
+
+# 46. Corrected Text
+
+Corrected Text represents an approved modification of source-language content.
+
+Potential sources:
+
+```text
+confirmed user correction
+
+approved automatic correction
+
+OCR correction workflow
+
+explicit rule-based correction
+```
+
+Correction must preserve provenance.
+
+---
+
+# 47. Correction Record
+
+A correction should carry enough information to explain:
+
+```text
+target
+
+previous value
+
+new value
+
+actor/source
+
+reason
+
+base version
+
+timestamp
+
+confidence/status where applicable
+```
+
+Do not silently overwrite source lineage.
+
+---
+
+# 48. Canonical Source Text
+
+Recommended precedence:
+
+```text
+Confirmed Corrected Text
+        ↓
+Normalized Text
+        ↓
+Source Text
+```
+
+Raw Text is diagnostic/provenance material.
+
+Presentation-formatted text is not canonical source-language truth.
+
+---
+
+# 49. Display Text Ownership
+
+The v1 Text Model included:
+
+```text
+Display Text
+```
+
+as a Text Model layer.
+
+In v2, layout-specific display transformation belongs primarily to:
+
+```text
+Presentation
+```
+
+Text Processing may preserve:
+
+```text
+source style hints
+
+semantic whitespace
+
+ruby annotations
+```
+
+but should not own final display formatting.
+
+---
+
+# 50. No Translation Inside SourceDocument
+
+`SourceDocument` must not use:
+
+```text
+translatedText
+```
+
+as embedded current truth.
+
+Translation is a separate module-owned Artifact.
+
+---
+
+# 51. Translation Association
+
+SourceDocument must expose stable source identities/ranges sufficient for Translation to build explicit alignment.
+
+Conceptually:
+
+```text
+SourceDocument Node(s)
+        ↕
+TranslationUnit source references
+        ↕
+TranslationArtifact
+```
+
+Translation owns the Translation-side relationships.
+
+---
+
+# 52. Source Reference
+
+SourceReference links a Text Node/range to its originating source.
+
+A generic SourceReference may contain:
+
+```text
+SourceKind
+
+SourceArtifactRef / source identity
+
+SourceEntityId / locator
+
+SourceEntityType
+
+SourceRange?
+
+GeometryRef?
+
+MappingType
+
+Confidence?
+
+Metadata?
+```
+
+The exact schema belongs to Text Processing contracts.
+
+---
+
+# 53. Source Kinds
+
+Possible source families:
+
+```text
+RecognitionArtifact
+
+StructuredText
+
+HTML
+
+PlainText
+
+UserInput
+
+DocumentTextLayer
+
+FutureImport
+```
+
+Avoid coupling canonical contracts to legacy `OCR Document` as the only source type.
+
+---
+
+# 54. Recognition-Derived Reference
+
+For Recognition-derived text, SourceReference may point back to:
+
+```text
+RecognitionArtifactId
+
+Recognition block/region identity
+
+line/word identity where exposed
+
+geometry reference
+```
+
+Detailed OCR internals remain subordinate to Recognition.
+
+---
+
+# 55. Structured-Source Reference
+
+For structured sources, references may use:
+
+```text
+source locator
+
+semantic block identity
+
+text offsets
+
+chapter/section locator
+
+adapter-provided stable identity
+```
+
+No geometry is required when it has no semantic purpose.
+
+---
+
+# 56. Many-to-Many Mapping
+
+Source mapping must support:
+
+```text
+N source entities
+        ↕
+M text nodes/ranges
+```
+
+because reconstruction may:
+
+```text
+merge lines
+
+split bubbles
+
+combine regions
+
+split one paragraph
+
+combine multiple structured blocks
+```
+
+Never assume 1:1 mapping.
+
+---
+
+# 57. Mapping Type
+
+Useful mapping categories may include:
+
+```text
+Exact
+
+Merged
+
+Split
+
+Derived
+
+Approximate
+
+Manual
+
+Synthetic
+
+Unknown
+```
+
+---
+
+# 58. Source Mapping Index
+
+A SourceDocument may maintain an index for efficient bidirectional lookup.
+
+Conceptually:
+
+```text
+Source Entity
+    → Text Nodes/Ranges
+```
+
+and:
+
+```text
+Text Node/Range
+    → Source References
+```
+
+---
+
+# 59. Geometry Reference
+
+Text Processing should normally reference geometry rather than duplicate the full geometric model.
+
+Geometry authority remains with the upstream source Artifact/Recognition semantics.
+
+Possible references:
+
+```text
+GeometryId
+
+BoundingBoxRef
+
+PolygonRef
+
+CoordinateSpace
+
+SourceArtifactRef
+```
+
+---
+
+# 60. Coordinate Space
+
+Every geometry reference must make coordinate space explicit.
+
+Examples:
+
+```text
+source-image pixels
+
+capture coordinates
+
+normalized image coordinates
+
+page coordinates
+
+viewport coordinates
+```
+
+Do not mix coordinate systems without transformation metadata.
+
+---
+
+# 61. Order Model
+
+Every ordered node scope must have deterministic ordering.
+
+Possible fields:
+
+```text
+OrderIndex
+
+PreviousNodeId?
+
+NextNodeId?
+
+SourceOrderRef?
+```
+
+Order must not depend on:
+
+```text
+hash-map iteration
+
+provider response accident
+
+parallel execution completion order
+```
+
+---
+
+# 62. Global Source Order
+
+SourceDocument should allow deterministic traversal of main semantic content.
+
+Example:
+
+```text
+Document
+    ↓
+Sections
+    ↓
+Blocks
+    ↓
+Paragraphs
+```
+
+Linguistic subnodes may be traversed as available.
+
+Global linear traversal must not destroy hierarchical relationships.
+
+---
+
+# 63. Order Provenance
+
+Order may come from:
+
+```text
+Recognition reading hints
+
+detailed OCR Reading Order
+
+structured source order
+
+Text Processing reconstruction
+
+manual correction
+```
+
+Source of the order decision should remain explainable where useful.
+
+---
+
+# 64. Auxiliary Content
+
+Content outside the main reading flow may be retained as auxiliary.
+
+Examples:
+
+```text
+SFX
+
+watermark
+
+UI text
+
+advertisement
+
+decorative text
+
+metadata text
+
+footnotes
+```
+
+Auxiliary content should retain provenance.
+
+---
+
+# 65. Auxiliary Does Not Mean Deleted
+
+Auxiliary content may still support:
+
+```text
+Presentation
+
+manual inspection
+
+Search
+
+future Translation
+
+export options
+```
+
+depending on policy.
+
+---
+
+# 66. Relationship Model
+
+SourceDocument may support non-hierarchical semantic relationships.
+
+Possible examples:
+
+```text
+continues
+
+references
+
+annotation_of
+
+visually_near
+
+derived_from
+
+alternative
+```
+
+Relationships requiring deeper downstream semantics should be owned by the appropriate downstream domain.
+
+---
+
+# 67. Translation Relationship Boundary
+
+Do not store:
+
+```text
+translation_of
+```
+
+as the sole authoritative Translation relationship inside SourceDocument.
+
+Translation-specific alignment belongs to Translation.
+
+Text Model may expose stable source references that enable it.
+
+---
+
+# 68. Speaker Relationship Boundary
+
+Speaker inference is not mandatory Text Model authority.
+
+Possible speaker information should initially remain:
+
+```text
+Annotation
+or
+low-confidence semantic hint
+```
+
+unless a future Knowledge/Dialogue owner is created.
+
+---
+
+# 69. Annotation
+
+Annotation attaches auxiliary semantic information without mutating canonical text.
+
+Examples:
+
+```text
+proper-name candidate
+
+term candidate
+
+speaker candidate
+
+emphasis
+
+uncertainty
+
+ruby/furigana
+
+correction proposal
+
+glossary match hint
+```
+
+---
+
+# 70. Annotation Integrity
+
+Annotation should identify:
+
+```text
+target NodeId
+
+range where applicable
+
+type
+
+value/reference
+
+source
+
+confidence
+
+metadata
+```
+
+It must not encode semantic annotations directly into source strings.
+
+---
+
+# 71. Style Hints
+
+Text Model may preserve source-style hints useful downstream.
+
+Examples:
+
+```text
+emphasis
+
+bold/italic source hint
+
+handwritten
+
+source font-size estimate
+
+source color
+
+vertical writing
+
+ruby
+
+decorative
+```
+
+These are hints, not final Presentation styles.
+
+---
+
+# 72. Language Metadata
+
+Language metadata may exist at multiple scopes:
+
+```text
+Document
+
+Section
+
+Block
+
+Paragraph
+
+Sentence
+
+Span
+
+Token
+```
+
+where useful.
+
+---
+
+# 73. Language Metadata Fields
+
+Possible fields:
+
+```text
+LanguageTag
+
+Script
+
+Confidence
+
+DetectionSource
+
+Inherited?
+
+Mixed?
+```
+
+---
+
+# 74. Language Inheritance
+
+Child nodes may inherit a parent language.
+
+Example:
+
+```text
+Document = zh-Hans
+
+Paragraph = inherited zh-Hans
+
+Span = en
+```
+
+This avoids redundant data while supporting mixed-language content.
+
+---
+
+# 75. Language Tags
+
+Prefer standard language identifiers such as:
+
+```text
+BCP 47
+```
+
+Examples:
+
+```text
+vi
+
+en
+
+zh-Hans
+
+zh-Hant
+
+ja
+
+ko
+```
+
+Do not invent arbitrary CRAI-specific language codes unless unavoidable.
+
+---
+
+# 76. Script Metadata
+
+Useful script identifiers may include:
+
+```text
+Latin
+
+Han
+
+Hiragana
+
+Katakana
+
+Hangul
+
+Arabic
+
+Cyrillic
+
+Mixed
+
+Unknown
+```
+
+Prefer standards-based representation where practical.
+
+---
+
+# 77. Direction Metadata
+
+Text nodes may retain source-writing information such as:
+
+```text
+writing mode
+
+text direction
+
+line direction
+
+block direction
+
+rotation
+```
+
+For Recognition-derived input, reuse authoritative Recognition/Text Direction results.
+
+Do not infer geometry direction twice without reason.
+
+---
+
+# 78. Confidence Model
+
+Avoid one undifferentiated confidence value.
+
+Possible dimensions:
+
+```text
+RecognitionConfidence
+
+OrderConfidence
+
+BoundaryConfidence
+
+LanguageConfidence
+
+MappingConfidence
+
+NormalizationConfidence
+```
+
+A high recognition confidence does not imply high sentence-boundary confidence.
+
+---
+
+# 79. Quality Flags
+
+Possible flags:
+
+```text
+LowRecognitionConfidence
+
+AmbiguousOrder
+
+UnknownLanguage
+
+BrokenMapping
+
+MissingSource
+
+SuspectedDuplicate
+
+IncompleteText
+
+ManualReviewRequired
+```
+
+Flags describe uncertainty.
+
+They must not silently modify text.
+
+---
+
+# 80. Normalization Pipeline
+
+Conceptually:
+
+```text
+Accepted Source Text
+    ↓
 Unicode Validation
-
-↓
-
+    ↓
 Unicode Normalization
-
-↓
-
-Whitespace Normalization
-
-↓
-
-Line Break Analysis
-
-↓
-
-Control Character Cleanup
-
-↓
-
-Punctuation Compatibility
-
-↓
-
+    ↓
+Whitespace Analysis
+    ↓
+Line-Break Analysis
+    ↓
+Control-Character Cleanup
+    ↓
+Safe Punctuation Normalization
+    ↓
 Normalized Text
 ```
 
-Mỗi bước nên có thể bật hoặc tắt bằng Profile.
+Exact enabled operations depend on Text Processing policy/profile.
 
 ---
 
-# 72. Unicode Normalization Policy
+# 81. Unicode Normalization Policy
 
-Hệ thống cần chọn rõ một chuẩn như:
+Text Processing must explicitly choose normalization policy.
 
-* NFC
-* NFKC
-
-NFC thường an toàn hơn để giữ hình thức ngôn ngữ.
-
-NFKC chỉ nên dùng khi chấp nhận chuyển đổi các ký tự tương thích.
-
-Normalization Policy phải được lưu trong Metadata.
-
----
-
-# 73. Whitespace Normalization
-
-Có thể xử lý:
-
-* khoảng trắng lặp
-* khoảng trắng đầu cuối
-* newline không cần thiết
-* non-breaking space
-* full-width space
-
-Không nên xóa khoảng trắng nếu nó có ý nghĩa trong:
-
-* ASCII Art
-* Code
-* biểu thức
-* định dạng đặc biệt
-
----
-
-# 74. OCR Line Break Handling
-
-OCR thường trả về newline theo bố cục ảnh.
-
-Ví dụ:
+Possible choices include:
 
 ```text
-Tôi rất
-vui được gặp
-bạn.
+NFC
+
+NFKC in explicitly compatible scenarios
 ```
 
-Normalized Text có thể là:
+NFC is generally safer for preserving source distinctions.
 
-```text
-Tôi rất vui được gặp bạn.
-```
-
-Nhưng Source Mapping vẫn phải giữ các Line gốc.
+The applied normalization policy/version must be recorded.
 
 ---
 
-# 75. Hyphenation Handling
+# 82. Whitespace
 
-Với văn bản Latin, từ có thể bị chia cuối dòng:
+Whitespace normalization must consider source semantics.
+
+Do not blindly collapse whitespace in:
+
+```text
+code
+
+ASCII art
+
+mathematical expression
+
+intentional formatting
+
+certain imported text
+```
+
+---
+
+# 83. Recognition Line Breaks
+
+Recognition line breaks often represent visual layout rather than linguistic paragraph/sentence boundaries.
+
+Example:
+
+```text
+我真的
+不知道
+怎么办。
+```
+
+may normalize to a continuous linguistic unit while preserving original source mappings.
+
+---
+
+# 84. Latin Hyphenation
+
+Line-end hyphenation may be reconstructed only when sufficiently supported.
+
+Example:
 
 ```text
 trans-
 lation
 ```
 
-Normalization có thể gộp thành:
+may become:
 
 ```text
 translation
 ```
 
-Chỉ được gộp khi Confidence đủ cao hoặc có quy tắc rõ ràng.
-
-Phải lưu Correction hoặc Normalization Record.
+with a Normalization Record/provenance.
 
 ---
 
-# 76. CJK Text Handling
+# 85. CJK Handling
 
-Với tiếng Trung, Nhật và Hàn:
-
-* không thể dựa hoàn toàn vào khoảng trắng
-* dấu câu có thể là full-width
-* dòng dọc và dòng ngang có quy tắc khác
-* Tokenization nên tách khỏi OCR Word
-
-Text Model không được chèn khoảng trắng máy móc giữa mọi OCR Word.
-
----
-
-# 77. Ruby and Furigana
-
-Ruby Text có thể được biểu diễn bằng:
-
-* Annotation
-* Relationship
-* Dedicated Span Metadata
-
-Ví dụ:
+For Chinese/Japanese/Korean:
 
 ```text
-Base Text: 漢字
-Ruby Text: かんじ
+do not rely on whitespace for word boundaries
+
+do not insert spaces between Recognition words mechanically
+
+preserve full-width punctuation semantics
+
+preserve vertical/horizontal source hints
 ```
 
-Ruby không nên bị nối trực tiếp thành:
+---
+
+# 86. Simplified and Traditional Chinese
+
+Default source normalization must preserve:
 
 ```text
-漢字かんじ
+zh-Hans
 ```
 
-nếu không có ký hiệu phân biệt.
-
----
-
-# 78. Simplified and Traditional Chinese
-
-Text Model phải giữ nguyên Script nguồn:
-
-* `zh-Hans`
-* `zh-Hant`
-
-Việc chuyển đổi Simplified/Traditional là một bước xử lý riêng.
-
-Không được tự động chuyển đổi trong Normalization mặc định.
-
----
-
-# 79. Punctuation Preservation
-
-Dấu câu có vai trò quan trọng với:
-
-* Sentence Segmentation
-* cảm xúc
-* Dialogue Style
-* Translation
-* Presentation
-
-Không nên loại bỏ:
-
-* `…`
-* `!?`
-* `—`
-* dấu ngoặc đặc biệt
-* dấu kéo dài
-* dấu lặp
-
-Normalization chỉ nên chuyển đổi khi có quy tắc tương đương rõ ràng.
-
----
-
-# 80. Repeated Punctuation
-
-Truyện tranh thường sử dụng:
+and:
 
 ```text
-!!!
-???
-……
+zh-Hant
+```
+
+as source distinctions.
+
+Simplified/Traditional conversion is not generic normalization.
+
+---
+
+# 87. Punctuation Preservation
+
+Preserve meaningful source punctuation such as:
+
+```text
+…
+
 !?
+
+—
+
+repeated punctuation
+
+CJK quotation marks
+
+elongation marks
 ```
 
-Repeated Punctuation phải được giữ trong Source Text.
-
-Translation hoặc Presentation có thể thay đổi sau, nhưng Text Model không nên rút gọn mặc định.
+unless an explicit semantics-preserving normalization rule applies.
 
 ---
 
-# 81. Empty and Whitespace Nodes
+# 88. Ruby and Furigana
 
-Node không có nội dung có thể xuất hiện do:
+Ruby/furigana should remain structured.
 
-* OCR lỗi
-* Layout Region trống
-* Decorative Region
-* Mapping chưa hoàn tất
-
-Text Model Builder có thể:
-
-* loại Node khỏi Main Flow
-* giữ Node với Quality Flag
-* chuyển Node sang Auxiliary
-* ghi Diagnostics
-
-Không được tạo Sentence rỗng hàng loạt mà không có lý do.
-
----
-
-# 82. Duplicate Text
-
-Duplicate Text có thể xuất phát từ:
-
-* OCR Region trùng
-* Bubble chồng
-* Provider Merge
-* ảnh lặp
-
-Text Model không nên tự xóa dựa chỉ trên chuỗi giống nhau.
-
-Hai Bubble khác nhau có thể thực sự chứa cùng nội dung.
-
-Duplicate Detection phải kết hợp:
-
-* Source Mapping
-* Geometry
-* Entity Relationship
-* OCR Diagnostics
-
----
-
-# 83. Manual Correction Model
-
-Manual Correction phải được lưu dưới dạng Patch hoặc Revision.
-
-Một Correction nên chứa:
-
-* Correction ID
-* Target Node ID
-* Previous Text
-* New Text
-* Character Range
-* Actor
-* Reason
-* Timestamp
-* Base Version
-* Status
-
----
-
-# 84. Correction Precedence
-
-Thứ tự ưu tiên nội dung khuyến nghị:
-
-1. Confirmed User Correction
-2. Approved Automatic Correction
-3. Normalized Text
-4. Source Text
-5. Raw Text
-
-Correction chưa được xác nhận không nên tự động trở thành Canonical Text.
-
----
-
-# 85. Immutable Source
-
-Source Text và Source Mapping nên được coi là immutable trong cùng Document Version.
-
-Khi thay đổi Source Text:
-
-* tạo Revision
-* tăng Version
-* giữ lịch sử
-* invalid cache liên quan
-
-Không nên sửa trực tiếp mà không có Audit Record.
-
----
-
-# 86. Revision Model
-
-Revision nên chứa:
-
-* Revision ID
-* Document ID
-* Base Version
-* New Version
-* Change Type
-* Changed Nodes
-* Actor
-* Timestamp
-* Reason
-* Metadata
-
-Change Type có thể là:
-
-* OCR Update
-* Reading Order Update
-* Manual Correction
-* Segmentation Update
-* Structural Update
-* Import Update
-
----
-
-# 87. Incremental Update
-
-Text Model phải hỗ trợ cập nhật một phần.
-
-Ví dụ:
-
-* một Bubble được OCR lại
-* một Region được sửa
-* Reading Order của một Panel thay đổi
-* một Paragraph được chia lại
-
-Không nên tái tạo toàn bộ Document nếu chỉ một Scope thay đổi.
-
----
-
-# 88. Node Identity Stability
-
-Node ID nên được giữ ổn định nếu Node vẫn đại diện cho cùng nội dung logic.
-
-Ví dụ:
-
-* sửa một ký tự không nhất thiết tạo Block ID mới
-* thay đổi Sentence Boundary có thể tạo Sentence ID mới
-* thay đổi Source Region hoàn toàn có thể yêu cầu Node mới
-
-Identity Policy phải được định nghĩa rõ.
-
----
-
-# 89. Stable Node ID
-
-Node ID không nên phụ thuộc hoàn toàn vào:
-
-* Order Index
-* Random Runtime ID
-* Memory Address
-* Provider Result Index
-
-Vì Order có thể thay đổi trong khi Node vẫn là cùng thực thể.
-
----
-
-# 90. Content Hash
-
-Content Hash có thể dùng cho:
-
-* Cache
-* Change Detection
-* Deduplication
-* Translation Reuse
-
-Hash nên xác định rõ dựa trên:
-
-* Canonical Text
-* Language
-* Node Type
-* Normalization Version
-
-Không nên dùng Hash làm ID duy nhất cho Node vì nhiều Node có thể có cùng nội dung.
-
----
-
-# 91. Serialization
-
-Text Document phải có thể serialize sang dạng ổn định.
-
-Các yêu cầu:
-
-* giữ Order
-* giữ ID
-* giữ Source Mapping
-* giữ Version
-* giữ Unicode chính xác
-* không phụ thuộc runtime-specific object
-
-Định dạng có thể là:
-
-* JSON
-* MessagePack
-* Protobuf
-* Internal Database Model
-
-Contract logic không được phụ thuộc một định dạng duy nhất.
-
----
-
-# 92. Compact Representation
-
-Với Runtime trên trình duyệt hoặc Extension, có thể cần Compact Representation.
-
-Compact Mode có thể:
-
-* bỏ Diagnostics chi tiết
-* bỏ Raw Text
-* rút gọn Metadata
-* dùng Reference Table
-* lazy-load Token
-
-Compact Mode không được làm mất:
-
-* Canonical Text
-* Order
-* Node ID
-* Source Mapping cần cho Presentation
-
----
-
-# 93. Full Representation
-
-Full Representation phù hợp cho:
-
-* Debug
-* Benchmark
-* Export
-* Training Data
-* Manual Editing
-* Audit
-
-Full Representation có thể chứa:
-
-* Raw Text
-* mọi Confidence
-* mọi Source Reference
-* Normalization Record
-* Diagnostics
-* Revision History
-
----
-
-# 94. Validation Rules
-
-Text Document phải được kiểm tra:
-
-* ID không trùng trong cùng Scope
-* Parent Reference hợp lệ
-* Order Index hợp lệ
-* Character Range hợp lệ
-* Source Reference tồn tại
-* Canonical Text xác định được
-* Language Metadata hợp lệ
-* không có vòng lặp Parent-Child
-* Mapping không tham chiếu Entity không tồn tại
-
----
-
-# 95. Structural Invariants
-
-Mỗi Node trừ Root phải có Parent hợp lệ.
-
-Node không được thuộc đồng thời hai Parent cấu trúc khác nhau.
-
-Một Sentence không thể trực tiếp thuộc Document nếu Contract yêu cầu Paragraph.
-
-Nếu cần linh hoạt, phải dùng Optional Layer hoặc Synthetic Parent.
-
----
-
-# 96. Synthetic Nodes
-
-Synthetic Node có thể được tạo để hoàn thiện cấu trúc.
-
-Ví dụ:
-
-* Synthetic Page
-* Synthetic Section
-* Synthetic Paragraph
-* Synthetic Sentence
-
-Synthetic Node phải được đánh dấu:
-
-* `isSynthetic = true`
-* Source = Builder
-* Reason
-* Confidence
-
----
-
-# 97. Orphan Handling
-
-Node không ánh xạ được vào cấu trúc cha có thể:
-
-* đưa vào Orphan Section
-* đưa vào Auxiliary Content
-* đánh dấu Invalid
-* yêu cầu Manual Review
-
-Không được âm thầm bỏ mất nội dung.
-
----
-
-# 98. Mapping Validation
-
-Source Mapping phải đảm bảo:
-
-* Source Entity tồn tại
-* Character Range không vượt Text
-* Mapping Type hợp lệ
-* Geometry Reference đúng Coordinate Space
-* Mapping Confidence nằm trong phạm vi chuẩn
-
----
-
-# 99. Text Statistics
-
-Text Document có thể cung cấp:
-
-* Page Count
-* Block Count
-* Paragraph Count
-* Sentence Count
-* Token Count
-* Character Count
-* Language Distribution
-* Main/Auxiliary Count
-* Low Confidence Node Count
-* Mapping Coverage
-
-Statistics không phải nguồn dữ liệu chính, chỉ là dữ liệu dẫn xuất.
-
----
-
-# 100. Mapping Coverage
-
-Mapping Coverage đo tỷ lệ Text có thể truy ngược về Source Entity.
-
-Mục tiêu với OCR-derived Text Document nên gần:
+Example:
 
 ```text
-100%
+BaseText = 漢字
+
+Ruby = かんじ
 ```
 
-Text được người dùng thêm mới có thể có Source Type là `User Input` thay vì OCR Entity.
+Do not flatten them into an ambiguous string by default.
 
 ---
 
-# 101. Diagnostics
+# 89. Empty Nodes
 
-Diagnostics nên ghi nhận:
+Empty/whitespace nodes may result from:
 
-* Missing Mapping
-* Invalid Range
-* Unknown Language
-* Normalization Change
-* Synthetic Node Created
-* Orphan Node
-* Duplicate Candidate
-* Order Mismatch
-* Low Confidence Boundary
-* Unsupported Script
+```text
+Recognition failure
 
----
+decorative region
 
-# 102. Explainability
+source markup
 
-Hệ thống cần có khả năng giải thích:
+incomplete mapping
+```
 
-* Node được tạo từ OCR Entity nào
-* tại sao hai dòng được gộp
-* tại sao một Block thuộc Auxiliary
-* Normalized Text khác Source Text ở đâu
-* Sentence Boundary được tạo bởi module nào
+Possible treatment:
 
----
+```text
+omit from main flow
 
-# 103. Error Model
+retain with quality flag
 
-Các lỗi có thể gồm:
+move to auxiliary
 
-* InvalidOCRDocument
-* InvalidReadingSequence
-* SourceEntityMissing
-* MappingFailed
-* InvalidTextRange
-* UnsupportedDocumentType
-* InvalidLanguageTag
-* StructuralValidationFailed
-* SerializationFailed
-* VersionConflict
+record diagnostic observation
+```
+
+Do not create meaningless empty linguistic hierarchies.
 
 ---
 
-# 104. Events
+# 90. Duplicate Text
 
-Các Event khuyến nghị:
+Do not remove duplicated strings based solely on text equality.
+
+Two different source Blocks may legitimately contain identical content.
+
+Duplicate analysis should consider:
+
+```text
+source identity
+
+mapping
+
+geometry/locator
+
+relationships
+
+content provenance
+```
+
+---
+
+# 91. Synthetic Nodes
+
+Synthetic nodes may be created when needed to maintain a usable structure.
+
+Examples:
+
+```text
+SyntheticSection
+
+SyntheticBlock
+
+SyntheticParagraph
+
+ProvisionalSentence
+```
+
+They must carry explicit provenance such as:
+
+```text
+isSynthetic
+
+reason
+
+source
+
+confidence
+```
+
+---
+
+# 92. Orphan Handling
+
+Unmapped content must not disappear silently.
+
+Possible outcomes:
+
+```text
+OrphanSection
+
+AuxiliaryContent
+
+Invalid flag
+
+ManualReviewRequired
+```
+
+---
+
+# 93. Structural Validation
+
+Validate at least:
+
+```text
+unique IDs in scope
+
+valid parent references
+
+no parent-child cycles
+
+valid ordering
+
+valid ranges
+
+valid source references
+
+valid language tags
+
+deterministic canonical text
+
+mapping target existence
+```
+
+---
+
+# 94. Mapping Validation
+
+For source mappings validate:
+
+```text
+source exists
+
+range is valid
+
+mapping type is valid
+
+coordinate space is known when geometry exists
+
+confidence is valid
+```
+
+---
+
+# 95. Canonical Text Validation
+
+Every translatable/searchable source node must be able to resolve canonical source text according to the Text Processing contract.
+
+A node without canonical text may still exist as structural/auxiliary metadata.
+
+---
+
+# 96. Source Mapping Coverage
+
+Recognition-derived text should strive for very high mapping coverage.
+
+Ideal target:
+
+```text
+close to 100%
+```
+
+for source-derived content where the upstream source exposes stable identity.
+
+User-created text may instead reference:
+
+```text
+UserInput
+```
+
+or another explicit source type.
+
+---
+
+# 97. Explainability
+
+Text Processing should be able to explain important transformations.
+
+Examples:
+
+```text
+which source entities produced this Block?
+
+why were two lines merged?
+
+why was content classified Auxiliary?
+
+what normalization changed this string?
+
+which segmentation operation created this boundary?
+```
+
+---
+
+# 98. Normalization Record
+
+Meaningful normalization changes should be traceable.
+
+A record may capture:
+
+```text
+operation
+
+before
+
+after
+
+range
+
+rule/version
+
+confidence
+
+reason
+```
+
+Exact record schema belongs to Text Processing contracts.
+
+---
+
+# 99. Correction vs Normalization
+
+Normalization:
+
+```text
+preserves semantic source content
+```
+
+Correction:
+
+```text
+changes accepted source representation
+based on explicit evidence/approval
+```
+
+These must remain distinguishable.
+
+---
+
+# 100. Immutable Published Model
+
+A Published SourceDocumentArtifact is immutable.
+
+Do not mutate it in place for:
+
+```text
+new segmentation
+
+manual correction
+
+new source content
+
+new semantic structure
+```
+
+Create a new Candidate/Artifact revision as defined by Text Processing.
+
+---
+
+# 101. Incremental Reconstruction
+
+Text Processing may optimize rebuilding by recomputing only affected scopes.
+
+Examples:
+
+```text
+one Recognition Block corrected
+
+one Paragraph boundary changed
+
+one source block updated
+
+one ordering relationship changed
+```
+
+Optimization must produce a coherent new immutable result.
+
+---
+
+# 102. Incremental Does Not Mean Mutable Publication
+
+Internal incremental computation is allowed.
+
+Public Artifact semantics remain:
+
+```text
+Candidate
+    ↓
+validation
+    ↓
+Published immutable Artifact
+```
+
+---
+
+# 103. Node Identity Stability
+
+Node IDs should remain stable when a node still represents the same logical semantic entity.
+
+Changing one character does not necessarily require a new BlockId.
+
+Changing a structural identity completely may.
+
+---
+
+# 104. Node ID Must Not Depend Solely On
+
+Avoid identities derived only from:
+
+```text
+OrderIndex
+
+RuntimeRevisionId
+
+AttemptId
+
+memory address
+
+provider array index
+
+content hash
+```
+
+These values do not define semantic identity reliably.
+
+---
+
+# 105. Content Hash
+
+Content hash may assist:
+
+```text
+cache lookup
+
+change detection
+
+deduplication
+
+Translation reuse
+```
+
+It should define its inputs explicitly, such as:
+
+```text
+canonical text
+
+language
+
+node kind
+
+normalization version
+```
+
+Hash is not semantic Node identity.
+
+---
+
+# 106. Serialization
+
+SourceDocument must be serializable in a stable representation.
+
+Serialization must preserve:
+
+```text
+identity
+
+ordering
+
+Unicode
+
+source mapping
+
+semantic versions
+
+relationships required by the contract
+```
+
+---
+
+# 107. Serialization Format
+
+Possible physical formats:
+
+```text
+JSON
+
+MessagePack
+
+Protobuf
+
+database representation
+```
+
+Logical semantics must not depend on one serialization technology.
+
+---
+
+# 108. No Runtime Objects
+
+Serialized/public Text Model must not contain:
+
+```text
+thread
+
+mutex
+
+callback
+
+closure
+
+provider SDK response
+
+native DOM node
+
+native window handle
+
+database connection
+```
+
+---
+
+# 109. Compact Representation
+
+Compact physical representation may:
+
+```text
+omit heavy Diagnostics
+
+omit Raw Text
+
+compress metadata
+
+use reference tables
+
+lazy-load Tokens
+```
+
+It must preserve required semantic contract information.
+
+---
+
+# 110. Full Representation
+
+A full/debug representation may retain more:
+
+```text
+Raw Text
+
+detailed confidence
+
+source mappings
+
+normalization records
+
+revision history
+
+diagnostic references
+```
+
+Privacy/retention rules still apply.
+
+---
+
+# 111. Lazy Construction
+
+Recommended general principle:
+
+```text
+Document / core Blocks
+    → construct when needed for SourceDocument
+
+Paragraph
+    → construct according to profile/source
+
+Sentence
+    → provisional or segmented
+
+Span
+    → on demand
+
+Token
+    → lazy
+```
+
+Do not tokenize whole long documents unless required.
+
+---
+
+# 112. Large Documents
+
+For long novels/webtoons:
+
+```text
+bounded document windows
+
+paged/lazy loading
+
+incremental SourceDocument scopes
+```
+
+may be required.
+
+Text Model must not force the whole book into memory.
+
+---
+
+# 113. Text Profile
+
+A Text Processing profile may configure:
+
+```text
+document/source type
+
+normalization policy
+
+structural granularity
+
+language policy
+
+auxiliary-content policy
+
+source-mapping policy
+
+initial segmentation policy
+
+lazy construction policy
+```
+
+---
+
+# 114. Profile Is Not User Preference Authority
+
+Text Profile is an effective Text Processing configuration snapshot.
+
+Persistent preference authority remains:
+
+```text
+Preferences
+```
+
+Session overrides remain:
+
+```text
+Reading Session
+```
+
+Application resolves effective configuration.
+
+---
+
+# 115. Comic Profile
+
+Likely priorities:
+
+```text
+Panel/Block grouping
+
+Bubble semantics
+
+geometry/source mapping
+
+Main/Auxiliary separation
+
+direction/order preservation
+```
+
+---
+
+# 116. Novel Profile
+
+Likely priorities:
+
+```text
+chapter/section structure
+
+paragraph fidelity
+
+header/footer isolation
+
+linguistic segmentation readiness
+
+semantic source locators
+```
+
+---
+
+# 117. Webtoon Profile
+
+Likely priorities:
+
+```text
+continuous ordering
+
+virtual ranges
+
+geometry mapping
+
+incremental processing
+
+bounded memory
+```
+
+---
+
+# 118. Plain Text Profile
+
+Likely priorities:
+
+```text
+paragraphs
+
+source offsets
+
+language metadata
+
+segmentation readiness
+```
+
+Geometry is unnecessary by default.
+
+---
+
+# 119. SourceDocument Builder
+
+A Text Processing implementation may contain a builder.
+
+Conceptually:
+
+```text
+Normalized Input
+    ↓
+Structural Reconstruction
+    ↓
+Source Mapping
+    ↓
+Normalization
+    ↓
+Optional Initial Segmentation
+    ↓
+Validation
+    ↓
+Candidate SourceDocument
+```
+
+The Builder is an implementation component, not an architecture owner.
+
+---
+
+# 120. Builder Contract Boundary
+
+Do not promote internal operations such as:
+
+```text
+MapStructure
+
+NormalizeText
+
+CreateSourceMapping
+```
+
+into global Event Bus events or Runtime stages automatically.
+
+They may remain internal functions/suboperations.
+
+---
+
+# 121. Runtime Relationship
+
+Runtime may execute a logical Text Processing WorkItem.
+
+Conceptually:
+
+```text
+TextProcessing WorkItem
+    ↓
+Attempt
+    ↓
+Text Processing operation
+    ↓
+Candidate SourceDocumentArtifact
+```
+
+Runtime owns WorkItem/Attempt state.
+
+Text Processing owns semantic result validity.
+
+---
+
+# 122. No Builder State Machine
+
+Deprecated architecture:
+
+```text
+Created
+→ Building
+→ Mapping
+→ Normalizing
+→ Validating
+→ Ready
+```
+
+as a public Text Model state machine.
+
+These are implementation phases.
+
+Module lifecycle belongs to:
+
+```text
+02-modules/text-processing/STATES.md
+```
+
+Runtime operation lifecycle belongs to Runtime.
+
+---
+
+# 123. No Build Command Events
+
+Deprecated:
+
+```text
+TextDocumentBuildRequested
+
+TextDocumentBuildStarted
+
+TextStructureMapped
+
+TextNormalized
+
+SourceMappingCreated
+
+TextDocumentValidated
+
+TextDocumentCompleted
+
+TextDocumentFailed
+```
+
+as a generic Event Bus execution chain.
+
+Exact canonical module events belong to:
+
+```text
+02-modules/text-processing/EVENTS.md
+```
+
+and must represent committed facts.
+
+---
+
+# 124. Artifact Publication Event
+
+If Text Processing defines a publication event, its semantics should correspond to:
+
+```text
+Published SourceDocumentArtifact
+```
+
+not internal builder progress.
+
+Exact event name remains module-owned.
+
+---
+
+# 125. Error Ownership
+
+Exact Text Processing errors belong to:
+
+```text
+02-modules/text-processing/ERRORS.md
+```
+
+This architecture document may describe failure categories but must not create a competing error taxonomy.
+
+---
+
+# 126. Useful Failure Categories
+
+Conceptual categories include:
+
+```text
+invalid source input
+
+invalid structure
+
+source mapping failure
+
+invalid text range
+
+unsupported source/document form
+
+invalid language metadata
+
+normalization failure
+
+serialization failure
+
+revision/version conflict
+```
+
+Use exact Text Processing error codes/contracts elsewhere.
+
+---
+
+# 127. Diagnostics
+
+Text Model-related diagnostic observations may include:
+
+```text
+missing source mapping
+
+invalid range
+
+unknown language
+
+normalization change
+
+synthetic node creation
+
+orphan node
+
+order mismatch
+
+low boundary confidence
+
+unsupported script
+
+mapping coverage
+```
+
+Diagnostics observes these without owning Text Processing semantics.
+
+---
+
+# 128. Statistics
+
+Derived statistics may include:
+
+```text
+BlockCount
+
+ParagraphCount
+
+SentenceCount
+
+TokenCount
+
+CharacterCount
+
+LanguageDistribution
+
+MainAuxiliaryCount
+
+LowConfidenceNodeCount
+
+MappingCoverage
+```
+
+Statistics are derived data, not source truth.
+
+---
+
+# 129. Translation Compatibility
+
+Translation's canonical input is:
+
+```text
+Published SourceDocumentArtifact
+```
+
+Translation may query or project from it:
+
+```text
+Blocks
+
+Paragraphs
+
+Sentences
+
+Spans
+
+source ranges
+
+language metadata
+
+annotations
+
+source mapping
+```
+
+according to Translation contracts.
+
+---
+
+# 130. TranslationUnit Boundary
+
+Deprecated:
+
+```text
+Text Segmentation
+    ↓
+Context Assembly
+    ↓
+Translation
+```
+
+as if Text Processing creates Translation-ready units/context.
+
+Current:
+
+```text
+SourceDocumentArtifact
+    ↓
+Translation
+    ↓
+TranslationUnit
+    ↓
+TranslationBatch
+    ↓
+Context Assembly
+```
+
+Translation owns those concepts.
+
+---
+
+# 131. Translation Alignment
+
+Text Model must expose stable source references so Translation can construct:
+
+```text
+1:1
+
+1:N
+
+N:1
+
+N:M
+```
+
+source-to-translation alignment.
+
+The alignment authority belongs to Translation.
+
+---
+
+# 132. Presentation Compatibility
+
+Presentation should normally consume:
+
+```text
+TranslationArtifact
+```
+
+rather than Text Model as its primary translated-content authority.
+
+It may reference SourceDocument/Recognition provenance as required for:
+
+```text
+source geometry
+
+source structure
+
+original text display
+```
+
+through explicit Artifact references.
+
+---
+
+# 133. No Text Model → Presentation Ownership Shortcut
+
+Deprecated implication:
+
+```text
+Text Model
+    stores translated reference/display text
+    and directly determines Presentation
+```
+
+Current boundary:
+
+```text
+SourceDocumentArtifact
+    ↓
+TranslationArtifact
+    ↓
+PresentationArtifact
+```
+
+---
+
+# 134. Search Compatibility
+
+Future Search may index:
+
+```text
+canonical source text
+
+corrected source text
+
+language
+
+document metadata
+
+node kinds
+```
+
+Translation search should use TranslationArtifact or an explicit combined search projection.
+
+Do not put Translation truth back into SourceDocument.
+
+---
+
+# 135. Export Compatibility
+
+Export may combine multiple owner Artifacts.
+
+Example:
+
+```text
+SourceDocumentArtifact
++
+TranslationArtifact
+    ↓
+Bilingual Export
+```
+
+Text Model alone does not own translated export truth.
+
+---
+
+# 136. Source Geometry and Presentation
+
+For image-derived content:
+
+```text
+SourceDocument Node
+    ↓
+SourceReference
+    ↓
+Recognition/Capture geometry
+```
+
+allows Presentation to map Translation output back to source location.
+
+Geometry authority is not transferred into Text Processing.
+
+---
+
+# 137. Structured Source Without Geometry
+
+For browser novels/plain text:
+
+```text
+SourceReference
+```
+
+may use semantic locators/ranges instead of geometry.
+
+Therefore geometry must remain optional in the generic Text Model.
+
+---
+
+# 138. Deterministic Output
+
+Given equivalent:
+
+```text
+source semantic input
+
+Text Processing profile
+
+normalization version
+
+segmentation/reconstruction version
+```
+
+Text Processing should produce deterministic semantic structure where algorithms are deterministic.
+
+Runtime timing must not change semantic output identity.
+
+---
+
+# 139. Provider Independence
+
+SourceDocument must not expose:
+
+```text
+PaddleOCR DTO
+
+Google Vision DTO
+
+browser DOM object
+
+Translation provider DTO
+```
+
+as canonical fields.
+
+Provider/source adapters normalize first.
+
+---
+
+# 140. Runtime Independence
+
+Text Model must not embed:
+
+```text
+WorkItem mutable state
+
+Attempt lifecycle state
+
+Scheduler priority
+
+cancellation token object
+
+queue handle
+```
+
+Runtime provenance may be referenced through immutable identifiers when appropriate at Artifact level.
+
+---
+
+# 141. Versioning
+
+The architecture should distinguish at least:
+
+```text
+SourceDocumentContractVersion
+
+TextProcessingImplementationVersion?
+
+NormalizationPolicyVersion
+
+TextProfileVersion
+
+SegmentationPolicyVersion where relevant
+
+Source input schema/version
+```
+
+Only semantically relevant versions should participate in compatibility/cache decisions.
+
+---
+
+# 142. Breaking Contract Change
+
+Increment SourceDocument contract/schema version when changes alter:
+
+```text
+required fields
+
+node semantics
+
+range semantics
+
+mapping semantics
+
+identity semantics
+
+serialization compatibility
+
+required hierarchy interpretation
+```
+
+---
+
+# 143. Migration
+
+Migration may:
+
+```text
+add defaults
+
+convert node kinds
+
+rebuild mapping indexes
+
+convert range convention
+
+preserve stable IDs where meaningful
+```
+
+Migration must not silently discard:
+
+```text
+Source Text
+
+confirmed corrections
+
+source provenance
+```
+
+---
+
+# 144. Cache Compatibility
+
+Text Processing cache identity may depend on:
+
+```text
+source semantic fingerprint
+
+source Artifact/schema version
+
+Text Profile
+
+normalization version
+
+reconstruction/segmentation policy version
+
+confirmed correction state
+```
+
+Do not hardcode cache identity only around legacy:
+
+```text
+OCR Document ID
+Reading Order Version
+```
+
+because structured sources exist too.
+
+---
+
+# 145. Cache Is Not Authority
+
+A cached SourceDocumentArtifact still requires:
+
+```text
+compatibility validation
+
+current Runtime authority validation
+```
+
+before it becomes current output.
+
+---
+
+# 146. Correction and Cache
+
+A confirmed source correction may invalidate:
+
+```text
+SourceDocument cache
+
+Translation cache
+
+Presentation derived output
+```
+
+depending on affected semantic scope.
+
+Invalidation consequences are coordinated through owner contracts/Runtime, not mutated backward through Artifacts.
+
+---
+
+# 147. Privacy
+
+SourceDocument may contain sensitive reading content.
+
+Default principles:
+
+```text
+do not log full text
+
+retain only according to policy
+
+protect persisted content
+
+minimize remote transmission
+
+allow deletion/retention control where required
+```
+
+---
+
+# 148. Raw Text Retention
+
+Raw provider/Recognition text should have shorter retention than canonical source-language Artifacts unless needed for:
+
+```text
+debugging
+
+benchmark
+
+manual correction
+
+explicit audit
+```
+
+---
+
+# 149. Security
+
+When importing/deserializing SourceDocument-like data:
+
+```text
+validate size
+
+validate nesting depth
+
+validate IDs
+
+validate ranges
+
+reject cycles
+
+validate source refs
+
+treat content as data, never executable code
+
+escape appropriately during export
+```
+
+---
+
+# 150. Performance
+
+Text Model must support:
+
+```text
+small comic bubbles
+
+long chapters
+
+long webtoon ranges
+
+large mixed-language documents
+
+incremental processing
+
+browser/desktop environments
+```
+
+Do not require eagerly materializing every linguistic node.
+
+---
+
+# 151. Memory Optimization
+
+Possible implementation techniques:
+
+```text
+string interning/table
+
+reference tables
+
+compact IDs
+
+lazy diagnostics
+
+mapping index separation
+
+paged loading
+
+immutable structural sharing
+```
+
+These must not alter logical contract semantics.
+
+---
+
+# 152. Testing Strategy
+
+Coverage should include:
+
+```text
+comic LTR
+
+manga RTL
+
+Chinese manhua
+
+Korean webtoon
+
+structured Chinese novel
+
+plain text
+
+mixed language
+
+vertical source text
+
+multiple sentences in one Bubble
+
+sentence across recognition lines
+
+merged source regions
+
+manual correction
+
+incremental reconstruction
+
+auxiliary text
+
+missing mapping
+
+structured source without geometry
+```
+
+---
+
+# 153. Golden Tests
+
+Golden tests should cover both source families.
+
+## Recognition-Derived
+
+Inputs may include:
+
+```text
+RecognitionArtifact fixture
+
+Text Profile
+```
+
+Expected:
+
+```text
+SourceDocument structure
+
+canonical text
+
+source mapping
+
+quality metadata
+```
+
+## Structured Source
+
+Inputs may include:
+
+```text
+StructuredSource fixture
+
+Text Profile
+```
+
+Expected the same canonical semantic output categories.
+
+---
+
+# 154. Round-Trip Mapping Test
+
+For Recognition-derived content verify:
+
+```text
+Recognition Entity
+    ↓
+SourceDocument Node
+    ↓
+SourceReference
+    ↓
+Recognition Entity
+```
+
+For structured input verify:
+
+```text
+Source Locator/Range
+    ↓
+SourceDocument Node
+    ↓
+SourceReference
+    ↓
+Source Locator/Range
+```
+
+---
+
+# 155. Geometry Round-Trip
+
+Where geometry exists:
+
+```text
+SourceDocument Node
+    ↓
+GeometryRef
+    ↓
+source geometry
+```
+
+must remain valid across serialization and publication.
+
+---
+
+# 156. Incremental Stability Test
+
+Given a small source change, verify:
+
+```text
+unaffected logical Node identities remain stable where appropriate
+
+affected semantic scopes update
+
+new SourceDocumentArtifact is coherent
+
+old Artifact remains immutable
+```
+
+---
+
+# 157. Unicode Tests
+
+Test at minimum:
+
+```text
+CJK punctuation
+
+Simplified Chinese
+
+Traditional Chinese
+
+combining accents
+
+emoji
+
+variation selectors
+
+surrogate-pair UI conversion
+
+ruby/furigana
+
+mixed scripts
+```
+
+---
+
+# 158. Architecture Invariants
+
+1. Text Processing owns Text Model semantics.
+
+2. `SourceDocumentArtifact` is the public cross-module boundary.
+
+3. Text Model is not OCR-only.
+
+4. RecognitionArtifact is the visual-text input boundary.
+
+5. Structured source input may bypass Capture/Recognition.
+
+6. Visual and structured inputs converge inside Text Processing.
+
+7. TranslationUnit does not belong to Text Processing.
+
+8. TranslationBatch does not belong to Text Processing.
+
+9. Translation context assembly does not belong to Text Processing.
+
+10. SourceDocument never stores translated text as its source of truth.
+
+11. Source Text remains source-language data.
+
+12. Confirmed corrections preserve history/provenance.
+
+13. Normalization does not silently change meaning.
+
+14. Simplified/Traditional conversion is not default normalization.
+
+15. Source mapping supports many-to-many relationships.
+
+16. Geometry is referenced, not re-owned.
+
+17. Geometry is optional for non-visual sources.
+
+18. Source-native/provider-native DTOs do not cross the boundary.
+
+19. Text ranges use one explicit indexing convention.
+
+20. Node order is deterministic.
+
+21. Runtime completion does not imply SourceDocumentArtifact publication.
+
+22. Published SourceDocumentArtifact is immutable.
+
+23. Runtime owns WorkItem/Attempt execution.
+
+24. Text Model does not expose Runtime execution state.
+
+25. Internal Builder phases are not module states.
+
+26. Internal Builder phases are not Event Bus command chains.
+
+27. Exact module events belong to `text-processing/EVENTS.md`.
+
+28. Exact module errors belong to `text-processing/ERRORS.md`.
+
+29. Cache is optimization, not authority.
+
+30. Serialization preserves semantic identity/order/mapping.
+
+31. Large documents may use lazy/incremental construction.
+
+32. Current SourceDocument contract remains provider-independent.
+
+---
+
+# 159. Deprecated v1 Concepts
+
+The following v1 assumptions are deprecated as current architecture:
+
+```text
+OCR Document
+    ↓
+Reading Order
+    ↓
+Text Model Builder
+```
+
+as the only Text Model input path.
+
+Also deprecated:
+
+```text
+Text Document
+    ↓
+Text Segmentation
+    ↓
+Context Assembly
+    ↓
+Translation
+```
+
+where Context Assembly appears Text Processing-owned.
+
+And:
 
 ```text
 TextDocumentBuildRequested
 TextDocumentBuildStarted
 TextStructureMapped
 TextNormalized
-SourceMappingCreated
-TextDocumentValidated
 TextDocumentCompleted
-TextDocumentUpdated
 TextDocumentFailed
 ```
 
-Tên Event thực tế phải tuân theo Event Convention chung của CRAI.
+as execution-control Event Bus events.
 
 ---
 
-# 105. State Model
+# 160. Preserved v1 Strengths
 
-Luồng trạng thái khuyến nghị:
+The following v1 concepts are intentionally retained:
 
 ```text
-Created
+hierarchical source-text model
 
-↓
+structural vs linguistic nodes
 
-Building
+Source/Normalized/Corrected text separation
 
-↓
+SourceReference
 
-Mapping
+many-to-many mapping
 
-↓
+geometry references
 
-Normalizing
+deterministic order
 
-↓
+Unicode-safe ranges
 
-Validating
+language/script metadata
 
-↓
+annotation separation
 
-Ready
+confidence dimensions
+
+auxiliary content
+
+synthetic/orphan handling
+
+correction provenance
+
+stable Node identity
+
+incremental processing
+
+serialization
+
+versioning
+
+migration
+
+privacy/security
+
+lazy construction
+
+deterministic testing
 ```
 
-Trạng thái khác:
+---
+
+# 161. Relationship to SEGMENTATION.md
+
+`SEGMENTATION.md` refines:
 
 ```text
-Invalid
-Failed
-Updating
-Archived
+Paragraph / Sentence / semantic boundary construction
 ```
 
----
+inside Text Processing.
 
-# 106. Cache Strategy
+It may transform provisional linguistic structure into a newer SourceDocument Candidate.
 
-Cache Key có thể gồm:
-
-* OCR Document ID
-* OCR Document Version
-* Reading Order Version
-* Text Profile Version
-* Builder Version
-* Normalization Version
-
-Cache phải invalid khi:
-
-* Source Text thay đổi
-* Reading Order thay đổi
-* Mapping Rule thay đổi
-* Normalization Rule thay đổi
-* Manual Correction được áp dụng
+It must not create TranslationUnit authority.
 
 ---
 
-# 107. Translation Compatibility
+# 162. Relationship to Translation
 
-Translation Module cần có thể nhận:
-
-* Sentence
-* Span
-* Segment
-* Context Reference
-* Source Language
-* Target Language
-* Source Mapping ID
-
-Translation không nên nhận trực tiếp OCR Provider Result.
-
----
-
-# 108. Presentation Compatibility
-
-Presentation cần có khả năng:
-
-* lấy Text Node theo Source Region
-* lấy Geometry theo Source Reference
-* lấy bản dịch tương ứng
-* giữ Reading Order
-* xác định Block Type
-* xác định Direction và Style Hint
-
-Text Model là cầu nối dữ liệu, không quyết định Layout hiển thị cuối.
-
----
-
-# 109. Search Compatibility
-
-Search Index có thể sử dụng:
-
-* Canonical Text
-* Corrected Text
-* Translation
-* Language
-* Document Metadata
-* Node Type
-
-Search Result phải có thể điều hướng ngược về:
-
-* Page
-* Block
-* Source Region
-* vị trí ảnh
-
----
-
-# 110. Export Compatibility
-
-Text Model nên hỗ trợ chuyển sang:
-
-* Plain Text
-* Markdown
-* HTML
-* EPUB
-* PDF Text Layer
-* Subtitle-like Format
-* Translation Dataset
-
-Mỗi Exporter phải chọn rõ:
-
-* Main Content
-* Auxiliary Content
-* Source Text
-* Corrected Text
-* Translated Text
-
----
-
-# 111. Translation Alignment
-
-Bản dịch không nên ghi trực tiếp đè lên Source Text.
-
-Thay vào đó cần liên kết:
+Translation consumes:
 
 ```text
-Source Text Node
-        ↕
-Translation Unit
+Published SourceDocumentArtifact
 ```
 
-Mối liên kết có thể là:
-
-* 1:1
-* 1:N
-* N:1
-* N:M
-
-Text Model phải giữ đủ ID và Range để hỗ trợ Alignment.
-
----
-
-# 112. Multi-Translation Support
-
-Một Source Node có thể có nhiều bản dịch:
-
-* nhiều ngôn ngữ đích
-* nhiều Provider
-* nhiều phiên bản
-* bản dịch máy
-* bản dịch người dùng
-* bản dịch đã duyệt
-
-Text Model không nên chứa một trường duy nhất như:
+and owns:
 
 ```text
-translatedText
+TranslationUnit
+
+TranslationBatch
+
+context assembly
+
+TranslationArtifact
 ```
 
-làm nguồn sự thật duy nhất.
-
 ---
 
-# 113. Context Compatibility
+# 163. Relationship to Presentation
 
-Context Module có thể sử dụng:
-
-* Previous Node
-* Next Node
-* Parent Block
-* Section
-* Page
-* Document Metadata
-* Annotations
-* Glossary Reference
-
-Do đó Text Model phải giữ cấu trúc và thứ tự, không chỉ giữ chuỗi phẳng.
-
----
-
-# 114. Dialogue Support
-
-Dialogue Block có thể bổ sung Annotation như:
-
-* Speaker Candidate
-* Addressee Candidate
-* Dialogue Group
-* Emotion
-* Bubble Tail Reference
-
-Các thông tin này không bắt buộc ở phiên bản Text Model đầu tiên.
-
----
-
-# 115. Speaker Separation
-
-Speaker không nên là trường bắt buộc của Sentence vì:
-
-* OCR chưa xác định được
-* Bubble Tail có thể mơ hồ
-* nhiều người có thể cùng nói
-* Narration không có Speaker trực tiếp
-
-Speaker nên là Annotation hoặc Relationship có Confidence.
-
----
-
-# 116. Scene and Context Grouping
-
-Section có thể được mở rộng thành Scene Group sau này.
-
-Scene Group hỗ trợ:
-
-* Context Window
-* Speaker Tracking
-* Translation Consistency
-* Character Name Resolution
-
-Text Model cơ bản chỉ cần cho phép Relation hoặc Section Type mở rộng.
-
----
-
-# 117. Privacy
-
-Text Document có thể chứa nội dung nhạy cảm.
-
-Hệ thống cần hỗ trợ:
-
-* local-only storage
-* redacted logging
-* encryption at rest
-* configurable retention
-* deletion by Document ID
-* remote processing policy
-
-Diagnostics không nên ghi toàn bộ nội dung văn bản mặc định.
-
----
-
-# 118. Security
-
-Khi serialize hoặc import Text Document:
-
-* kiểm tra kích thước
-* kiểm tra depth
-* kiểm tra ID
-* kiểm tra Character Range
-* chống circular structure
-* không thực thi nội dung nhúng
-* escape khi xuất HTML
-
-Text Model là dữ liệu, không phải mã thực thi.
-
----
-
-# 119. Performance Considerations
-
-Text Model cần phù hợp với:
-
-* truyện ngắn
-* chương dài
-* Webtoon rất dài
-* nhiều Token
-* xử lý trên trình duyệt
-* đồng bộ incremental
-
-Không nên luôn tạo Token cho toàn bộ Document nếu chưa cần.
-
-Có thể dùng lazy tokenization.
-
----
-
-# 120. Lazy Construction
-
-Các tầng có thể được tạo theo nhu cầu:
-
-* Document, Page, Block: tạo ngay
-* Paragraph: tạo ngay hoặc theo Profile
-* Sentence: provisional
-* Span: khi cần
-* Token: lazy
-
-Điều này giảm chi phí cho các luồng chỉ cần dịch theo Bubble.
-
----
-
-# 121. Memory Optimization
-
-Có thể tối ưu bằng:
-
-* shared string table
-* reference table
-* compact ID
-* lazy diagnostics
-* separate source mapping index
-* paged loading
-* immutable snapshots
-
-Tối ưu không được phá vỡ Contract logic.
-
----
-
-# 122. Testing Strategy
-
-Cần kiểm thử:
-
-* Comic LTR
-* Manga RTL
-* Chinese Manhua
-* Korean Webtoon
-* Novel
-* Mixed Language
-* Vertical Text
-* Multiple Sentences in Bubble
-* Sentence Across Lines
-* Multiple Regions Merged
-* Manual Correction
-* Incremental Update
-* Auxiliary Text
-* Missing Source Mapping
-
----
-
-# 123. Golden Test
-
-Mỗi Golden Test có thể gồm:
-
-* OCR Document Fixture
-* Reading Order Fixture
-* Text Profile
-* Expected Text Structure
-* Expected Canonical Text
-* Expected Source Mapping
-* Expected Diagnostics
-
----
-
-# 124. Round-Trip Test
-
-Round-Trip Test cần kiểm tra:
+Presentation consumes:
 
 ```text
-OCR Entity
-    → Text Node
-    → Source Reference
-    → OCR Entity
+Published TranslationArtifact
 ```
 
-và:
+and may follow references back to:
 
 ```text
-Text Node
-    → Source Geometry
-    → Presentation Target
+SourceDocumentArtifact
+
+RecognitionArtifact
+
+CaptureArtifact
 ```
 
-Không được mất liên kết trong quá trình serialize và deserialize.
+where source geometry/original text is required.
 
 ---
 
-# 125. Deterministic Output
+# 164. Relationship to DATA_FLOW.md
 
-Cùng:
+`core/DATA_FLOW.md` owns architecture-wide Artifact movement.
 
-* OCR Document
-* Reading Order
-* Text Profile
-* Builder Version
-
-phải tạo cùng:
-
-* Node Structure
-* Order
-* Canonical Text
-* Source Mapping
-
-Timestamp và Runtime Metric có thể khác nhưng không được ảnh hưởng Content Hash.
+This file owns the semantic model inside the Text Processing boundary.
 
 ---
 
-# 126. Benchmark Metrics
+# 165. Relationship to OCR Architecture
 
-Các chỉ số có thể gồm:
+Detailed OCR documents may define:
 
-* Build Latency
-* Memory Usage
-* Node Count
-* Mapping Coverage
-* Orphan Rate
-* Normalization Change Rate
-* Invalid Range Rate
-* Incremental Update Latency
-* Serialization Size
+```text
+Region
 
----
+OCR reading order
 
-# 127. Compatibility and Versioning
+layout
 
-Text Document phải lưu:
+direction
 
-* Contract Version
-* Builder Version
-* Normalization Version
-* Text Profile Version
-* Source OCR Version
-* Reading Order Version
+postprocessing
+```
 
-Breaking Change phải tăng Contract Version.
+Recognition normalizes/exposes the public RecognitionArtifact contract.
+
+Text Processing must not depend on provider-specific OCR internals.
 
 ---
 
-# 128. Migration
+# 166. Related Documents
 
-Khi Contract thay đổi, cần Migration Strategy.
+```text
+doc/01-architecture/core/
+├── DATA_FLOW.md
+├── STATE_MACHINE.md
+└── EVENT_CONVENTION.md
 
-Migration có thể:
+doc/01-architecture/ocr/
+├── RECOGNITION.md
+├── LAYOUT.md
+├── READING_ORDER.md
+└── POSTPROCESS.md
 
-* thêm trường mặc định
-* chuyển đổi Node Type
-* xây lại Mapping Index
-* cập nhật Range Convention
-* giữ ID cũ nếu có thể
+doc/01-architecture/text/
+├── TEXT_MODEL.md
+└── SEGMENTATION.md
 
-Migration không được âm thầm làm mất Source Text hoặc Correction History.
-
----
-
-# 129. Architecture Invariants
-
-Text Model phải luôn đảm bảo:
-
-* không phụ thuộc OCR Provider cụ thể
-* không phụ thuộc Translation Provider cụ thể
-* mọi nội dung OCR-derived phải có Source Reference
-* không ghi đè Source Text bằng bản dịch
-* không ghi đè Source Text bằng Correction mà không có Revision
-* Canonical Text phải xác định được
-* Order phải phản ánh Reading Order Result
-* cấu trúc Parent-Child không có Cycle
-* Character Range phải dùng cùng một quy ước
-* Language Metadata phải hỗ trợ kế thừa và ghi đè
-* Main Content và Auxiliary Content phải được phân biệt
-* Geometry thuộc Source Domain và chỉ được tham chiếu
-* cùng Input và Version phải tạo cùng Output
-* Text Node phải có thể ánh xạ ngược về Source khi nguồn là OCR
-* Translation và Presentation không cần đọc OCR Provider Response nguyên bản
+doc/02-modules/
+├── recognition/
+├── text-processing/
+├── translation/
+└── presentation/
+```
 
 ---
 
-# 130. Future Extensions
+# 167. Open Decisions
 
-Text Model phải cho phép mở rộng:
+The following remain open:
 
-* Speaker Model
-* Character Entity
-* Scene Graph
-* Dialogue Graph
-* Semantic Role
-* Emotion Annotation
-* Translation Memory Link
-* Glossary Link
-* Named Entity Graph
-* Cross-page Sentence
-* Cross-bubble Dialogue
-* User Comment
-* Collaborative Editing
-* Version Branching
-* AI Correction Proposal
-* Alignment với Audiobook
-* Subtitle Export
-* Accessibility Description
+```text
+final SourceDocument schema
+
+whether Page is required or optional
+
+final Node identity policy
+
+Unicode Code Point vs Grapheme-based semantic ranges
+
+exact structured-source input contract
+
+exact incremental Artifact strategy
+
+whether segmentation produces one new Artifact
+or a staged internal Candidate
+
+persistent correction domain design
+
+semantic locator format
+
+cross-page/cross-bubble sentence model
+
+speaker/character ownership
+
+Knowledge module boundary
+
+annotation extension policy
+
+partial-document publication model
+```
 
 ---
 
-# 131. Summary
+# 168. Completion Criteria
 
-Text Model chuyển dữ liệu từ OCR Domain sang Language Domain.
+This Text Model is synchronized when:
 
-Đầu vào:
+* Text Model is owned by Text Processing;
+* SourceDocumentArtifact is the public boundary;
+* OCR is no longer the only source path;
+* RecognitionArtifact replaces legacy OCR Document as public visual input;
+* structured text can enter Text Processing directly;
+* Text Processing ends at SourceDocumentArtifact;
+* TranslationUnit/Batch/context assembly are absent from Text Processing ownership;
+* translated text is not embedded as SourceDocument truth;
+* Presentation display formatting is no longer Text Model authority;
+* Source Mapping remains many-to-many;
+* Unicode/range conventions remain explicit;
+* corrections preserve source provenance;
+* internal Builder phases are not public state machine stages;
+* BuildRequested/Started/Completed events are removed as command/execution flow;
+* cache/versioning support structured and visual inputs;
+* Candidate → Published authority matches Runtime v2.
+
+---
+
+# 169. Summary
+
+CRAI v1 modeled Text Model mainly as:
 
 ```text
 OCR Document
-+
-Reading Order Result
-+
-Text Profile
-```
-
-Đầu ra:
-
-```text
+    ↓
+Reading Order
+    ↓
+Text Model Builder
+    ↓
 Text Document
+    ↓
+Segmentation
+    ↓
+Context Assembly
+    ↓
+Translation
 ```
 
-Cấu trúc chính:
+CRAI v2 models:
 
 ```text
-Document
-└── Page
-    └── Section
-        └── Block
-            └── Paragraph
-                └── Sentence
-                    └── Span
-                        └── Token
+RecognitionArtifact
+       \
+        \
+         ↓
+      Text Processing
+         ↑
+        /
+       /
+Structured Source
 ```
 
-Text Document phải giữ đồng thời:
+which produces:
 
-* nội dung văn bản
-* cấu trúc
-* thứ tự đọc
-* ngôn ngữ
-* Confidence
-* Source Mapping
-* khả năng chỉnh sửa
-* khả năng versioning
+```text
+Candidate SourceDocumentArtifact
+    ↓
+Authority Validation
+    ↓
+Published SourceDocumentArtifact
+```
 
-Đây là Contract trung tâm để các module sau như Segmentation, Context, Translation, Search, Export và Presentation có thể hoạt động mà không phụ thuộc trực tiếp vào OCR Pipeline.
+Then:
+
+```text
+SourceDocumentArtifact
+    ↓
+Translation
+    ↓
+TranslationUnit / TranslationBatch
+    ↓
+TranslationArtifact
+    ↓
+PresentationArtifact
+```
+
+The central rule is:
+
+```text
+Text Processing owns
+source-language structure.
+
+Translation owns
+translation preparation and output.
+
+Runtime owns execution.
+
+SourceDocumentArtifact
+is the stable boundary
+between them.
+```

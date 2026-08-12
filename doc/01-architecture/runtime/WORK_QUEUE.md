@@ -1,144 +1,165 @@
-# runtime/WORK_QUEUE.md
-
 # Runtime Work Queue
 
-**Status:** Draft  
-**Version:** 2.0
+* **Document:** Runtime Architecture / Work Queue
+* **Version:** 3.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-Tài liệu này định nghĩa cách CRAI Runtime lưu giữ tạm thời các `WorkItem` đã được Scheduler admit nhưng chưa bắt đầu execution.
+This document defines how CRAI Runtime temporarily holds admitted execution work before physical execution begins.
 
-Work Queue nằm giữa Scheduler và Worker Execution:
+The Work Queue sits between:
 
 ```text
 Runtime Control
-    ↓ creates eligible WorkItem
+        |
+        v
 Scheduler
-    ↓ admission decision
+        |
+        v
 Work Queue
-    ↓ dispatch
-Worker Execution
+        |
+        v
+Worker / Execution Capacity
 ```
 
-Work Queue chỉ chịu trách nhiệm đối với **queued position và bounded buffering**.
+The Work Queue owns only:
 
-Work Queue không:
+```text
+queued position
++
+bounded waiting
++
+atomic queue-state transitions
+```
 
-- quyết định business workflow;
-- quyết định priority policy;
-- tạo retry;
-- sở hữu terminal outcome;
-- thực thi WorkItem;
-- quản lý Artifact payload;
-- thay Runtime Control hoặc Scheduler.
+It does NOT own:
 
----
-
-## 2. Core Responsibility
-
-Work Queue có một trách nhiệm chính:
-
-> Giữ các WorkItem đã được admission trong một bounded waiting structure cho đến khi chúng được dispatch, replaced hoặc removed.
-
-Work Queue chịu trách nhiệm:
-
-- lưu queued WorkItem reference;
-- giữ queued order theo decision từ Scheduler;
-- áp dụng bounded capacity;
-- hỗ trợ replacement;
-- hỗ trợ removal khi WorkItem mất eligibility;
-- hỗ trợ dispatch atomically;
-- bảo vệ lightweight queue item;
-- cung cấp queue metrics;
-- hỗ trợ drain khi pause hoặc shutdown.
+* business workflow;
+* admission policy;
+* Runtime execution authority;
+* Retry Policy;
+* Fallback;
+* terminal WorkItem outcome;
+* cancellation authority;
+* physical execution;
+* Runtime Artifact payloads;
+* Business result correctness.
 
 ---
 
-## 3. Architectural Position
+# 2. Core Responsibility
+
+The Work Queue has one primary responsibility:
+
+```text
+hold already-admitted lightweight execution references
+until they are dispatched, replaced, removed or drained
+```
+
+Its responsibilities include:
+
+* storing queued execution references;
+* maintaining bounded capacity;
+* preserving Scheduler-provided ordering metadata;
+* applying explicit replacement instructions;
+* applying explicit removal instructions;
+* atomically dispatching items;
+* preventing duplicate queued Attempt identity;
+* exposing queue capacity/pressure metrics;
+* supporting controlled drain/shutdown.
+
+---
+
+# 3. Architectural Position
 
 ```text
 BusinessExecutionPlan
-        ↓
+        |
+        v
 Runtime Control
-        ↓
-WorkItem
-        ↓
+        |
+        v
+WorkItem / Attempt
+        |
+        v
 Scheduler
-        ↓
-ADMIT / DEFER / REJECT / REPLACE
-        ↓
+        |
+        +--> ADMIT
+        +--> DEFER
+        +--> REJECT
+        +--> REPLACE
+        |
+        v
 Work Queue
-        ↓
+        |
+        v
 Worker Execution
 ```
 
-Queue không được bypass Scheduler.
+Queue MUST NOT bypass Scheduler.
 
-Worker không được lấy WorkItem chưa được admission.
-
----
-
-## 4. Queue Philosophy
-
-CRAI là interactive runtime.
-
-Queue được tối ưu cho:
-
-```text
-Current useful work
-```
-
-không phải:
-
-```text
-Preserve every submitted task
-```
-
-Do đó Queue phải:
-
-- bounded;
-- revision-aware;
-- replacement-aware;
-- lightweight;
-- observable;
-- removable;
-- không strict FIFO tuyệt đối.
+Worker MUST NOT execute queued work that has not passed admission.
 
 ---
 
-## 5. Generic Queue Model
+# 4. Queue Philosophy
 
-Work Queue là generic runtime infrastructure.
+CRAI is an interactive Runtime.
 
-Runtime không định nghĩa queue theo capability cụ thể như:
-
-```text
-OCR Queue
-Layout Queue
-Translation Queue
-Presentation Queue
-```
-
-Thay vào đó Queue làm việc với:
+Queue is optimized for:
 
 ```text
-WorkItem
-WorkType
-PriorityClass
-CapabilityRequirements
-ReplacementKey
+valuable admitted work
 ```
 
-Việc phân tách vật lý thành nhiều queue implementation có thể được quyết định về sau, nhưng public architecture vẫn phải generic.
+not:
+
+```text
+preserving every submitted task forever
+```
+
+Queue MUST be:
+
+* bounded;
+* lightweight;
+* removable;
+* replacement-capable;
+* observable;
+* generic;
+* safe under cancellation/shutdown.
+
+Queue MUST NOT become a second Scheduler.
 
 ---
 
-## 6. Logical Queue Classes
+# 5. Generic Runtime Infrastructure
 
-Runtime có thể sử dụng các logical queue class:
+Work Queue is generic Runtime infrastructure.
+
+Architecture MUST NOT define canonical queues such as:
+
+```text
+OCRQueue
+LayoutQueue
+TranslationQueue
+PresentationQueue
+```
+
+Queue works with generic Runtime execution metadata.
+
+Physical implementations MAY partition queues later.
+
+Logical contracts remain capability-independent.
+
+---
+
+# 6. Logical Queue Classes
+
+Runtime MAY use logical queue classes such as:
 
 ```text
 CONTROL
@@ -147,168 +168,255 @@ BACKGROUND
 MAINTENANCE
 ```
 
-### 6.1 Control Queue
+These classes support Runtime admission and capacity isolation.
 
-Dành cho:
+They do NOT imply:
 
-- cancellation;
-- pause;
-- resume;
-- shutdown;
-- revision replacement;
-- runtime control command.
-
-Control capacity phải được bảo vệ.
-
-### 6.2 Interactive Queue
-
-Dành cho WorkItem phục vụ trực tiếp current user-visible output.
-
-### 6.3 Background Queue
-
-Dành cho prefetch, background analysis hoặc nonblocking enhancement.
-
-### 6.4 Maintenance Queue
-
-Dành cho bounded cleanup, diagnostics aggregation hoặc preload.
-
-Logical queue class không đồng nghĩa dedicated thread hoặc dedicated process.
+* dedicated thread;
+* dedicated process;
+* Business Module ownership.
 
 ---
 
-## 7. Queue Item
+# 7. CONTROL Queue
 
-Queue lưu immutable lightweight item.
+CONTROL capacity is reserved for Runtime control-plane work such as:
+
+* cancellation coordination;
+* shutdown;
+* ExecutionRevision replacement;
+* fatal containment;
+* Runtime lifecycle commands;
+* bounded cleanup coordination.
+
+CONTROL is not ordinary Business execution work.
+
+---
+
+# 8. INTERACTIVE Queue
+
+INTERACTIVE work contributes directly to current user-facing useful output.
+
+Exact business priority is supplied by Runtime Control/Scheduler metadata.
+
+Queue does not infer user-visible importance.
+
+---
+
+# 9. BACKGROUND Queue
+
+BACKGROUND may hold:
+
+* prefetch;
+* nearby-content preparation;
+* nonblocking enhancement;
+* other admitted background work.
+
+---
+
+# 10. MAINTENANCE Queue
+
+MAINTENANCE may hold bounded:
+
+* cleanup jobs;
+* diagnostics aggregation;
+* preload;
+* maintenance tasks.
+
+It MUST NOT consume all control/interactive capacity.
+
+---
+
+# 11. Queue Item
+
+Queue stores an immutable lightweight item.
+
+Recommended:
 
 ```text
-QueuedWorkItem
-├── WorkItemId
-├── AttemptId
-├── SessionId
-├── RevisionId
-├── BusinessStageId
-├── WorkType
-├── PriorityClass
-├── CapabilityRequirements
-├── InputArtifactRefs
-├── ConfigurationVersion
-├── ReplacementKey
-├── CancellationScope
-├── EnqueuedAt
-├── Deadline
-└── QueueMetadata
+QueuedExecutionItem
+├── executionScopeId
+├── executionRevisionId
+├── workItemId
+├── attemptId
+├── businessStageId?
+├── workType
+├── priorityClass
+├── orderingMetadata
+├── executionRequirementsReference?
+├── inputArtifactRefs[]
+├── runtimeConfigurationSnapshotId
+├── cancellationReference
+├── replacementKey?
+├── replacementPolicy?
+├── enqueuedAt
+├── deadline?
+└── queueMetadata
 ```
-
-Queue Item không chứa:
-
-- image buffer;
-- OCR text payload;
-- translated document;
-- mutable provider DTO;
-- secret;
-- retry counter source of truth;
-- business object mutable state.
 
 ---
 
-## 8. Attempt Reference
+# 12. Queue Identity
 
-Nếu Queue dispatch ở attempt level, mỗi queued item phải tham chiếu `AttemptId`.
+Canonical queued execution identity SHOULD include:
 
-Retry không mutate queued item cũ.
+```text
+WorkItemId
++
+AttemptId
+```
 
-Luồng đúng:
+within the relevant logical queue scope.
+
+The same Attempt MUST NOT be queued multiple times.
+
+---
+
+# 13. ExecutionScope / ExecutionRevision
+
+Queue uses:
+
+```text
+ExecutionScopeId
+ExecutionRevisionId
+```
+
+It MUST NOT use unqualified:
+
+```text
+SessionId
+RevisionId
+```
+
+as canonical Runtime hierarchy.
+
+Business identifiers such as ReadingSessionId MAY be attached separately for correlation.
+
+---
+
+# 14. Queue Item Must Stay Lightweight
+
+Queued item MUST NOT contain:
+
+* image buffers;
+* OCR/source text payload;
+* translated document payload;
+* Prompt;
+* AI Context;
+* mutable provider SDK DTO;
+* raw secrets;
+* mutable Business objects;
+* retry-budget source of truth;
+* large binary payloads.
+
+Large data is referenced by:
+
+```text
+ArtifactRef
+```
+
+or another approved immutable handle.
+
+---
+
+# 15. Queue Does Not Own Artifact Lifetime
+
+Queue only stores Artifact references.
+
+Runtime Artifact Store / Resource Manager owns:
+
+* Artifact registry;
+* physical backing;
+* lease;
+* retention;
+* disposal.
+
+Queue SHOULD NOT hold long-lived Artifact leases.
+
+---
+
+# 16. Attempt-Level Queueing
+
+Physical execution queueing SHOULD normally occur at Attempt level.
+
+Retry flow:
 
 ```text
 Attempt 1 failed
-        ↓
+        |
+        v
 Runtime Control / Retry Policy
-        ↓
+        |
+        v
 Attempt 2 created
-        ↓
+        |
+        v
 Scheduler admission
-        ↓
-New queued item
+        |
+        v
+new QueuedExecutionItem
 ```
 
-Attempt cũ không được quay lại Queue.
+Attempt 1 MUST NOT be mutated/requeued as Attempt 2.
 
 ---
 
-## 9. Queue Ownership
-
-Ownership được tách rõ:
+# 17. Queue Ownership
 
 ```text
 Runtime Control
-    → WorkItem logical state và authority
+    -> execution authority
+       WorkItem logical state
 
 Scheduler
-    → admission decision
+    -> admission decision
+       scheduling policy
 
 Work Queue
-    → queued position
+    -> waiting position
+       bounded buffering
 
-Worker Execution
-    → physical execution
+Worker
+    -> physical Attempt execution
 
-Artifact Store
-    → runtime artifacts
+Runtime Artifact Store
+    -> execution Artifact lifecycle
 ```
-
-Queue không sở hữu WorkItem terminal state.
 
 ---
 
-## 10. Queue Lifecycle
+# 18. Queue Lifecycle
 
-Queue lifecycle:
+Recommended queue-item lifecycle:
 
 ```text
-ADMITTED
-  ↓
 ENQUEUED
-  ↓
+    |
+    v
 WAITING
-  ↓
+    |
+    v
 SELECTED
-  ↓
+    |
+    v
 DISPATCHED
 ```
 
-Hoặc:
+Alternative terminal queue states:
 
 ```text
-WAITING
-  ↓
-REPLACED
+WAITING -> REPLACED
+WAITING -> REMOVED
+WAITING -> DRAINED
 ```
 
-Hoặc:
-
-```text
-WAITING
-  ↓
-REMOVED
-```
-
-Hoặc:
-
-```text
-WAITING
-  ↓
-DRAINED
-```
-
-Sau `DISPATCHED`, item không còn thuộc Queue.
-
-Execution lifecycle thuộc `PIPELINE_RUNTIME.md`.
+After `DISPATCHED`, the item is no longer Queue-owned.
 
 ---
 
-## 11. Queue State
+# 19. Queue States
 
-Một queued item có thể ở:
+Queue MAY use:
 
 ```text
 ENQUEUED
@@ -320,713 +428,1351 @@ REMOVED
 DRAINED
 ```
 
-Queue không sử dụng:
+Queue MUST NOT use execution states such as:
 
 ```text
 RUNNING
 SUCCEEDED
 FAILED
-CANCELED
+CANCELLED
 STALE
 ```
 
-vì đó là runtime execution state.
+Those belong outside Queue ownership.
 
 ---
 
-## 12. Bounded Capacity
+# 20. Bounded Capacity
 
-Mọi queue đều phải bounded.
+Every Queue MUST be bounded.
 
-Capacity có thể cấu hình theo:
+Capacity MAY be partitioned by:
 
-- logical queue class;
-- session;
-- WorkType;
-- worker pool;
-- provider class;
-- resource class;
-- global runtime limit.
+* logical queue class;
+* ExecutionScope;
+* WorkType;
+* execution class;
+* worker pool;
+* provider/runtime binding;
+* resource class;
+* global Runtime budget.
 
-Giá trị cụ thể thuộc `RUNTIME_CONFIG.md`.
+Exact limits belong to `RUNTIME_CONFIG.md`.
 
 ---
 
-## 13. Capacity Reservation
+# 21. Capacity Reservation
 
-Control Queue phải có reserved capacity.
+Runtime SHOULD reserve capacity for CONTROL.
 
-Interactive work cũng có thể có reserved capacity để background work không chiếm hết Queue.
+Interactive capacity MAY also be protected.
 
-Ví dụ conceptual:
+Conceptually:
 
 ```text
-Total Queue Budget
-├── Reserved Control Capacity
-├── Reserved Interactive Capacity
-└── Shared Background/Maintenance Capacity
+Total Queue Capacity
+├── Reserved Control
+├── Reserved Interactive
+└── Shared Background / Maintenance
 ```
 
 ---
 
-## 14. Queue Admission
+# 22. Admission Boundary
 
-Queue chỉ nhận item khi Scheduler quyết định `ADMIT`.
-
-Queue có thể từ chối technical enqueue nếu:
-
-- capacity contract bị phá;
-- queue đang stopping;
-- duplicate queue identity;
-- invalid serialization;
-- internal integrity failure.
-
-Technical enqueue failure phải được báo về Runtime Control.
-
-Queue không tự chuyển sang `DEFER` hoặc `REJECT` policy.
-
----
-
-## 15. Queue Ordering
-
-Queue ordering phản ánh policy từ Scheduler.
-
-Queue không tự quyết định priority.
-
-Possible ordering inputs:
-
-- PriorityClass;
-- current revision;
-- user interaction priority;
-- deadline;
-- queue age;
-- fairness weight;
-- replacement state.
-
-Queue implementation có thể dùng heap, deque hoặc partitioned queue, nhưng semantics phải giữ nguyên.
-
----
-
-## 16. Non-FIFO Behavior
-
-Queue không strict FIFO.
-
-Ví dụ:
+Queue accepts an item only after Scheduler returns:
 
 ```text
-Revision 18 waiting
-Revision 19 waiting
-Revision 20 waiting
+ADMIT
 ```
 
-Khi current revision là 20, Scheduler có thể:
+or after an explicit Scheduler-controlled replacement operation.
 
-- replace older pending work;
-- select Revision 20 trước;
-- remove obsolete candidates.
-
-Queue chỉ thực hiện quyết định đó.
+Queue MUST NOT convert technical conditions into business admission policy.
 
 ---
 
-## 17. Replacement
+# 23. Technical Enqueue Failure
 
-Replacement áp dụng cho pending queued work có cùng `ReplacementKey`.
+Queue MAY fail an enqueue technically because of:
+
+* internal integrity failure;
+* duplicate queued identity;
+* Queue stopping;
+* serialization/representation failure;
+* capacity contract violation caused by race/inconsistency.
+
+It reports:
 
 ```text
-ReplacementKey
-├── SessionId
-├── TargetIdentity
-├── WorkType
-└── BusinessStageId
+QueueEnqueueFailure
 ```
 
-Default behavior:
+to Scheduler/Runtime Control.
+
+It does NOT independently decide:
 
 ```text
-newer eligible queued item
-    replaces
-older pending item with same replacement key
+DEFER
+REJECT
 ```
 
-Replacement phải atomic.
-
-Replaced item không được dispatch sau khi replacement hoàn tất.
+as scheduling policy.
 
 ---
 
-## 18. Duplicate Prevention
+# 24. Capacity Pressure vs Admission Decision
 
-Queue phải phát hiện duplicate identity:
+Critical distinction:
 
 ```text
-WorkItemId + AttemptId
+Queue
+    reports capacity state
 ```
 
-Một Attempt không được tồn tại nhiều lần trong cùng logical queue scope.
+```text
+Scheduler
+    decides admission response
+```
 
-Duplicate enqueue phải:
-
-- bị reject;
-- được ghi nhận reason code;
-- không tạo thêm execution.
-
----
-
-## 19. Eligibility Loss
-
-Queued item có thể mất eligibility khi:
-
-- session inactive;
-- revision superseded;
-- cancellation authority revoked;
-- BusinessExecutionPlan replaced;
-- dependency invalidated;
-- deadline expired;
-- provider capability unavailable lâu dài;
-- runtime stopping.
-
-Queue không tự quyết định eligibility.
-
-Runtime Control hoặc Scheduler cung cấp removal instruction.
+Queue MUST NOT become a second admission engine.
 
 ---
 
-## 20. Removal
+# 25. Ordering Metadata
 
-Queued item có thể bị remove:
+Queue preserves Scheduler-provided ordering metadata.
 
-- trước dispatch;
-- khi revision thay đổi;
-- khi session dừng;
-- khi cancellation được yêu cầu;
-- khi item bị replace;
-- khi Queue drain;
-- khi internal integrity check thất bại.
+Queue SHOULD NOT independently derive scheduling priority.
 
-Removal phải observable.
+Possible metadata MAY include:
+
+```text
+priorityClass
+priorityRank
+schedulerDecisionSequence
+deadline
+fairnessToken
+```
+
+Exact format is implementation-specific.
 
 ---
 
-## 21. Dispatch
+# 26. Ordering Boundary
 
-Dispatch phải atomic:
+Preferred architecture:
+
+```text
+Scheduler
+    computes order/selection semantics
+
+Queue
+    preserves/applies them
+```
+
+Queue MUST NOT reinterpret:
+
+* business priority;
+* ExecutionRevision freshness;
+* provider preference;
+* deadline policy;
+* fairness semantics.
+
+---
+
+# 27. Non-FIFO Behavior
+
+Queue need not be strict FIFO.
+
+Example:
+
+```text
+A waiting
+B waiting
+C waiting
+```
+
+Scheduler may choose C before A/B based on policy.
+
+Queue executes that scheduling decision.
+
+---
+
+# 28. Queue Selection Models
+
+Implementation MAY use one of several valid models.
+
+### Model A — Scheduler Selects
+
+```text
+Scheduler
+    identifies next queued item
+
+Queue
+    atomically selects/removes it
+```
+
+### Model B — Queue Uses Scheduler Ordering Token
+
+```text
+Scheduler
+    assigns immutable ordering metadata
+
+Queue
+    selects highest-ranked item
+```
+
+Both are valid if Queue does not redefine policy.
+
+---
+
+# 29. Replacement
+
+Replacement applies only to queued/pending work explicitly declared replaceable.
+
+Queue MUST NOT invent replacement semantics.
+
+---
+
+# 30. Replacement Key
+
+`replacementKey` SHOULD be treated as opaque by Queue.
+
+Example:
+
+```text
+replacementKey = "opaque-runtime-lineage-key"
+```
+
+Its semantic meaning belongs to Runtime Control/planning contracts.
+
+---
+
+# 31. Replacement Policy
+
+Possible supplied policies MAY include:
+
+```text
+NONE
+LATEST_ELIGIBLE
+EXPLICIT_REPLACEMENT_ONLY
+```
+
+Exact taxonomy remains open.
+
+Queue only applies the provided policy.
+
+---
+
+# 32. Atomic Replacement
+
+Replacement MUST be atomic.
+
+After successful replacement:
+
+```text
+old item
+    MUST NOT dispatch
+```
+
+---
+
+# 33. Replacement Does Not Affect Running Attempt
+
+Queue can replace only queued/waiting items.
+
+A running Attempt is outside Queue ownership.
+
+Running work may:
+
+* lose authority;
+* receive cancellation;
+* drain.
+
+Those actions belong to Runtime Control/Cancellation.
+
+---
+
+# 34. Duplicate Prevention
+
+Queue MUST prevent duplicate queued Attempt identity.
+
+Recommended key:
+
+```text
+logicalQueueScope
++
+WorkItemId
++
+AttemptId
+```
+
+Duplicate enqueue MUST:
+
+* fail safely;
+* emit reason code;
+* not create duplicate physical execution.
+
+---
+
+# 35. Eligibility
+
+Queue does NOT determine execution eligibility.
+
+Eligibility is supplied by Runtime Control/Scheduler.
+
+Queue MAY retain eligibility metadata for efficient removal.
+
+It MUST NOT independently decide which ExecutionRevision is current.
+
+---
+
+# 36. Eligibility Loss
+
+Possible causes supplied externally:
+
+* ExecutionScope inactive;
+* ExecutionRevision superseded;
+* cancellation authority revoked;
+* BusinessExecutionPlan replaced;
+* deadline invalid;
+* dependency runtime invalidated;
+* executable binding unavailable;
+* Runtime stopping.
+
+Queue receives explicit instruction to remove/replace/drain affected work.
+
+---
+
+# 37. Removal
+
+Queued item MAY be removed:
+
+* before dispatch;
+* after eligibility revocation;
+* after cancellation;
+* through explicit replacement;
+* during drain;
+* after integrity failure.
+
+Removal MUST be:
+
+* atomic;
+* observable;
+* idempotent where practical.
+
+---
+
+# 38. Removal Instruction
+
+Recommended:
+
+```text
+QueueRemovalInstruction
+├── instructionId
+├── targetSelector
+├── reasonCode
+├── issuedBy
+├── correlationId?
+└── issuedAt
+```
+
+---
+
+# 39. Target Selectors
+
+Possible selectors:
+
+```text
+WORK_ITEM
+ATTEMPT
+EXECUTION_SCOPE
+EXECUTION_REVISION
+REPLACEMENT_KEY
+QUEUE_CLASS
+ALL_NON_CONTROL
+ALL
+```
+
+---
+
+# 40. Canonical Runtime Names
+
+Use:
+
+```text
+REMOVE_EXECUTION_SCOPE
+REMOVE_EXECUTION_REVISION
+```
+
+not:
+
+```text
+REMOVE_SESSION
+REMOVE_REVISION
+```
+
+unless the command is explicitly Business Session-specific.
+
+---
+
+# 41. Dispatch
+
+Dispatch MUST transfer ownership atomically.
+
+Recommended:
+
+```text
+WAITING
+    |
+    v
+SELECTED
+    |
+    v
+Queue ownership removed
+    |
+    v
+Worker ownership established
+    |
+    v
+DISPATCHED
+```
+
+---
+
+# 42. No Ambiguous Ownership Window
+
+There MUST NOT be an observable state where one item is simultaneously:
+
+```text
+Queue-owned
+and
+Worker-owned
+```
+
+without an explicit transfer protocol.
+
+---
+
+# 43. Dispatch Token
+
+Implementation MAY use a short-lived:
+
+```text
+DispatchToken
+```
+
+to make transfer atomic/idempotent.
+
+Exact mechanism remains open.
+
+---
+
+# 44. Dispatch Failure
+
+If selected work cannot be handed to Worker:
 
 ```text
 SELECTED
-    ↓
-remove from queue ownership
-    ↓
-assign to Worker Execution
+    |
+    v
+Dispatch Failed
 ```
 
-Không được có trạng thái item vừa thuộc Queue vừa thuộc Worker ownership không rõ ràng.
+Queue MUST NOT automatically perform execution Retry.
+
+It reports failure to Runtime Control/Scheduler.
+
+Possible later actions include:
+
+* re-admit;
+* defer;
+* reject;
+* create another Attempt if policy requires.
 
 ---
 
-## 22. Dispatch Failure
+# 45. Dispatch Failure vs Attempt Failure
 
-Nếu Worker không nhận được item sau selection:
+Critical distinction:
 
 ```text
-SELECTED
-    ↓ dispatch failure
+Dispatch failed
+    = Attempt may never have started
 ```
 
-Queue không tự retry execution.
+```text
+Attempt failed
+    = physical execution began
+      and ended in failure
+```
 
-Runtime Control và Scheduler quyết định:
-
-- re-admit;
-- defer;
-- reject;
-- create new Attempt khi phù hợp.
+These MUST remain distinguishable.
 
 ---
 
-## 23. Queue Drain
+# 46. Drain
 
-Drain được dùng khi:
+Drain removes or freezes queued work according to an explicit drain instruction.
 
-- Scheduler pause;
-- session stop;
-- runtime shutdown;
-- worker pool restart;
-- configuration transition.
+Possible reasons:
 
-Drain modes có thể gồm:
+* Scheduler pause;
+* Runtime shutdown;
+* ExecutionScope termination;
+* ExecutionRevision replacement;
+* worker pool restart;
+* Runtime configuration transition;
+* security containment.
+
+---
+
+# 47. Drain Modes
+
+Possible modes:
 
 ```text
 REMOVE_NON_CONTROL
 REMOVE_BACKGROUND
-REMOVE_SESSION
-REMOVE_REVISION
+REMOVE_EXECUTION_SCOPE
+REMOVE_EXECUTION_REVISION
+REMOVE_QUEUE_CLASS
 REMOVE_ALL
+HOLD_PENDING
 ```
 
-Control path phải tiếp tục hoạt động trong quá trình drain nếu có thể.
+Queue MUST NOT decide the scope semantically by itself.
 
 ---
 
-## 24. Pause Behavior
+# 48. Drain Authority
 
-Khi Scheduler paused:
+Drain is requested by the appropriate Runtime owner.
 
-- domain WorkItem mới không được dispatch;
-- queued item có thể được giữ hoặc drain theo policy;
-- control item vẫn được xử lý;
-- cancellation và shutdown vẫn hoạt động;
-- queue metrics vẫn hoạt động.
-
----
-
-## 25. Shutdown Behavior
+Examples:
 
 ```text
-Stop new admission
-        ↓
-Stop normal dispatch
-        ↓
-Remove queued domain work
-        ↓
-Preserve control operations
-        ↓
-Drain queue metadata
-        ↓
-Dispose queue infrastructure
+Runtime Control
+Scheduler lifecycle
+Cancellation Coordinator
+Shutdown coordination
 ```
 
-Queue không chờ running Attempt vì running Attempt đã thuộc Worker Execution.
+Queue only executes the instruction.
 
 ---
 
-## 26. Backpressure
+# 49. Scheduler PAUSED Behavior
 
-Khi Queue đạt soft hoặc hard limit:
+When Scheduler admission is `PAUSED`:
 
-### Soft Limit
+* no new normal Business work is admitted;
+* queued work may be held or drained by explicit policy;
+* CONTROL work remains available;
+* cancellation/shutdown continues;
+* queue metrics remain available.
 
-- defer background admission;
-- increase replacement;
-- reduce expensive WorkType admission;
-- emit saturation telemetry.
-
-### Hard Limit
-
-- reject noncritical admission;
-- protect control capacity;
-- preserve current interactive work;
-- notify Runtime Control.
-
-Queue không được tăng memory vô hạn.
+This does NOT mean a Reading Session is paused.
 
 ---
 
-## 27. Upstream Coordination
+# 50. Shutdown
 
-Queue không trực tiếp pause Business Module hoặc upstream stage.
-
-Luồng đúng:
+Recommended:
 
 ```text
-Queue pressure
-    ↓
-Queue telemetry
-    ↓
-Scheduler reduces admission
-    ↓
-Runtime Control creates less downstream work
+Stop New Scheduler Admission
+        |
+        v
+Stop Normal Dispatch
+        |
+        v
+Apply Queue Drain Instructions
+        |
+        v
+Preserve Required Control Work
+        |
+        v
+Finalize Queue Metadata
+        |
+        v
+Dispose Queue Infrastructure
 ```
 
-Event Bus có thể thông báo pressure nhưng không điều phối flow.
+Running Attempts are outside Queue ownership.
 
 ---
 
-## 28. Memory Model
+# 51. Backpressure
 
-Queue item phải nhẹ.
+Queue participates in backpressure by exposing capacity/pressure state.
 
-Large data nằm trong Artifact Store.
+It does NOT decide the high-level admission response.
+
+---
+
+# 52. Queue Pressure Signals
+
+Possible:
 
 ```text
-QueuedWorkItem
-    ↓ references
+NORMAL
+ELEVATED
+HIGH
+CRITICAL
+```
+
+or:
+
+```text
+SOFT_LIMIT
+HARD_LIMIT
+```
+
+These are operational observations.
+
+---
+
+# 53. Pressure Flow
+
+Correct:
+
+```text
+Queue Pressure
+        |
+        v
+Queue Metrics / Signal
+        |
+        v
+Scheduler
+        |
+        v
+Admission Reduced
+```
+
+Possible Scheduler reactions:
+
+* defer Background work;
+* reject obsolete work;
+* apply explicit replacement;
+* reduce expensive execution;
+* protect CONTROL/INTERACTIVE capacity.
+
+---
+
+# 54. Queue Must Not Expand Unbounded
+
+A Queue MUST NOT respond to saturation by increasing memory without bound.
+
+Bounded capacity is a hard Runtime property.
+
+---
+
+# 55. Upstream Coordination
+
+Queue MUST NOT directly pause:
+
+* Business Module;
+* Business Stage;
+* Pipeline Orchestrator.
+
+Correct:
+
+```text
+Queue Pressure
+        |
+        v
+Scheduler admission changes
+        |
+        v
+Runtime Control materializes less work
+```
+
+---
+
+# 56. Runtime Control Materialization Boundary
+
+Runtime Control SHOULD avoid creating unnecessary downstream WorkItems when sustained pressure indicates work is already obsolete or not yet useful.
+
+But Queue itself does not decide Business progression.
+
+---
+
+# 57. Artifact Reference
+
+Queued item stores:
+
+```text
 ArtifactRef
-    ↓
-Artifact Store
 ```
 
-Queue không giữ Artifact Lease dài hạn trừ khi dispatch contract yêu cầu rất ngắn và rõ ràng.
+only.
 
-Worker acquire lease trước khi đọc Artifact.
-
----
-
-## 29. Artifact Reference Validation
-
-Queue có thể kiểm tra technical shape của ArtifactRef.
-
-Queue không xác nhận business validity hoặc artifact authority.
-
-Validation cuối cùng thuộc Runtime Control và Artifact Store.
+Worker acquires required lease immediately before execution.
 
 ---
 
-## 30. Cancellation Boundary
+# 58. Queue Artifact Validation
 
-Queue hỗ trợ removal theo cancellation instruction.
+Queue MAY validate only technical reference shape:
 
-Queue không sở hữu cancellation authority.
+* non-empty ID;
+* valid reference encoding;
+* supported reference type.
+
+It MUST NOT validate:
+
+* business correctness;
+* execution authority;
+* cache compatibility;
+* Domain validity.
+
+---
+
+# 59. Cancellation Boundary
+
+Correct:
 
 ```text
 Cancellation Requested
-        ↓
-Runtime Control revokes authority
-        ↓
-Queue removal instruction
-        ↓
-Queued item removed
+        |
+        v
+Runtime Control Revokes Authority
+        |
+        v
+Queue Removal Instruction
+        |
+        v
+Queued Item Removed
 ```
 
-Running Attempt không còn thuộc Queue.
+Queue does not own cancellation authority.
 
 ---
 
-## 31. Retry Boundary
+# 60. Running Attempt Cancellation
 
-Queue không biết retry policy.
+Running Attempt has already left Queue ownership.
 
-Queue không lưu retry counter source of truth.
+Cancellation is handled by:
 
-Retry flow:
+```text
+Runtime Control
+Cancellation Coordinator
+Worker / Adapter
+```
+
+---
+
+# 61. Retry Boundary
+
+Queue knows no Retry policy.
+
+Correct:
 
 ```text
 Attempt failed
-        ↓
+        |
+        v
 Retry Policy
-        ↓
-New Attempt
-        ↓
+        |
+        v
+new Attempt
+        |
+        v
 Scheduler
-        ↓
-Queue
+        |
+        v
+new Queue Item
 ```
 
----
-
-## 32. Scheduler Interaction
-
-Scheduler:
-
-- chọn candidate;
-- quyết định `ADMIT`, `DEFER`, `REJECT`, `REPLACE`;
-- cung cấp ordering metadata;
-- chọn next dispatch candidate;
-- phản ứng với queue pressure.
-
-Queue:
-
-- lưu item đã admit;
-- expose pending state;
-- thực hiện replacement/removal;
-- dispatch atomically;
-- báo metrics.
+Queue does not store authoritative retry count/budget.
 
 ---
 
-## 33. Worker Interaction
+# 62. Fallback Boundary
 
-Worker Execution:
-
-- nhận dispatched item;
-- acquire Artifact Lease;
-- execute Attempt;
-- gửi Completion về Runtime Control.
-
-Worker không thao tác trực tiếp queue nội bộ ngoài dispatch contract.
-
-Worker không re-enqueue chính nó.
-
----
-
-## 34. Queue Metrics
-
-Queue nên cung cấp:
-
-- current length;
-- capacity;
-- utilization ratio;
-- enqueue count;
-- dispatch count;
-- replace count;
-- remove count;
-- drain count;
-- duplicate rejection count;
-- enqueue failure count;
-- average wait time;
-- P50/P90/P95/P99 wait time;
-- queue saturation duration;
-- current-revision queue ratio;
-- background queue ratio;
-- control capacity utilization.
-
-Metrics không chứa user content.
-
----
-
-## 35. Queue Events
-
-Conceptual events:
+Queue has no knowledge of:
 
 ```text
-WORK_ENQUEUED
-WORK_SELECTED
-WORK_DISPATCHED
-WORK_REPLACED
-WORK_REMOVED
-QUEUE_SOFT_LIMIT_REACHED
-QUEUE_HARD_LIMIT_REACHED
-QUEUE_DRAIN_STARTED
-QUEUE_DRAIN_COMPLETED
-QUEUE_INTEGRITY_FAILED
+provider fallback
+model fallback
+route fallback
 ```
 
-Tên cuối cùng phải tuân theo Event Standard.
-
-Queue không phát terminal outcome cho WorkItem.
+A new execution binding, if produced externally, simply appears as another admitted Attempt candidate.
 
 ---
 
-## 36. Integrity Rules
+# 63. Scheduler Interaction
 
-Queue phải đảm bảo:
+Scheduler owns:
 
-- không duplicate Attempt identity;
-- capacity không âm;
-- item dispatched không còn pending;
-- item replaced không thể dispatch;
-- item removed không thể dispatch;
-- queue state transition hợp lệ;
-- ordering metadata không bị mutate sau enqueue;
-- queue drain không mất control path trái policy.
+* admission;
+* priority/order semantics;
+* fairness;
+* resource-budget decision;
+* explicit replacement decision;
+* dispatch selection policy.
+
+Queue owns:
+
+* storage of admitted item;
+* bounded capacity;
+* queue state;
+* atomic replacement/removal;
+* atomic dispatch transfer;
+* capacity metrics.
 
 ---
 
-## 37. Failure Isolation
+# 64. Worker Interaction
 
-Nếu một queue partition lỗi:
+Worker:
+
+* receives dispatched item;
+* acquires Artifact leases;
+* executes Attempt;
+* reports Completion to Runtime Control;
+* releases resources.
+
+Worker MUST NOT mutate Queue internals or re-enqueue itself.
+
+---
+
+# 65. Queue Metrics
+
+Recommended:
+
+```text
+current length
+capacity
+utilization ratio
+enqueue count
+dispatch count
+replace count
+remove count
+drain count
+duplicate rejection count
+technical enqueue failure count
+dispatch failure count
+average wait time
+P50/P90/P95/P99 wait time
+saturation duration
+CONTROL utilization
+INTERACTIVE utilization
+BACKGROUND utilization
+```
+
+Metrics MUST contain no user content.
+
+---
+
+# 66. Queue Events
+
+Possible normalized events:
+
+```text
+WorkEnqueued
+WorkSelected
+WorkDispatched
+WorkReplaced
+WorkRemoved
+
+QueuePressureChanged
+QueueDrainStarted
+QueueDrainCompleted
+QueueIntegrityFailed
+QueueDispatchFailed
+```
+
+---
+
+# 67. Event Boundary
+
+Queue events describe Queue infrastructure state.
+
+Queue MUST NOT emit terminal WorkItem outcomes such as:
+
+```text
+WorkSucceeded
+WorkFailed
+WorkCancelled
+```
+
+as if it owned them.
+
+---
+
+# 68. Integrity Rules
+
+Queue MUST ensure:
+
+1. no duplicate queued Attempt identity;
+
+2. capacity never exceeds hard contract;
+
+3. dispatched item is no longer waiting;
+
+4. replaced item cannot dispatch;
+
+5. removed item cannot dispatch;
+
+6. drained item cannot dispatch;
+
+7. queue state transitions are valid;
+
+8. immutable ordering metadata does not mutate after enqueue;
+
+9. replacement is atomic;
+
+10. dispatch ownership transfer is atomic;
+
+11. CONTROL capacity remains protected according to policy;
+
+12. technical failure never creates duplicate execution.
+
+---
+
+# 69. Failure Isolation
+
+If one Queue partition fails:
 
 ```text
 Stop affected dispatch
-        ↓
-Preserve control path
-        ↓
-Notify Runtime Control and Scheduler
-        ↓
-Reject or drain affected queued items safely
-        ↓
+        |
+        v
+Preserve CONTROL path where possible
+        |
+        v
+Notify Scheduler / Runtime Control
+        |
+        v
+Hold / drain affected queued items safely
+        |
+        v
 Emit diagnostics
 ```
 
-Queue failure không được corrupt Artifact hoặc business data.
+Queue failure MUST NOT corrupt:
+
+* Runtime Artifact;
+* Domain data;
+* accepted Business result;
+* Runtime authority.
 
 ---
 
-## 38. MVP Queue Model
+# 70. Recovery
 
-MVP có thể dùng:
+Queue recovery MAY:
+
+* reconstruct pending metadata from authoritative Runtime state if supported;
+* discard non-durable queue state;
+* require Runtime Control to rematerialize/re-admit eligible work.
+
+Queue MUST NOT assume it is the source of truth for WorkItem logical state.
+
+---
+
+# 71. Durable Queue Boundary
+
+MVP Queue is expected to be process-local/in-memory.
+
+Future durable queue support MUST preserve:
 
 ```text
-Control Queue
-Interactive Queue
-Background Queue
-Maintenance Queue
+Queue state
+    !=
+Runtime Control authority state
 ```
 
-Mỗi queue:
-
-- in-memory;
-- bounded;
-- process-local;
-- typed;
-- observable;
-- replacement-aware.
-
-Không cần external broker.
+Durable delivery MUST NOT cause stale work to regain authority after restart.
 
 ---
 
-## 39. MVP Replacement Rule
+# 72. Process Restart
+
+After host restart:
 
 ```text
-For the same SessionId + TargetIdentity + WorkType:
-keep the newest eligible pending item.
+old queued item
 ```
 
-Áp dụng chủ yếu cho interactive work thay đổi nhanh.
+MUST NOT automatically execute solely because it existed before crash.
 
-Không áp dụng mù quáng cho work có business ordering bắt buộc.
-
----
-
-## 40. MVP Dispatch Rule
-
-1. Dispatch control work trước.
-2. Dispatch current interactive work tiếp theo.
-3. Dispatch supporting work khi còn capacity.
-4. Dispatch background work khi không ảnh hưởng interactive latency.
-5. Maintenance chạy với bounded low priority.
-6. Không dispatch item đã mất eligibility.
+Runtime authority and eligibility must be reconstructed/revalidated first.
 
 ---
 
-## 41. Example: Rapid Scrolling
+# 73. MVP Queue Model
+
+MVP MAY use:
 
 ```text
-Revision 30 interactive item queued
-Revision 31 arrives
-Revision 30 replaced
-Revision 32 arrives
-Revision 31 replaced
+CONTROL Queue
+INTERACTIVE Queue
+BACKGROUND Queue
+MAINTENANCE Queue
+```
+
+Each SHOULD be:
+
+* in-memory;
+* bounded;
+* process-local;
+* typed;
+* observable;
+* replacement-capable.
+
+No external message broker is required.
+
+---
+
+# 74. MVP Replacement Policy
+
+MVP SHOULD use replacement only for explicitly declared fast-changing interactive work.
+
+Example:
+
+```text
+replacementKey supplied
++
+replacementPolicy = LATEST_ELIGIBLE
+```
+
+Do NOT globally assume:
+
+```text
+same WorkType
+    => replace older
+```
+
+---
+
+# 75. MVP Dispatch Policy
+
+Conceptually:
+
+1. preserve CONTROL dispatch;
+
+2. prefer current useful INTERACTIVE work;
+
+3. dispatch supporting work when capacity permits;
+
+4. dispatch BACKGROUND when interactive latency remains protected;
+
+5. run MAINTENANCE with bounded low priority;
+
+6. never dispatch externally-marked ineligible work.
+
+Actual selection policy remains Scheduler-owned.
+
+---
+
+# 76. Example — Rapid Scrolling
+
+```text
+ExecutionRevision 30 item queued
+
+ExecutionRevision 31 becomes current
+
+Runtime Control / Scheduler:
+    mark Revision 30 queued item obsolete/replaced
+
+ExecutionRevision 31 item queued
+
+ExecutionRevision 32 becomes current
+
+Revision 31 item replaced
+
 Worker becomes available
-Revision 32 dispatched
+
+Scheduler selects Revision 32 item
+
+Queue dispatches Revision 32
 ```
 
-Queue không tự quyết định revision nào mới nhất; Scheduler cung cấp replacement decision.
+Queue never independently decides which revision is newest.
 
 ---
 
-## 42. Example: Queue Saturation
+# 77. Example — Queue Saturation
 
 ```text
-Interactive Queue reaches soft limit
-        ↓
-Queue emits pressure metric
-        ↓
-Scheduler defers background work
-        ↓
-Older replaceable items removed
-        ↓
-Current-revision item remains eligible
+INTERACTIVE Queue reaches pressure threshold
+        |
+        v
+Queue emits capacity signal
+        |
+        v
+Scheduler reduces low-value admission
+        |
+        v
+Explicitly replaceable obsolete items removed
+        |
+        v
+CONTROL capacity remains protected
 ```
 
 ---
 
-## 43. Example: Cancellation
+# 78. Example — Cancellation
 
 ```text
-Session stop requested
-        ↓
+ExecutionScope cancellation requested
+        |
+        v
 Runtime Control revokes authority
-        ↓
-Queue receives REMOVE_SESSION
-        ↓
-All queued session items removed
-        ↓
-Running attempts handled by Cancellation Coordinator
+        |
+        v
+Queue receives REMOVE_EXECUTION_SCOPE
+        |
+        v
+matching queued items removed
+        |
+        v
+running Attempts handled outside Queue
 ```
 
 ---
 
-## 44. Example: Retry
+# 79. Example — Retry
 
 ```text
 Attempt 1 fails
-        ↓
-Runtime Control accepts failure
-        ↓
-Retry Policy approves retry
-        ↓
+        |
+        v
+Retry Policy permits retry
+        |
+        v
 Attempt 2 created
-        ↓
-Scheduler admits
-        ↓
+        |
+        v
+Scheduler ADMIT
+        |
+        v
 Attempt 2 queued
 ```
 
-Queue không biết Attempt 2 là retry ngoài metadata tham chiếu.
+Queue does not care whether Attempt 2 is Retry except for optional diagnostics metadata.
 
 ---
 
-## 45. Architecture Invariants
-
-1. Queue chỉ sở hữu queued position.
-2. Queue không sở hữu WorkItem terminal state.
-3. Queue không quyết định admission policy.
-4. Queue không tự retry.
-5. Queue không tự cancel running Attempt.
-6. Queue không thực thi WorkItem.
-7. Queue không chứa large payload.
-8. Queue không chứa secret.
-9. Queue luôn bounded.
-10. Control capacity được bảo vệ.
-11. Replacement phải atomic.
-12. Dispatched item không còn thuộc Queue.
-13. Replaced hoặc removed item không được dispatch.
-14. Retry tạo queued item mới cho Attempt mới.
-15. Queue không phụ thuộc business capability cụ thể.
-16. Queue không định nghĩa OCR/Translation-specific topology.
-17. Queue pressure phải tạo backpressure.
-18. Queue metrics không chứa user content.
-19. Queue failure không phá runtime correctness.
-20. Shutdown dừng admission trước drain.
-
----
-
-## 46. Related Documents
-
-| Document | Relationship |
-|---|---|
-| `PIPELINE_RUNTIME.md` | WorkItem và Attempt lifecycle |
-| `SCHEDULER.md` | Admission, ordering và replacement decision |
-| `RUNTIME_COMPONENTS.md` | Queue ownership |
-| `CANCELLATION.md` | Queued-work removal |
-| `RETRY_POLICY.md` | New Attempt creation |
-| `MEMORY_MODEL.md` | Artifact Store và Lease |
-| `RESOURCE_LIFECYCLE.md` | Ownership transfer và disposal |
-| `THREADING_MODEL.md` | Worker dispatch boundary |
-| `PERFORMANCE_MODEL.md` | Queue wait và backpressure |
-| `RUNTIME_CONFIG.md` | Capacity và policy configuration |
-| `RUNTIME_OBSERVABILITY.md` | Queue telemetry |
-
----
-
-## 47. Completion Criteria
-
-`WORK_QUEUE.md` được xem là đồng bộ khi:
-
-- queue generic, không gắn OCR/Layout/Translation;
-- queue chỉ sở hữu queued position;
-- lifecycle kết thúc tại dispatch/removal;
-- retry counter bị loại khỏi queue ownership;
-- cancellation chỉ tạo removal instruction;
-- Scheduler decision khớp `ADMIT`, `DEFER`, `REJECT`, `REPLACE`;
-- replacement key được định nghĩa;
-- queue bounded và lightweight;
-- ArtifactRef thay large payload;
-- control capacity được bảo vệ;
-- metrics và integrity rules rõ ràng;
-- startup, pause, drain và shutdown không mâu thuẫn runtime lifecycle.
-
----
-
-## 48. Summary
-
-Work Queue là bounded waiting infrastructure của CRAI Runtime.
+# 80. Example — Dispatch Failure
 
 ```text
-Runtime Control creates work.
-
-Scheduler admits work.
-
-Queue holds waiting position.
-
-Worker executes attempts.
-
-Runtime Control accepts outcomes.
+Queued item selected
+        |
+        v
+Worker handoff fails
+        |
+        v
+Queue reports DISPATCH_FAILED
+        |
+        v
+Runtime Control / Scheduler decide next action
 ```
 
-Ranh giới cốt lõi:
+Queue does not silently requeue itself.
+
+---
+
+# 81. Architecture Invariants
+
+1. Work Queue owns queued position only.
+
+2. Queue does not own WorkItem terminal state.
+
+3. Queue does not own Runtime authority.
+
+4. Queue does not decide Scheduler admission policy.
+
+5. Queue does not create Retry.
+
+6. Queue does not choose Fallback.
+
+7. Queue does not cancel running Attempt.
+
+8. Queue does not execute WorkItem.
+
+9. Queue does not contain large payloads.
+
+10. Queue does not contain raw secrets.
+
+11. Queue is always bounded.
+
+12. CONTROL capacity is protected.
+
+13. Queue does not infer current ExecutionRevision.
+
+14. Queue does not invent replacement semantics.
+
+15. Replacement metadata is externally supplied.
+
+16. Replacement is atomic.
+
+17. Dispatched item is no longer Queue-owned.
+
+18. Replaced/removed/drained item cannot dispatch.
+
+19. Retry creates another queue item for another Attempt.
+
+20. Queue remains capability-independent.
+
+21. Queue does not define OCR/Translation-specific topology.
+
+22. Queue pressure creates signals/backpressure, not independent admission policy.
+
+23. Queue does not independently `DEFER` or `REJECT` as Scheduler policy.
+
+24. Queue ordering follows Scheduler semantics.
+
+25. Queue does not reinterpret business priority.
+
+26. Queue artifact validation is technical only.
+
+27. Cancellation removal follows external authority.
+
+28. Queue lifecycle ends before physical Attempt execution.
+
+29. Queue failure does not corrupt Runtime authority or Business data.
+
+30. Shutdown stops admission before destructive Queue drain.
+
+31. Durable queue support must not resurrect stale authority.
+
+32. ExecutionScope/ExecutionRevision terminology is canonical.
+
+---
+
+# 82. Recommended MVP
+
+CRAI MVP SHOULD support:
+
+* process-local Work Queues;
+* bounded capacity;
+* CONTROL/INTERACTIVE/BACKGROUND/MAINTENANCE classes;
+* immutable lightweight queue items;
+* WorkItemId + AttemptId duplicate prevention;
+* ArtifactRef-only payload references;
+* Scheduler-controlled ordering;
+* explicit replacement key/policy;
+* atomic replacement;
+* explicit removal instructions;
+* atomic dispatch transfer;
+* queue drain;
+* queue pressure metrics;
+* dispatch-failure reporting;
+* graceful shutdown.
+
+MVP MAY defer:
+
+* durable queue persistence;
+* distributed queue;
+* remote workers;
+* queue replication;
+* persistent delivery acknowledgments;
+* advanced multi-consumer work stealing;
+* dynamic queue topology.
+
+---
+
+# 83. Open Decisions
+
+The following remain open:
+
+* exact queue-item schema;
+* physical queue count;
+* heap vs deque vs partitioned implementation;
+* Scheduler-select vs ordering-token dispatch model;
+* dispatch-token mechanism;
+* replacement-policy taxonomy;
+* queue partition keys;
+* per-ExecutionScope capacity;
+* queue pressure thresholds;
+* durable queue recovery model;
+* process-restart rematerialization strategy;
+* dispatch failure recovery;
+* fairness metadata retention;
+* metrics sampling.
+
+---
+
+# 84. Related Documents
+
+Runtime:
+
+* `PIPELINE_RUNTIME.md`
+* `SCHEDULER.md`
+* `RUNTIME_COMPONENTS.md`
+* `CANCELLATION.md`
+* `RETRY_POLICY.md`
+* `MEMORY_MODEL.md`
+* `RESOURCE_LIFECYCLE.md`
+* `THREADING_MODEL.md`
+* `PERFORMANCE_MODEL.md`
+* `RUNTIME_CONFIG.md`
+* `RUNTIME_OBSERVABILITY.md`
+
+---
+
+# 85. Completion Criteria
+
+`WORK_QUEUE.md` is synchronized when:
+
+* Queue remains generic;
+* Queue owns only waiting position;
+* ExecutionScope/ExecutionRevision terminology is used;
+* queue lifecycle ends at dispatch/removal;
+* Queue does not own Retry/cancellation authority;
+* replacement semantics are externally supplied;
+* Queue does not invent current-revision logic;
+* Scheduler remains the only admission policy owner;
+* Queue pressure does not become independent DEFER/REJECT policy;
+* Queue is bounded/lightweight;
+* large payloads use ArtifactRef;
+* CONTROL capacity is preserved;
+* dispatch transfer is atomic;
+* process restart does not resurrect stale queued authority.
+
+---
+
+# 86. Summary
+
+CRAI Work Queue follows:
+
+```text
+Runtime Control
+    creates eligible execution work
+
+        |
+        v
+
+Scheduler
+    decides admission/order
+
+        |
+        v
+
+Work Queue
+    holds bounded waiting position
+
+        |
+        v
+
+Worker
+    executes Attempt
+
+        |
+        v
+
+Runtime Control
+    accepts/rejects Completion
+```
+
+The central boundary is:
 
 ```text
 Queue stores references, not payloads.
@@ -1035,5 +1781,5 @@ Queue owns waiting, not execution.
 
 Queue applies decisions, not policy.
 
-Queue is generic runtime infrastructure.
+Queue does not invent execution meaning.
 ```

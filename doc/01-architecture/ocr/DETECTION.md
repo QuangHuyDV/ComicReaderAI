@@ -1,7 +1,7 @@
 # Text Detection
 
 > **Status:** Draft
-> **Version:** 1.1.0
+> **Version:** 1.2.0
 > **Owner:** OCR Architecture
 > **Layer:** OCR Architecture
 > **Depends On:** Preprocessing
@@ -75,7 +75,7 @@ Detection không thực hiện:
 * text rendering
 * bubble redrawing
 * Runtime scheduling
-* Runtime retry
+* Runtime same-work retry
 * Event Bus behavior
 * global cache lifecycle
 
@@ -871,7 +871,7 @@ Compatibility có thể phụ thuộc:
 
 Detection chỉ định nghĩa semantic compatibility.
 
-Global cache policy thuộc Runtime.
+Global cache lifecycle thuộc Runtime Cache Policy.
 
 ---
 
@@ -974,9 +974,13 @@ Detection Result
 Recognition
 ```
 
-Detection không tự gọi downstream stage theo business/runtime semantics.
+Detection không tự gọi downstream stage theo business hoặc Runtime semantics.
 
-Runtime/Pipeline orchestration quyết định execution flow.
+Business Pipeline Orchestration quyết định downstream Business work và stage dependency.
+
+Pipeline Runtime materialize WorkItem/Attempt từ resolved plan.
+
+Runtime Scheduler quyết định execution admission của dependency-ready work.
 
 ---
 
@@ -1045,17 +1049,30 @@ Presentation không được thay đổi Detection semantics.
 
 Detection không sở hữu:
 
+* ExecutionScope hoặc ExecutionRevision
+* WorkItem hoặc Attempt lifecycle
 * Queued state
 * Running state
-* retry attempts
+* Retry Policy hoặc retry budget
 * execution timeout policy
 * cancellation authority
 * Scheduler behavior
-* stale authority
+* execution authority
+* stale-result rejection
+* Runtime Artifact publication
 
-Runtime chịu trách nhiệm những phần này.
+Runtime sở hữu các execution mechanics và authority trên.
 
-Detection chỉ tạo semantic result hoặc semantic failure information.
+Detection chỉ tạo:
+
+* semantic Detection Result candidate
+* Detection-specific semantic failure information
+* semantic compatibility information
+* execution hoặc resource hints khi contract cho phép
+
+Khi Detection execution hoàn thành, Runtime Control quyết định completion còn execution authority hay phải bị reject vì stale hoặc cancelled trước Runtime publication.
+
+Detection không quyết định downstream Business continuation.
 
 ---
 
@@ -1070,7 +1087,7 @@ Ví dụ:
 * Detection Profile thay đổi
 * Detection Strategy thay đổi
 
-Eviction, retention và cache storage thuộc Runtime.
+Eviction, retention và cache storage thuộc Runtime Cache Policy.
 
 ---
 
@@ -1103,9 +1120,11 @@ DetectionResultInvalid
 UnsupportedDetectionMode
 ```
 
-Provider-specific errors phải được map trước khi crossing Detection boundary.
+Provider-specific errors phải được map sang Detection/provider-neutral failure trước khi crossing Detection boundary.
 
-Runtime Error Model sở hữu normalization ở cấp execution.
+Detection sở hữu semantic meaning của Detection-specific errors.
+
+Runtime Error Model sở hữu execution-level normalization và cross-runtime failure representation.
 
 ---
 
@@ -1121,7 +1140,7 @@ Detection có thể cung cấp measurements như:
 * provider identity
 * strategy version
 
-Telemetry transport và lifecycle thuộc Runtime/Infrastructure.
+Runtime Observability sở hữu execution correlation; telemetry transport và lifecycle thuộc Infrastructure.
 
 ---
 
@@ -1155,19 +1174,29 @@ Detection luôn phải đảm bảo:
 
 13. Detection không sở hữu Runtime scheduling.
 
-14. Detection không sở hữu Runtime retry.
+14. Detection không sở hữu Runtime Retry Policy hoặc Retry budget.
 
 15. Detection không sở hữu cancellation authority.
 
-16. Detection không sở hữu global cache lifecycle.
+16. Detection không sở hữu Runtime execution authority hoặc stale-result decision.
 
-17. Detection Result phải serializable và provider-neutral.
+17. Detection không sở hữu Runtime Artifact publication.
 
-18. Published Detection Result không bị mutate âm thầm.
+18. Detection không sở hữu downstream Business continuation.
 
-19. Region merge/split phải giữ đủ lineage để truy vết khi cần.
+19. Detection không sở hữu global cache lifecycle.
 
-20. Detection-specific semantics chỉ được định nghĩa authoritative tại tài liệu này.
+20. Detection Result phải serializable và provider-neutral.
+
+21. Published Detection Result không bị mutate âm thầm.
+
+22. Region merge/split phải giữ đủ lineage để truy vết khi cần.
+
+23. Detection-specific semantics chỉ được định nghĩa authoritative tại tài liệu này.
+
+24. Detection semantic compatibility không bị Runtime Cache Policy redefine.
+
+25. Provider selection hoặc fallback không thuộc Detection ownership.
 
 ---
 
@@ -1221,26 +1250,32 @@ Không bắt buộc MVP phải có:
 
 # 56. Ownership References
 
-| Concern                    | Owner               |
-| -------------------------- | ------------------- |
-| Preprocessing              | `PREPROCESS.md`     |
-| Detection Result           | `DETECTION.md`      |
-| Region                     | `DETECTION.md`      |
-| Region Type                | `DETECTION.md`      |
-| Detection Geometry         | `DETECTION.md`      |
-| Detection Confidence       | `DETECTION.md`      |
-| Recognition Text           | `RECOGNITION.md`    |
-| Writing Direction          | `TEXT_DIRECTION.md` |
-| Layout Tree                | `LAYOUT.md`         |
-| Spatial Relationship Graph | `LAYOUT.md`         |
-| OCR Document               | `POSTPROCESS.md`    |
-| Reading Order              | `READING_ORDER.md`  |
-| Retry                      | Runtime             |
-| Cancellation               | Runtime             |
-| Scheduling                 | Runtime             |
-| Cache Lifecycle            | Runtime             |
-| Event Transport            | Event Bus           |
-| Telemetry Transport        | Infrastructure      |
+| Concern | Owner |
+| --- | --- |
+| Preprocessing | `PREPROCESS.md` |
+| Detection Result | `DETECTION.md` |
+| Region | `DETECTION.md` |
+| Region Type | `DETECTION.md` |
+| Detection Geometry | `DETECTION.md` |
+| Detection Confidence | `DETECTION.md` |
+| Detection semantic compatibility | `DETECTION.md` |
+| Recognition Text | `RECOGNITION.md` |
+| Writing Direction | `TEXT_DIRECTION.md` |
+| Layout Tree | `LAYOUT.md` |
+| Spatial Relationship Graph | `LAYOUT.md` |
+| OCR Document | `POSTPROCESS.md` |
+| Reading Order | `READING_ORDER.md` |
+| Same-work Retry | Runtime Retry Policy |
+| Cancellation Authority | Runtime Control / Cancellation |
+| Scheduling | Runtime Scheduler |
+| Execution Authority / stale-result rejection | Runtime Control |
+| Runtime Artifact publication | Runtime Artifact boundary |
+| Business continuation | Business Pipeline Orchestration |
+| Provider selection / fallback | AI Routing / Recovery |
+| Cache Lifecycle | Runtime Cache Policy |
+| Event Transport | Event Bus |
+| Execution Error Normalization | Runtime Error Model |
+| Telemetry Transport | Infrastructure |
 
 ---
 
@@ -1303,5 +1338,5 @@ Layout owns spatial structure.
 
 Recognition owns recognized text.
 
-Runtime owns execution.
+Runtime owns execution mechanics and execution authority.
 ```

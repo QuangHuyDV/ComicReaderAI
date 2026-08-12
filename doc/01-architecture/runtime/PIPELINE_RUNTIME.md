@@ -1,406 +1,782 @@
-# runtime/PIPELINE_RUNTIME.md
+# Pipeline Runtime
 
-# Runtime Execution Model
-
-**Status:** Draft  
-**Version:** 2.0
-
----
-
-## 1. Purpose
-
-Tài liệu này định nghĩa cách CRAI Runtime tiếp nhận một `BusinessExecutionPlan` và chuyển nó thành execution có kiểm soát bằng:
-
-- `Revision`;
-- `WorkItem`;
-- `Attempt`;
-- `Artifact`;
-- authority validation;
-- accepted terminal outcome.
-
-Tài liệu này là nguồn định nghĩa chuẩn cho runtime vocabulary.
-
-Nó không mô tả:
-
-- OCR flow;
-- Translation flow;
-- Presentation flow;
-- business stage implementation;
-- provider implementation;
-- UI framework;
-- process topology cụ thể.
+* **Document:** Runtime Architecture / Pipeline Runtime
+* **Version:** 2.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 2. Architectural Position
+# 1. Purpose
+
+This document defines how CRAI Runtime accepts an immutable `BusinessExecutionPlan` and executes it using controlled Runtime concepts:
+
+* `ExecutionScope`;
+* `ExecutionRevision`;
+* `WorkItem`;
+* `Attempt`;
+* Runtime Artifacts;
+* completion reporting;
+* execution-authority validation;
+* accepted execution outcome;
+* stage-runtime readiness;
+* cancellation;
+* Retry;
+* cleanup.
+
+This document is the canonical source for Runtime execution vocabulary.
+
+It does NOT define:
+
+* business pipeline planning;
+* Recognition/OCR semantics;
+* Translation semantics;
+* Presentation semantics;
+* provider/model selection;
+* Plugin implementation;
+* UI framework;
+* concrete process topology.
+
+---
+
+# 2. Architectural Position
 
 ```text
 Business Request
-        ↓
+        |
+        v
 Business Pipeline Orchestration
-        ↓
+        |
+        v
 BusinessExecutionPlan
-        ↓
+        |
+        v
 Pipeline Runtime
-        ↓
+        |
+        v
 Runtime Control
-        ↓
+        |
+        v
 Scheduler / Work Queue / Worker
-        ↓
-Business Module Contract
-        ↓
-Artifact / Completion
-        ↓
-Authority Validation
-        ↓
-Accepted Outcome
+        |
+        v
+Public Business Module Contract
+        |
+        v
+Attempt Result
+        |
+        v
+Execution Authority Validation
+        |
+        v
+Accepted Execution Result
+        |
+        v
+Owning Business Module
+        |
+        v
+Business Validation / Commit
+        |
+        v
+Declared Downstream Stage Readiness
 ```
 
-Pipeline Runtime trả lời câu hỏi:
+Pipeline Runtime answers:
 
-> Runtime thực thi một Business Execution Plan như thế nào mà vẫn bảo đảm authority, cancellation, retry, stale protection và resource safety?
+```text
+How is a declared BusinessExecutionPlan
+executed while preserving execution authority,
+cancellation, Retry, stale protection,
+resource safety and ownership boundaries?
+```
 
 ---
 
-## 3. Core Separation
+# 3. Core Separation
 
-CRAI phân biệt rõ:
+CRAI distinguishes:
 
 ```text
 Business Pipeline Orchestration
-    → quyết định business work nào cần thiết
+    -> decides WHAT business work exists
 
 Pipeline Runtime
-    → quản lý execution state và authority
+    -> executes the declared plan
 
 Business Module
-    → quyết định correctness và semantics của result
+    -> decides WHAT each result means
+       and whether it is business-valid
 ```
 
-Runtime không biết chi tiết OCR, layout, segmentation, translation strategy hoặc rendering algorithm.
+Runtime does not know implementation details such as:
 
-Runtime chỉ biết:
+* OCR algorithm;
+* layout analysis;
+* segmentation;
+* Translation strategy;
+* Prompt design;
+* rendering algorithm.
+
+Runtime understands only the public execution contracts.
+
+---
+
+# 4. Canonical Runtime Hierarchy
 
 ```text
-BusinessStagePlan
-        ↓
+ApplicationInstance
+        |
+        v
+ExecutionScope
+        |
+        v
+ExecutionRevision
+        |
+        v
 WorkItem
-        ↓
+        |
+        v
 Attempt
-        ↓
-Completion
-        ↓
-Accepted Outcome
 ```
 
----
-
-## 4. Runtime Vocabulary
-
-Các thuật ngữ sau được định nghĩa chuẩn tại tài liệu này.
-
-### 4.1 Session
-
-Một runtime scope gắn với một Reading Session đang hoạt động.
-
-`SessionId` là identity cấp cao để cô lập:
-
-- current revision;
-- cancellation scope;
-- priority;
-- runtime metadata;
-- session-scoped resource ownership.
-
-Session business state vẫn thuộc Reading Module.
-
-### 4.2 Revision
-
-`Revision` đại diện cho một phiên bản nội dung hoặc execution intent ổn định trong một session.
-
-Revision là immutable về identity.
-
-Revision có thể trở thành obsolete nhưng không bị mutate thành revision mới.
-
-### 4.3 WorkItem
-
-`WorkItem` là đơn vị công việc logic mà Runtime cần hoàn thành để thực hiện một phần của `BusinessExecutionPlan`.
-
-WorkItem:
-
-- có identity ổn định;
-- có dependency;
-- có priority;
-- có input ArtifactRef;
-- có thể có nhiều Attempt;
-- chỉ chấp nhận một terminal outcome cuối cùng.
-
-### 4.4 Attempt
-
-`Attempt` là một lần thực thi vật lý của một WorkItem.
-
-Mỗi retry tạo `AttemptId` mới.
-
-Attempt cũ không được resume.
-
-### 4.5 Artifact
-
-`Artifact` là output immutable được publish vào Runtime Artifact Store.
-
-Artifact có:
-
-- `ArtifactId`;
-- artifact type;
-- producer WorkItem;
-- producer Attempt;
-- version metadata;
-- ownership metadata;
-- lease metadata;
-- lifecycle state.
-
-### 4.6 Completion
-
-`Completion` là command hoặc notification do Worker gửi về Runtime Control sau khi Attempt kết thúc.
-
-Completion chưa phải accepted outcome.
-
-### 4.7 Terminal Outcome
-
-Mỗi WorkItem chỉ chấp nhận một terminal outcome:
+Optional business correlation may include:
 
 ```text
-SUCCEEDED
-FAILED
-CANCELED
-STALE
-ABANDONED
+ReadingSessionId
+ProjectId
+DocumentId
+RequestId
 ```
 
-### 4.8 Authority
-
-Authority là quyền logic để một result tiếp tục ảnh hưởng Runtime hoặc UI.
-
-Một result có thể đúng về kỹ thuật nhưng không còn authority.
+These identities do not replace Runtime identities.
 
 ---
 
-## 5. Runtime Execution Flow
+# 5. ExecutionScope
+
+An `ExecutionScope` is a Runtime execution boundary.
+
+It may correspond to execution for:
+
+* one Reading Session;
+* one manual translation operation;
+* one export operation;
+* another application use case.
+
+Recommended identity:
 
 ```text
-BusinessExecutionPlan accepted
-        ↓
-Runtime Control validates request
-        ↓
-Revision created
-        ↓
-BusinessStagePlan evaluated
-        ↓
-Logical WorkItem created
-        ↓
-Scheduler admission
-        ↓
-Work Queue
-        ↓
-Worker Execution
-        ↓
-Business Module Contract invoked
-        ↓
-Temporary Result produced
-        ↓
-Completion returned
-        ↓
-Runtime Control validates authority
-        ↓
-Artifact accepted and published
-        ↓
-WorkItem terminal outcome accepted
-        ↓
-Downstream WorkItem becomes eligible
-        ↓
-Presentation commit or revision completion
+ExecutionScopeId
 ```
 
----
+ExecutionScope may own Runtime metadata such as:
 
-## 6. Runtime Control Ownership
-
-Runtime Control là single logical writer đối với:
-
-- runtime state;
-- active session runtime metadata;
-- current revision authority;
-- WorkItem logical state;
-- Attempt lineage;
-- accepted terminal outcome;
-- cancellation state;
-- retry state;
-- commit authority;
-- shutdown state.
-
-Worker, Scheduler, Event Bus và Provider Adapter không được mutate trực tiếp các state này.
+* current ExecutionRevision;
+* cancellation scope;
+* runtime priority context;
+* configuration reference;
+* Runtime Artifact ownership;
+* execution correlation.
 
 ---
 
-## 7. Revision Model
+# 6. ExecutionScope vs ReadingSession
 
-### 7.1 Revision Identity
-
-Mỗi Revision có tối thiểu:
+Critical distinction:
 
 ```text
-SessionId
-RevisionId
-CreatedAt
-BusinessPlanId
-BusinessPlanVersion
-ConfigurationVersion
-SourceIdentity
-RevisionMetadata
+ReadingSession
+    = business/domain concept
+
+ExecutionScope
+    = Runtime execution concept
 ```
 
-### 7.2 Revision Lifecycle
+A Reading Session MAY have an associated ExecutionScope.
+
+Runtime MUST NOT redefine Reading Session business lifecycle.
+
+---
+
+# 7. ExecutionRevision
+
+`ExecutionRevision` represents one immutable generation of execution intent inside an ExecutionScope.
+
+Recommended:
+
+```text
+ExecutionRevision
+├── executionRevisionId
+├── executionScopeId
+├── businessPlanId
+├── planDefinitionVersion
+├── runtimeConfigurationSnapshotId
+├── sourceIdentityReference?
+├── createdAt
+├── authorityState
+└── metadata
+```
+
+---
+
+# 8. ExecutionRevision Is Not Domain Revision
+
+```text
+ExecutionRevision
+    = runtime freshness / execution authority
+```
+
+It is NOT:
+
+```text
+TranslationRevision
+CharacterRevision
+ProfileRevision
+```
+
+Those belong to Domain/Business architecture.
+
+---
+
+# 9. ExecutionRevision Identity
+
+ExecutionRevision identity is immutable.
+
+If business intent changes:
+
+```text
+ExecutionRevision A
+    remains unchanged
+
+ExecutionRevision B
+    is created
+```
+
+---
+
+# 10. ExecutionRevision Lifecycle
+
+Recommended:
 
 ```text
 CREATED
-  ↓
+    |
+    v
 CURRENT
-  ↓
-SUPERSEDED
-  ↓
+    |
+    +--> SUPERSEDED
+    |
+    +--> CANCELLED
+    |
+    v
 DRAINING
-  ↓
+    |
+    v
 DISPOSED
 ```
 
-Revision cũng có thể kết thúc bằng failure hoặc cancellation ở mức execution, nhưng authority vẫn được quản lý riêng.
-
-### 7.3 Current Revision
-
-Mỗi session chỉ có một current revision tại một thời điểm.
-
-Current revision:
-
-- có commit authority;
-- có scheduling priority cao nhất;
-- có quyền tạo downstream work;
-- có thể supersede revision trước.
-
-### 7.4 Superseded Revision
-
-Revision cũ bị supersede khi:
-
-- nội dung mới ổn định;
-- source identity thay đổi;
-- user intent thay đổi;
-- BusinessExecutionPlan mới thay thế plan cũ;
-- session configuration thay đổi theo cách làm invalid output cũ.
-
-Superseded revision có thể vẫn còn running Attempt trong thời gian drain nhưng không còn commit authority.
+Failure of individual WorkItems does not necessarily make the whole ExecutionRevision invalid.
 
 ---
 
-## 8. WorkItem Model
+# 11. Current ExecutionRevision
 
-### 8.1 WorkItem Identity
+An ExecutionScope SHOULD have at most one current ExecutionRevision for one mutually exclusive execution lineage.
+
+Current means:
 
 ```text
-SessionId
-RevisionId
-WorkItemId
-BusinessStageId
-WorkType
-Priority
-InputArtifactRefs
-ConfigurationVersion
-CancellationScope
+eligible for current execution acceptance
 ```
 
-### 8.2 WorkItem Lifecycle
+It does NOT automatically mean:
+
+```text
+highest Scheduler priority in all cases
+```
+
+---
+
+# 12. Scheduler Priority Boundary
+
+Current work normally outranks obsolete work.
+
+However Scheduler still considers:
+
+* control priority;
+* user-interactive priority;
+* deadline;
+* Retry class;
+* background work;
+* resource pressure;
+* shutdown/drain state.
+
+Therefore:
+
+```text
+CURRENT
+    !=
+absolute highest priority
+```
+
+---
+
+# 13. Superseded ExecutionRevision
+
+An ExecutionRevision becomes superseded when another accepted execution intent replaces it.
+
+Possible causes:
+
+* source changed;
+* user intent changed;
+* BusinessExecutionPlan replaced;
+* required business configuration changed;
+* reusable input became invalid.
+
+A superseded revision may still have running Attempts while draining.
+
+Its late results have no current execution authority.
+
+---
+
+# 14. WorkItem
+
+A `WorkItem` is one logical Runtime unit created to execute a declared part of the BusinessExecutionPlan.
+
+Recommended:
+
+```text
+WorkItem
+├── workItemId
+├── executionScopeId
+├── executionRevisionId
+├── businessStageId
+├── workType
+├── handlerReference
+├── dependencyReferences[]
+├── inputArtifactRefs[]
+├── businessConfigurationReferences[]
+├── runtimeConfigurationSnapshotId
+├── priority
+├── deadline?
+├── cancellationScope
+└── correlationContext
+```
+
+---
+
+# 15. WorkItem Rules
+
+1. WorkItem identity is stable.
+
+2. Retry does not clone the WorkItem.
+
+3. Retry creates another Attempt.
+
+4. WorkItem contains no large payload.
+
+5. WorkItem contains no raw secret.
+
+6. WorkItem does not invoke downstream business work itself.
+
+7. WorkItem does not commit Domain or UI state.
+
+8. WorkItem may have several Attempt records.
+
+9. WorkItem accepts at most one final logical execution outcome.
+
+---
+
+# 16. WorkItem Lifecycle
+
+Recommended:
 
 ```text
 CREATED
-  ↓
+    |
+    v
 PENDING
-  ↓
+    |
+    v
 ADMITTED
-  ↓
+    |
+    v
 QUEUED
-  ↓
+    |
+    v
 RUNNING
-  ↓
+    |
+    v
 COMPLETION_REPORTED
-  ↓
-TERMINAL_ACCEPTED
+    |
+    v
+OUTCOME_ACCEPTED
 ```
 
-Các terminal outcome:
+Possible terminal accepted logical outcomes:
 
 ```text
 SUCCEEDED
 FAILED
-CANCELED
-STALE
+CANCELLED
 ABANDONED
 ```
 
-### 8.3 WorkItem Rules
+---
 
-1. WorkItem là logical identity ổn định.
-2. WorkItem không bị clone khi retry.
-3. Retry tạo Attempt mới.
-4. WorkItem chỉ có một accepted terminal outcome.
-5. WorkItem không chứa large payload.
-6. WorkItem không chứa secret.
-7. WorkItem không tự schedule downstream work.
-8. WorkItem không tự commit result.
+# 17. STALE Is Not Physical WorkItem Success/Failure
+
+`STALE` SHOULD normally be represented as:
+
+```text
+Completion Rejection Reason
+```
+
+or:
+
+```text
+Execution Authority Rejection
+```
+
+rather than as a physical execution outcome.
+
+Example:
+
+```text
+Attempt:
+    COMPLETED
+
+Completion:
+    REJECT_STALE
+```
 
 ---
 
-## 9. Attempt Model
+# 18. Attempt
 
-### 9.1 Attempt Identity
+An `Attempt` is one physical execution attempt for one WorkItem.
+
+Recommended:
 
 ```text
-SessionId
-RevisionId
-WorkItemId
-AttemptId
-AttemptNumber
-ProviderSelectionRef
-StartedAt
-ExecutionContextRef
+Attempt
+├── attemptId
+├── workItemId
+├── executionScopeId
+├── executionRevisionId
+├── attemptNumber
+├── executionBindingReference
+├── runtimeConfigurationSnapshotId
+├── startedAt
+├── deadline?
+└── executionContextReference
 ```
 
-### 9.2 Attempt Lifecycle
+---
+
+# 19. Attempt Lifecycle
 
 ```text
 CREATED
-  ↓
+    |
+    v
 STARTED
-  ↓
+    |
+    v
 RUNNING
-  ↓
-COMPLETED | FAILED | CANCELED | ABANDONED
+    |
+    +--> COMPLETED
+    |
+    +--> FAILED
+    |
+    +--> CANCELLED
+    |
+    +--> ABANDONED
 ```
 
-Attempt lifecycle khác WorkItem lifecycle.
-
-### 9.3 Attempt Rules
-
-- mỗi retry tạo Attempt mới;
-- Attempt không được resume;
-- Attempt cũ không overwrite accepted outcome;
-- late completion phải được authority validation;
-- provider fallback là một Attempt mới;
-- speculative execution chưa thuộc MVP;
-- một WorkItem có thể có nhiều Attempt nhưng chỉ một accepted outcome.
+Attempt state is physical execution state.
 
 ---
 
-## 10. Scheduler Interaction
+# 20. Attempt Rules
 
-Pipeline Runtime tạo WorkItem và yêu cầu Scheduler admission.
+* each Retry creates a new AttemptId;
+* an old Attempt is never resumed;
+* late Attempt completion cannot overwrite accepted WorkItem outcome;
+* every Completion passes execution-authority validation;
+* speculative execution is outside MVP;
+* multiple Attempts may exist for one WorkItem;
+* only one logical WorkItem outcome is accepted.
 
-Scheduler chỉ quyết định:
+---
+
+# 21. Execution Binding
+
+An Attempt MAY reference:
+
+```text
+ExecutionBindingReference
+```
+
+Examples:
+
+* built-in implementation;
+* plugin capability provider;
+* provider deployment;
+* AI RoutePlan result;
+* Recognition engine binding.
+
+Runtime consumes this binding.
+
+Runtime MUST NOT independently reinterpret business/provider policy.
+
+---
+
+# 22. Retry vs Fallback
+
+Critical distinction:
+
+```text
+Retry
+    = same WorkItem
+      + compatible execution binding
+      + new Attempt
+```
+
+```text
+Fallback
+    = different execution route/binding
+      selected by owning routing/recovery architecture
+```
+
+Fallback MAY produce a new Attempt.
+
+But:
+
+```text
+Pipeline Runtime
+    does not choose the fallback
+```
+
+---
+
+# 23. Provider Fallback Rule
+
+Do NOT define:
+
+```text
+provider fallback
+    = automatically another Runtime Attempt
+```
+
+as a Runtime-owned rule.
+
+Correct flow:
+
+```text
+Attempt Failure
+        |
+        v
+Owning Routing / Recovery Policy
+        |
+        v
+new ExecutionBindingReference
+        |
+        v
+Runtime creates another Attempt
+```
+
+---
+
+# 24. Runtime Artifact
+
+A Runtime Artifact is an immutable execution payload published into the Runtime Artifact Store.
+
+Recommended:
+
+```text
+RuntimeArtifact
+├── artifactId
+├── artifactType
+├── producerWorkItemId
+├── producerAttemptId
+├── executionRevisionId
+├── semanticReference?
+├── versionMetadata
+├── ownershipMetadata
+├── retentionMetadata
+└── backingResourceReference
+```
+
+---
+
+# 25. Runtime Artifact vs Domain Artifact
+
+```text
+RuntimeArtifact
+    = execution payload
+```
+
+It is NOT automatically:
+
+```text
+TranslationRevision
+GlossarySnapshot
+CharacterRecord
+canonical SourceDocument history
+```
+
+Those are Business/Domain-owned resources.
+
+---
+
+# 26. Completion
+
+`Completion` is the report submitted after an Attempt physically ends.
+
+Recommended:
+
+```text
+AttemptCompletion
+├── executionScopeId
+├── executionRevisionId
+├── workItemId
+├── attemptId
+├── physicalOutcome
+├── temporaryArtifactReference?
+├── normalizedErrorReference?
+├── timingMetadata
+└── executionBindingReference
+```
+
+Completion does not mutate Runtime state by itself.
+
+---
+
+# 27. Completion vs Accepted Outcome
+
+Critical distinction:
+
+```text
+Attempt physically finished
+    !=
+Completion accepted
+```
+
+and:
+
+```text
+Completion accepted by Runtime
+    !=
+Business result accepted by owning module
+```
+
+---
+
+# 28. Execution Flow
+
+Recommended:
+
+```text
+BusinessExecutionPlan Accepted
+        |
+        v
+ExecutionScope Bound
+        |
+        v
+ExecutionRevision Created
+        |
+        v
+Declared Stage Dependencies Evaluated
+        |
+        v
+WorkItem Materialized
+        |
+        v
+Scheduler Admission
+        |
+        v
+Bounded Work Queue
+        |
+        v
+Worker Executes Attempt
+        |
+        v
+Public Module / Adapter Contract
+        |
+        v
+Temporary Result
+        |
+        v
+Completion Reported
+        |
+        v
+Execution Authority Validation
+        |
+        +--> Reject
+        |
+        +--> Accept Execution Result
+                    |
+                    v
+             Runtime Artifact Publication
+                    |
+                    v
+             Owning Business Module
+                    |
+                    v
+             Business Validation / Commit
+                    |
+                    v
+             Business Stage Satisfied
+                    |
+                    v
+             Declared Downstream Stage Ready
+```
+
+---
+
+# 29. Runtime Control Ownership
+
+Runtime Control is the logical authority for execution-orchestration state.
+
+It MAY own:
+
+```text
+current ExecutionRevision
+WorkItem logical state
+Attempt lineage
+accepted execution outcome
+execution authority
+cancellation authority
+Retry lineage
+plan/execution replacement
+runtime shutdown coordination
+```
+
+---
+
+# 30. Runtime Control Is Not Owner of All Runtime State
+
+Runtime Control does NOT own:
+
+* Scheduler admission state;
+* Queue position;
+* physical Resource lifecycle;
+* Artifact backing storage;
+* Provider Health;
+* Plugin lifecycle;
+* Runtime Configuration source state;
+* Business result correctness;
+* Presentation local state;
+* telemetry state.
+
+---
+
+# 31. Scheduler Interaction
+
+Pipeline Runtime requests Scheduler admission.
+
+Scheduler decides:
 
 ```text
 ADMIT
@@ -409,147 +785,161 @@ REJECT
 REPLACE
 ```
 
-Scheduler không:
+Scheduler MUST NOT:
 
-- thay đổi BusinessExecutionPlan;
-- tự tạo retry;
-- tự tạo downstream WorkItem;
-- xác nhận terminal outcome;
-- commit Artifact;
-- mutate revision authority.
+* change BusinessExecutionPlan;
+* add/remove required Business Stages;
+* create Retry decisions;
+* create Fallback decisions;
+* accept terminal WorkItem outcome;
+* change ExecutionRevision authority.
 
 ---
 
-## 11. Queue Interaction
+# 32. Queue Interaction
 
-Sau khi được admission, WorkItem có thể vào bounded Work Queue.
+After admission, Attempt execution may enter a bounded Work Queue.
 
-Queue chỉ lưu:
+Queue entry SHOULD contain lightweight references only:
 
 ```text
 WorkItemRef
 AttemptRef
 Priority
-Dependency state
-Cancellation reference
-Artifact references
+DependencyRuntimeState
+CancellationReference
+ArtifactRefs
+RuntimeConfigurationSnapshotId
+Deadline?
 ```
 
-Queue không lưu:
+---
 
-- image buffer;
-- text payload lớn;
-- provider response;
-- secret;
-- mutable business object.
+# 33. Queue Forbidden Payloads
+
+Queue MUST NOT contain:
+
+* image buffers;
+* full OCR text payload;
+* full Translation output;
+* provider SDK response objects;
+* raw secrets;
+* mutable Business objects.
 
 ---
 
-## 12. Worker Execution
+# 34. Worker Execution
 
-Worker thực thi một Attempt.
+Worker owns physical Attempt execution.
 
-Worker có trách nhiệm:
+Worker MAY:
 
-- nhận immutable execution input;
-- acquire Artifact Lease;
-- gọi public contract phù hợp;
-- theo dõi cooperative cancellation;
-- tạo temporary output;
-- chuẩn hóa execution result;
-- gửi Completion về Runtime Control;
-- release lease;
-- cleanup temporary resource.
-
-Worker không được:
-
-- tự retry;
-- tạo downstream work;
-- mutate Runtime Control state;
-- commit UI;
-- publish accepted Artifact trước authority validation;
-- coi technical completion là accepted success.
+* acquire Artifact leases;
+* invoke public capability/module contract;
+* cooperate with cancellation;
+* create temporary output;
+* normalize provider/module failure;
+* submit Completion;
+* release leases;
+* cleanup temporary resources.
 
 ---
 
-## 13. Business Module Invocation
+# 35. Worker Restrictions
 
-Runtime gọi Business Module thông qua public contract.
+Worker MUST NOT:
 
-Ví dụ:
+* mutate Runtime Control state;
+* schedule downstream Business Stages;
+* perform orchestration-level Retry;
+* choose Fallback route;
+* directly accept terminal outcome;
+* directly commit Domain state;
+* directly commit Presentation/UI;
+* publish accepted Artifact before Runtime authority validation.
+
+---
+
+# 36. Business Module Invocation
+
+Runtime invokes the owning Business Module through its public contract.
+
+Example:
 
 ```text
 Worker
-    ↓
-Recognition Contract
-    ↓
-Recognition Result
+    |
+    v
+Recognition Public Contract
+    |
+    v
+Recognition Execution Result
 ```
 
-Runtime không biết Recognition Module thực hiện:
+Runtime does not know whether Recognition internally uses:
 
-- OCR;
-- layout analysis;
-- reading order;
-- bubble detection;
-- model inference;
-- provider selection nội bộ.
-
-Tương tự, Runtime không biết Translation Module xử lý glossary, cache hay provider như thế nào.
+* OCR;
+* Layout;
+* Reading Order;
+* AI model;
+* Plugin implementation;
+* local/native provider.
 
 ---
 
-## 14. Completion Model
+# 37. Business Module Result
 
-Worker gửi Completion khi Attempt kết thúc.
-
-Ví dụ:
+A Business Module execution may return:
 
 ```text
-AttemptCompleted
-AttemptFailed
-AttemptCanceled
-AttemptAbandoned
+execution result
 ```
 
-Completion phải chứa tối thiểu:
+but Runtime MUST distinguish:
 
 ```text
-SessionId
-RevisionId
-WorkItemId
-AttemptId
-ExecutionOutcome
-TemporaryArtifactRef
-ErrorRef
-TimingMetadata
+technical invocation succeeded
 ```
 
-Completion không tự thay đổi WorkItem state.
+from:
+
+```text
+business result accepted
+```
+
+where the module contract requires semantic validation/commit.
 
 ---
 
-## 15. Authority Validation
+# 38. Execution Authority Validation
 
-Runtime Control xác nhận Completion bằng cách kiểm tra:
+Runtime Control validates whether a Completion is still eligible to influence current Runtime execution.
 
-- session còn active;
-- revision còn authority;
-- WorkItem chưa terminal;
-- Attempt còn hợp lệ;
-- cancellation state;
-- configuration version;
-- result identity;
-- artifact integrity;
-- duplicate completion;
-- stale condition.
+Possible inputs:
 
-Kết quả validation:
+```text
+ExecutionScope active?
+ExecutionRevision current/eligible?
+WorkItem already terminal?
+Attempt lineage valid?
+Cancellation revoked?
+RuntimeConfigurationSnapshot compatible?
+Result identity valid?
+Artifact candidate intact?
+Duplicate Completion?
+Superseded?
+```
+
+---
+
+# 39. Authority Decisions
+
+Recommended:
 
 ```text
 ACCEPT
 REJECT_STALE
-REJECT_CANCELED
+REJECT_CANCELLED
 REJECT_DUPLICATE
 REJECT_INVALID_STATE
 REJECT_INTEGRITY
@@ -557,508 +947,1123 @@ REJECT_INTEGRITY
 
 ---
 
-## 16. Accepted Completion
+# 40. Authority Is Runtime Freshness
 
-Khi Completion được chấp nhận:
+Execution authority answers:
 
 ```text
-Completion
-    ↓
-Authority Validation
-    ↓
-Artifact Publication
-    ↓
-WorkItem Terminal Outcome
-    ↓
-Downstream Eligibility
+May this result still influence current execution?
 ```
 
-Chỉ Runtime Control mới được chấp nhận terminal outcome.
+It does NOT answer:
+
+```text
+Is the Translation semantically correct?
+Is the Recognition result valid?
+Should the UI display this representation?
+```
 
 ---
 
-## 17. Artifact Publication
+# 41. Accepted Execution Result
 
-Worker có thể tạo temporary output.
+When Runtime accepts a Completion:
 
-Temporary output chỉ trở thành accepted Artifact sau validation.
+```text
+Completion
+    |
+    v
+Authority Validation
+    |
+    v
+AcceptedExecutionResult
+```
+
+The result may then be published as a Runtime Artifact.
+
+---
+
+# 42. Runtime Artifact Publication
+
+Recommended:
 
 ```text
 Temporary Output
-        ↓
-Register candidate
-        ↓
-Authority Validation
-        ↓
-Atomic publication
-        ↓
+        |
+        v
+Artifact Candidate
+        |
+        v
+Execution Authority Validation
+        |
+        v
+Atomic Runtime Artifact Publication
+        |
+        v
 Accepted ArtifactRef
 ```
 
-Artifact đã publish là immutable.
+Published Runtime Artifacts are immutable.
 
 ---
 
-## 18. Artifact Rejection
+# 43. Publication Boundary
 
-Artifact candidate bị loại khi:
-
-- Attempt stale;
-- cancellation đã revoke authority;
-- WorkItem đã terminal;
-- artifact corrupt;
-- duplicate completion;
-- configuration mismatch;
-- source identity mismatch.
-
-Rejected output phải được cleanup theo Resource Lifecycle.
-
----
-
-## 19. Downstream Work Creation
-
-Business Stage không tự gọi stage kế tiếp.
-
-Luồng đúng:
+Runtime Artifact publication means:
 
 ```text
-WorkItem succeeded
-        ↓
-Runtime Control updates dependency state
-        ↓
-Downstream BusinessStagePlan becomes ready
-        ↓
-Runtime Control creates downstream WorkItem
-        ↓
+execution payload accepted and retained
+```
+
+It does NOT automatically mean:
+
+```text
+Domain state committed
+Presentation committed
+Storage persisted
+```
+
+---
+
+# 44. Business Validation / Commit
+
+After Runtime acceptance, the owning Business Module decides whether the accepted execution result satisfies its business contract.
+
+Recommended:
+
+```text
+AcceptedExecutionResult
+        |
+        v
+Owning Business Module
+        |
+        +--> ACCEPT_BUSINESS_RESULT
+        |
+        +--> REJECT_BUSINESS_RESULT
+        |
+        +--> REQUEST_RECOVERY
+```
+
+Exact contract belongs to the owning module.
+
+---
+
+# 45. Stage Completion
+
+A Business Stage becomes logically satisfied only after the required business output has been accepted according to its owner contract.
+
+Critical rule:
+
+```text
+Worker returned
+    !=
+Stage complete
+```
+
+and:
+
+```text
+Runtime authority accepted
+    !=
+Stage business-valid
+```
+
+---
+
+# 46. Downstream Stage Readiness
+
+Correct progression:
+
+```text
+Business Stage Output Accepted
+        |
+        v
+Runtime updates declared dependency state
+        |
+        v
+Declared downstream BusinessStagePlan ready
+        |
+        v
+Runtime Control materializes WorkItem(s)
+        |
+        v
 Scheduler admission
 ```
 
 ---
 
-## 20. Retry Boundary
+# 47. Runtime May Advance Declared Graph
 
-Pipeline Runtime chỉ định nghĩa execution model cho retry.
+Pipeline Runtime MAY automatically advance through the already-accepted BusinessExecutionPlan.
+
+It may determine:
 
 ```text
-Attempt 1 failed
-        ↓
-Runtime Control validates relevance
-        ↓
+which declared stage has all dependencies satisfied
+```
+
+It MUST NOT invent a Business Stage not present in the plan.
+
+---
+
+# 48. Dynamic Business Decision
+
+If an execution result requires another business decision not represented by the plan:
+
+```text
+Runtime
+    |
+    v
+Application / Business Orchestrator
+    |
+    v
+Replan
+```
+
+Runtime MUST NOT silently extend the graph.
+
+---
+
+# 49. Retry Boundary
+
+Recommended:
+
+```text
+Attempt 1 Failed
+        |
+        v
+Runtime verifies WorkItem still relevant
+        |
+        v
 Retry Policy evaluates
-        ↓
-Attempt 2 created
-        ↓
-Scheduler admission
+        |
+        +--> no retry
+        |
+        +--> retry allowed
+                    |
+                    v
+               Attempt 2
+                    |
+                    v
+             Scheduler Admission
 ```
-
-Retry policy chi tiết thuộc `RETRY_POLICY.md`.
 
 ---
 
-## 21. Cancellation Boundary
+# 50. Retry Identity
 
-Cancellation bắt đầu bằng authority revocation.
+Retry preserves:
+
+```text
+ExecutionScopeId
+ExecutionRevisionId
+WorkItemId
+```
+
+and creates:
+
+```text
+new AttemptId
+```
+
+---
+
+# 51. Retry Configuration
+
+Retry execution uses the immutable Runtime Configuration identity applicable to the retry policy.
+
+If Retry is allowed to use a newer Runtime snapshot, that activation rule MUST be explicit.
+
+---
+
+# 52. Cancellation Boundary
+
+Cancellation begins by revoking execution authority.
+
+Recommended:
 
 ```text
 Cancellation Requested
-        ↓
+        |
+        v
 Authority Revoked
-        ↓
+        |
+        v
 Queued Work Removed
-        ↓
-Running Attempt Signaled
-        ↓
+        |
+        v
+Running Attempts Signaled
+        |
+        v
 Late Completion Rejected
-        ↓
-Resource Drain
-```
-
-Chi tiết propagation thuộc `CANCELLATION.md`.
-
----
-
-## 22. Stale Result
-
-Một result là stale khi:
-
-- revision không còn current;
-- newer plan đã thay thế;
-- Attempt không còn hợp lệ;
-- source identity thay đổi;
-- presentation target version thay đổi;
-- session đã dừng.
-
-Stale không đồng nghĩa technical failure.
-
----
-
-## 23. Replacement Flow
-
-```text
-Revision A current
-        ↓
-Revision B created
-        ↓
-Revision A authority revoked
-        ↓
-Revision B becomes current
-        ↓
-Revision A late completion arrives
-        ↓
-Rejected as STALE
+        |
+        v
+Resources Drain
 ```
 
 ---
 
-## 24. Partial Result
-
-Partial result chỉ được chấp nhận khi BusinessExecutionPlan và owner contract cho phép.
-
-Mỗi partial result phải có:
-
-- identity;
-- order;
-- parent WorkItem;
-- revision identity;
-- authority metadata;
-- completion semantics.
-
-Partial result không được bypass authority validation.
-
----
-
-## 25. Presentation Commit
-
-Presentation commit là side effect có thể quan sát được.
-
-Chỉ được phép khi:
-
-- revision còn current;
-- result còn authority;
-- presentation target còn hợp lệ;
-- UI context còn active;
-- commit chưa bị thay thế;
-- artifact integrity hợp lệ.
-
-Worker không commit UI trực tiếp.
-
----
-
-## 26. Failure Model
-
-Execution failure phải được normalize thành RuntimeError.
-
-Technical failure không đồng nghĩa:
+# 53. Cancellation Is Not Failure
 
 ```text
-CANCELED
-STALE
-ABANDONED
+CANCELLED
+    !=
+FAILED
 ```
 
-Runtime Error Model chi tiết thuộc `ERROR_MODEL.md`.
+unless the owning business contract explicitly maps cancellation to another higher-level outcome.
 
 ---
 
-## 27. Concurrent Revisions
+# 54. Stale Completion
 
-Nhiều Revision có thể đồng thời tồn tại ở các trạng thái khác nhau:
+A Completion is stale when it belongs to execution no longer eligible to affect current output.
+
+Examples:
+
+* ExecutionRevision superseded;
+* plan replaced;
+* Attempt no longer valid;
+* source identity changed;
+* execution target changed;
+* ExecutionScope ended.
+
+---
+
+# 55. Stale Is an Authority Outcome
+
+Recommended:
 
 ```text
-Revision 20 → DRAINING
-Revision 21 → RUNNING
-Revision 22 → CURRENT / PENDING
+Attempt physical outcome:
+    COMPLETED
+
+Runtime authority decision:
+    REJECT_STALE
 ```
 
-Chỉ current revision có commit authority.
+This preserves the distinction between physical execution and logical acceptance.
 
 ---
 
-## 28. Concurrent WorkItems
-
-Các WorkItem độc lập có thể chạy song song nếu:
-
-- dependency đã thỏa;
-- Scheduler admission cho phép;
-- resource budget đủ;
-- provider concurrency cho phép;
-- business ordering không bị phá;
-- cancellation scope còn active.
-
----
-
-## 29. Backpressure
-
-Pipeline Runtime phải hỗ trợ backpressure khi:
-
-- queue đầy;
-- provider saturated;
-- memory pressure;
-- artifact count vượt budget;
-- worker pool saturated;
-- downstream chậm.
-
-Backpressure được thực hiện qua Scheduler, Queue và Runtime Control, không qua Business Module tự ý chặn lẫn nhau.
-
----
-
-## 30. Runtime Cleanup
-
-Cleanup chỉ xảy ra khi resource đủ điều kiện.
+# 56. Replacement Flow
 
 ```text
-Revision loses authority
-        ↓
-Logical ownership removed
-        ↓
-Running Attempt drains
-        ↓
-Artifact Lease released
-        ↓
-Artifact no longer retained
-        ↓
+ExecutionRevision A CURRENT
+        |
+        v
+Business intent changes
+        |
+        v
+BusinessExecutionPlan B accepted
+        |
+        v
+ExecutionRevision B created
+        |
+        v
+A authority revoked
+        |
+        v
+B becomes CURRENT
+        |
+        v
+A late Completion
+        |
+        v
+REJECT_STALE
+```
+
+---
+
+# 57. Replan Mapping
+
+Business Orchestration creates the new plan.
+
+Pipeline Runtime decides how that plan maps to:
+
+```text
+ExecutionRevision
+WorkItems
+Attempts
+```
+
+Business Orchestrator MUST NOT create Runtime identities directly.
+
+---
+
+# 58. Partial Results
+
+Partial result is allowed only when:
+
+* BusinessExecutionPlan declares partial delivery;
+* owning module supports partial output contract;
+* identity is explicit;
+* ordering is explicit;
+* Runtime authority can be evaluated;
+* downstream consumption is safe.
+
+---
+
+# 59. Partial Runtime Identity
+
+Recommended:
+
+```text
+PartialExecutionResult
+├── parentWorkItemId
+├── attemptId
+├── executionRevisionId
+├── partialId
+├── sequence/order
+├── completionState
+└── artifactReference
+```
+
+---
+
+# 60. Partial Result Authority
+
+Each partial output MUST pass authority validation.
+
+A late partial from a superseded ExecutionRevision MUST NOT be accepted as current.
+
+---
+
+# 61. Presentation Boundary
+
+Presentation commit is owned by Presentation/Application.
+
+Pipeline Runtime may confirm:
+
+```text
+accepted execution result still has current authority
+```
+
+Presentation then decides:
+
+```text
+whether/how the result may be committed
+to the current target/UI
+```
+
+---
+
+# 62. Runtime Does Not Own UI Commit
+
+Runtime Control MUST NOT be defined as the semantic owner of:
+
+* target existence;
+* layout validity;
+* UI widget state;
+* user-visible rendering correctness.
+
+These belong to Presentation/Application.
+
+---
+
+# 63. Presentation Commit Flow
+
+Recommended:
+
+```text
+Accepted Presentation Input Artifact
+        |
+        v
+Presentation Module
+        |
+        v
+Presentation Target Validation
+        |
+        v
+UI/Application Commit
+```
+
+Runtime authority remains an input to that decision.
+
+---
+
+# 64. Concurrent ExecutionRevisions
+
+Several ExecutionRevisions MAY coexist physically:
+
+```text
+ExecutionRevision 20 -> DRAINING
+ExecutionRevision 21 -> CURRENT
+ExecutionRevision 22 -> CREATED/PENDING
+```
+
+Only the current eligible revision may normally affect current execution output.
+
+---
+
+# 65. Concurrent WorkItems
+
+Independent WorkItems may execute concurrently when:
+
+* business dependencies satisfied;
+* Scheduler admits them;
+* resource budget available;
+* provider/runtime concurrency permits;
+* business ordering is preserved;
+* cancellation scope active.
+
+---
+
+# 66. Backpressure
+
+Pipeline Runtime MUST support bounded backpressure for:
+
+* Queue capacity;
+* worker saturation;
+* provider saturation;
+* memory pressure;
+* Artifact pressure;
+* slow downstream components.
+
+Backpressure mechanisms belong to Scheduler, Queue and Resource policy.
+
+Business Modules MUST NOT coordinate backpressure through private blocking dependencies.
+
+---
+
+# 67. Resource Cleanup
+
+Logical authority loss and physical resource disposal are separate.
+
+Recommended:
+
+```text
+ExecutionRevision loses authority
+        |
+        v
+New work stops
+        |
+        v
+Running Attempts drain/cancel
+        |
+        v
+Artifact leases released
+        |
+        v
+Retention eligibility evaluated
+        |
+        v
 Physical disposal
 ```
 
-Mất authority không đồng nghĩa dispose ngay.
+---
+
+# 68. ExecutionRevision Disposal
+
+An ExecutionRevision may be disposed when:
+
+* it is no longer current;
+* no pending WorkItems remain;
+* no active Attempts remain;
+* no retained Runtime Artifact ownership remains;
+* no active lease remains;
+* required diagnostic retention expired;
+* cleanup completed or transferred to cleanup-retry ownership.
 
 ---
 
-## 31. Revision Disposal
+# 69. WorkItem Terminal Outcome
 
-Revision có thể dispose khi:
+One WorkItem accepts at most one logical terminal outcome.
 
-- không còn current;
-- không còn pending WorkItem;
-- không còn running Attempt;
-- không còn accepted Artifact ownership cần giữ;
-- không còn active lease;
-- diagnostic retention đã hết;
-- cleanup hoàn tất hoặc được chuyển sang retry cleanup.
-
----
-
-## 32. Shutdown
+Recommended:
 
 ```text
-Stop new admission
-        ↓
-Revoke execution authority
-        ↓
-Remove queued work
-        ↓
-Signal running attempts
-        ↓
-Drain resources
-        ↓
-Release Artifact leases
-        ↓
-Dispose revision state
-        ↓
-Stop workers and providers
+SUCCEEDED
+FAILED
+CANCELLED
+ABANDONED
 ```
 
-Shutdown chi tiết phải thống nhất với `BOOT_SEQUENCE.md` và `RESOURCE_LIFECYCLE.md`.
-
----
-
-## 33. Observability
-
-Pipeline Runtime phải phát telemetry cho:
-
-- revision lifecycle;
-- WorkItem lifecycle;
-- Attempt lifecycle;
-- queue wait;
-- execution duration;
-- authority rejection;
-- stale completion;
-- retry lineage;
-- cancellation;
-- artifact publication;
-- cleanup;
-- presentation commit;
-- current-revision latency.
-
-Không log user content mặc định.
-
----
-
-## 34. Performance Model
-
-Pipeline Runtime đo performance theo useful output của current revision.
-
-Metric trọng tâm:
+Authority rejections such as:
 
 ```text
-Useful Translation Latency
-Current Revision Commit Ratio
-Stale Work Ratio
+STALE
+DUPLICATE
+INVALID_STATE
+```
+
+are tracked separately.
+
+---
+
+# 70. Attempt Outcome vs WorkItem Outcome
+
+Example:
+
+```text
+Attempt 1:
+    FAILED
+
+Attempt 2:
+    COMPLETED
+
+WorkItem:
+    SUCCEEDED
+```
+
+Another example:
+
+```text
+Attempt 1:
+    COMPLETED
+
+Authority:
+    REJECT_STALE
+
+WorkItem:
+    CANCELLED / superseded according to execution lineage
+```
+
+---
+
+# 71. Failure Model
+
+Technical execution failures are normalized into Runtime Error contracts.
+
+Failure remains separate from:
+
+```text
+CANCELLED
+STALE rejection
+ABANDONED
+```
+
+Detailed taxonomy belongs to `ERROR_MODEL.md`.
+
+---
+
+# 72. Runtime Completion State vs Business Failure
+
+A WorkItem may technically succeed while the Business Module rejects the result as invalid.
+
+That rejection MAY result in:
+
+* WorkItem failure;
+* another recovery WorkItem;
+* Fallback request;
+* replan;
+* user-visible degradation.
+
+Exact ownership depends on the Business contract.
+
+---
+
+# 73. Provider Runtime Boundary
+
+Pipeline Runtime executes already-resolved execution bindings through public provider/capability runtime interfaces.
+
+It does NOT own:
+
+* Provider Configuration;
+* provider credentials;
+* provider selection policy;
+* AI model routing;
+* Plugin trust.
+
+---
+
+# 74. Plugin Boundary
+
+A WorkItem MAY execute through a Plugin-provided capability.
+
+Runtime depends on the capability contract, not plugin-private implementation APIs.
+
+---
+
+# 75. Configuration Boundary
+
+Every WorkItem/Attempt MUST carry or reference immutable Runtime configuration identity.
+
+Runtime does not copy full Workspace/Profile/Provider/Plugin configuration into execution objects.
+
+---
+
+# 76. Secrets
+
+Raw secrets MUST NOT appear in:
+
+* WorkItem;
+* Attempt;
+* Completion;
+* Runtime Artifact metadata;
+* Event Bus payload;
+* Runtime telemetry.
+
+Secret references/privileged Host Services are used where required.
+
+---
+
+# 77. Runtime State Ownership Summary
+
+| State                             | Owner                      |
+| --------------------------------- | -------------------------- |
+| Current ExecutionRevision         | Runtime Control            |
+| ExecutionRevision metadata        | Execution State Store      |
+| WorkItem logical state            | Runtime Control            |
+| Attempt physical execution        | Worker / execution context |
+| Attempt lineage acceptance        | Runtime Control            |
+| Scheduler admission               | Scheduler                  |
+| Queue position                    | Work Queue                 |
+| Runtime Artifact registry         | Runtime Artifact Store     |
+| Physical resource lifecycle       | Resource Manager           |
+| Business result correctness       | Business Module            |
+| Presentation/UI state             | Presentation/Application   |
+| Durable persistence               | Storage                    |
+| Provider configuration/governance | Provider Management        |
+
+---
+
+# 78. Downstream Ownership Summary
+
+```text
+Business Orchestrator
+    defines stage graph
+
+Business Module
+    accepts business output
+
+Pipeline Runtime
+    observes declared dependency satisfaction
+
+Runtime Control
+    materializes downstream WorkItems
+
+Scheduler
+    controls admission
+```
+
+---
+
+# 79. Shutdown
+
+Recommended:
+
+```text
+Stop New ExecutionScope Creation
+        |
+        v
+Stop Scheduler Admission
+        |
+        v
+Revoke / Quiesce Execution Authority
+        |
+        v
+Remove Obsolete Queued Work
+        |
+        v
+Signal Running Attempts
+        |
+        v
+Drain / Cancel
+        |
+        v
+Release Artifact Leases
+        |
+        v
+Dispose ExecutionRevision State
+        |
+        v
+Stop Workers / Provider Runtime
+```
+
+Exact ordering aligns with `BOOT_SEQUENCE.md` and `RESOURCE_LIFECYCLE.md`.
+
+---
+
+# 80. Observability
+
+Pipeline Runtime SHOULD emit telemetry for:
+
+* ExecutionScope lifecycle;
+* ExecutionRevision lifecycle;
+* WorkItem lifecycle;
+* Attempt lifecycle;
+* Queue wait;
+* execution duration;
+* authority rejection;
+* stale Completion;
+* Retry lineage;
+* cancellation;
+* Runtime Artifact publication;
+* business-result acceptance latency;
+* cleanup;
+* wasted execution.
+
+---
+
+# 81. Correlation
+
+Recommended correlation chain:
+
+```text
+ApplicationInstanceId
+        |
+        v
+ExecutionScopeId
+        |
+        v
+ExecutionRevisionId
+        |
+        v
+WorkItemId
+        |
+        v
+AttemptId
+```
+
+Business IDs may be attached separately.
+
+---
+
+# 82. Privacy
+
+Runtime telemetry MUST NOT log reading content by default.
+
+Do not log:
+
+* screenshot;
+* OCR/source text;
+* translated text;
+* Prompt;
+* full AI Context;
+* raw provider payload;
+* secret.
+
+---
+
+# 83. Performance
+
+Runtime performance SHOULD prioritize useful accepted output.
+
+Possible metrics:
+
+```text
+Current ExecutionRevision Useful Latency
 Useful Work Ratio
+Stale Work Ratio
+Rejected Completion Ratio
 Wasted Execution Time
-```
-
-Chi tiết thuộc `PERFORMANCE_MODEL.md`.
-
----
-
-## 35. Runtime State Summary
-
-```text
-Session
-  └── Revision
-        ├── WorkItem
-        │     ├── Attempt 1
-        │     ├── Attempt 2
-        │     └── Accepted Outcome
-        └── ArtifactRefs
+Queue Wait
+Retry Cost
+Business Acceptance Latency
 ```
 
 ---
 
-## 36. State Ownership Summary
+# 84. Dependency Rules
 
-| State | Owner |
-|---|---|
-| Current revision | Runtime Control |
-| Revision metadata | Revision Store |
-| WorkItem logical state | Runtime Control |
-| Attempt execution state | Worker execution + Runtime Control acceptance |
-| Scheduling decision | Scheduler |
-| Queue position | Work Queue |
-| Artifact registry | Artifact Store |
-| Physical resource lifecycle | Resource Manager |
-| Business result correctness | Business Module |
-| Durable persistence | Storage Module |
-| UI local state | Presentation |
+1. Runtime Control does not depend on concrete provider implementation.
 
----
+2. Scheduler does not modify BusinessExecutionPlan.
 
-## 37. Dependency Rules
+3. Worker does not mutate Runtime Control state.
 
-1. Runtime Control không phụ thuộc provider implementation.
-2. Scheduler không thay đổi BusinessExecutionPlan.
-3. Worker không mutate Runtime Control.
-4. Worker không tự retry.
-5. Business Module không tự schedule downstream work.
-6. Event Bus không điều phối pipeline.
-7. Artifact Store không sở hữu business data semantics.
-8. Storage Module không quản lý runtime authority.
-9. UI không gọi Worker trực tiếp.
-10. Secret không đi qua WorkItem hoặc Completion.
-11. Large payload chỉ truyền bằng ArtifactRef.
-12. Process boundary không được thay đổi runtime semantics.
-13. Completion phải được validation trước side effect.
-14. Late Attempt không overwrite accepted outcome.
-15. Cleanup không được phá active lease.
+4. Worker does not perform orchestration-level Retry.
 
----
+5. Worker does not choose Fallback.
 
-## 38. Runtime Invariants
+6. Business Module does not directly schedule downstream Runtime work.
 
-1. Runtime Control là single logical writer.
-2. Mỗi session chỉ có một current revision.
-3. Current revision có priority cao nhất.
-4. Revision identity là immutable.
-5. WorkItem identity là immutable.
-6. Attempt identity là immutable.
-7. Mỗi WorkItem chỉ chấp nhận một terminal outcome.
-8. Mỗi retry tạo Attempt mới.
-9. Worker không commit.
-10. Scheduler không đổi business semantics.
-11. Business Module sở hữu result correctness.
-12. Artifact đã publish là immutable.
-13. Stale result không được commit.
-14. Cancellation không mặc định là failure.
-15. Failed, canceled hoặc stale output không được promote như success.
-16. Artifact chỉ dispose khi không còn owner hoặc lease.
-17. Large payload không đi qua queue.
-18. Runtime correctness không phụ thuộc telemetry.
-19. Shutdown dừng admission trước cleanup.
-20. Storage và Artifact Store là hai boundary khác nhau.
+7. Event Bus does not orchestrate the pipeline.
+
+8. Runtime Artifact Store does not own Business semantics.
+
+9. Storage does not manage execution authority.
+
+10. UI does not call Worker directly.
+
+11. Raw secrets do not travel through Runtime execution contracts.
+
+12. Large payloads use ArtifactRefs/handles.
+
+13. Process boundaries preserve execution semantics.
+
+14. Completion passes authority validation before Runtime acceptance.
+
+15. Accepted Runtime result may still require Business validation.
+
+16. Late Attempt cannot overwrite accepted WorkItem outcome.
+
+17. Resource cleanup must preserve active leases.
+
+18. Runtime may only advance stages declared in the accepted plan.
+
+19. Runtime does not invent business workflow.
+
+20. Fallback selection belongs outside Pipeline Runtime.
 
 ---
 
-## 39. Related Documents
+# 85. Architecture Invariants
 
-| Document | Relationship |
-|---|---|
-| `BUSINESS_PIPELINE_ORCHESTRATION.md` | Tạo BusinessExecutionPlan |
-| `RUNTIME_COMPONENTS.md` | Component ownership |
-| `SCHEDULER.md` | Admission model |
-| `WORK_QUEUE.md` | Queue lifecycle |
-| `CANCELLATION.md` | Cancellation propagation |
-| `RETRY_POLICY.md` | Retry eligibility |
-| `ERROR_MODEL.md` | Runtime error và terminal outcome |
-| `CACHE_POLICY.md` | Artifact reuse |
-| `MEMORY_MODEL.md` | Revision Store, Artifact Store và Lease |
-| `THREADING_MODEL.md` | Execution context |
-| `RESOURCE_LIFECYCLE.md` | Ownership transfer và disposal |
-| `PERFORMANCE_MODEL.md` | Useful-result performance |
-| `RUNTIME_OBSERVABILITY.md` | Telemetry |
-| `BOOT_SEQUENCE.md` | Startup và shutdown |
-| `RUNTIME_CONFIG.md` | Configuration snapshot |
+1. `ExecutionScope` is the Runtime execution scope.
+
+2. `ExecutionRevision` is the Runtime freshness/authority generation.
+
+3. ExecutionRevision is distinct from Domain revisions.
+
+4. ReadingSession is distinct from ExecutionScope.
+
+5. ExecutionRevision identity is immutable.
+
+6. WorkItem identity is immutable.
+
+7. Attempt identity is immutable.
+
+8. Retry creates a new Attempt.
+
+9. WorkItem accepts at most one final logical outcome.
+
+10. Runtime Control is authority for execution-orchestration state.
+
+11. Runtime Control is not owner of every Runtime component's state.
+
+12. Scheduler owns admission.
+
+13. Worker owns physical execution only.
+
+14. Worker does not commit Business or UI state.
+
+15. Completion is not accepted outcome.
+
+16. Runtime authority acceptance is not Business correctness.
+
+17. Business Module owns Business result validity.
+
+18. Published Runtime Artifacts are immutable.
+
+19. Runtime Artifact publication is not Domain commit.
+
+20. Stale is an authority rejection concept.
+
+21. Cancellation is not automatically Failure.
+
+22. Retry and Fallback are separate.
+
+23. Pipeline Runtime does not select another Provider/Model fallback.
+
+24. Current ExecutionRevision does not automatically have absolute highest Scheduler priority.
+
+25. Business plan defines downstream stage graph.
+
+26. Runtime may advance declared stages only.
+
+27. Runtime MUST NOT invent Business Stages.
+
+28. Downstream readiness requires accepted business dependency output.
+
+29. Worker completion alone does not satisfy a Business Stage.
+
+30. Large payloads do not travel through Queue.
+
+31. Raw secrets do not travel through WorkItem/Completion.
+
+32. Runtime correctness does not depend on telemetry.
+
+33. Resource authority loss does not imply immediate physical disposal.
+
+34. Artifact disposal requires ownership/lease eligibility.
+
+35. Storage and Runtime Artifact Store remain separate.
+
+36. Presentation owns visible commit semantics.
+
+37. Runtime authority may constrain Presentation commit but does not own UI semantics.
+
+38. Shutdown stops admission before destructive cleanup.
 
 ---
 
-## 40. Completion Criteria
+# 86. Recommended MVP
 
-`PIPELINE_RUNTIME.md` được xem là hoàn chỉnh khi:
+CRAI MVP SHOULD support:
 
-- runtime vocabulary chỉ được định nghĩa tại đây;
-- BusinessExecutionPlan là input chính;
-- Revision, WorkItem và Attempt được tách rõ;
-- Runtime Control là authority owner;
-- Scheduler chỉ sở hữu admission;
-- Worker chỉ sở hữu execution;
-- Completion khác accepted outcome;
-- Artifact publication cần authority validation;
-- retry tạo Attempt mới;
-- stale được tách khỏi failure;
-- cancellation bắt đầu bằng authority revocation;
-- cleanup tách khỏi logical authority;
-- Business Module không bị Runtime chiếm ownership;
-- Storage và Artifact Store không bị nhầm;
-- không còn business capability như OCR hoặc Translation được định nghĩa như runtime stage.
+* ExecutionScope;
+* ExecutionRevision;
+* WorkItem;
+* Attempt;
+* immutable BusinessExecutionPlan input;
+* stage dependency tracking;
+* Scheduler admission;
+* bounded Work Queue;
+* Worker execution;
+* Completion reporting;
+* execution-authority validation;
+* Runtime Artifact publication;
+* Business-result handoff;
+* downstream declared-stage readiness;
+* same-binding Retry;
+* cancellation;
+* stale protection;
+* Runtime Artifact leases;
+* graceful cleanup;
+* ExecutionRevision replacement.
+
+MVP MAY defer:
+
+* speculative execution;
+* provider racing;
+* distributed Runtime Control;
+* distributed Work Queues;
+* multi-process execution consensus;
+* dynamic business plan mutation;
+* autonomous Runtime planning;
+* automatic Runtime-owned provider Fallback;
+* persistent queue replay.
 
 ---
 
-## 41. Summary
+# 87. Open Decisions
 
-Pipeline Runtime biến một BusinessExecutionPlan thành execution có kiểm soát:
+The following remain open:
+
+* exact ExecutionScope schema;
+* exact ExecutionRevision schema;
+* WorkItem schema;
+* Attempt schema;
+* Completion schema;
+* AcceptedExecutionResult schema;
+* stage-runtime readiness representation;
+* WorkItem terminal outcome taxonomy;
+* how Business Module acceptance is represented;
+* whether Business result rejection reuses WorkItem or creates recovery WorkItem;
+* Retry configuration snapshot behavior;
+* Fallback-to-Attempt handoff contract;
+* Runtime Artifact candidate/publication API;
+* partial-result identity;
+* ExecutionRevision replacement command;
+* Execution State persistence;
+* current revision per execution lineage;
+* crash recovery;
+* cleanup retention;
+* Provider Runtime Gateway invocation contract.
+
+---
+
+# 88. Related Documents
+
+Runtime:
+
+* `BUSINESS_PIPELINE_ORCHESTRATION.md`
+* `RUNTIME_COMPONENTS.md`
+* `BOOT_SEQUENCE.md`
+* `RUNTIME_CONFIG.md`
+* `SCHEDULER.md`
+* `WORK_QUEUE.md`
+* `CANCELLATION.md`
+* `RETRY_POLICY.md`
+* `CACHE_POLICY.md`
+* `MEMORY_MODEL.md`
+* `THREADING_MODEL.md`
+* `RESOURCE_LIFECYCLE.md`
+* `PERFORMANCE_MODEL.md`
+* `ERROR_MODEL.md`
+* `RUNTIME_OBSERVABILITY.md`
+* `PROCESS_TOPOLOGY.md`
+
+External:
+
+* `../ai/ROUTING.md`
+* `../ai/RETRY.md`
+* `../ai/FALLBACK.md`
+* `../plugin/PLUGIN_SYSTEM.md`
+* `../../02-modules/provider-management/`
+
+---
+
+# 89. Completion Criteria
+
+`PIPELINE_RUNTIME.md` is synchronized when:
+
+* Runtime vocabulary uses ExecutionScope/ExecutionRevision;
+* Reading Session is not treated as Runtime ownership;
+* Runtime Control ownership is narrow and explicit;
+* WorkItem and Attempt remain distinct;
+* Completion remains distinct from accepted outcome;
+* Runtime authority remains distinct from Business correctness;
+* STALE is separated from physical Attempt outcome;
+* Retry creates new Attempt;
+* Retry remains distinct from Fallback;
+* provider fallback is not selected by Runtime;
+* Runtime Artifact publication remains authority-gated;
+* Business Module validation/commit occurs before downstream business-stage satisfaction;
+* downstream work is created only for stages declared in the plan;
+* Presentation commit remains Presentation-owned;
+* Resource cleanup remains separate from logical authority loss.
+
+---
+
+# 90. Summary
+
+Pipeline Runtime transforms an immutable BusinessExecutionPlan into controlled execution:
 
 ```text
 BusinessExecutionPlan
-        ↓
-Revision
-        ↓
+        |
+        v
+ExecutionScope
+        |
+        v
+ExecutionRevision
+        |
+        v
+Declared Business Stage
+        |
+        v
 WorkItem
-        ↓
+        |
+        v
 Attempt
-        ↓
+        |
+        v
 Completion
-        ↓
-Authority Validation
-        ↓
-Accepted Artifact
-        ↓
-Accepted Terminal Outcome
+        |
+        v
+Execution Authority Validation
+        |
+        v
+Accepted Execution Result
+        |
+        v
+Runtime Artifact
+        |
+        v
+Business Module Validation / Commit
+        |
+        v
+Declared Downstream Stage Ready
 ```
 
-Ranh giới cốt lõi:
+The central ownership model is:
 
 ```text
-Business Orchestrator decides what work is required.
+Business Orchestrator
+    owns the declared business graph.
 
-Runtime Control owns authority.
+Runtime Control
+    owns execution authority.
 
-Scheduler owns admission.
+Scheduler
+    owns admission.
 
-Workers own execution.
+Worker
+    owns physical Attempt execution.
 
-Business Modules own meaning.
+Business Module
+    owns result meaning and correctness.
 
-Artifact Store owns runtime artifacts.
+Runtime Artifact Store
+    owns execution artifacts.
 
-Storage owns durable persistence.
+Presentation
+    owns visible commit.
+
+Storage
+    owns durable persistence.
 ```

@@ -1,1233 +1,2112 @@
-# runtime/CACHE_POLICY.md
-
 # Runtime Cache Policy
 
-> Project: CRAI  
-> Version: 1.0  
-> Status: Architecture Draft
+* **Document:** Runtime Architecture / Cache Policy
+* **Version:** 2.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-Tài liệu này định nghĩa cách CRAI Runtime đánh giá, lưu giữ, tái sử dụng, xác thực, hết hạn và loại bỏ các runtime Artifact nhằm tránh lặp lại computation đắt đỏ mà không làm sai business meaning hoặc runtime authority.
+This document defines how CRAI Runtime may reuse and retain previously accepted execution results to reduce repeated computation, latency and provider/resource cost without changing business semantics or execution authority.
 
-Cache là một cơ chế:
+Cache is an optional optimization.
 
-- performance optimization;
-- Artifact retention;
-- result reuse;
-- provider-cost reduction;
-- latency reduction.
+It MAY provide:
 
-Cache không phải:
+* execution-result reuse;
+* Runtime Artifact retention;
+* provider-cost reduction;
+* latency reduction;
+* duplicate-computation reduction.
 
-- source of truth;
-- Business Module;
-- Scheduler decision;
-- WorkItem terminal outcome;
-- durable Storage mặc định;
-- nơi sở hữu business semantics.
+Cache is NOT:
+
+* a source of truth;
+* a Business Module;
+* a Business validity owner;
+* a Scheduler decision;
+* a WorkItem terminal outcome;
+* Runtime execution authority;
+* durable Storage by default;
+* a Policy/Governance owner.
 
 ---
 
-## 2. Architectural Position
+# 2. Core Principle
 
 ```text
 Business Module
-    → định nghĩa semantic compatibility
-
+    defines semantic compatibility
+        |
+        v
+Policy / Privacy Owner
+    defines allowed reuse scope
+        |
+        v
 Cache Policy
-    → quyết định reuse và retention có được phép hay không
-
-Artifact Store
-    → quản lý runtime Artifact, metadata và memory retention
-
-Storage
-    → cung cấp durable persistence khi use case cho phép
-
+    applies reuse / retention mechanics
+        |
+        v
+Runtime Artifact Store / Durable Cache
+        |
+        v
 Runtime Control
-    → quyết định reused Artifact còn authority trong execution hiện tại hay không
+    validates current execution relevance
 ```
 
-Runtime flow khái niệm:
-
-```text
-WorkItem becomes eligible
-        ↓
-Runtime Control requests reuse evaluation
-        ↓
-Cache Policy builds ReuseQuery
-        ↓
-Artifact Store / Durable Cache lookup
-        ↓
-Candidate validation
-        ↓
-Reusable Artifact accepted?
-    ├── Yes → satisfy logical work without new Attempt
-    └── No  → continue Scheduler admission
-```
-
----
-
-## 3. Cache Principles
-
-1. Cache là optional optimization.
-2. Runtime phải đúng khi cache hoàn toàn trống.
-3. Cache entry không sở hữu business truth.
-4. Cache key phải deterministic.
-5. Reuse chỉ hợp lệ khi semantic compatibility được chứng minh.
-6. RevisionId không phải reuse identity mặc định.
-7. Cache hit không phải Scheduler decision.
-8. Cache hit không phải terminal outcome.
-9. Worker không tự quyết định cache reuse.
-10. Technical success không đồng nghĩa cache eligible.
-11. Failed, canceled, stale và abandoned output không promote mặc định.
-12. Cache retention bounded.
-13. Cache eviction không được phá active lease.
-14. Cache không chứa secret.
-15. Durable cache phải qua Storage boundary.
-16. Privacy partition phải được tôn trọng.
-17. Cache validation failure được xử lý như miss trừ khi integrity failure cần diagnostics.
-18. Cache promotion không copy payload mặc định.
-19. Cache operation failure không được phá runtime correctness.
-20. Cache policy không được thay đổi business semantics.
-
----
-
-## 4. Cache vs Source of Truth
-
-Source of truth được chia theo ownership:
-
-```text
-Business Module
-    → business meaning và result correctness
-
-Runtime Control
-    → active execution state và authority
-
-Artifact Store
-    → accepted runtime Artifact registry
-
-Storage
-    → durable persistence mechanics
-
-Cache
-    → optional reuse/retention metadata
-```
-
-Cache có thể bị xóa bất cứ lúc nào.
-
-Runtime vẫn phải tạo được kết quả đúng khi:
-
-- mọi entry bị evict;
-- durable cache unavailable;
-- lookup lỗi;
-- validation reject;
-- cache disabled bởi privacy mode.
-
----
-
-## 5. Reuse Vocabulary
-
-### 5.1 Reuse Query
-
-Yêu cầu tìm Artifact có thể thỏa mãn logical work hiện tại.
-
-### 5.2 Reuse Candidate
-
-Artifact hoặc durable record có khả năng tương thích nhưng chưa được chấp nhận.
-
-### 5.3 Reusable Artifact
-
-Artifact đã vượt qua identity, compatibility, integrity, privacy và authority checks.
-
-### 5.4 Cache Entry
-
-Metadata liên kết reuse identity với ArtifactRef hoặc durable persistence reference.
-
-### 5.5 Promotion
-
-Thêm retention ownership cho một accepted Artifact.
-
-### 5.6 Eviction
-
-Bỏ retention do capacity hoặc value.
-
-### 5.7 Invalidation
-
-Entry không còn semantically compatible hoặc structurally valid.
-
-### 5.8 Expiration
-
-Entry vượt temporal lifetime.
-
-### 5.9 Removal
-
-Entry bị xóa do user action, privacy action hoặc administrative operation.
-
----
-
-## 6. Cache Entry Model
-
-Conceptual model:
-
-```text
-CacheEntry
-├── CacheEntryId
-├── CacheKey
-├── ArtifactRef
-├── ArtifactType
-├── OwnerModule
-├── OutputContractVersion
-├── CompatibilityMetadata
-├── ProducerVersion
-├── ConfigurationVersions
-├── PrivacyPartition
-├── CreatedAt
-├── LastAccessedAt
-├── ExpiresAt
-├── SizeEstimate
-├── RetentionClass
-├── ValidationState
-└── IntegrityMetadata
-```
-
-Cache Entry không cần copy Artifact payload.
-
----
-
-## 7. Ownership
-
-Ownership được tách như sau:
-
-| Concern | Owner |
-|---|---|
-| Semantic cache-key dependency | Business Module |
-| Compatibility rule | Business Module |
-| Reuse/retention policy | Cache Policy |
-| Runtime Artifact lifecycle | Artifact Store |
-| Durable persistence mechanics | Storage |
-| Current execution relevance | Runtime Control |
-| Admission when reuse fails | Scheduler |
-| Physical memory disposal | Artifact Store / Resource Manager |
-
-Business Module không tự quản lý physical cache eviction.
-
-Cache Policy không tự định nghĩa business result compatibility.
-
----
-
-## 8. Artifact Reuse Flow
-
-```text
-Logical work identified
-        ↓
-Build ReuseQuery
-        ↓
-Search runtime Artifact Store
-        ↓
-Optional durable lookup through Storage
-        ↓
-Collect candidates
-        ↓
-Identity validation
-        ↓
-Compatibility validation
-        ↓
-Integrity validation
-        ↓
-Privacy validation
-        ↓
-Authority/relevance validation
-        ↓
-Accept reusable Artifact
-```
-
-Nếu bất kỳ bước nào fail:
-
-```text
-Treat as miss
-```
-
-ngoại trừ integrity corruption cần error diagnostics và invalidation.
-
----
-
-## 9. Reuse Query
-
-```text
-ReuseQuery
-├── OwnerModule
-├── ArtifactType
-├── InputContentIdentity
-├── OutputContractVersion
-├── DependencyVersions
-├── ConfigurationVersions
-├── ProviderProfileVersion
-├── LanguageProfile
-├── PrivacyPartition
-├── Scope
-└── RequestedRetentionClass
-```
-
-Reuse Query không chứa raw secret hoặc mutable execution state.
-
----
-
-## 10. Cache Key
-
-Cache key phải deterministic và dựa trên semantic dependencies.
-
-Conceptual composition:
-
-```text
-CacheKey = Hash(
-    OwnerModule
-    + ArtifactType
-    + InputContentIdentity
-    + OutputContractVersion
-    + DependencyVersions
-    + ConfigurationVersions
-    + ProviderProfileVersion
-    + LanguageProfile
-    + PrivacyPartition
-)
-```
-
-Không nên dùng raw source content trong public architecture model.
-
-Implementation có thể hash normalized content identity.
-
----
-
-## 11. Content Identity
-
-`ContentIdentity` mô tả input business content, không phải execution identity.
-
-Ví dụ:
-
-```text
-RevisionId
-    → execution identity
-
-ContentIdentity
-    → reuse identity
-```
-
-Artifact có thể được reuse giữa:
-
-- nhiều Revision;
-- nhiều Attempt;
-- nhiều Session;
-
-nếu compatibility và privacy policy cho phép.
-
----
-
-## 12. Compatibility Metadata
-
-Compatibility có thể phụ thuộc:
-
-- source content identity;
-- module contract version;
-- algorithm/model version;
-- provider profile;
-- prompt/profile version;
-- glossary version;
-- language pair;
-- preprocessing version;
-- output contract version;
-- presentation profile;
-- privacy mode;
-- normalization rules;
-- context version.
-
-Business Module định nghĩa dependency nào ảnh hưởng semantic result.
-
----
-
-## 13. Validation Dimensions
-
-Reuse validation phải tách thành:
-
-### 13.1 Identity Match
-
-Input business content tương thích.
-
-### 13.2 Compatibility Match
-
-Versions và configuration dependencies tương thích.
-
-### 13.3 Integrity Validation
-
-Artifact không corrupt và metadata nhất quán.
-
-### 13.4 Privacy Eligibility
-
-Entry được phép reuse trong current privacy partition.
-
-### 13.5 Retention Availability
-
-Artifact payload hoặc durable record vẫn tồn tại.
-
-### 13.6 Authority/Relevance
-
-Runtime Control xác nhận reuse phù hợp với WorkItem hiện tại.
-
----
-
-## 14. Revision Compatibility
-
-Artifact không cần thuộc current Revision để reusable.
-
-Revision cũ có thể cung cấp Artifact nếu:
-
-- content identity trùng;
-- dependency versions tương thích;
-- Artifact accepted và valid;
-- privacy scope cho phép;
-- Artifact chưa bị invalidated;
-- output contract đúng.
-
-Revision authority và Artifact reusability là hai khái niệm khác nhau.
-
----
-
-## 15. Reuse Scopes
-
-```text
-REVISION_LOCAL
-SESSION
-RUNTIME
-DURABLE_ELIGIBLE
-```
-
-### Revision Local
-
-Chỉ reuse trong một Revision.
-
-### Session
-
-Reuse giữa Revision trong cùng Session.
-
-### Runtime
-
-Reuse giữa Session trong cùng application runtime.
-
-### Durable Eligible
-
-Có thể persist qua Storage và reuse sau restart nếu policy cho phép.
-
----
-
-## 16. Runtime Memory Cache
-
-Runtime Memory Cache là volatile retention trong Artifact Store.
-
-Đặc điểm:
-
-- process-local;
-- bounded;
-- mất khi restart;
-- fast lookup;
-- ArtifactRef-based;
-- active lease safe;
-- pressure-aware eviction.
-
----
-
-## 17. Durable Cache Boundary
-
-Durable Cache là một persistence use case thông qua Storage.
-
-```text
-Cache Policy
-    ↓ approves durable eligibility
-Storage
-    ↓ persists cache record
-Durable Cache Record
-```
-
-Storage không quyết định semantic compatibility.
-
-Business Module và Cache Policy vẫn định nghĩa:
-
-- key;
-- version;
-- validation;
-- privacy;
-- invalidation semantics.
-
----
-
-## 18. Durable Cache Record
-
-Conceptual durable record:
-
-```text
-DurableCacheRecord
-├── CacheKey
-├── ArtifactDescriptor
-├── CompatibilityMetadata
-├── PersistenceVersion
-├── RetentionInstruction
-├── PrivacyPartition
-├── CreatedAt
-├── ExpiresAt
-└── IntegrityMetadata
-```
-
-Exact schema thuộc Storage implementation.
-
----
-
-## 19. Cache Population
-
-Chỉ accepted Artifact được xét promotion.
-
-Điều kiện:
-
-- Runtime Control chấp nhận Completion;
-- Artifact integrity hợp lệ;
-- output contract hợp lệ;
-- Business Module xác nhận cache eligibility;
-- compatibility metadata đầy đủ;
-- privacy policy cho phép;
-- retention budget còn;
-- promotion không gây ảnh hưởng đáng kể tới current work.
-
----
-
-## 20. Technical Success vs Cache Eligibility
-
-```text
-Attempt completed successfully
-    ≠
-Artifact cache eligible
-```
-
-Ví dụ Artifact không promote nếu:
-
-- thiếu dependency version;
-- privacy mode là ephemeral;
-- output nondeterministic và policy không cho phép;
-- result chỉ valid trong current Attempt;
-- current resource pressure quá cao;
-- retention benefit thấp.
-
----
-
-## 21. Partial Artifact Policy
-
-### Unvalidated Partial Output
-
-Không được cache.
-
-### Validated Partial Artifact
-
-Có thể cache nếu:
-
-- có explicit contract;
-- có stable identity;
-- có ordering metadata;
-- owner module cho phép;
-- downstream semantics không bị sai;
-- Cache Policy cho phép.
-
-MVP mặc định:
-
-```text
-Do not promote partial Artifact
-unless explicitly declared cache eligible.
-```
-
----
-
-## 22. Warning-bearing Artifact
-
-`SUCCEEDED + warnings` vẫn có thể cache nếu:
-
-- Artifact valid;
-- warnings không làm sai semantic output;
-- warning metadata được giữ;
-- owner module cho phép.
-
-Warning không tự ngăn cache promotion.
-
----
-
-## 23. Cancellation and Cache
-
-Canceled work không promote mặc định.
-
-Nếu physical execution hoàn thành sau cancellation:
-
-- result không có runtime authority;
-- result không tự promote;
-- future policy có thể cho phép reuse chỉ khi deterministic và explicit;
-- MVP: reject promotion.
-
----
-
-## 24. Stale Result and Cache
-
-Stale result không overwrite valid entry.
-
-MVP:
-
-```text
-STALE
-    → no cache promotion
-```
-
-Future policy có thể xem xét stale-but-valid Artifact riêng, nhưng phải qua explicit validation và không ảnh hưởng current execution.
-
----
-
-## 25. Failed and Abandoned Result
-
-```text
-FAILED
-ABANDONED
-```
-
-không promote thành successful Artifact.
-
-Negative-result caching là policy riêng trong tương lai.
-
----
-
-## 26. Retry Interaction
-
-Trước khi tạo/admit new Attempt:
-
-```text
-Runtime Control
-    ↓
-Reuse evaluation
-    ↓
-Reusable Artifact found?
-```
-
-Nếu có:
-
-- không tạo Attempt mới;
-- hoặc rút pending retry Attempt;
-- WorkItem được thỏa mãn bằng accepted Artifact flow.
-
-Retry Policy không lookup cache trực tiếp.
-
----
-
-## 27. Cache Hit Semantics
-
-Cache hit nghĩa là:
-
-```text
-Compatible reusable Artifact found
-```
-
-Cache hit không phải:
-
-- terminal outcome;
-- Scheduler decision;
-- UI commit;
-- authority grant.
-
-Runtime Control vẫn phải xác nhận WorkItem relevance.
-
----
-
-## 28. In-Flight Reuse Coordination
-
-Nhiều WorkItem có thể cùng cần một reuse key.
-
-Không nên tạo duplicate expensive execution không cần thiết.
-
-Conceptual behavior:
-
-```text
-First compatible work computes
-Other compatible work observes in-flight candidate
-```
-
-Các WorkItem khác có thể:
-
-- wait;
-- attach as observer;
-- continue independently;
-- abandon waiting nếu stale/canceled.
-
----
-
-## 29. In-Flight Reuse Rules
-
-1. In-flight execution không trở thành shared mutable WorkItem.
-2. Mỗi WorkItem giữ identity riêng.
-3. Cancellation một WorkItem không tự cancel producer nếu producer còn owner khác.
-4. Producer failure không làm các WorkItem khác terminal tự động.
-5. Accepted Artifact mới là reusable output.
-6. Wait phải bounded và cancelable.
-7. Coalescing không bypass authority validation.
-
----
-
-## 30. Eviction
-
-Eviction bỏ retention vì:
-
-- memory pressure;
-- budget;
-- low value;
-- LRU/LFU policy;
-- session end;
-- runtime shutdown;
-- manual clear;
-- retention-class expiry.
-
-Eviction không làm Artifact invalid nếu active owner/lease còn.
-
----
-
-## 31. Invalidation
-
-Invalidation xảy ra khi entry không còn đúng hoặc compatible.
-
-Ví dụ:
-
-- integrity failure;
-- output contract unsupported;
-- compatibility metadata corrupt;
-- privacy rule changed;
-- module version declares incompatibility;
-- user correction invalidates old result;
-- security policy requires removal.
-
-Version upgrade thường tạo key mới, không nhất thiết scan-delete toàn bộ old entry ngay.
-
----
-
-## 32. Expiration
-
-Expiration dựa trên temporal policy:
-
-```text
-TTL
-Idle TTL
-Session lifetime
-Runtime lifetime
-Durable retention window
-```
-
-Expired entry không được reuse.
-
-Payload disposal vẫn phải chờ owner/lease.
-
----
-
-## 33. Removal
-
-Removal có thể do:
-
-- user clear;
-- privacy request;
-- account/profile removal;
-- manual administration;
-- corruption remediation;
-- security incident.
-
-Durable removal phải đi qua Storage retention/deletion policy.
-
----
-
-## 34. Privacy Partition
-
-Cache reuse phải partition theo:
-
-- user/profile;
-- privacy mode;
-- source scope;
-- provider profile;
-- local/remote eligibility;
-- language/profile;
-- content sensitivity classification.
-
-Không reuse xuyên partition nếu chưa được phép rõ ràng.
-
----
-
-## 35. Privacy Modes
-
-### STANDARD
-
-Memory reuse và durable eligibility theo configured policy.
-
-### LOCAL_ONLY
-
-Không reuse Artifact yêu cầu remote-only provenance nếu policy cấm.
-
-Durable cache chỉ dùng local Storage nếu cho phép.
-
-### EPHEMERAL
-
-- không durable promote;
-- retention rất ngắn;
-- session/runtime disposal ưu tiên;
-- raw content không giữ sau use case.
-
----
-
-## 36. Security
-
-Cache không chứa:
-
-- API key;
-- access token;
-- provider secret;
-- credential;
-- raw secret reference resolution;
-- unsafe raw path;
-- unrestricted private diagnostics.
-
-Cache key cũng không được leak raw sensitive content.
-
----
-
-## 37. Cache Failure Degradation
-
-Cache failure mặc định degrade thành miss.
-
-```text
-Lookup failure
-    ↓
-Record diagnostics
-    ↓
-Treat as miss
-    ↓
-Continue execution
-```
-
-Ngoại lệ:
-
-- corruption liên tục;
-- Artifact Store integrity failure;
-- Storage failure đe dọa correctness;
-- resource pressure nghiêm trọng.
-
----
-
-## 38. Durable Cache Failure
-
-Nếu durable cache unavailable:
-
-- memory cache vẫn có thể hoạt động;
-- Runtime vẫn compute bình thường;
-- không làm WorkItem fail mặc định;
-- diagnostics ghi persistence degradation;
-- durable promotion tạm dừng.
-
----
-
-## 39. Cache Stampede Prevention
-
-Dùng:
-
-- in-flight coalescing;
-- bounded lookup;
-- per-key coordination;
-- current-revision priority;
-- negative result không dùng mặc định;
-- admission limits;
-- provider concurrency limits.
-
-Không lock toàn runtime theo một key.
-
----
-
-## 40. Negative Cache Boundary
-
-MVP không hỗ trợ negative cache.
-
-```text
-Failure
-    → not stored as successful Artifact
-```
-
-Future deterministic negative cache phải:
-
-- có type riêng;
-- có expiry ngắn;
-- không lẫn Artifact cache;
-- không tạo false success;
-- tôn trọng configuration/version/privacy.
-
----
-
-## 41. Cache Events
-
-Conceptual events:
-
-```text
-CACHE_LOOKUP_STARTED
-CACHE_HIT
-CACHE_MISS
-CACHE_CANDIDATE_REJECTED
-CACHE_ENTRY_PROMOTED
-CACHE_ENTRY_EVICTED
-CACHE_ENTRY_INVALIDATED
-CACHE_ENTRY_EXPIRED
-CACHE_LOOKUP_FAILED
-DURABLE_CACHE_DEGRADED
-IN_FLIGHT_REUSE_COALESCED
-```
-
-Tên cuối phải tuân theo Event Standard.
-
----
-
-## 42. Metrics
-
-Theo dõi:
-
-- hit count;
-- miss count;
-- hit ratio;
-- validation reject count;
-- compatibility miss count;
-- integrity failure count;
-- privacy partition miss count;
-- promotion count;
-- promotion skipped count;
-- eviction count by reason;
-- invalidation count;
-- expiration count;
-- retained bytes;
-- lookup latency;
-- durable lookup latency;
-- promotion latency;
-- in-flight coalescing count;
-- saved execution time;
-- saved provider cost;
-- current-revision useful hit ratio;
-- failed cache operation count.
-
----
-
-## 43. Useful Cache Metrics
-
-Hit rate đơn thuần chưa đủ.
-
-Ưu tiên:
-
-```text
-Useful Hit Ratio
-Saved Useful Latency
-Saved Provider Cost
-Current-Revision Reuse Ratio
-Invalid Reuse Prevention Count
-```
-
-Cache hit cho obsolete work không phải useful hit.
-
----
-
-## 44. Observability and Privacy
-
-Cache telemetry chỉ chứa metadata:
-
-- ArtifactType;
-- OwnerModule;
-- CacheScope;
-- decision;
-- reason;
-- size;
-- timing;
-- version identifiers.
-
-Không log raw content hoặc key preimage.
-
----
-
-## 45. MVP Cache Policy
-
-MVP triển khai:
-
-- process-local memory cache;
-- bounded Artifact Store retention;
-- deterministic cache key;
-- Revision/Session/Runtime scopes;
-- LRU hoặc weighted LRU;
-- no implicit durable cache;
-- no negative cache;
-- no partial promotion mặc định;
-- no stale/canceled/failed promotion;
-- privacy partition tối thiểu;
-- cache failure → miss;
-- in-flight reuse có thể hoãn nếu implementation phức tạp.
-
----
-
-## 46. MVP Artifact Types
-
-MVP có thể hỗ trợ reuse cho:
-
-```text
-Source Artifact
-Recognition Artifact
-Source Document Artifact
-Translation Artifact
-Presentation Artifact
-```
-
-Artifact type cụ thể do module contract định nghĩa.
-
-Không tạo architecture layer tên `OCR Cache` hoặc `Layout Cache`.
-
----
-
-## 47. MVP Retention
-
-Conceptual defaults:
-
-| Scope | Retention |
-|---|---|
-| Revision-local | đến Revision disposal |
-| Session | đến Session close hoặc pressure eviction |
-| Runtime | bounded LRU |
-| Durable | disabled by default |
-| Debug/private | disabled by default |
-
-Exact values thuộc `RUNTIME_CONFIG.md`.
-
----
-
-## 48. Example: Runtime Memory Hit
-
-```text
-WorkItem requests Recognition Artifact
-        ↓
-ReuseQuery built
-        ↓
-Artifact Store finds candidate
-        ↓
-Compatibility and integrity valid
-        ↓
-Runtime Control accepts reuse
-        ↓
-No new Attempt needed
-```
-
----
-
-## 49. Example: Version Mismatch
-
-```text
-Translation Artifact found
-        ↓
-GlossaryVersion differs
-        ↓
-Compatibility reject
-        ↓
-Cache miss
-        ↓
-New Attempt proceeds
-```
-
-Old entry không nhất thiết bị xóa ngay.
-
----
-
-## 50. Example: Cache Eviction with Lease
-
-```text
-LRU selects Artifact
-        ↓
-Cache retention removed
-        ↓
-Worker lease active
-        ↓
-Payload remains
-        ↓
-Lease released
-        ↓
-Physical disposal
-```
-
----
-
-## 51. Example: Durable Cache Lookup
-
-```text
-Memory miss
-    ↓
-Durable cache lookup through Storage
-    ↓
-Record materialized as candidate Artifact
-    ↓
-Compatibility/integrity validation
-    ↓
-Runtime Artifact accepted
-```
-
-Durable record không tự có runtime authority.
-
----
-
-## 52. Example: Privacy Partition Miss
-
-```text
-Artifact exists in STANDARD partition
-        ↓
-Current request = EPHEMERAL
-        ↓
-Reuse not allowed
-        ↓
-Treat as miss
-```
-
----
-
-## 53. Architecture Invariants
-
-1. Cache không là source of truth.
-2. Runtime đúng khi cache trống.
-3. Cache key deterministic.
-4. RevisionId không phải reuse identity mặc định.
-5. Business Module sở hữu compatibility semantics.
-6. Cache Policy sở hữu reuse/retention policy.
-7. Artifact Store sở hữu runtime payload lifecycle.
-8. Storage sở hữu durable persistence mechanics.
-9. Runtime Control xác nhận current authority.
-10. Scheduler không quyết định cache hit.
-11. Worker không tự lookup/promote cache.
-12. Cache hit không phải terminal outcome.
-13. Technical success không đồng nghĩa cache eligible.
-14. Failed/canceled/stale/abandoned output không promote mặc định.
-15. Unvalidated partial output không cache.
-16. Promotion không copy payload mặc định.
-17. Eviction không phá active lease.
-18. Invalidation khác eviction.
-19. Expiration khác invalidation.
-20. Durable cache phải qua Storage.
-21. Privacy partition bắt buộc.
-22. Cache không chứa secret.
-23. Lookup failure degrade thành miss mặc định.
-24. In-flight reuse không merge WorkItem identity.
-25. Cache metrics không chứa raw content.
-26. Negative cache tách khỏi successful Artifact cache.
-27. Reuse luôn cần compatibility validation.
-28. Version change không bắt buộc xóa old entry ngay.
-29. Cache retention bounded.
-30. Artifact Store và Storage không bị trộn.
-
----
-
-## 54. Testing Requirements
-
-Test phải bao phủ:
-
-- memory hit;
-- memory miss;
-- compatibility mismatch;
-- integrity failure;
-- privacy partition mismatch;
-- runtime cache disabled;
-- all entries evicted;
-- promotion of accepted Artifact;
-- rejected promotion for failed/canceled/stale/abandoned;
-- validated partial policy;
-- cache eviction with active lease;
-- durable lookup unavailable;
-- durable record incompatible;
-- duplicate in-flight key;
-- cancellation while waiting for in-flight reuse;
-- retry satisfied by cache;
-- version upgrade;
-- user clear;
-- ephemeral mode;
-- cache lookup failure degradation;
-- metrics privacy.
-
----
-
-## 55. Open Questions
-
-- MVP có cần in-flight coalescing không?
-- Weighted LRU dùng size hay cost?
-- Artifact nào durable eligible?
-- Durable cache encryption ở Storage layer ra sao?
-- Privacy partition key chi tiết gồm gì?
-- Translation cache có chia theo provider hay semantic profile?
-- User correction invalidation lan truyền thế nào?
-- Source Document reuse giữa Session có được phép không?
-- Durable cache retention window là bao lâu?
-- Negative cache có cần trong tương lai không?
-- Cache usefulness được ước lượng ra sao?
-
----
-
-## 56. Related Documents
-
-| Document | Relationship |
-|---|---|
-| `PIPELINE_RUNTIME.md` | WorkItem và authority |
-| `RUNTIME_COMPONENTS.md` | Artifact Store ownership |
-| `MEMORY_MODEL.md` | Retention, lease và disposal |
-| `RESOURCE_LIFECYCLE.md` | Ownership transfer |
-| `SCHEDULER.md` | Admission khi reuse miss |
-| `RETRY_POLICY.md` | Reuse evaluation trước new Attempt |
-| `CANCELLATION.md` | Promotion restriction |
-| `ERROR_MODEL.md` | Cache failure normalization |
-| `PERFORMANCE_MODEL.md` | Saved useful latency |
-| `RUNTIME_CONFIG.md` | Capacity, TTL và policy |
-| `RUNTIME_OBSERVABILITY.md` | Metrics and events |
-| `../../modules/storage/README.md` | Durable persistence boundary |
-| `../../modules/*/CONTRACT.md` | Artifact compatibility semantics |
-
----
-
-## 57. Completion Criteria
-
-`CACHE_POLICY.md` được xem là đồng bộ khi:
-
-- cache được mô tả như Artifact reuse/retention policy;
-- OCR/Layout-specific cache layer bị loại;
-- source-of-truth ownership đúng;
-- CacheEntry và ReuseQuery rõ ràng;
-- ContentIdentity tách RevisionId;
-- compatibility, integrity, privacy và authority tách riêng;
-- Business Module, Cache Policy, Artifact Store, Storage và Runtime Control có boundary rõ;
-- promotion chỉ áp dụng accepted Artifact;
-- partial policy không tuyệt đối nhưng MVP an toàn;
-- eviction/invalidation/expiration/removal tách rõ;
-- durable cache qua Storage;
-- privacy partition được định nghĩa;
-- in-flight reuse và stampede boundary rõ;
-- events, metrics và MVP policy đầy đủ.
-
----
-
-## 58. Summary
-
-CRAI Cache Policy quản lý Artifact reuse mà không chiếm ownership của business truth:
-
-```text
-Business Module defines compatibility.
-
-Cache Policy decides reuse and retention.
-
-Artifact Store manages runtime Artifact lifecycle.
-
-Storage provides durable persistence.
-
-Runtime Control decides whether reused output still matters.
-```
-
-Runtime phải luôn đúng khi:
+The system MUST remain correct when:
 
 ```text
 Cache = Empty
 ```
 
-Cache correctness luôn quan trọng hơn cache hit rate.
+---
+
+# 3. Architectural Position
+
+Recommended reuse flow:
+
+```text
+Logical Work Identified
+        |
+        v
+Owner-Defined Reuse Requirements
+        |
+        v
+ReuseQuery
+        |
+        v
+Runtime / Durable Candidate Lookup
+        |
+        v
+Semantic Compatibility Validation
+        |
+        v
+Policy / Partition Validation
+        |
+        v
+Integrity / Availability Validation
+        |
+        v
+Runtime Authority Validation
+        |
+        v
+Reusable Result Accepted
+        |
+        +--> satisfy WorkItem without new Attempt
+        |
+        +--> miss -> Scheduler path
+```
+
+---
+
+# 4. Ownership
+
+| Concern                          | Owner                     |
+| -------------------------------- | ------------------------- |
+| Business result meaning          | Business Module           |
+| Semantic compatibility           | Business Module           |
+| Semantic dependency declaration  | Business Module           |
+| Privacy/policy reuse constraints | Policy / Governance owner |
+| Cache reuse mechanics            | Cache Policy              |
+| Cache retention policy           | Cache Policy              |
+| Runtime Artifact lifecycle       | Runtime Artifact Store    |
+| Physical resource lifecycle      | Resource Manager          |
+| Durable persistence mechanics    | Storage                   |
+| Current execution relevance      | Runtime Control           |
+| Scheduler admission after miss   | Scheduler                 |
+
+---
+
+# 5. Cache Policy Boundary
+
+Cache Policy MAY decide:
+
+* whether cache lookup is enabled;
+* which retention class is allowed;
+* lookup order;
+* bounded retention;
+* eviction;
+* expiration;
+* coalescing mechanics;
+* durable-cache eligibility mechanics;
+* promotion mechanics.
+
+Cache Policy MUST NOT independently define:
+
+* Translation semantic compatibility;
+* Recognition semantic compatibility;
+* Presentation semantic compatibility;
+* Provider equivalence;
+* Language equivalence;
+* Workspace Privacy meaning;
+* Domain correctness.
+
+---
+
+# 6. Cache Principles
+
+1. Cache is optional.
+
+2. Runtime correctness MUST NOT depend on cache presence.
+
+3. Cache is not source of truth.
+
+4. Cache key is deterministic.
+
+5. Reuse requires explicit semantic compatibility.
+
+6. ExecutionRevisionId is not a semantic reuse identity.
+
+7. Cache hit is not Scheduler admission.
+
+8. Cache hit is not WorkItem terminal outcome.
+
+9. Worker does not decide cache reuse.
+
+10. Technical execution success does not imply cache eligibility.
+
+11. Business acceptance is normally required before promotion.
+
+12. Failed/Canceled/Stale/Abandoned output is not promoted by default.
+
+13. Cache retention is bounded.
+
+14. Eviction does not invalidate active leases.
+
+15. Durable cache uses Storage boundary.
+
+16. Cache contains no raw secret.
+
+17. Policy partitions are respected.
+
+18. Cache operation failure normally degrades to miss.
+
+19. Cache does not alter Business semantics.
+
+20. Cache coalescing does not merge WorkItem authority.
+
+---
+
+# 7. Runtime Vocabulary
+
+Canonical Runtime identities:
+
+```text
+ApplicationInstanceId
+ExecutionScopeId
+ExecutionRevisionId
+WorkItemId
+AttemptId
+```
+
+Cache reuse identities are separate.
+
+---
+
+# 8. Execution Identity vs Reuse Identity
+
+```text
+ExecutionRevisionId
+    = runtime freshness / authority identity
+```
+
+```text
+ContentIdentity
+    = semantic input identity
+```
+
+```text
+ReuseIdentity
+    = semantic reuse identity
+```
+
+They MUST NOT be conflated.
+
+---
+
+# 9. Content Identity
+
+`ContentIdentity` represents the semantic identity of relevant business input.
+
+It SHOULD be:
+
+* deterministic;
+* privacy-safe;
+* stable enough for reuse;
+* independent from one Attempt;
+* independent from one ExecutionRevision where semantics permit.
+
+---
+
+# 10. Content Identity Examples
+
+Possible implementations MAY derive identity from:
+
+* normalized source structure;
+* source-document identity;
+* immutable Domain resource revision;
+* content hash;
+* owner-defined semantic identity.
+
+Exact construction belongs to the owning Business Module contract.
+
+---
+
+# 11. Reuse Across Execution
+
+An accepted result MAY potentially be reused across:
+
+```text
+multiple Attempts
+multiple WorkItems
+multiple ExecutionRevisions
+multiple ExecutionScopes
+multiple application runs
+```
+
+only when semantic compatibility and policy permit.
+
+---
+
+# 12. Reuse Query
+
+Recommended:
+
+```text
+ReuseQuery
+├── ownerModule
+├── resultType
+├── contentIdentity
+├── outputContractVersion
+├── semanticDependencyFingerprint
+├── reusePartitionReference
+├── requestedReuseScope
+├── requestedRetentionClass?
+└── correlationMetadata?
+```
+
+---
+
+# 13. Semantic Dependency Fingerprint
+
+Instead of hard-coding:
+
+```text
+ProviderProfileVersion
+LanguageProfile
+GlossaryVersion
+PromptVersion
+ModelVersion
+```
+
+into generic Cache architecture, the owning module SHOULD produce:
+
+```text
+SemanticDependencyFingerprint
+```
+
+representing all dependencies that materially affect result compatibility.
+
+---
+
+# 14. Why Fingerprint Is Owner-Defined
+
+Different results have different semantic dependencies.
+
+Example:
+
+```text
+Translation Result
+    may depend on:
+        source identity
+        target language
+        translation profile
+        glossary
+        model/provider semantics
+```
+
+while:
+
+```text
+Recognition Result
+    may depend on:
+        image identity
+        recognition configuration
+        model/version
+```
+
+Cache Policy MUST NOT encode these rules globally.
+
+---
+
+# 15. Semantic Dependency Descriptor
+
+Where diagnostics require explainability, owner MAY expose:
+
+```text
+SemanticDependencyDescriptor
+├── fingerprint
+├── dependencyKinds[]
+├── contractVersion
+└── compatibilityVersion
+```
+
+Values SHOULD avoid exposing sensitive content.
+
+---
+
+# 16. Cache Key
+
+Recommended conceptual composition:
+
+```text
+CacheKey = Hash(
+    OwnerModule
+    + ResultType
+    + ContentIdentity
+    + OutputContractVersion
+    + SemanticDependencyFingerprint
+    + ReusePartitionId
+)
+```
+
+---
+
+# 17. Cache Key Boundary
+
+Cache Key MUST NOT rely on:
+
+```text
+ExecutionRevisionId
+AttemptId
+WorkerId
+QueueId
+```
+
+unless a deliberately local reuse scope requires execution identity.
+
+---
+
+# 18. Cache Key Privacy
+
+Cache keys MUST NOT expose raw:
+
+* source content;
+* translated content;
+* Prompt;
+* URL;
+* credential;
+* private path.
+
+Hash preimages SHOULD remain inaccessible through ordinary diagnostics.
+
+---
+
+# 19. Reuse Candidate
+
+A `ReuseCandidate` is a previously retained result that MAY satisfy a current logical work request.
+
+Recommended:
+
+```text
+ReuseCandidate
+├── cacheEntryId
+├── resultReference
+├── resultType
+├── ownerModule
+├── outputContractVersion
+├── semanticDependencyFingerprint
+├── reusePartitionReference
+├── producerMetadata
+├── integrityMetadata
+├── retentionMetadata
+└── provenanceReference?
+```
+
+---
+
+# 20. Cache Entry
+
+Recommended:
+
+```text
+CacheEntry
+├── cacheEntryId
+├── cacheKey
+├── resultReference
+├── resultType
+├── ownerModule
+├── outputContractVersion
+├── semanticDependencyFingerprint
+├── reusePartitionReference
+├── producerVersion?
+├── createdAt
+├── lastAccessedAt?
+├── expiresAt?
+├── sizeEstimate?
+├── retentionClass
+├── validationState
+└── integrityMetadata
+```
+
+Cache Entry SHOULD NOT duplicate payload.
+
+---
+
+# 21. Result Reference
+
+A Cache Entry MAY reference:
+
+```text
+RuntimeArtifactRef
+DurableCacheRecordRef
+BusinessResultRef
+```
+
+depending on architecture and retention class.
+
+The reference type MUST remain explicit.
+
+---
+
+# 22. Runtime Artifact vs Business Result
+
+Critical distinction:
+
+```text
+RuntimeArtifact
+    = execution payload
+```
+
+```text
+Business Result
+    = owner-accepted semantic result
+```
+
+A Runtime Artifact is not automatically eligible for semantic reuse.
+
+---
+
+# 23. Promotion Preconditions
+
+By default, promotion SHOULD require:
+
+```text
+Runtime execution result accepted
+        |
+        v
+Owning Business Module accepts result
+        |
+        v
+Owner declares result cache-eligible
+        |
+        v
+Policy permits retention/reuse
+        |
+        v
+Cache Policy promotes
+```
+
+---
+
+# 24. Runtime Acceptance Is Not Enough
+
+Critical rule:
+
+```text
+Runtime authority accepted
+    !=
+Business result cache eligible
+```
+
+Runtime Control proves that the result was current.
+
+Business Module proves that the result is semantically valid.
+
+---
+
+# 25. Promotion
+
+Promotion means:
+
+```text
+add cache retention/reuse ownership
+```
+
+to an already accepted result.
+
+Promotion SHOULD NOT copy large payload by default.
+
+---
+
+# 26. Promotion Result
+
+Recommended:
+
+```text
+CachePromotionResult
+├── cacheEntryId
+├── resultReference
+├── retentionClass
+├── reuseScope
+├── expiresAt?
+└── policyReference?
+```
+
+---
+
+# 27. Technical Success vs Promotion
+
+```text
+Attempt SUCCEEDED
+    !=
+cache promotion
+```
+
+Possible non-promotable successful result:
+
+* insufficient compatibility metadata;
+* policy forbids retention;
+* result nondeterministic and owner disallows reuse;
+* result only valid for current operation;
+* retention budget exhausted;
+* business owner marks result non-cacheable.
+
+---
+
+# 28. Reuse Validation
+
+Recommended dimensions:
+
+```text
+Identity
+Semantic Compatibility
+Contract Compatibility
+Policy / Partition
+Integrity
+Availability
+Runtime Relevance
+```
+
+Each dimension has a distinct owner.
+
+---
+
+# 29. Identity Validation
+
+Checks that candidate input identity matches current logical work according to owner-defined rules.
+
+---
+
+# 30. Semantic Compatibility Validation
+
+Business Module or an owner-provided compatibility contract decides:
+
+```text
+Does this result remain semantically valid?
+```
+
+Cache Policy MUST NOT recreate those rules.
+
+---
+
+# 31. Contract Compatibility
+
+Output contract/version must be consumable by the current Business Module contract.
+
+---
+
+# 32. Policy / Partition Validation
+
+Authoritative Policy/Governance rules determine whether candidate may cross:
+
+* Workspace;
+* Project;
+* principal/user;
+* privacy class;
+* local/remote provenance;
+* security boundary.
+
+Cache Policy applies the resolved result.
+
+---
+
+# 33. Integrity Validation
+
+Checks:
+
+* referenced payload exists;
+* metadata matches;
+* checksum/hash valid where available;
+* durable record not corrupt;
+* Artifact reference structurally valid.
+
+---
+
+# 34. Runtime Relevance
+
+Runtime Control confirms:
+
+```text
+Does the current WorkItem
+still need this result?
+```
+
+This is execution relevance, not semantic compatibility.
+
+---
+
+# 35. Reuse Acceptance
+
+A cache candidate becomes reusable only when all required validations pass.
+
+Recommended:
+
+```text
+REUSE_ACCEPTED
+REUSE_MISS
+REUSE_REJECTED_COMPATIBILITY
+REUSE_REJECTED_POLICY
+REUSE_REJECTED_INTEGRITY
+REUSE_REJECTED_AUTHORITY
+REUSE_UNAVAILABLE
+```
+
+---
+
+# 36. Cache Hit Semantics
+
+A cache hit means:
+
+```text
+compatible reusable result found
+```
+
+It does NOT mean:
+
+```text
+WorkItem terminal state changed
+Scheduler admitted/rejected work
+Business result committed
+Presentation committed
+```
+
+---
+
+# 37. Satisfying Work from Reuse
+
+Recommended:
+
+```text
+Reusable Result
+        |
+        v
+Runtime Control validates WorkItem relevance
+        |
+        v
+Owning Business Contract accepts reuse
+        |
+        v
+WorkItem logical result may be satisfied
+```
+
+Exact WorkItem completion mechanism belongs to `PIPELINE_RUNTIME.md`.
+
+---
+
+# 38. Reuse Scope
+
+Recommended generic scopes:
+
+```text
+EXECUTION_REVISION
+EXECUTION_SCOPE
+APPLICATION_RUNTIME
+DURABLE
+```
+
+---
+
+# 39. EXECUTION_REVISION
+
+Reuse limited to one ExecutionRevision.
+
+Useful for highly execution-local result classes.
+
+---
+
+# 40. EXECUTION_SCOPE
+
+Reuse allowed across ExecutionRevisions within one ExecutionScope.
+
+---
+
+# 41. APPLICATION_RUNTIME
+
+Reuse allowed across ExecutionScopes in the same application process/runtime when policy permits.
+
+---
+
+# 42. DURABLE
+
+Reuse may survive application restart through Storage.
+
+Durable reuse requires stronger provenance/compatibility validation.
+
+---
+
+# 43. Reuse Scope Is Not Permission
+
+A result marked:
+
+```text
+APPLICATION_RUNTIME
+```
+
+does not automatically mean every Workspace/principal may access it.
+
+Policy partition remains authoritative.
+
+---
+
+# 44. Reuse Partition
+
+Generic Cache architecture SHOULD use:
+
+```text
+ReusePartitionReference
+```
+
+rather than hard-coding privacy dimensions.
+
+---
+
+# 45. Reuse Partition Ownership
+
+Policy/Governance may derive partition from:
+
+* Workspace;
+* principal;
+* privacy mode;
+* sensitivity;
+* local/remote policy;
+* provenance constraints.
+
+Cache receives a resolved partition/reference.
+
+---
+
+# 46. Cross-Partition Reuse
+
+Default:
+
+```text
+different partition
+    -> no reuse
+```
+
+unless authoritative policy explicitly permits compatibility.
+
+---
+
+# 47. EPHEMERAL-Like Policy
+
+When resolved policy prohibits durable retention:
+
+* no durable promotion;
+* runtime retention remains minimal;
+* cleanup receives elevated priority;
+* reuse scope may be constrained.
+
+Cache Policy applies this resolved restriction.
+
+It does not own the meaning of EPHEMERAL policy itself.
+
+---
+
+# 48. Runtime Memory Cache
+
+Runtime memory cache provides volatile process-local retention.
+
+Characteristics:
+
+* bounded;
+* fast lookup;
+* RuntimeArtifactRef/result-reference based;
+* lease-aware;
+* pressure-aware;
+* lost on process restart.
+
+---
+
+# 49. Artifact Store Boundary
+
+Runtime Artifact Store owns:
+
+* Artifact registry;
+* backing-resource references;
+* leases;
+* Runtime retention;
+* physical lifecycle coordination.
+
+Cache Policy owns:
+
+* whether extra reuse retention should exist;
+* when that retention should be removed.
+
+---
+
+# 50. Cache Retention vs Artifact Lifetime
+
+Critical distinction:
+
+```text
+Cache retention removed
+    !=
+Artifact physically destroyed
+```
+
+An Artifact may remain alive because of:
+
+* active owner;
+* active lease;
+* other retention;
+* Business reference.
+
+---
+
+# 51. Durable Cache
+
+Durable cache is a Storage-backed optimization.
+
+Recommended:
+
+```text
+Cache Policy
+    approves durable retention
+        |
+        v
+Storage
+    persists durable cache representation
+```
+
+Storage does not define semantic compatibility.
+
+---
+
+# 52. Durable Cache Record
+
+Recommended:
+
+```text
+DurableCacheRecord
+├── cacheKey
+├── resultDescriptor
+├── outputContractVersion
+├── semanticDependencyFingerprint
+├── reusePartitionReference
+├── persistenceVersion
+├── retentionMetadata
+├── provenanceMetadata
+├── createdAt
+├── expiresAt?
+└── integrityMetadata
+```
+
+---
+
+# 53. Durable Materialization
+
+A durable record loaded after restart is only:
+
+```text
+ReuseCandidate
+```
+
+It does NOT automatically gain Runtime authority.
+
+---
+
+# 54. Durable Reuse Validation
+
+After materialization, validate again:
+
+* contract compatibility;
+* semantic dependencies;
+* partition/policy;
+* integrity;
+* availability;
+* current Runtime relevance.
+
+---
+
+# 55. Eviction
+
+Eviction removes cache retention because of:
+
+* pressure;
+* budget;
+* low usefulness;
+* LRU/LFU/weighted policy;
+* scope end;
+* runtime shutdown;
+* retention expiry.
+
+Eviction does NOT mean semantic invalidity.
+
+---
+
+# 56. Invalidation
+
+Invalidation means candidate is no longer semantically/structurally eligible.
+
+Possible causes:
+
+* integrity failure;
+* unsupported output contract;
+* owner compatibility rule changed;
+* policy changed;
+* explicit Business correction invalidates result;
+* security removal requirement.
+
+---
+
+# 57. Expiration
+
+Expiration is time-based.
+
+Possible:
+
+```text
+TTL
+Idle TTL
+ExecutionScope lifetime
+Application lifetime
+Durable retention window
+```
+
+Expiration prevents reuse.
+
+Physical disposal still follows ownership/lease rules.
+
+---
+
+# 58. Removal
+
+Removal may be requested for:
+
+* user clear;
+* privacy action;
+* account/workspace removal;
+* administrative cleanup;
+* corruption remediation;
+* security incident.
+
+Durable removal follows Storage deletion policy.
+
+---
+
+# 59. Eviction vs Invalidation vs Expiration vs Removal
+
+```text
+Eviction
+    = retention/value decision
+
+Invalidation
+    = compatibility/integrity decision
+
+Expiration
+    = temporal decision
+
+Removal
+    = explicit deletion action
+```
+
+These MUST remain distinct.
+
+---
+
+# 60. Partial Results
+
+Unvalidated partial output MUST NOT be cached.
+
+Validated partial output MAY be cacheable only if:
+
+* owner defines stable partial-result contract;
+* identity is stable;
+* ordering metadata exists;
+* semantic compatibility exists;
+* policy permits;
+* cache promotion is explicit.
+
+MVP SHOULD default to no partial promotion.
+
+---
+
+# 61. Warning-Bearing Results
+
+A business-accepted result with warnings MAY be reusable when:
+
+* warnings are preserved;
+* warnings do not invalidate semantics;
+* owner allows reuse;
+* policy allows retention.
+
+Warning alone does not automatically prohibit reuse.
+
+---
+
+# 62. Canceled Results
+
+Canceled execution output SHOULD NOT be promoted by default.
+
+MVP:
+
+```text
+Cancellation
+    -> no promotion
+```
+
+---
+
+# 63. Stale Results
+
+Stale execution output SHOULD NOT be promoted by default.
+
+MVP:
+
+```text
+REJECT_STALE
+    -> no promotion
+```
+
+Future optimization may consider stale-but-semantically-valid results only through an explicit separate policy.
+
+---
+
+# 64. Failed / Abandoned Results
+
+Failed or abandoned execution MUST NOT be stored as successful reusable results.
+
+Negative-result caching is a separate future architecture.
+
+---
+
+# 65. Retry Interaction
+
+Before creating another Retry Attempt, Runtime MAY request reuse evaluation.
+
+```text
+Retry Candidate
+        |
+        v
+Runtime Control
+        |
+        v
+Reuse Evaluation
+        |
+        +--> reusable result
+        |       -> no new Attempt needed
+        |
+        +--> miss
+                -> Retry continues
+```
+
+Retry Policy does not perform cache lookup.
+
+---
+
+# 66. Scheduler Interaction
+
+Cache lookup SHOULD normally occur before Scheduler admission when practical.
+
+Cache hit is not a Scheduler decision.
+
+If reuse fails:
+
+```text
+Runtime Control
+    -> Scheduler
+```
+
+continues normal execution admission.
+
+---
+
+# 67. Worker Boundary
+
+Worker MUST NOT independently:
+
+* lookup semantic cache;
+* select reusable result;
+* promote result;
+* invalidate business cache entries.
+
+Worker may interact with low-level implementation-local caches only when those are hidden behind the owning capability contract and do not violate Runtime semantics.
+
+---
+
+# 68. In-Flight Reuse
+
+Cache architecture MAY support coalescing duplicate expensive execution.
+
+This is distinct from ordinary cache hit.
+
+---
+
+# 69. In-Flight Reuse Model
+
+```text
+WorkItem A
+    produces ReuseKey K
+
+WorkItem B
+    also needs K
+```
+
+Possible behavior:
+
+```text
+A executes
+
+B waits for accepted result from A
+```
+
+provided B keeps its own:
+
+* WorkItem identity;
+* cancellation scope;
+* authority;
+* deadline;
+* business context.
+
+---
+
+# 70. Producer Is Not Shared WorkItem
+
+Critical rule:
+
+```text
+In-flight coalescing
+    !=
+merge WorkItems
+```
+
+Producer remains one WorkItem.
+
+Observers remain independent WorkItems.
+
+---
+
+# 71. Coalescing Ownership
+
+Recommended:
+
+```text
+InFlightReuseCoordinator
+```
+
+MAY coordinate:
+
+* producer registration;
+* observer registration;
+* bounded waiting;
+* accepted-result publication;
+* observer detachment.
+
+This MAY remain internal to Cache Runtime implementation.
+
+---
+
+# 72. In-Flight Cancellation
+
+Canceling observer B MUST NOT automatically cancel producer A if:
+
+* A is still independently required;
+* another observer still depends on A.
+
+---
+
+# 73. Producer Failure
+
+Producer failure MUST NOT automatically mark observers failed.
+
+Observers may:
+
+* continue normal execution;
+* retry lookup;
+* create their own Attempt;
+* receive recovery decision.
+
+---
+
+# 74. Accepted Result Requirement
+
+Only a result accepted through required Runtime and Business boundaries becomes eligible to satisfy observers.
+
+Physical producer Completion alone is insufficient.
+
+---
+
+# 75. Coalescing Wait
+
+Observer wait MUST be:
+
+* bounded;
+* cancelable;
+* deadline-aware;
+* authority-aware.
+
+---
+
+# 76. Stampede Prevention
+
+Possible mechanisms:
+
+* in-flight coalescing;
+* bounded lookup;
+* per-key coordination;
+* Scheduler admission;
+* bounded provider/execution concurrency.
+
+Do NOT use one global cache lock.
+
+---
+
+# 77. Negative Cache
+
+MVP SHOULD NOT support negative-result caching.
+
+Future negative cache MUST use a distinct type/contract.
+
+It MUST NOT masquerade as successful reusable Artifact/result.
+
+---
+
+# 78. Cache Failure
+
+Normal cache failure degrades to miss.
+
+```text
+Cache Lookup Failure
+        |
+        v
+Diagnostics
+        |
+        v
+Treat As Miss
+        |
+        v
+Continue Normal Execution
+```
+
+---
+
+# 79. Cache Integrity Failure
+
+Integrity corruption MAY require:
+
+* candidate invalidation;
+* Artifact quarantine;
+* Storage diagnostics;
+* security diagnostics where appropriate.
+
+It still MUST NOT create false success.
+
+---
+
+# 80. Durable Cache Failure
+
+If durable cache is unavailable:
+
+* runtime memory reuse MAY remain available;
+* normal execution continues;
+* WorkItem does not fail merely because durable cache failed;
+* durable promotion pauses.
+
+---
+
+# 81. Cache Configuration
+
+Runtime Configuration MAY control operational limits such as:
+
+```text
+memory capacity
+maximum entries
+retention TTL
+lookup timeout
+eviction thresholds
+```
+
+It MUST NOT define Business semantic compatibility.
+
+---
+
+# 82. Semantic Configuration Identity
+
+Where Business configuration affects result semantics, the owning module includes that dependency in:
+
+```text
+SemanticDependencyFingerprint
+```
+
+Cache does not independently inspect full configuration objects.
+
+---
+
+# 83. Provider Boundary
+
+Whether Provider identity affects semantic reuse is an owning-module/routing contract decision.
+
+Cache architecture MUST NOT globally assume:
+
+```text
+different Provider
+    -> incompatible
+```
+
+or:
+
+```text
+different Provider
+    -> compatible
+```
+
+---
+
+# 84. Model Boundary
+
+Likewise, whether AI/OCR model identity affects result compatibility is owner-defined.
+
+Cache only receives the resulting semantic fingerprint.
+
+---
+
+# 85. Language Boundary
+
+Language pair/profile affects cache identity only when the owner declares it semantic.
+
+Generic Cache Policy does not understand language semantics.
+
+---
+
+# 86. Presentation Cache Boundary
+
+Presentation results MAY have reuse semantics different from Translation/Recognition.
+
+Presentation owner defines their dependencies.
+
+Runtime Cache must not hard-code:
+
+```text
+font
+layout
+theme
+```
+
+globally.
+
+---
+
+# 87. Source Document Boundary
+
+Source Document reuse follows Text/Domain ownership rules.
+
+Cache Policy does not decide whether two source representations are semantically identical.
+
+---
+
+# 88. Observability Events
+
+Recommended:
+
+```text
+CacheLookupStarted
+CacheHit
+CacheMiss
+CacheCandidateRejected
+CacheEntryPromoted
+CacheEntryEvicted
+CacheEntryInvalidated
+CacheEntryExpired
+CacheEntryRemoved
+CacheLookupFailed
+DurableCacheDegraded
+InFlightReuseJoined
+InFlightReuseDetached
+```
+
+---
+
+# 89. Event Payload
+
+Recommended metadata:
+
+```text
+cacheEntryId?
+resultType
+ownerModule
+reuseScope
+reusePartitionReference
+decision
+reasonCode
+sizeEstimate?
+timing
+contractVersion
+semanticFingerprintReference?
+```
+
+Do not emit raw cache-key preimage.
+
+---
+
+# 90. Metrics
+
+Recommended:
+
+```text
+hit count
+miss count
+useful hit ratio
+validation rejection count
+semantic incompatibility count
+policy partition miss count
+integrity failure count
+promotion count
+promotion skipped count
+eviction count
+invalidation count
+expiration count
+retained bytes
+lookup latency
+durable lookup latency
+saved useful latency
+saved provider/resource cost
+in-flight coalescing count
+cache operation failure count
+```
+
+---
+
+# 91. Useful Metrics
+
+Raw hit rate is not sufficient.
+
+Prefer:
+
+```text
+Useful Hit Ratio
+Saved Useful Latency
+Saved Execution Cost
+Current Execution Reuse Ratio
+Invalid Reuse Prevention Count
+```
+
+---
+
+# 92. Privacy
+
+Cache telemetry MUST NOT contain:
+
+* source text;
+* translated text;
+* screenshot;
+* Prompt;
+* AI Context;
+* raw URL;
+* credentials;
+* key preimage.
+
+---
+
+# 93. Cache Security
+
+Cache MUST NOT contain:
+
+* API keys;
+* OAuth tokens;
+* access tokens;
+* private keys;
+* resolved credential values;
+* unrestricted private diagnostics.
+
+---
+
+# 94. Process Restart
+
+Runtime-memory cache disappears at process restart.
+
+Durable cache records must be revalidated.
+
+No durable record automatically restores:
+
+```text
+ExecutionRevision authority
+WorkItem outcome
+Runtime Artifact ownership
+```
+
+---
+
+# 95. Cache and ExecutionRevision
+
+An Artifact/result produced under an old ExecutionRevision MAY still be reusable later.
+
+Therefore:
+
+```text
+ExecutionRevision authority
+    !=
+semantic reuse compatibility
+```
+
+---
+
+# 96. Cache and ExecutionScope
+
+Cross-ExecutionScope reuse is allowed only when:
+
+* semantic compatibility allows;
+* reuse scope allows;
+* policy partition permits;
+* security/tenant isolation permits.
+
+---
+
+# 97. Cache and Domain History
+
+Cache MUST NOT replace Domain history.
+
+Example:
+
+```text
+TranslationRevision history
+```
+
+remains Domain-owned even if equivalent Translation output is cached.
+
+---
+
+# 98. Cache and Durable Storage
+
+Durable cache is disposable optimization data.
+
+Canonical persisted business truth remains separate.
+
+Deleting durable cache MUST NOT delete canonical Domain resources.
+
+---
+
+# 99. Cache and Resource Lifecycle
+
+Eviction removes retention.
+
+Resource Manager determines physical disposal eligibility.
+
+Recommended:
+
+```text
+Eviction
+    |
+    v
+Cache Retention Released
+    |
+    v
+Artifact still leased?
+    |
+    +--> yes -> remain physically alive
+    |
+    +--> no  -> disposal eligible
+```
+
+---
+
+# 100. Architecture Invariants
+
+1. Cache is not source of truth.
+
+2. Runtime remains correct when cache is empty.
+
+3. Cache key is deterministic.
+
+4. ExecutionRevisionId is not semantic reuse identity.
+
+5. ExecutionScopeId is not semantic reuse identity.
+
+6. Business Module owns semantic compatibility.
+
+7. Business Module owns semantic dependency declaration.
+
+8. Policy/Governance owns cross-scope privacy/security reuse constraints.
+
+9. Cache Policy owns reuse/retention mechanics.
+
+10. Runtime Artifact Store owns runtime payload lifecycle.
+
+11. Storage owns durable persistence mechanics.
+
+12. Runtime Control owns current execution relevance.
+
+13. Scheduler does not decide cache hit.
+
+14. Worker does not perform semantic cache reuse.
+
+15. Cache hit is not terminal WorkItem outcome.
+
+16. Technical success does not imply cache eligibility.
+
+17. Runtime authority acceptance alone does not imply cache eligibility.
+
+18. Business-accepted result is normally required for promotion.
+
+19. Failed/Canceled/Stale/Abandoned outputs do not promote by default.
+
+20. Unvalidated partial output does not promote.
+
+21. Cache promotion does not copy payload by default.
+
+22. Eviction does not invalidate active lease.
+
+23. Eviction and invalidation are distinct.
+
+24. Expiration and invalidation are distinct.
+
+25. Explicit removal is distinct from eviction.
+
+26. Durable cache always uses Storage boundary.
+
+27. Reuse partition is policy-derived.
+
+28. Cross-partition reuse is denied by default.
+
+29. Cache contains no secrets.
+
+30. Cache-key diagnostics do not expose preimages.
+
+31. Lookup failure normally degrades to miss.
+
+32. In-flight reuse does not merge WorkItem identity.
+
+33. Observer cancellation does not automatically cancel producer.
+
+34. Producer physical Completion alone does not satisfy observers.
+
+35. Only accepted compatible result satisfies reuse.
+
+36. SemanticDependencyFingerprint is owner-defined.
+
+37. Cache Policy does not hard-code Provider/Language/Model semantics.
+
+38. Version changes do not require immediate deletion of older entries.
+
+39. Cache retention is always bounded.
+
+40. Runtime cache and canonical Domain persistence remain separate.
+
+---
+
+# 101. Recommended MVP
+
+CRAI MVP SHOULD support:
+
+* process-local memory cache;
+* bounded Runtime Artifact retention;
+* deterministic CacheKey;
+* ContentIdentity;
+* SemanticDependencyFingerprint;
+* ReusePartitionReference;
+* EXECUTION_REVISION scope;
+* EXECUTION_SCOPE scope;
+* APPLICATION_RUNTIME scope;
+* no durable cache by default;
+* LRU/weighted LRU;
+* no negative cache;
+* no partial promotion by default;
+* no Failed/Canceled/Stale/Abandoned promotion;
+* business-accepted-result promotion;
+* policy-partition validation;
+* cache failure -> miss;
+* Retry pre-check integration;
+* basic content-free cache telemetry.
+
+MVP MAY defer:
+
+* in-flight coalescing;
+* durable cache;
+* cross-application reuse;
+* cost-aware eviction;
+* adaptive retention;
+* negative-result cache;
+* stale-but-semantic-result salvage;
+* cross-device cache.
+
+---
+
+# 102. MVP Result Types
+
+MVP MAY support reuse for owner-defined result contracts such as:
+
+```text
+Captured/Source Result
+Recognition Result
+Source Document
+Translation Result
+Presentation Result
+```
+
+Exact types belong to module contracts.
+
+Do NOT create architecture layers named:
+
+```text
+OCR Cache
+Layout Cache
+Translation Cache
+```
+
+unless those owners explicitly expose such reusable result contracts.
+
+---
+
+# 103. MVP Retention
+
+Conceptual defaults:
+
+| Scope               | Retention                                   |
+| ------------------- | ------------------------------------------- |
+| ExecutionRevision   | Until revision cleanup or pressure eviction |
+| ExecutionScope      | Until scope cleanup or pressure eviction    |
+| Application Runtime | Bounded LRU                                 |
+| Durable             | Disabled by default                         |
+| Debug/private       | Disabled by default                         |
+
+Exact values belong to `RUNTIME_CONFIG.md`.
+
+---
+
+# 104. Example — Runtime Hit
+
+```text
+WorkItem Needs Recognition Result
+        |
+        v
+ReuseQuery
+        |
+        v
+Candidate Found
+        |
+        v
+Semantic Compatibility Valid
+        |
+        v
+Policy Partition Valid
+        |
+        v
+Integrity Valid
+        |
+        v
+Runtime Relevance Valid
+        |
+        v
+Reuse Accepted
+        |
+        v
+No New Attempt Needed
+```
+
+---
+
+# 105. Example — Semantic Fingerprint Mismatch
+
+```text
+Translation Result Found
+        |
+        v
+SemanticDependencyFingerprint differs
+        |
+        v
+Reuse Rejected
+        |
+        v
+Cache Miss
+        |
+        v
+Normal Execution
+```
+
+Cache does not need to know whether the difference was caused by Glossary, model, Profile or another semantic dependency.
+
+---
+
+# 106. Example — Eviction with Active Lease
+
+```text
+Eviction selects Cache Entry
+        |
+        v
+Cache Retention Removed
+        |
+        v
+Artifact Lease Still Active
+        |
+        v
+Payload Remains
+        |
+        v
+Lease Released
+        |
+        v
+Physical Disposal Eligible
+```
+
+---
+
+# 107. Example — Durable Reuse
+
+```text
+Memory Miss
+        |
+        v
+Storage-backed Cache Lookup
+        |
+        v
+Durable Record Found
+        |
+        v
+Materialize ReuseCandidate
+        |
+        v
+Revalidate Contract / Semantic Fingerprint
+        |
+        v
+Validate Partition / Integrity
+        |
+        v
+Runtime Control checks relevance
+        |
+        v
+Reuse Accepted
+```
+
+Durable presence alone never grants runtime authority.
+
+---
+
+# 108. Example — Partition Miss
+
+```text
+Candidate Found
+        |
+        v
+Candidate ReusePartition = P1
+
+Current request ReusePartition = P2
+        |
+        v
+No explicit cross-partition authorization
+        |
+        v
+Reuse Rejected
+```
+
+---
+
+# 109. Example — Retry Avoided by Reuse
+
+```text
+Attempt A1 fails
+        |
+        v
+Runtime Control considers another Attempt
+        |
+        v
+Reuse evaluation
+        |
+        v
+Compatible accepted result exists
+        |
+        v
+No new Attempt created
+```
+
+Retry Policy itself performs no lookup.
+
+---
+
+# 110. Example — In-Flight Coalescing
+
+```text
+WorkItem A needs key K
+WorkItem B needs key K
+
+A becomes producer
+B becomes observer
+
+A completes
+        |
+        v
+Runtime + Business acceptance
+        |
+        v
+Reusable result published
+        |
+        v
+B independently validates authority
+        |
+        v
+B may use result
+```
+
+A and B retain independent WorkItem identity.
+
+---
+
+# 111. Testing Requirements
+
+Tests SHOULD include:
+
+* memory hit;
+* memory miss;
+* deterministic key;
+* semantic fingerprint mismatch;
+* output contract mismatch;
+* partition mismatch;
+* integrity failure;
+* Runtime relevance rejection;
+* cache disabled;
+* all entries evicted;
+* promotion after Business acceptance;
+* rejection before Business acceptance;
+* Failed/Canceled/Stale/Abandoned promotion rejection;
+* partial-result rejection;
+* warning-bearing accepted result;
+* eviction with active lease;
+* durable cache unavailable;
+* durable candidate incompatible;
+* Retry avoided by reuse;
+* ExecutionRevision cross-reuse;
+* ExecutionScope cross-reuse;
+* cross-partition denial;
+* process restart;
+* cache lookup failure degradation;
+* telemetry privacy;
+* optional in-flight coalescing;
+* observer cancellation;
+* producer failure.
+
+---
+
+# 112. Open Decisions
+
+The following remain open:
+
+* CacheKey hash algorithm;
+* ContentIdentity representation;
+* SemanticDependencyFingerprint format;
+* ReusePartition representation;
+* compatibility-query contract;
+* owner-module cache-eligibility API;
+* RuntimeArtifactRef vs BusinessResultRef representation;
+* LRU vs weighted LRU;
+* reuse-scope defaults;
+* durable-cache support;
+* durable-cache encryption;
+* durable retention window;
+* cross-ExecutionScope reuse defaults;
+* in-flight coalescing MVP inclusion;
+* coalescing coordinator implementation;
+* useful-value scoring;
+* stale-but-semantic-result future policy;
+* negative-result caching.
+
+---
+
+# 113. Related Documents
+
+Runtime:
+
+* `PIPELINE_RUNTIME.md`
+* `RUNTIME_COMPONENTS.md`
+* `SCHEDULER.md`
+* `RETRY_POLICY.md`
+* `CANCELLATION.md`
+* `MEMORY_MODEL.md`
+* `RESOURCE_LIFECYCLE.md`
+* `PERFORMANCE_MODEL.md`
+* `RUNTIME_CONFIG.md`
+* `RUNTIME_OBSERVABILITY.md`
+
+External:
+
+* `../domain/`
+* `../ai/CACHE.md`
+* `../../02-modules/recognition/`
+* `../../02-modules/translation/`
+* `../../02-modules/presentation/`
+* `../../02-modules/storage/`
+
+---
+
+# 114. Completion Criteria
+
+`CACHE_POLICY.md` is synchronized when:
+
+* Cache remains an optional optimization;
+* Cache is never source of truth;
+* ExecutionScope/ExecutionRevision terminology is canonical;
+* execution identity and reuse identity are separate;
+* Business Module owns semantic compatibility;
+* owner-defined SemanticDependencyFingerprint replaces hard-coded generic dependencies;
+* Policy/Governance owns reuse partition semantics;
+* Cache Policy owns mechanics rather than Business meaning;
+* Runtime authority remains Runtime Control-owned;
+* promotion normally requires Business-accepted result;
+* Cache hit remains distinct from terminal WorkItem outcome;
+* Runtime Artifact Store remains distinct from Cache Policy;
+* durable cache remains Storage-backed;
+* eviction/invalidation/expiration/removal remain distinct;
+* Retry can re-evaluate reuse without Retry Policy owning cache lookup;
+* in-flight coalescing does not merge WorkItems;
+* no raw secrets/content appear in cache metadata/telemetry.
+
+---
+
+# 115. Summary
+
+CRAI Cache Policy follows:
+
+```text
+Business Result Semantics
+        |
+        v
+Owner-Defined Compatibility
+        |
+        v
+Policy-Derived Reuse Scope
+        |
+        v
+Cache Reuse Evaluation
+        |
+        v
+Candidate Lookup
+        |
+        v
+Validation
+        |
+        v
+Runtime Relevance
+        |
+        v
+Reusable Result
+```
+
+The central rule is:
+
+```text
+Cache reuses accepted meaning.
+
+Cache does not define meaning.
+```

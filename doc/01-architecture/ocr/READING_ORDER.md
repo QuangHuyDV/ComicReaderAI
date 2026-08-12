@@ -1,7 +1,7 @@
 # Reading Order
 
 > **Status:** Draft
-> **Version:** 1.1
+> **Version:** 1.2.0
 > **Layer:** OCR Architecture
 > **Depends On:** Detection, Recognition, Text Direction, Layout Analysis, OCR Postprocessing
 > **Next Layer:** Text Processing
@@ -64,7 +64,7 @@ Reading Order không chịu trách nhiệm:
 * Translation
 * semantic text reconstruction
 * Runtime scheduling
-* Runtime retry
+* Runtime same-work retry
 * Runtime cancellation
 * Event Bus behavior
 * global cache lifecycle
@@ -1165,7 +1165,9 @@ Reading Confidence có thể tồn tại ở:
 
 Global Confidence không nhất thiết bằng trung bình Edge Confidence.
 
-Quality Assessment có thể sử dụng Reading Confidence nếu Reading Order nằm trong quality boundary tương ứng.
+Quality Assessment có thể sử dụng Reading Confidence trong một evaluation scope chạy sau Reading Order hoặc trong một Quality Profile mở rộng có Reading Order làm input.
+
+Quality Report đánh giá OCR Document trước Reading Order không được giả định đã có Reading Confidence.
 
 ---
 
@@ -1231,7 +1233,7 @@ Reading Order có thể hỗ trợ override semantic như:
 
 Override phải tồn tại tách khỏi immutable OCR result.
 
-Runtime/persistence của override thuộc owner tương ứng.
+Persistence và user-preference lifecycle của override thuộc authoritative Business/Persistence owner tương ứng. Runtime chỉ thực thi recomputation work khi được yêu cầu.
 
 ---
 
@@ -1277,7 +1279,7 @@ changed scope
     → recompute only affected order
 ```
 
-Scheduling và incremental execution authority thuộc Runtime.
+Reading Order sở hữu incremental recomputation semantics. Runtime sở hữu scheduling, execution authority và execution mechanics của recomputation work.
 
 ---
 
@@ -1332,19 +1334,32 @@ Diagnostics không thay thế Reading Order Result.
 
 # 60. Runtime Integration
 
-Reading Order chỉ cung cấp semantic output.
+Reading Order chỉ cung cấp semantic output và semantic recomputation requirements.
 
 Runtime sở hữu:
 
+* ExecutionScope và ExecutionRevision correlation
+* WorkItem / Attempt execution mechanics
 * scheduling
-* cancellation
-* retry
-* attempt lifecycle
+* cancellation execution
+* same-work Retry mechanics
 * queue
 * execution state
-* stale authority
+* execution authority
+* stale-result rejection
 
-Reading Order không tự schedule lại chính nó.
+Reading Order không tự:
+
+* schedule lại chính nó
+* tạo Attempt
+* quyết định Retry budget
+* quyết định cancellation authority
+* publish Runtime Artifact
+* quyết định downstream Business continuation
+
+Nếu Reading Order Result hoàn thành sau khi execution intent đã thay đổi, Runtime Control quyết định result còn execution authority để publish hay phải bị reject như stale/cancelled.
+
+Reading Order semantics không bị Runtime redefine.
 
 ---
 
@@ -1395,7 +1410,7 @@ StrategyUnavailable
 SequenceValidationFailed
 ```
 
-Các lỗi này phải map vào Runtime Error Model khi crossing Runtime boundary.
+Các lỗi này phải map vào Runtime Error Model khi crossing Runtime execution boundary; Reading Order vẫn sở hữu semantic meaning của lỗi.
 
 ---
 
@@ -1411,7 +1426,7 @@ Reading Order luôn phải đảm bảo:
 
 4. Không thay đổi Text Direction.
 
-5. Chỉ tạo order relationships và sequences.
+5. Chỉ tạo order relationships, sequences và ordering diagnostics.
 
 6. Mọi Ordered Entity phải tham chiếu entity nguồn.
 
@@ -1429,15 +1444,27 @@ Reading Order luôn phải đảm bảo:
 
 13. Reading Order không sở hữu Runtime scheduling.
 
-14. Reading Order không sở hữu Retry.
+14. Reading Order không sở hữu Runtime Retry Policy hoặc Retry budget.
 
 15. Reading Order không sở hữu Cancellation authority.
 
-16. Reading Order không sở hữu global cache lifecycle.
+16. Reading Order không sở hữu Runtime execution authority hoặc stale-result decision.
 
-17. Reading Order không định nghĩa Event Bus semantics.
+17. Reading Order không sở hữu global cache lifecycle.
 
-18. Translation không được tự suy luận lại Reading Order từ Geometry nếu Reading Order Result hợp lệ đã tồn tại.
+18. Reading Order không định nghĩa Event Bus transport semantics.
+
+19. Reading Order không sở hữu Runtime Artifact publication.
+
+20. Reading Order không quyết định downstream Business continuation.
+
+21. Translation không được tự suy luận lại Reading Order từ Geometry nếu Reading Order Result hợp lệ và compatible đã tồn tại.
+
+22. Reading Confidence thuộc Reading Order; Quality chỉ consume nó khi evaluation scope thực sự bao gồm Reading Order output.
+
+23. Manual override phải tách khỏi immutable OCR Document và Reading Order base result.
+
+24. Incremental recomputation phải giữ stable order cho unchanged compatible scopes khi có thể.
 
 ---
 
@@ -1489,24 +1516,30 @@ có thể để sau.
 
 # 66. Ownership References
 
-| Concern                  | Owner               |
-| ------------------------ | ------------------- |
-| Region                   | `DETECTION.md`      |
-| Region Type              | `DETECTION.md`      |
-| Recognition Text Model   | `RECOGNITION.md`    |
+| Concern | Owner |
+| --- | --- |
+| Region | `DETECTION.md` |
+| Region Type | `DETECTION.md` |
+| Recognition Text Model | `RECOGNITION.md` |
 | Writing Mode / Direction | `TEXT_DIRECTION.md` |
-| Layout Tree              | `LAYOUT.md`         |
-| Spatial Relationships    | `LAYOUT.md`         |
-| OCR Document             | `POSTPROCESS.md`    |
-| Quality Report           | `QUALITY.md`        |
-| Reading Order Graph      | `READING_ORDER.md`  |
-| Main/Auxiliary Sequence  | `READING_ORDER.md`  |
-| Retry                    | Runtime             |
-| Cancellation             | Runtime             |
-| Scheduling               | Runtime             |
-| Cache lifecycle          | Runtime             |
-| Event transport          | Event Bus           |
-| Error normalization      | Runtime Error Model |
+| Layout Tree | `LAYOUT.md` |
+| Spatial Relationships | `LAYOUT.md` |
+| OCR Document | `POSTPROCESS.md` |
+| OCR Quality Report | `QUALITY.md` |
+| Reading Order Graph | `READING_ORDER.md` |
+| Main/Auxiliary Sequence | `READING_ORDER.md` |
+| Reading Confidence | `READING_ORDER.md` |
+| Reading semantic compatibility | `READING_ORDER.md` |
+| Same-work Retry | Runtime Retry Policy |
+| Cancellation authority | Runtime Control / Cancellation |
+| Scheduling | Runtime Scheduler |
+| Execution Authority / stale-result rejection | Runtime Control |
+| Runtime Artifact publication | Runtime Artifact boundary |
+| Business continuation | Business Pipeline Orchestration |
+| Cache lifecycle | Runtime Cache Policy |
+| Event transport | Event Bus |
+| Error normalization | Runtime Error Model |
+| Override persistence | Business / Persistence owner |
 
 ---
 
@@ -1561,5 +1594,5 @@ Text Direction defines writing direction.
 
 Reading Order defines precedence.
 
-Runtime defines execution.
+Runtime defines execution mechanics and execution authority.
 ```

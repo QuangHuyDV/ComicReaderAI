@@ -1,7 +1,7 @@
 # Profile Domain
 
 * **Document:** Domain / Profile
-* **Version:** 1.0.0
+* **Version:** 2.0.0
 * **Status:** Draft
 * **Owner:** CRAI Architecture
 
@@ -9,258 +9,305 @@
 
 # Purpose
 
-The Profile domain defines reusable, versioned and provider-neutral configuration used to control how CRAI processes, translates, validates and presents content.
+The `Profile` domain defines reusable, versioned and provider-neutral behavioral configuration used by CRAI capabilities.
 
-A Profile represents an intentional set of behavioral choices.
+A Profile represents **intent**.
 
 Examples:
 
-* Translate Chinese novels into natural Vietnamese
-* Preserve cultivation terminology
-* Detect vertical comic text
-* Prefer concise speech bubbles
-* Render translated text over the original bubble
-* Reject Translation when character names are inconsistent
-* Use local processing for sensitive Projects
-* Prefer low-cost providers for draft Translation
-* Use higher-quality providers for approved Translation
+* translate Chinese novels into natural Vietnamese,
+* preserve cultivation terminology,
+* prefer concise comic dialogue,
+* detect vertical comic text,
+* present Translation beside original content,
+* require strict terminology validation,
+* prefer local execution,
+* optimize draft work for lower cost,
+* prefer higher quality for publication output.
 
-Profiles allow CRAI to separate:
-
-```text
-What the user wants
-```
-
-from:
+A Profile describes:
 
 ```text
-How a specific provider performs it
+What behavior is desired
 ```
 
-The Profile domain must remain independent from:
+rather than:
 
-* Provider-specific request payloads
-* Provider model identifiers
-* Runtime jobs
-* User interface form state
-* Authentication
-* Billing accounts
-* Raw prompt strings
-* Temporary Session state
-* Environment variables
-* Deployment configuration
+```text
+How one provider implements that behavior
+```
+
+Profiles MUST remain independent from:
+
+* provider request payloads,
+* provider credentials,
+* concrete model identifiers,
+* runtime jobs,
+* retry attempts,
+* prompts,
+* environment variables,
+* deployment settings,
+* UI form state,
+* billing accounts.
 
 ---
 
 # Domain Role
 
-Profiles define reusable processing intent.
+Profile is a shared configuration domain.
+
+Conceptually:
 
 ```text
-Profile
-    │
-    ├── Translation Profile
-    ├── OCR Profile
-    ├── Presentation Profile
-    ├── Validation Profile
-    ├── Routing Profile
-    ├── Context Profile
-    └── Export Profile
-```
-
-A Profile is selected by:
-
-* Workspace
-* Project
-* Book
-* Chapter
-* Session
-* Operation
-
-The selected Profile Revision is resolved into operation-specific configuration.
-
-```text
-Profile Revision
-        │
-        ▼
+Profile Revision(s)
+        |
+        v
 Configuration Resolution
-        │
-        ▼
-Operation Context Snapshot
-        │
-        ▼
-Provider-neutral Request
-        │
-        ▼
-Provider Adapter
+        |
+        +--> Preferences
+        +--> Scope Defaults
+        +--> Operation Overrides
+        +--> Mandatory Policies
+        +--> Capability Constraints
+        |
+        v
+Resolved Configuration Snapshot
+        |
+        v
+Capability Execution
 ```
+
+A capability consumes resolved immutable configuration.
+
+It SHOULD NOT repeatedly read mutable Profile state during execution.
 
 ---
 
-# Profile Is Not User Preference
+# Profile Is Intent
 
-User Preference represents a user’s general UI or workflow preference.
-
-Profile represents reusable processing or presentation behavior.
-
-Examples:
-
-```text
-User Preference:
-Use dark mode
-```
-
-```text
-Presentation Profile:
-Use 18 px serif font with 1.6 line spacing
-```
-
-```text
-Translation Profile:
-Prefer natural Vietnamese while preserving honorific hierarchy
-```
-
-A User Preference may select a default Profile.
-
-It does not replace the Profile model.
-
----
-
-# Profile Is Not Workspace Policy
-
-A Profile states desired behavior.
-
-A Workspace Policy constrains allowed behavior.
-
-```text
-Profile:
-Use cloud Translation provider
-```
-
-```text
-Workspace Policy:
-Cloud processing forbidden
-```
-
-The operation must be rejected or resolved to an allowed alternative.
-
-Profile cannot override mandatory Workspace policy.
-
----
-
-# Profile Is Not Provider Configuration
-
-Provider Configuration identifies how CRAI accesses one provider.
-
-It may include:
-
-* Provider type
-* Credential reference
-* Region
-* Available capabilities
-* Enabled models
-* Rate limits
-
-Profile describes provider-neutral intent.
+A Profile expresses reusable desired behavior.
 
 Example:
 
 ```text
 Translation Profile:
-High quality, natural Vietnamese, moderate latency
+    natural Vietnamese
+    preserve relationship hierarchy
+    preserve ambiguity
 ```
 
-Routing may resolve that intent to:
+It does NOT define:
 
 ```text
-Provider Configuration P3
-Model M2
+provider = X
+model = Y
+temperature = 0.7
+API key = ...
 ```
 
-Provider Configuration and Profile must remain separate.
+unless an explicitly supported provider preference is represented as non-binding intent.
+
+Concrete provider execution remains the responsibility of Routing and provider adapters.
+
+---
+
+# Profile Is Not User Preference
+
+User Preference describes general user choices.
+
+Examples:
+
+```text
+dark mode
+default reader font size
+default selected Translation Profile
+```
+
+Profile describes reusable processing behavior.
+
+Example:
+
+```text
+Translation Profile:
+    natural Vietnamese
+    relationship-aware pronouns
+```
+
+A User Preference MAY select a Profile.
+
+It MUST NOT replace Profile semantics.
+
+---
+
+# Profile Is Not Policy
+
+Profile describes desired behavior.
+
+Policy defines mandatory constraints.
+
+Example:
+
+```text
+Profile:
+    external processing preferred
+```
+
+```text
+Policy:
+    external processing forbidden
+```
+
+The Profile MUST NOT override the Policy.
+
+Resolution MUST either:
+
+* produce an allowed compatible configuration,
+* request an explicit alternative,
+* or reject the operation.
+
+---
+
+# Profile Is Not Provider Configuration
+
+Provider Configuration MAY contain:
+
+* provider identity,
+* credential reference,
+* region,
+* available models,
+* rate limits,
+* runtime capabilities.
+
+Profile contains provider-neutral intent.
+
+Example:
+
+```text
+Routing intent:
+    high quality
+    interactive latency
+    approved providers only
+```
+
+Runtime Routing MAY resolve that to a concrete provider/model.
+
+That decision is not Profile identity.
 
 ---
 
 # Profile Is Not Prompt
 
-A Profile may influence prompt compilation.
+Profile configuration MAY influence prompt construction.
 
-It must not be modeled as one raw prompt string.
+Recommended boundary:
 
 ```text
-Profile
-    ↓
+Profile / Resolved Configuration
+            |
+            v
 Context Compiler
-    ↓
-Prompt or Request Compiler
-    ↓
-Provider Request
+            |
+            v
+Request / Prompt Compiler
+            |
+            v
+Provider Adapter
 ```
 
-Raw provider prompts are derived infrastructure artifacts.
+Raw prompt strings are derived execution artifacts.
 
-Profile remains structured, provider-neutral domain configuration.
+They MUST NOT become canonical Profile configuration.
 
 ---
 
-# Profile Is Not Operation State
+# Profile Is Not Runtime State
 
-Profile does not own:
+Profile does NOT own:
 
-* Job status
-* Provider retry count
-* Token usage
-* Runtime timeout attempts
-* Provider response
-* Execution error
-* Queue priority state
+* execution status,
+* queue state,
+* provider attempt count,
+* timeout attempts,
+* token usage,
+* latency,
+* provider response,
+* runtime error,
+* fallback attempt state.
 
-Those belong to runtime or operation domains.
+A Profile MAY express intent such as:
 
-A Profile may define policies such as desired timeout class or quality tier, but it does not track execution.
+```text
+latencyTier: INTERACTIVE
+```
+
+but does not track whether that target was achieved.
+
+---
+
+# Core Concepts
+
+The Profile domain SHOULD distinguish:
+
+```text
+Profile
+ProfileRevision
+ProfileSchema
+ProfileApplicability
+ProfileSelection
+ProfileDefaultSelection
+ProfileReview
+ProfileAuthority
+ProfileCandidate
+ProfileImportPlan
+ResolvedProfileSnapshot
+ResolvedConfigurationSnapshot
+ProfileImpact
+```
+
+These concepts SHOULD NOT be collapsed into one stateful object.
 
 ---
 
 # Aggregate Boundary
 
-Profile should be modeled as an Aggregate Root.
+`Profile` is an Aggregate Root with stable identity.
+
+Recommended aggregate:
 
 ```text
-Profile Aggregate
-├── Profile
-├── Profile Revision
-├── Profile Metadata
-├── Profile Scope
-├── Profile Lifecycle
-├── Profile Review State
-├── Profile Lock
-└── Profile Revision Lineage
+Profile
+├── profileId
+├── profileType
+├── ownerScope
+├── displayName
+├── description?
+├── visibility
+├── lifecycleStatus
+├── activeRevisionId?
+├── createdAt
+├── updatedAt
+└── version
 ```
 
 Profile owns:
 
-* Stable Profile identity
-* Profile type
-* Human-readable metadata
-* Revision lineage
-* Revision lifecycle
-* Review and approval state
-* Lock state
-* Visibility
-* Ownership scope
-* Compatibility declarations
+* Profile identity,
+* Profile type,
+* ownership scope,
+* discovery metadata,
+* lifecycle,
+* active/recommended Revision references.
 
-Profile does not own:
+Profile does NOT transactionally own:
 
-* Provider credentials
-* Projects
-* Sessions
-* Operations
-* Translation results
-* Prompt artifacts
-* Runtime routing results
-* User accounts
-* Usage ledger
+* operations,
+* Sessions,
+* Projects,
+* Translation artifacts,
+* OCR artifacts,
+* provider routing results,
+* Review workflow,
+* runtime snapshots.
 
 ---
 
@@ -269,2363 +316,1791 @@ Profile does not own:
 Critical invariant:
 
 ```text
-Profile ID
-≠
-Profile Revision ID
+profileId != profileRevisionId
 ```
 
-Profile ID identifies the reusable configuration concept.
+`profileId` identifies the reusable configuration concept.
 
-Profile Revision ID identifies one immutable version of that configuration.
+`profileRevisionId` identifies one immutable behavioral definition.
 
 Example:
 
 ```text
 Profile:
-Natural Vietnamese Novel Translation
+    Natural Vietnamese Novel Translation
 
 Revision 1:
-Literalness = 0.55
+    style: natural
+    honorificPolicy: preserve
 
 Revision 2:
-Literalness = 0.45
-Honorific preservation = stronger
+    style: natural
+    honorificPolicy: relationship-aware
 ```
 
-Both revisions belong to the same Profile identity.
-
----
-
-# Profile Record
-
-Recommended structure:
-
-```text
-Profile
-├── Profile ID
-├── Profile Type
-├── Owner Scope
-├── Display Name
-├── Description
-├── Active Revision ID
-├── Lifecycle State
-├── Visibility
-├── Created By
-├── Created At
-├── Updated At
-└── Aggregate Version
-```
-
-The mutable Profile record points to active or recommended revisions.
-
-Durable outputs must reference exact Profile Revision IDs.
+Both revisions belong to one Profile identity.
 
 ---
 
 # Profile Revision
 
-Profile Revision is immutable after creation.
+A Profile Revision represents one immutable configuration definition.
 
 Recommended structure:
 
 ```text
-Profile Revision
-├── Profile Revision ID
-├── Profile ID
-├── Revision Number
-├── Parent Revision ID
-├── Profile Type
-├── Configuration Document
-├── Schema Version
-├── Compatibility Metadata
-├── Review State
-├── Content Hash
-├── Change Summary
-├── Created By
-├── Created At
-└── Supersedes Revision ID
+ProfileRevision
+├── profileRevisionId
+├── profileId
+├── revisionNumber
+├── parentRevisionId?
+├── profileType
+├── schemaVersion
+├── configuration
+├── compatibility
+├── contentHash
+├── changeSummary?
+├── createdBy
+├── createdAt
+└── lineageMetadata?
 ```
 
-A correction creates a new revision.
+Published or externally referenced Profile Revisions MUST be immutable.
 
-It must not mutate an existing revision that has been used by an operation.
-
----
-
-# Why Revisions Are Required
-
-Without immutable revisions:
-
-* Existing Translation results become unreproducible.
-* Cache keys become unstable.
-* Audit cannot explain historical behavior.
-* Profile updates silently alter future retries.
-* Validation results may refer to different rules over time.
-* Session recovery may produce different output.
-* Shared Workspace configuration becomes unsafe.
-
-Therefore:
-
-> Every durable operation must reference exact Profile Revisions.
+Semantic correction creates another Revision.
 
 ---
 
-# Profile Types
+# Revision Immutability
 
-Recommended core Profile Types:
+Once a Profile Revision has been consumed by a durable operation, it MUST NOT change.
 
-* Translation
-* OCR
-* Presentation
-* Validation
-* Context
-* Routing
-* Export
+Without this rule:
+
+* Translation becomes unreproducible,
+* cache keys become unstable,
+* retries may produce different behavior,
+* historical audit becomes ambiguous,
+* Session recovery may change semantics.
+
+Durable processing therefore pins exact Profile Revision identities or an exact resolved configuration snapshot.
+
+---
+
+# Profile Type
+
+Profiles MUST be capability-coherent rather than universal.
+
+Recommended core types:
+
+```text
+TRANSLATION
+OCR
+PRESENTATION
+VALIDATION
+CONTEXT
+ROUTING
+EXPORT
+```
 
 Possible future types:
 
-* Import
-* Capture
-* Recognition
-* Speech
-* Audio
-* Accessibility
-* Review
-* Quality
-* Cost
-* Privacy
-* Notification
+```text
+CAPTURE
+IMPORT
+RECOGNITION
+ACCESSIBILITY
+REVIEW
+QUALITY
+```
 
-The Profile framework may support several types, but each type must have its own schema and validation.
+Each Profile Type MUST have:
+
+* its own schema,
+* validation rules,
+* compatibility rules,
+* semantic impact rules.
 
 ---
 
-# Avoid the Universal Profile
+# Avoid Universal Profile
 
-CRAI should not create one universal Profile containing every possible option.
+CRAI MUST NOT create one Profile containing every configurable behavior.
 
-An excessively broad Profile would cause:
-
-* Unclear ownership
-* High coupling
-* Invalid combinations
-* Large revisions
-* Difficult permission control
-* Unnecessary cache invalidation
-* Complex user interfaces
-* Poor reuse
-
-Recommended composition:
+Bad:
 
 ```text
-Translation Profile Revision
-+
-OCR Profile Revision
-+
-Presentation Profile Revision
-+
-Validation Profile Revision
-+
-Context Profile Revision
-+
-Routing Profile Revision
+MegaProfile
+├── Translation
+├── OCR
+├── Rendering
+├── Routing
+├── Export
+├── Validation
+└── Privacy
 ```
 
-Each controls one coherent capability.
+This creates:
+
+* unclear ownership,
+* unnecessary coupling,
+* broad invalidation,
+* oversized revisions,
+* difficult reuse,
+* difficult permissions.
+
+Recommended:
+
+```text
+TranslationProfileRevision
+OCRProfileRevision
+PresentationProfileRevision
+ValidationProfileRevision
+ContextProfileRevision
+RoutingProfileRevision
+```
+
+These may be composed during operation resolution.
 
 ---
 
 # Profile Composition
 
-An operation may use several Profile Revisions together.
+One operation MAY consume several Profile Revisions.
 
 Example:
 
 ```text
 Translation Operation
-├── Translation Profile Revision 7
-├── Context Profile Revision 3
-├── Validation Profile Revision 5
-└── Routing Profile Revision 2
+
+Translation Profile Revision 7
+Context Profile Revision 3
+Validation Profile Revision 5
+Routing Profile Revision 2
 ```
 
-A comic reading Session may additionally use:
+For image content:
 
 ```text
 OCR Profile Revision 4
 Presentation Profile Revision 8
 ```
 
-Profile composition occurs in application-level configuration resolution.
+Composition occurs during configuration resolution.
 
-It does not create ownership between the Profiles.
+One Profile MUST NOT gain ownership of another Profile merely because both are used together.
 
 ---
 
 # Composite Profile
 
-For user convenience, CRAI may support a Composite Profile.
+A `CompositeProfile` MAY exist for user convenience.
 
-A Composite Profile stores references to compatible Profile Revisions.
+It SHOULD contain explicit references or selection policies.
+
+Example:
 
 ```text
-Composite Profile Revision
-├── Translation Profile Revision
-├── OCR Profile Revision
-├── Presentation Profile Revision
-├── Validation Profile Revision
-├── Context Profile Revision
-└── Routing Profile Revision
+CompositeProfileRevision
+├── translationSelection
+├── ocrSelection
+├── presentationSelection
+├── validationSelection
+├── contextSelection
+└── routingSelection
 ```
 
-A Composite Profile must not copy mutable Profile contents implicitly.
+It MUST NOT copy mutable Profile state implicitly.
 
-It references exact revisions or explicit selection policies.
-
----
-
-# Composite Selection Modes
-
-Possible reference modes:
-
-* Exact Revision
-* Active Approved Revision
-* Latest Compatible Approved Revision
-* Workspace Default
-* Project Default
-
-For reproducibility, every operation resolves these policies into exact revisions before execution.
+At operation start, all selection policies MUST resolve to exact immutable revisions.
 
 ---
 
-# Profile Ownership Scope
+# Profile Ownership
 
-A Profile may be owned by:
+A Profile MAY be owned by:
 
-* System
-* User
-* Workspace
-* Project
+```text
+SYSTEM
+USER
+WORKSPACE
+PROJECT
+```
 
 Possible future ownership:
 
-* Organization
-* Marketplace publisher
-* External package
+```text
+ORGANIZATION
+EXTERNAL_PACKAGE
+```
 
-Recommended structure:
+Ownership describes:
 
 ```text
-Profile Owner Scope
-├── Scope Type
-└── Scope ID
+who controls the Profile
+```
+
+It does NOT define:
+
+```text
+where the Profile applies
 ```
 
 ---
 
-# System Profile
+# Ownership vs Applicability
 
-System Profiles are built-in defaults.
+Ownership and applicability MUST remain separate.
 
-Examples:
-
-* Default Novel Translation
-* Default Comic OCR
-* Default Overlay Presentation
-* Strict Validation
-* Low-Cost Draft Routing
-
-System Profiles should be versioned like any other Profile.
-
-They must not be silently changed in place.
-
----
-
-# User Profile
-
-User Profile is private to one user unless shared.
-
-Examples:
-
-* Personal Chinese novel style
-* Preferred Vietnamese punctuation
-* Personal reading font
-* Personal local-only routing preference
-
-A User Profile may be used across Workspaces only where policy permits.
-
----
-
-# Workspace Profile
-
-Workspace Profile is shared across Projects in one Workspace.
-
-Examples:
-
-* Publisher Translation Style
-* Team Terminology Validation
-* Approved Comic Layout
-* Workspace Provider Routing
-
-Workspace administrators may control who can edit or approve it.
-
----
-
-# Project Profile
-
-Project Profile is specific to one Project.
-
-Examples:
-
-* Novel A Translation Style
-* Comic B Bubble Layout
-* Project-specific Validation rules
-* Project-specific character naming convention
-
-Project Profile may inherit or clone a Workspace Profile.
-
----
-
-# Profile Scope and Applicability
-
-Profile ownership and Profile applicability are different.
-
-A Workspace-owned Profile may apply to:
-
-* Entire Workspace
-* Selected Projects
-* Selected Books
-* Selected content types
-* Selected language pairs
-* Selected Session types
-
-Recommended applicability structure:
+Example:
 
 ```text
-Profile Applicability
-├── Workspace Scope
-├── Project Scope
-├── Content Types
-├── Source Languages
-├── Target Languages
-├── Session Types
-├── Capability Types
-└── Classification Restrictions
+Workspace-owned Translation Profile
+
+Applicable to:
+    Project A
+    Project B
+    zh-* -> vi
 ```
+
+Recommended applicability:
+
+```text
+ProfileApplicability
+├── projectIds?
+├── bookIds?
+├── chapterIds?
+├── contentTypes?
+├── sourceLanguageRanges?
+├── targetLanguageRanges?
+├── sessionTypes?
+├── capabilityTypes?
+├── classificationRestrictions?
+└── exclusions?
+```
+
+Book and Chapter MUST remain optional.
+
+Page or TextBlock applicability MAY be introduced only when required.
 
 ---
 
-# Profile Visibility
+# Visibility
 
-Recommended visibility values:
+Possible visibility:
 
-* Private
-* Workspace
-* Restricted
-* Shared Link
-* Public
-* System
+```text
+PRIVATE
+WORKSPACE
+RESTRICTED
+SHARED
+PUBLIC
+SYSTEM
+```
 
 Visibility controls discoverability.
 
-It does not by itself grant permission to edit or use a Profile.
+It MUST NOT by itself imply permission to:
+
+* edit,
+* approve,
+* use,
+* export,
+* clone.
+
+Authorization is handled separately.
 
 ---
 
 # Profile Lifecycle
 
-Recommended lifecycle states:
+Profile lifecycle describes availability of the reusable Profile identity.
+
+Recommended lifecycle:
 
 ```text
-Draft
-→ Active
-→ Deprecated
-→ Archived
+DRAFT
+ACTIVE
+DEPRECATED
+ARCHIVED
 ```
 
-Possible states:
+Optional:
 
-* Candidate
-* Draft
-* Active
-* Deprecated
-* Archived
-* Rejected
-* Deleted
-* Imported
-* Locked
+```text
+DELETING
+DELETED
+```
 
-Lifecycle is separate from Review State.
+Only when deletion semantics require explicit states.
 
 ---
 
-# Draft
+# Lifecycle Semantics
 
-Draft Profile may be edited by creating replacement revisions.
+`DRAFT`
 
-Draft revisions may be tested in non-production or explicitly allowed Sessions.
+Profile exists but is not normally selected for production use.
 
-Draft status should be visible to consumers.
+`ACTIVE`
 
----
+Profile is available for normal selection.
 
-# Active
+`DEPRECATED`
 
-Active indicates that the Profile is available for normal selection.
+Profile remains valid for historical use but SHOULD NOT be selected by default for new operations.
 
-Several revisions may remain usable, but one may be marked as:
+`ARCHIVED`
 
-* Active
-* Recommended
-* Default
-* Latest approved
-
-Durable operations still pin exact revisions.
+Profile remains historically resolvable but is hidden from ordinary selection.
 
 ---
 
-# Deprecated
+# What Is Not Profile Lifecycle
 
-Deprecated Profile should not be selected by default for new work.
+The following MUST NOT be Profile lifecycle states:
 
-Existing references remain valid.
+```text
+CANDIDATE
+REJECTED
+IMPORTED
+LOCKED
+APPROVED
+SUPERSEDED
+```
 
-Deprecation may include:
+They describe other concepts:
 
-* Replacement Profile
-* Migration recommendation
-* Reason
-* Effective date
+```text
+CANDIDATE
+    -> ProfileCandidate workflow
+
+REJECTED / APPROVED
+    -> Review decision
+
+IMPORTED
+    -> provenance
+
+LOCKED
+    -> authority/governance
+
+SUPERSEDED
+    -> Revision lineage
+```
 
 ---
 
-# Archived
+# Profile Revision Status
 
-Archived Profile is hidden from ordinary selection.
+A Profile Revision MAY have publication state distinct from Profile lifecycle.
 
-Historical operations retain valid references to its revisions.
+Possible revision status:
 
-Archived Profiles must not be hard deleted when referenced.
+```text
+DRAFT
+PUBLISHED
+SUPERSEDED
+WITHDRAWN
+```
 
----
-
-# Review State
-
-Recommended Review States:
-
-* Unreviewed
-* In Review
-* Changes Requested
-* Approved
-* Rejected
-* Superseded
-* Locked
-
-Review State applies to a Profile Revision.
-
-It is distinct from Profile lifecycle.
+This status SHOULD NOT replace Review state.
 
 Example:
 
 ```text
 Profile:
-Active
+    ACTIVE
 
 Revision 8:
-Approved
+    PUBLISHED + APPROVED
 
 Revision 9:
-In Review
+    DRAFT + IN_REVIEW
 ```
 
-New production operations may continue using Revision 8.
-
 ---
 
-# Approval
+# Review
 
-Approval may be required for:
+Review applies to exact Profile Revisions.
 
-* Workspace Profiles
-* Publisher Profiles
-* Profiles affecting public export
-* Profiles using external providers
-* Profiles changing terminology policy
-* Profiles changing privacy behavior
-
-Approval rules belong to Workspace governance.
-
----
-
-# Lock
-
-A Profile Revision may be locked.
-
-Lock means the revision cannot be altered—which is already implied by immutability—but may additionally restrict:
-
-* Deprecation
-* Replacement
-* Use outside approved scope
-* Cloning
-* Export
-* Administrative deletion
-
-Lock should not encourage mutation of an existing revision.
-
----
-
-# Profile Metadata
-
-Profile metadata may include:
-
-* Display name
-* Description
-* Tags
-* Intended use
-* Author
-* Supported language pairs
-* Supported content types
-* Quality tier
-* Cost tier
-* Latency tier
-* Example output references
-* Change summary
-
-Metadata that affects behavior must be included in the immutable Revision configuration.
-
-Non-semantic discovery metadata may remain mutable.
-
----
-
-# Profile Schema
-
-Each Profile Type must have an explicit schema.
-
-Example:
+Recommended Review states:
 
 ```text
-Translation Profile Schema v1
-OCR Profile Schema v2
-Presentation Profile Schema v1
+UNREVIEWED
+REVIEW_REQUESTED
+IN_REVIEW
+CHANGES_REQUESTED
+APPROVED
+REJECTED
 ```
 
-Profile Revision stores its schema version.
+Review state is separate from:
 
-Schema validation occurs before activation.
-
----
-
-# Schema Evolution
-
-Profile schemas will evolve.
-
-Possible changes:
-
-* Add optional field
-* Add required field with default
-* Rename field
-* Split one field into several
-* Replace an enum
-* Remove obsolete behavior
-
-Schema migration should create a new Profile Revision or a new normalized representation.
-
-Historical revisions remain interpretable through their original schema versions.
+* Profile lifecycle,
+* Revision publication status,
+* lock/authority.
 
 ---
 
-# Unknown Fields
+# Authority and Lock
 
-Import and forward compatibility may require preserving unknown fields.
-
-Policy options:
-
-* Reject unknown fields
-* Preserve but ignore
-* Preserve and warn
-* Allow extension namespace
-
-Recommended approach:
-
-* Canonical schemas reject unknown core fields.
-* Extension fields use explicit namespaces.
-* Import plans report unsupported data.
-
----
-
-# Extension Namespace
-
-Possible extension structure:
-
-```text
-extensions:
-  vendor.example:
-    custom_setting: value
-```
-
-Extension fields must not silently alter core behavior unless a registered capability understands them.
-
----
-
-# Translation Profile
-
-Translation Profile defines provider-neutral Translation intent.
-
-Recommended areas:
-
-```text
-Translation Profile Revision
-├── Language Strategy
-├── Translation Style
-├── Literalness
-├── Fluency
-├── Terminology Policy
-├── Name Policy
-├── Honorific Policy
-├── Pronoun Policy
-├── Cultural Localization
-├── Formatting Policy
-├── Content Preservation
-├── Ambiguity Policy
-├── Dialogue Policy
-├── Narration Policy
-├── Quality Target
-└── Output Constraints
-```
-
----
-
-# Translation Style
-
-Possible style values:
-
-* Literal
-* Faithful
-* Natural
-* Localized
-* Literary
-* Concise
-* Academic
-* Conversational
-* Subtitle
-* Comic
-* Custom
-
-Style should not be represented only as an unstructured text label.
-
-It should resolve into explicit configuration fields.
-
----
-
-# Literalness
-
-Literalness may be represented as:
-
-* Enum
-* Ordered level
-* Numeric range
-* Structured policy
-
-Example:
-
-```text
-Literalness:
-Balanced
-
-Meaning Preservation:
-High
-
-Naturalness:
-High
-
-Structural Preservation:
-Medium
-```
-
-A single numeric slider may be useful in UI but should not replace explicit semantic rules where precision matters.
-
----
-
-# Terminology Policy
-
-Translation Profile may define:
-
-* Use Glossary Snapshot
-* Required term enforcement
-* Preferred term enforcement
-* Preserve source term
-* Add transliteration
-* Permit synonyms
-* Case sensitivity
-* Inflection behavior
-* Unknown term handling
-* Conflict resolution
-
-The Profile does not own Glossary Entries.
-
-It defines how resolved Glossary context should be applied.
-
----
-
-# Name Policy
-
-Name policy may define:
-
-* Preserve original script
-* Use canonical translated name
-* Use romanization
-* Use localized name
-* Use context-specific alias
-* Reveal-safe naming
-* First-mention formatting
-* Title ordering
-* Family-name order
-* Unknown-name handling
-
-Character Context Snapshot provides the actual Character data.
-
----
-
-# Pronoun Policy
-
-Pronoun policy may define:
-
-* Preserve relationship hierarchy
-* Prefer natural Vietnamese address
-* Avoid unsupported gender assumptions
-* Use speaker-listener relationship
-* Use scene context
-* Preserve self-reference style
-* Flag uncertain pronouns
-* Allow neutral fallback
-
-The Profile must not hard-code individual Character truth.
-
----
-
-# Honorific Policy
-
-Possible rules:
-
-* Preserve all honorifics
-* Translate honorifics
-* Drop culturally redundant honorifics
-* Use Vietnamese equivalents
-* Use source transliteration
-* Resolve by relationship
-* Resolve by rank
-* Flag ambiguous honorifics
-
----
-
-# Cultural Localization
-
-Localization options may include:
-
-* Preserve source culture
-* Adapt idioms
-* Adapt measurements
-* Adapt punctuation
-* Adapt dates
-* Adapt titles
-* Preserve food and place names
-* Add explanatory notes
-* Avoid domesticating proper nouns
-
-Localization is distinct from language translation itself.
-
----
-
-# Formatting Policy
-
-Translation Profile may define semantic formatting requirements:
-
-* Preserve paragraph boundaries
-* Preserve line breaks
-* Preserve emphasis
-* Preserve speaker labels
-* Preserve ruby annotations
-* Preserve punctuation intent
-* Limit output lines
-* Avoid Markdown
-* Output structured segments
-
-Visual font and layout belong to Presentation Profile.
-
----
-
-# Dialogue Policy
-
-Dialogue policy may define:
-
-* Natural spoken Vietnamese
-* Maintain character voice
-* Preserve interruptions
-* Preserve hesitations
-* Preserve sentence fragments
-* Use Vietnamese quotation conventions
-* Avoid over-formalization
-* Use Character Speech Profile
-
----
-
-# Narration Policy
-
-Narration policy may define:
-
-* Literary register
-* Tense handling
-* Viewpoint preservation
-* Internal monologue formatting
-* Narrator-person distinction
-* Descriptive density
-* Sentence-length preference
-
----
-
-# Ambiguity Policy
-
-Possible behaviors:
-
-* Preserve ambiguity
-* Choose most likely interpretation
-* Add uncertainty annotation
-* Produce alternatives
-* Require review
-* Use surrounding context
-* Avoid adding unstated gender
-* Avoid resolving unrevealed identity
-
----
-
-# Translation Output Constraints
-
-Possible constraints:
-
-* Maximum characters
-* Maximum lines
-* Preserve segment count
-* Structured JSON output
-* No commentary
-* No source repetition
-* Include confidence
-* Include alternatives
-* Include terminology findings
-* Include alignment
-
-These remain provider-neutral requirements.
-
-Provider adapters translate them into provider-specific request formats.
-
----
-
-# OCR Profile
-
-OCR Profile defines provider-neutral text detection and recognition intent.
-
-Recommended areas:
-
-```text
-OCR Profile Revision
-├── Content Mode
-├── Expected Languages
-├── Script Policy
-├── Text Orientation
-├── Detection Policy
-├── Recognition Policy
-├── Confidence Thresholds
-├── Layout Assumptions
-├── Preprocessing Intent
-├── Reading Order Policy
-├── Region Policy
-└── Output Requirements
-```
-
----
-
-# OCR Content Mode
-
-Possible modes:
-
-* Comic
-* Novel Page
-* Web Page
-* Screenshot
-* Scanned Book
-* Subtitle
-* Document
-* Mixed
-* Handwritten
-* Custom
-
-Content Mode helps select appropriate detection behavior.
-
----
-
-# Expected Languages
-
-OCR Profile may define:
-
-* Primary language
-* Secondary languages
-* Allowed scripts
-* Mixed-language handling
-* Unknown-language behavior
-
-Language values use canonical Language Value Objects.
-
-Provider-specific OCR language codes remain in adapters.
-
----
-
-# Text Orientation
-
-Possible values:
-
-* Horizontal
-* Vertical
-* Mixed
-* Auto Detect
-* Rotated
-* Curved
-
-Chinese and Japanese comic support may require mixed horizontal and vertical text.
-
----
-
-# Detection Policy
-
-OCR detection policy may define:
-
-* Detect all text
-* Detect dialogue only
-* Detect narration
-* Detect sound effects
-* Ignore interface text
-* Ignore watermarks
-* Merge nearby regions
-* Split distinct lines
-* Detect speech bubbles
-* Detect captions
-* Detect page numbers
-
-OCR Profile expresses desired categories.
-
-Actual computer vision implementation remains outside the Profile domain.
-
----
-
-# OCR Confidence Thresholds
-
-Possible thresholds:
-
-* Minimum region detection confidence
-* Minimum recognition confidence
-* Auto-accept threshold
-* Review-required threshold
-* Reject threshold
-* Language-confidence threshold
-* Reading-order confidence threshold
-
-Thresholds should be validated for coherent ordering.
-
----
-
-# OCR Preprocessing Intent
-
-Possible settings:
-
-* Denoise
-* Contrast enhancement
-* Upscale
-* Deskew
-* Remove background
-* Bubble isolation
-* Thresholding
-* Sharpening
-* Preserve color
-* Detect inverted text
-
-These are semantic intents.
-
-Provider-specific image parameters belong to adapters or processing pipelines.
-
----
-
-# OCR Reading Order
-
-Possible policies:
-
-* Left to right
-* Right to left
-* Top to bottom
-* Vertical columns
-* Manga order
-* Webtoon order
-* Automatic
-* User-defined
-
-Reading-order output should remain revisable independently from OCR text where architecture requires it.
-
----
-
-# OCR Region Policy
-
-OCR Profile may define:
-
-* Full Page
-* User Selection
-* Auto-detected panels
-* Speech bubbles only
-* Existing regions
-* Screen viewport
-* Incremental changed regions
-
-It does not own Page Regions or TextBlocks.
-
----
-
-# OCR Output Requirements
-
-Possible requirements:
-
-* Text
-* Region geometry
-* Line geometry
-* Word confidence
-* Language detection
-* Reading order
-* Character alignment
-* Alternative recognition candidates
-* Orientation
-* Script classification
-
----
-
-# Presentation Profile
-
-Presentation Profile defines how original and translated content are displayed.
-
-Recommended areas:
-
-```text
-Presentation Profile Revision
-├── Content Mode
-├── Display Mode
-├── Typography
-├── Layout
-├── Overlay
-├── Original Visibility
-├── Translation Visibility
-├── Reading Direction
-├── Overflow Policy
-├── Accessibility
-├── Theme
-└── Device Adaptation
-```
-
-Presentation Profile does not alter Translation semantics.
-
----
-
-# Presentation Content Mode
-
-Possible modes:
-
-* Novel
-* Comic
-* Webtoon
-* Parallel Text
-* Subtitle
-* Review
-* Export
-* Accessibility
-* Custom
-
----
-
-# Display Mode
-
-Possible values:
-
-* Original Only
-* Translation Only
-* Side by Side
-* Interleaved
-* Overlay
-* Replacement
-* Hover
-* Focus
-* Comparison
-* Review
-
----
-
-# Typography
-
-Typography configuration may include:
-
-* Font family preference
-* Fallback families
-* Font size
-* Minimum font size
-* Maximum font size
-* Weight
-* Italic policy
-* Line height
-* Letter spacing
-* Word spacing
-* Paragraph spacing
-* Text alignment
-* Vertical text support
-
-Font files themselves are not Profile data.
-
-Profile stores family references and requirements.
-
----
-
-# Font Resolution
-
-Recommended flow:
-
-```text
-Presentation Profile Font Preference
-        ↓
-Workspace Font Policy
-        ↓
-Available Device Fonts
-        ↓
-Bundled or Licensed Font Set
-        ↓
-Resolved Font
-```
-
-The resolved font may differ by device.
-
-The Profile preserves semantic preference and fallback order.
-
----
-
-# Layout
-
-Presentation layout may define:
-
-* Maximum width
-* Margins
-* Column count
-* Text alignment
-* Bubble padding
-* Caption placement
-* Translation block spacing
-* Responsive behavior
-* Panel association
-* Page flow
-* Scroll mode
-
----
-
-# Overlay Configuration
-
-Comic overlay settings may include:
-
-* Replace original text
-* Cover original text
-* Preserve bubble background
-* Overlay opacity
-* Text padding
-* Region clipping
-* Rotation handling
-* Bubble-tail protection
-* Low-confidence indicator
-* Debug region visibility
-
-Image inpainting and rendering remain presentation capabilities.
-
----
-
-# Overflow Policy
-
-Possible overflow policies:
-
-* Reduce font size
-* Expand region
-* Wrap lines
-* Condense spacing
-* Truncate
-* Scroll
-* Show popup
-* Use external caption
-* Require review
-* Regenerate concise Translation
-
-Presentation may request a more concise Translation, but must not mutate an approved Translation silently.
-
----
-
-# Accessibility
-
-Presentation Profile may define:
-
-* High contrast
-* Dyslexia-friendly font preference
-* Minimum font size
-* Screen reader labels
-* Keyboard navigation
-* Reduced motion
-* Color-independent warnings
-* Text-to-speech compatibility
-* Larger touch targets
-
----
-
-# Validation Profile
-
-Validation Profile defines which checks apply to processed content and how findings are classified.
-
-Recommended areas:
-
-```text
-Validation Profile Revision
-├── Validation Rules
-├── Severity Mapping
-├── Confidence Thresholds
-├── Blocking Policy
-├── Review Policy
-├── Auto-Fix Policy
-├── Rule Scope
-└── Output Requirements
-```
-
----
-
-# Validation Rule Categories
-
-Possible categories:
-
-* Language mismatch
-* Missing Translation
-* Empty output
-* Hallucinated content
-* Omitted content
-* Terminology inconsistency
-* Character name inconsistency
-* Pronoun inconsistency
-* Speaker mismatch
-* Relationship mismatch
-* Spoiler leak
-* Formatting mismatch
-* Length overflow
-* OCR confidence
-* Reading-order inconsistency
-* Duplicate text
-* Unsupported script
-* Unsafe provider output
-* Invalid structured response
-
----
-
-# Severity
-
-Recommended severities:
-
-* Information
-* Warning
-* Error
-* Critical
-* Blocking
-
-Severity may be overridden by scope.
-
-Example:
-
-```text
-Terminology mismatch:
-Warning in draft mode
-Blocking in publication mode
-```
-
----
-
-# Blocking Policy
-
-Validation Profile may define whether findings:
-
-* Allow continuation
-* Require warning acknowledgement
-* Require review
-* Block approval
-* Block export
-* Block publication
-* Trigger reprocessing
-* Trigger fallback routing
-
----
-
-# Auto-Fix Policy
-
-Auto-fix must be conservative.
-
-Possible values:
-
-* Disabled
-* Safe deterministic fixes only
-* Suggest fixes
-* Apply formatting fixes
-* Apply glossary substitutions
-* Require user confirmation
-
-An auto-fix that changes Translation meaning must create a new Translation Revision.
-
----
-
-# Context Profile
-
-Context Profile defines which surrounding information should be compiled for an operation.
-
-Recommended areas:
-
-```text
-Context Profile Revision
-├── Context Sources
-├── Window Sizes
-├── Character Context Policy
-├── Glossary Context Policy
-├── Story Context Policy
-├── Spoiler Policy
-├── Memory Policy
-├── Prior Translation Policy
-├── Token Budget
-└── Truncation Strategy
-```
-
----
-
-# Context Sources
-
-Possible sources:
-
-* Current TextBlock
-* Neighboring TextBlocks
-* Current Page
-* Previous Pages
-* Current Chapter
-* Previous Chapter summary
-* Character Context Snapshot
-* Glossary Snapshot
-* Project style guide
-* Previous Translation Revisions
-* User notes
-* Session Memory
-* Scene summary
-
----
-
-# Context Window
-
-Context Profile may define:
-
-* Previous TextBlock count
-* Next TextBlock count
-* Previous Page count
-* Chapter summary inclusion
-* Dialogue-turn count
-* Maximum source characters
-* Maximum estimated tokens
-
-Exact provider token calculation occurs later.
-
----
-
-# Spoiler Policy
-
-Possible spoiler settings:
-
-* Current position only
-* Current Chapter
-* Previously read content only
-* Project-approved knowledge
-* Full Project context
-* Explicitly pinned future context
-
-Default reading behavior should avoid future spoilers.
-
-Character aliases and identities must respect reveal boundaries.
-
----
-
-# Context Priority
-
-When context exceeds budget, recommended priority may be:
-
-```text
-Current Source
-    ↓
-Required Glossary
-    ↓
-Confirmed Character Context
-    ↓
-Immediate Dialogue
-    ↓
-Current Page
-    ↓
-Recent Translation
-    ↓
-Chapter Summary
-    ↓
-General Project Context
-```
-
-Context Profile should make this policy explicit.
-
----
-
-# Context Truncation
-
-Possible strategies:
-
-* Drop lowest-priority entries
-* Summarize older context
-* Keep complete dialogue turns
-* Preserve required terminology
-* Preserve character relationships
-* Preserve source boundaries
-* Split operation
-* Reject when required context cannot fit
-
----
-
-# Routing Profile
-
-Routing Profile defines provider-neutral execution preferences.
-
-Recommended areas:
-
-```text
-Routing Profile Revision
-├── Capability Requirements
-├── Quality Tier
-├── Cost Tier
-├── Latency Tier
-├── Privacy Tier
-├── Locality Preference
-├── Provider Allowlist
-├── Provider Denylist
-├── Fallback Policy
-├── Retry Class
-├── Model Capability Requirements
-└── Budget Constraints
-```
-
-Routing Profile does not identify raw credentials.
-
----
-
-# Quality Tier
-
-Possible values:
-
-* Draft
-* Standard
-* High
-* Publication
-* Experimental
-* Custom
-
-Quality Tier is an intent used by routing.
-
-It must not map permanently to one provider model.
-
----
-
-# Cost Tier
-
-Possible values:
-
-* Free
-* Low
-* Balanced
-* Premium
-* Unrestricted
-* Budget Bound
-
-Workspace policy and quota remain authoritative.
-
----
-
-# Latency Tier
-
-Possible values:
-
-* Interactive
-* Near Real Time
-* Standard
-* Batch
-* Background
-
-This may influence provider and queue selection.
-
-It does not guarantee exact execution time.
-
----
-
-# Privacy Tier
-
-Possible values:
-
-* Local Only
-* Private Cloud Allowed
-* Approved Providers Only
-* External Allowed
-* Public Content
-
-Workspace policy may further restrict the result.
-
----
-
-# Fallback Policy
-
-Possible fallback actions:
-
-* Retry same provider
-* Try another model
-* Try another provider
-* Fall back to local model
-* Reduce context
-* Lower quality
-* Queue for later
-* Require user approval
-* Stop
-
-Fallback must not silently violate policy or materially change Translation intent.
-
----
-
-# Export Profile
-
-Export Profile defines how selected domain content becomes an export package.
-
-Recommended areas:
-
-```text
-Export Profile Revision
-├── Export Format
-├── Included Content
-├── Revision Selection
-├── Layout
-├── Metadata
-├── Spoiler Policy
-├── Watermark Policy
-├── File Naming
-├── Packaging
-└── Compatibility Target
-```
-
----
-
-# Export Format
-
-Possible formats:
-
-* JSON
-* YAML
-* CSV
-* Markdown
-* HTML
-* EPUB
-* PDF
-* Plain Text
-* Image Package
-* Subtitle Format
-* Translation Memory Format
-* Custom
-
-Format-specific rendering occurs outside the Profile aggregate.
-
----
-
-# Revision Selection
-
-Export Profile may define:
-
-* Latest approved Translation
-* Latest user-confirmed Translation
-* Specific Translation Revision
-* Include revision history
-* Include source text
-* Include OCR alternatives
-* Include validation findings
-* Include glossary references
-* Include character references
-
----
-
-# Profile Inheritance
-
-Profiles may reuse other Profiles through controlled inheritance.
-
-Possible model:
-
-```text
-Base Profile Revision
-        +
-Override Document
-        ↓
-Derived Profile Revision
-```
-
-The derived Profile Revision must preserve:
-
-* Base Profile Revision ID
-* Explicit overrides
-* Fully resolved content hash
-* Compatibility validation
-
----
-
-# Inheritance Risks
-
-Deep inheritance may cause:
-
-* Hard-to-understand behavior
-* Unexpected changes
-* Circular dependencies
-* Difficult audit
-* Complex migration
-
-Recommended restriction:
-
-* Maximum one direct base revision in MVP
-* No circular references
-* Resolve to a flattened immutable configuration
-* Pin exact base revision
-* Do not track mutable “latest” during execution
-
----
-
-# Clone Versus Inherit
-
-## Clone
-
-Copies one Profile Revision into a new independent Profile.
-
-Future changes are independent.
-
-## Inherit
-
-Creates a new Profile Revision that explicitly references a base revision and overrides selected fields.
-
-## Follow Latest
-
-Tracks future approved revisions of another Profile.
-
-This is convenient but unsafe for reproducibility unless resolved before each operation.
-
-MVP should prioritize Clone and exact-revision inheritance.
-
----
-
-# Override Semantics
-
-A Profile may be overridden at narrower scopes.
-
-Example:
-
-```text
-Workspace Translation Profile
-        ↓
-Project Translation Profile
-        ↓
-Session Override
-        ↓
-Operation Override
-```
-
-The system must distinguish:
-
-* Profile Revision override
-* Individual field override
-* Mandatory policy
-* User preference
-* Runtime adaptation
-
----
-
-# Configuration Resolution
-
-Recommended resolution sequence:
-
-```text
-Application Defaults
-        ↓
-System Profile
-        ↓
-Workspace Profile
-        ↓
-Project Profile
-        ↓
-Book or Chapter Profile
-        ↓
-Session Profile Selection
-        ↓
-Operation Override
-        ↓
-Workspace Policy Validation
-        ↓
-Capability Validation
-        ↓
-Resolved Configuration Snapshot
-```
-
-More specific values override defaults where allowed.
-
-Mandatory policy is enforced after and during resolution.
-
----
-
-# Resolved Profile Snapshot
-
-An operation should receive an immutable Resolved Profile Snapshot.
+Lock is governance state.
 
 Recommended structure:
 
 ```text
-Resolved Profile Snapshot
-├── Snapshot ID
-├── Profile Type
-├── Source Profile Revision IDs
-├── Applied Overrides
-├── Applied Defaults
-├── Policy Revision ID
-├── Resolved Configuration
-├── Schema Version
-├── Content Hash
-├── Created At
-└── Resolution Trace
+ProfileAuthority
+├── profileId
+├── profileRevisionId?
+├── restrictedActions[]
+├── scope
+├── authorityLevel
+├── actor
+├── createdAt
+└── reason?
 ```
 
-This makes behavior reproducible and explainable.
+Lock MAY restrict:
 
----
+* replacement,
+* deprecation,
+* cloning,
+* export,
+* use outside approved scope,
+* administrative deletion.
 
-# Resolution Trace
-
-Resolution Trace explains where each effective value came from.
-
-Example:
-
-```text
-target_style:
-  value: natural
-  source: Project Translation Profile Revision 12
-
-honorific_policy:
-  value: preserve_relationship
-  source: Workspace Translation Profile Revision 4
-
-maximum_output_characters:
-  value: 120
-  source: Operation Override
-
-cloud_processing:
-  value: false
-  source: Workspace Policy Revision 9
-```
-
----
-
-# Effective Configuration
-
-Effective Configuration is not itself a mutable Profile.
-
-It is a snapshot derived for:
-
-* Session
-* Operation
-* Export
-* Validation
-* Presentation
-
-It may combine several Profile Types.
-
----
-
-# Compatibility
-
-Profiles must declare and validate compatibility.
-
-Possible dimensions:
-
-* Source language
-* Target language
-* Content type
-* Capability type
-* Project type
-* Session type
-* Schema version
-* Required context
-* Required provider capability
-* Required Presentation capability
-
----
-
-# Language Compatibility
-
-A Translation Profile may support:
-
-* Any source language to Vietnamese
-* Chinese to Vietnamese only
-* Japanese to Vietnamese only
-* One language family
-* Any target language
-
-Compatibility should use canonical Language ranges.
-
-Example:
-
-```text
-Source:
-zh-*
-
-Target:
-vi
-```
-
----
-
-# Content Compatibility
-
-Possible content types:
-
-* Novel
-* Comic
-* Webtoon
-* Document
-* Subtitle
-* Dialogue
-* Narration
-* Mixed
-
-A comic Translation Profile may impose concise output constraints unsuitable for a novel.
-
----
-
-# Capability Compatibility
-
-Example:
-
-```text
-OCR Profile:
-Requires region geometry support
-```
-
-A provider returning plain text only is incompatible.
-
-Routing should avoid incompatible provider configurations.
-
----
-
-# Profile Validation
-
-Profile validation includes:
-
-* Schema validity
-* Enum validity
-* Range validity
-* Required-field presence
-* Language compatibility
-* Internal threshold consistency
-* Reference validity
-* Base revision validity
-* No inheritance cycles
-* Policy compatibility
-* Capability compatibility
-* Output-constraint consistency
-* Ownership scope validity
-* Extension namespace validity
-
----
-
-# Cross-Field Validation
-
-Examples:
-
-* Minimum font size must not exceed maximum font size.
-* Auto-accept confidence must exceed review threshold.
-* Review threshold must exceed reject threshold.
-* Local-only privacy cannot allow cloud-only fallback.
-* “Preserve line count” conflicts with unrestricted paragraph restructuring.
-* “No source repetition” conflicts with bilingual output.
-* Target-language requirement must match supported language range.
-* Strict glossary enforcement requires a Glossary context source.
-* Character-aware pronouns require Character Context.
-* Bubble replacement requires geometry-capable presentation.
-
----
-
-# Profile Test Case
-
-A Profile Revision may include or reference test cases.
-
-Recommended structure:
-
-```text
-Profile Test Case
-├── Test Case ID
-├── Profile Revision ID
-├── Input Reference
-├── Context Reference
-├── Expected Properties
-├── Prohibited Properties
-├── Expected Findings
-└── Status
-```
-
-Expected output should often use properties rather than one exact string.
-
----
-
-# Translation Profile Test
-
-Example expected properties:
-
-* Uses “sư tôn” for the specified term
-* Preserves Character A’s formal register
-* Does not reveal Character B’s hidden identity
-* Produces no more than three lines
-* Does not add explanatory commentary
-
----
-
-# Profile Evaluation
-
-Profile Evaluation measures Profile behavior against:
-
-* Test datasets
-* User ratings
-* Validation findings
-* Cost
-* Latency
-* Terminology consistency
-* Layout success
-* Review acceptance
-
-Evaluation results are derived data.
-
-They must not silently mutate the Profile.
+Because Revision is already immutable, lock MUST NOT imply in-place mutation protection as its primary meaning.
 
 ---
 
 # Profile Candidate
 
-AI or import processes may propose a Profile Candidate.
+Profile Candidate represents a suggested configuration.
 
-Examples:
+Possible sources:
 
-* Infer Translation style from approved chapters
-* Infer terminology policy
-* Infer OCR settings from document samples
-* Infer Presentation settings from user adjustments
+* AI inference,
+* user behavior,
+* imported presets,
+* experiment results,
+* correction patterns.
 
-Candidate is not canonical Profile truth.
-
----
-
-# Candidate Promotion
+Candidate is NOT canonical Profile state.
 
 Recommended flow:
 
 ```text
-Profile Candidate
-→ Review
-→ Edit
-→ Validate
-→ Create Profile Revision
-→ Approve
-→ Activate
+Candidate
+   |
+   v
+Review
+   |
+   v
+Edit / Validate
+   |
+   v
+Create Profile Revision
+   |
+   v
+Approve
+   |
+   v
+Publish / Activate
 ```
 
-AI must not silently replace approved Profile configuration.
+AI MUST NOT silently change an approved Profile.
 
 ---
 
-# Import
+# Schema
 
-Profile import may support:
+Every Profile Type has an explicit schema.
 
-* JSON
-* YAML
-* Workspace package
-* Project package
-* External translation tool configuration
-* User preset
-* Template package
-
-Import must create an Import Plan before applying changes.
-
----
-
-# Import Plan
-
-Recommended structure:
+Example:
 
 ```text
-Profile Import Plan
-├── Source Format
-├── Detected Profile Type
-├── Schema Version
-├── Proposed Owner Scope
-├── Proposed Profile
-├── Proposed Revisions
-├── Unsupported Fields
-├── Conflicts
-├── Required Migrations
-└── Validation Findings
+translation.profile.schema.v1
+ocr.profile.schema.v2
+presentation.profile.schema.v1
 ```
 
-Import must not overwrite approved revisions silently.
+Every Revision stores its schema version.
+
+Schema validation MUST occur before publication or normal use.
 
 ---
 
-# Export
+# Schema Evolution
 
-Profile export should preserve:
+Schema changes MAY include:
 
-* Profile ID where portability permits
-* Revision ID
-* Profile Type
-* Schema version
-* Configuration
-* Revision lineage
-* Ownership metadata where appropriate
-* Compatibility declarations
-* Content hash
-* Review state where allowed
+* new optional fields,
+* renamed fields,
+* new enums,
+* split fields,
+* removed behavior,
+* default changes.
 
-Sensitive provider credentials must never be included.
+Historical Revisions MUST remain interpretable.
 
----
+Migration MUST NOT silently rewrite referenced historical Revisions.
 
-# Round-Trip Preservation
+Migration SHOULD create:
 
-Importing an exported Profile should preserve semantics.
-
-Possible identity modes:
-
-* Preserve original IDs
-* Generate new IDs and retain external references
-* Clone into new ownership scope
-* Merge by explicit user decision
+* a new Revision,
+* or a normalized execution representation.
 
 ---
 
-# Profile Package
+# Unknown Fields
 
-A Profile package may include:
+Core schemas SHOULD reject unknown unregistered fields.
 
-* Profile metadata
-* One or several revisions
-* Test cases
-* Example outputs
-* Compatibility metadata
-* Base Profile references
-* Documentation
-* License metadata
+Extensions MAY use explicit namespaces.
 
-It must not include raw provider secrets.
+Example:
 
----
+```text
+extensions:
+    vendor.example:
+        option: value
+```
 
-# Marketplace and Sharing
-
-Future CRAI versions may support sharing Profiles.
-
-Potential features:
-
-* Public Profile catalog
-* Workspace template library
-* Author attribution
-* Version updates
-* Ratings
-* Compatibility reports
-* License
-* Trust level
-* Security review
-
-Public Profile content should be treated as untrusted input until validated.
+Unknown extensions MUST NOT silently alter core behavior unless a registered capability explicitly understands them.
 
 ---
 
-# External Profile Reference
+# Translation Profile
 
-A Profile may retain references to:
+Translation Profile defines semantic Translation intent.
 
-* External preset ID
-* Marketplace package ID
-* Source repository
-* Imported tool configuration
-* Publisher style guide identifier
+Possible areas:
 
-External IDs are not canonical CRAI Profile identity.
+```text
+TranslationProfile
+├── languageStrategy
+├── style
+├── meaningPreservation
+├── naturalness
+├── terminologyPolicy
+├── namePolicy
+├── honorificPolicy
+├── pronounPolicy
+├── localizationPolicy
+├── ambiguityPolicy
+├── dialoguePolicy
+├── narrationPolicy
+├── semanticFormattingPolicy
+├── qualityTarget
+└── outputConstraints
+```
+
+Translation Profile MUST NOT own:
+
+* Glossary Entries,
+* Character facts,
+* provider prompts,
+* Translation results.
+
+---
+
+# Translation Style
+
+Possible styles MAY include:
+
+```text
+LITERAL
+FAITHFUL
+NATURAL
+LOCALIZED
+LITERARY
+CONCISE
+CONVERSATIONAL
+COMIC
+SUBTITLE
+CUSTOM
+```
+
+A style label alone SHOULD NOT be the complete behavioral definition.
+
+Structured settings SHOULD define its actual semantics.
+
+---
+
+# Terminology Policy
+
+Translation Profile MAY specify how resolved Glossary context should be used.
+
+Examples:
+
+* required terminology enforcement,
+* preferred terminology,
+* synonym policy,
+* unknown-term handling,
+* preserve rule handling,
+* conflict behavior.
+
+Profile does NOT own terminology data.
+
+GlossarySnapshot supplies actual terminology.
+
+---
+
+# Character Policy
+
+Translation Profile MAY specify how Character Context should influence Translation.
+
+Examples:
+
+* preserve relationship hierarchy,
+* use Character Speech Profile,
+* avoid unsupported gender assumptions,
+* use relationship-aware address,
+* preserve reveal-safe names,
+* flag uncertain speaker-dependent language.
+
+Profile MUST NOT encode individual mutable Character truth.
+
+CharacterContextSnapshot supplies actual Character information.
+
+---
+
+# Formatting Boundary
+
+Translation Profile MAY contain semantic output requirements such as:
+
+```text
+preserve paragraph boundaries
+preserve segment count
+avoid commentary
+maximum semantic output length
+structured alignment
+```
+
+Visual settings such as:
+
+```text
+font family
+font size
+line height
+overlay geometry
+```
+
+belong to Presentation Profile.
+
+---
+
+# OCR Profile
+
+OCR Profile defines provider-neutral detection and recognition intent.
+
+Possible areas:
+
+```text
+OCRProfile
+├── contentMode
+├── expectedLanguages
+├── expectedScripts
+├── textOrientationPolicy
+├── detectionPolicy
+├── recognitionPolicy
+├── preprocessingIntent
+├── confidencePolicy
+├── readingOrderPolicy
+├── regionPolicy
+└── outputRequirements
+```
+
+OCR Profile describes desired processing behavior.
+
+It does NOT own OCR results or pipeline execution state.
+
+---
+
+# OCR Preprocessing Intent
+
+Profile MAY express semantic intent such as:
+
+```text
+denoise
+deskew
+upscale
+enhance contrast
+preserve color
+detect inverted text
+```
+
+Concrete algorithm parameters remain in processing configuration when they are implementation-specific.
+
+---
+
+# Presentation Profile
+
+Presentation Profile defines display behavior.
+
+Possible areas:
+
+```text
+PresentationProfile
+├── contentMode
+├── displayMode
+├── typography
+├── layout
+├── overlayPolicy
+├── sourceVisibility
+├── translationVisibility
+├── readingDirection
+├── overflowPolicy
+├── accessibility
+├── theme
+└── deviceAdaptation
+```
+
+Presentation Profile MUST NOT change Translation semantic truth.
+
+---
+
+# Typography
+
+Typography intent MAY include:
+
+* font family preference,
+* fallback families,
+* font size,
+* min/max font size,
+* weight,
+* line height,
+* spacing,
+* alignment,
+* vertical-text support.
+
+Font binaries are NOT Profile data.
+
+---
+
+# Overflow Policy
+
+Possible Presentation actions:
+
+```text
+WRAP
+REDUCE_FONT_SIZE
+EXPAND_REGION
+CONDENSE_SPACING
+SCROLL
+POPUP
+EXTERNAL_CAPTION
+REQUIRE_REVIEW
+REQUEST_CONCISE_RETRANSLATION
+```
+
+Presentation MUST NOT silently rewrite an approved Translation.
+
+If semantic Translation text changes, a new Translation Revision is required.
+
+---
+
+# Validation Profile
+
+Validation Profile defines validation behavior.
+
+Possible fields:
+
+```text
+ValidationProfile
+├── enabledRules
+├── severityMapping
+├── confidenceThresholds
+├── blockingPolicy
+├── reviewPolicy
+├── autoFixPolicy
+└── ruleScope
+```
+
+Validation Profile does NOT own validation results.
+
+---
+
+# Validation Auto-Fix
+
+Auto-fix MUST be conservative.
+
+Possible modes:
+
+```text
+DISABLED
+SUGGEST_ONLY
+SAFE_DETERMINISTIC
+FORMATTING_ONLY
+```
+
+An automatic fix that changes Translation semantics MUST produce a new Translation Revision.
+
+---
+
+# Context Profile
+
+Context Profile defines **context selection policy**.
+
+Possible areas:
+
+```text
+ContextProfile
+├── contextSources
+├── sourceWindowPolicy
+├── CharacterContextPolicy
+├── GlossaryContextPolicy
+├── storyContextPolicy
+├── spoilerPolicy
+├── memoryPolicy
+├── priorTranslationPolicy
+├── contextBudget
+└── truncationStrategy
+```
+
+It MUST NOT contain the actual mutable context.
+
+Execution produces immutable Context Snapshots.
+
+---
+
+# Optional Context Sources
+
+Possible sources include:
+
+* current TextBlock,
+* neighboring TextBlocks,
+* current Chapter,
+* optional current Page,
+* optional neighboring Pages,
+* Glossary Snapshot,
+* Character Context Snapshot,
+* previous Translation,
+* Session context,
+* Chapter summary.
+
+Page-dependent context MUST be optional because text-native content may not have Pages.
+
+---
+
+# Spoiler Policy
+
+Possible policies:
+
+```text
+CURRENT_POSITION_ONLY
+CURRENT_CHAPTER
+PREVIOUSLY_READ_ONLY
+PROJECT_APPROVED_KNOWLEDGE
+FULL_PROJECT_CONTEXT
+EXPLICIT_FUTURE_CONTEXT
+```
+
+Normal reading Translation SHOULD avoid future spoiler context by default.
+
+---
+
+# Routing Profile
+
+Routing Profile defines **provider-neutral routing intent**.
+
+Possible fields:
+
+```text
+RoutingProfile
+├── capabilityRequirements
+├── qualityTier
+├── costPreference
+├── latencyPreference
+├── localityPreference
+├── privacyIntent
+├── providerPreference?
+├── fallbackIntent
+└── budgetIntent?
+```
+
+Routing Profile MUST NOT contain:
+
+* credentials,
+* concrete runtime attempt state,
+* active rate-limit counters,
+* queue state.
+
+---
+
+# Routing Intent vs Mandatory Policy
+
+Routing Profile MAY say:
+
+```text
+external providers preferred
+```
+
+Workspace Policy MAY say:
+
+```text
+external providers forbidden
+```
+
+Mandatory Policy wins.
+
+Therefore Routing Profile SHOULD express preferences, not authorization.
+
+---
+
+# Provider Allow / Deny
+
+If provider allow/deny preferences are supported inside Routing Profile, they MUST be treated as user/configuration preference.
+
+Mandatory provider restrictions belong to Policy.
+
+Resolution computes the intersection.
+
+Example:
+
+```text
+Profile allowed:
+    A, B, C
+
+Policy allowed:
+    B, C, D
+
+Effective:
+    B, C
+```
+
+---
+
+# Retry and Fallback Boundary
+
+Profile MAY define high-level fallback intent:
+
+```text
+allow alternate provider
+allow lower quality
+allow local fallback
+stop on semantic degradation
+```
+
+Concrete retry attempt counts, backoff timers and provider sequencing belong to runtime execution.
+
+---
+
+# Export Profile
+
+Export Profile defines reusable export intent.
+
+Possible fields:
+
+```text
+ExportProfile
+├── format
+├── includedContent
+├── revisionSelectionPolicy
+├── layoutPreference
+├── metadataPolicy
+├── spoilerPolicy
+├── watermarkPolicy
+├── namingPolicy
+├── packagingPolicy
+└── compatibilityTarget
+```
+
+Actual Export execution remains outside Profile.
+
+---
+
+# Inheritance
+
+Profile inheritance MAY be supported.
+
+Recommended MVP rule:
+
+```text
+one exact base Profile Revision
++
+explicit overrides
+=
+new derived Profile Revision
+```
+
+Requirements:
+
+* exact base Revision pinned,
+* no circular dependency,
+* flattened resolved configuration available,
+* content hash reproducible.
+
+---
+
+# Clone vs Inherit
+
+Clone:
+
+```text
+Revision A
+    |
+    v
+new independent Profile
+```
+
+Future changes are independent.
+
+Inherit:
+
+```text
+Exact Revision A
++
+Overrides
+    |
+    v
+Derived Revision B
+```
+
+Follow-latest:
+
+```text
+latest approved Revision of A
+```
+
+is a selection policy, NOT stable execution identity.
+
+It MUST resolve to an exact Revision before operation start.
+
+---
+
+# Configuration Resolution
+
+Configuration resolution combines intent and constraints.
+
+Conceptual inputs:
+
+```text
+Application Defaults
+
+System Profile Selection
+
+User Preference / Default Selection
+
+Workspace Profile Selection
+
+Project Profile Selection
+
+Optional Book / Chapter Selection
+
+Session Selection / Override
+
+Operation Override
+
+Mandatory Policy
+
+Capability Constraints
+```
+
+The order MUST NOT be interpreted as "every layer always exists".
+
+Missing optional scopes are skipped.
+
+---
+
+# Selection vs Field Override
+
+CRAI MUST distinguish:
+
+```text
+select another Profile Revision
+```
+
+from:
+
+```text
+override selected fields
+```
+
+and from:
+
+```text
+mandatory Policy constraint
+```
+
+These have different provenance and validation semantics.
 
 ---
 
 # Profile Selection
 
-Profile selection may occur through:
+A scope MAY select Profile behavior through:
 
-* Explicit user choice
-* Workspace default
-* Project default
-* Session default
-* Content-type matching
-* Language matching
-* Template
-* Routing rule
-* Automatic recommendation
+* exact Revision,
+* active approved Revision,
+* latest compatible approved Revision,
+* default Profile,
+* explicit user selection.
 
-Automatic recommendation must resolve to an exact Profile Revision before use.
+Any dynamic policy MUST resolve to an exact Revision before execution.
 
 ---
 
-# Default Profile
+# Default Selection
 
-A scope may define one default Profile per type.
+A scope MAY define default Profile selection per Profile Type.
 
 Example:
 
 ```text
-Project Default Profiles
-├── Translation Profile Revision
-├── OCR Profile Revision
-├── Presentation Profile Revision
-├── Validation Profile Revision
-└── Routing Profile Revision
+Project Defaults
+├── Translation
+├── OCR
+├── Presentation
+├── Validation
+├── Context
+└── Routing
 ```
 
-Defaults may be changed without rewriting historical operations.
+Changing defaults affects future resolution only.
+
+Historical operations remain unchanged.
 
 ---
 
 # Active Revision
 
-A Profile may designate one Active Revision.
+A Profile MAY point to a preferred active Revision.
 
-Active Revision means:
-
-* Preferred for new selections
-* Not automatically substituted into existing Sessions
-* Not automatically applied to already-started operations
-* Not a replacement for exact revision references
-
----
-
-# Follow Latest Approved
-
-Some Project configurations may choose:
+`activeRevisionId` means:
 
 ```text
-Follow Latest Approved Revision
+preferred default candidate for new selection
 ```
 
-At operation start:
+It does NOT mean:
 
-1. Resolve latest approved compatible revision.
-2. Record exact Revision ID.
-3. Create Resolved Profile Snapshot.
-4. Execute using that snapshot.
-
-Later approvals do not alter the operation.
+```text
+automatically replace exact revisions already in use
+```
 
 ---
 
 # Pinning
 
-A Project or Session may pin a Profile Revision.
+A Project, Session or operation MAY pin exact Profile Revisions.
 
-Pinning protects against automatic changes.
+Pinning supports:
 
-Common use cases:
+* publication consistency,
+* long-running Translation,
+* reproducible review,
+* experiments,
+* offline work.
 
-* Publication consistency
-* Long-running Book Translation
-* Reproducible review
-* Controlled experiment
-* Offline operation
+Pinned references remain stable until explicitly changed.
 
 ---
 
-# Migration
+# Resolved Profile Snapshot
 
-When a newer Profile Revision is published, consumers may:
+`ResolvedProfileSnapshot` represents the immutable resolved configuration for **one Profile Type**.
 
-* Continue using pinned revision
-* Adopt immediately
-* Adopt for new Chapters
-* Fork Session
-* Reprocess affected content
-* Compare revisions
-* Require approval
+Recommended structure:
 
-Profile publication itself must not force reprocessing.
+```text
+ResolvedProfileSnapshot
+├── snapshotId
+├── profileType
+├── sourceProfileRevisionIds[]
+├── appliedDefaults[]
+├── appliedOverrides[]
+├── appliedPolicyConstraints[]
+├── resolvedConfiguration
+├── schemaVersion
+├── contentHash
+├── resolutionTrace
+└── createdAt
+```
+
+Example:
+
+```text
+Resolved Translation Profile Snapshot
+```
+
+or:
+
+```text
+Resolved OCR Profile Snapshot
+```
+
+---
+
+# Resolved Configuration Snapshot
+
+An operation MAY use several resolved Profile types.
+
+Therefore CRAI SHOULD distinguish a higher-level:
+
+```text
+ResolvedConfigurationSnapshot
+```
+
+Recommended structure:
+
+```text
+ResolvedConfigurationSnapshot
+├── snapshotId
+├── operationType
+├── resolvedProfileSnapshotIds[]
+├── policySnapshotReferences[]
+├── capabilityResolutionReferences[]
+├── operationOverrides[]
+├── contentHash
+├── resolutionTrace
+└── createdAt
+```
+
+Example:
+
+```text
+Translation Operation
+
+ResolvedConfigurationSnapshot
+├── Resolved Translation Profile
+├── Resolved Context Profile
+├── Resolved Validation Profile
+└── Resolved Routing Profile
+```
+
+This distinction avoids pretending one Profile Type contains the whole operation configuration.
+
+---
+
+# Resolution Trace
+
+Resolution MUST be explainable.
+
+Example:
+
+```text
+translation.style:
+    natural
+    <- Project Translation Profile Revision 12
+
+honorificPolicy:
+    relationship-aware
+    <- Workspace Translation Profile Revision 4
+
+maximumCharacters:
+    120
+    <- Operation Override
+
+externalProcessing:
+    false
+    <- Workspace Policy Revision 9
+```
+
+Resolution Trace is derived provenance.
+
+---
+
+# Policy Snapshot
+
+Mandatory policy that materially affected execution SHOULD be captured by exact revision/reference.
+
+Historical operation reproducibility MUST NOT depend on mutable "current Workspace policy".
+
+---
+
+# Capability Validation
+
+Resolved configuration MUST be validated against runtime capabilities.
+
+Example:
+
+```text
+OCR Profile:
+    requires region geometry
+```
+
+A runtime/provider incapable of returning geometry is incompatible.
+
+Profile remains valid domain intent even if no currently configured provider can satisfy it.
+
+Execution resolution may fail with a compatibility error.
+
+---
+
+# Compatibility
+
+Profile Revision MAY declare compatibility against:
+
+* Language Range,
+* target Language,
+* content type,
+* capability,
+* Project type,
+* Session type,
+* schema version,
+* required context,
+* Presentation requirements.
+
+Compatibility is declarative intent.
+
+Actual runtime availability remains external.
+
+---
+
+# Profile Validation
+
+Profile Revision validation SHOULD include:
+
+* schema validity,
+* range validity,
+* enum validity,
+* required fields,
+* Language compatibility,
+* cross-field consistency,
+* reference validity,
+* inheritance validity,
+* ownership validity,
+* extension validation.
+
+Runtime capability validation MAY additionally run at resolution time.
+
+---
+
+# Semantic Validation
+
+Example conflicts:
+
+```text
+minimumFontSize > maximumFontSize
+```
+
+```text
+localOnly + cloudOnlyFallback
+```
+
+```text
+preserveLineCount + unrestrictedParagraphRestructure
+```
+
+```text
+strictGlossaryEnforcement
+without Glossary context
+```
+
+```text
+Character-aware pronouns
+without Character context
+```
+
+Such contradictions SHOULD be rejected before normal use.
+
+---
+
+# Profile Test Case
+
+Profile Revision MAY reference reusable test cases.
+
+Recommended:
+
+```text
+ProfileTestCase
+├── testCaseId
+├── profileRevisionId
+├── inputReference
+├── contextReference
+├── expectedProperties[]
+├── prohibitedProperties[]
+└── expectedFindings[]
+```
+
+Tests SHOULD often validate properties rather than one exact Translation string.
+
+---
+
+# Profile Evaluation
+
+Evaluation is derived data.
+
+Possible metrics:
+
+* validation success,
+* user acceptance,
+* cost,
+* latency,
+* terminology consistency,
+* layout success,
+* reviewer acceptance.
+
+Evaluation MUST NOT mutate Profile configuration automatically.
+
+---
+
+# Experimentation
+
+A/B evaluation MAY compare Profile Revisions.
+
+Promotion SHOULD follow:
+
+```text
+Experiment
+    |
+    v
+Evaluation
+    |
+    v
+Review
+    |
+    v
+Approval
+    |
+    v
+Default / Active Revision update
+```
+
+Experiment result MUST NOT silently alter production defaults.
 
 ---
 
 # Profile Change Impact
 
-Profile changes may be classified as:
+Changes SHOULD be semantically classified.
 
-* No Impact
-* Presentation Only
-* Validation Only
-* Context Change
-* Routing Only
-* Retranslation Recommended
-* Retranslation Required
-* Re-OCR Recommended
-* Re-OCR Required
-* Re-export Required
-
----
-
-# Impact Examples
-
-## Presentation Font Change
+Possible impacts:
 
 ```text
-Impact:
-Presentation Only
+NONE
+FUTURE_EXECUTION_ONLY
+PRESENTATION_ONLY
+VALIDATION_ONLY
+CONTEXT_ONLY
+ROUTING_ONLY
+RETRANSLATION_RECOMMENDED
+RETRANSLATION_REQUIRED
+RE_OCR_RECOMMENDED
+RE_OCR_REQUIRED
+RE_EXPORT_RECOMMENDED
 ```
-
-Translation does not become stale.
-
-## Terminology Enforcement Change
-
-```text
-Impact:
-Validation or Retranslation Recommended
-```
-
-Affected Translations may be identified through Glossary and Profile snapshots.
-
-## Target Style Change
-
-```text
-Impact:
-Retranslation Recommended
-```
-
-## OCR Language Change
-
-```text
-Impact:
-Re-OCR Recommended
-```
-
-## Routing Cost Preference Change
-
-```text
-Impact:
-Future Execution Only
-```
-
-Completed Translation semantics remain unchanged.
 
 ---
 
 # Staleness
 
-A domain artifact becomes stale only when a relevant input changed.
-
-Profile update alone does not automatically stale every artifact using the Profile identity.
-
-The system compares exact revisions and impact classifications.
-
-```text
-Artifact used Profile Revision 4
-Current preferred revision is 5
-```
-
-This means the artifact is based on an older Profile.
-
-It does not necessarily mean the artifact is invalid.
-
----
-
-# Retranslation Scope
-
-When Profile Revision changes, CRAI should identify affected Translations through:
-
-* Exact Profile Revision reference
-* Resolved Profile Snapshot
-* Profile change impact
-* Content type
-* Language pair
-* Project scope
-* Validation findings
-
-Only affected content should be recommended for retranslation.
-
----
-
-# Profile Diff
-
-CRAI should support semantic Profile Revision diff.
+A new Profile Revision does NOT automatically make all previous artifacts stale.
 
 Example:
 
 ```text
-Revision 7 → Revision 8
+Translation used Profile Revision 4
 
-Changed:
-- Literalness: balanced → natural
-- Honorific policy: preserve all → relationship-aware
-- Maximum output lines: 5 → 4
-
-Unchanged:
-- Target language
-- Glossary enforcement
-- Character context policy
+current preferred Revision:
+    5
 ```
 
-Diff should not rely only on raw JSON text comparison.
-
----
-
-# Merge
-
-Concurrent Profile changes may require merge.
-
-Three-way merge inputs:
+This means only:
 
 ```text
-Base Revision
-User A Revision
-User B Revision
+Translation used an older configuration
 ```
 
-Possible outcomes:
+It does NOT necessarily mean:
 
-* Automatically merged
-* Conflict requires review
-* Separate revisions retained
+```text
+Translation invalid
+```
 
-Approved revisions are never modified during merge.
+Actual staleness depends on semantic impact.
 
 ---
 
-# Conflict Types
+# Selective Impact
 
-Possible conflicts:
+Examples:
 
-* Same field changed differently
-* Base Profile changed
-* Incompatible language range
-* Policy conflict
-* Deleted referenced Profile
-* Different schema migration
-* Extension namespace collision
-* Composite reference conflict
+```text
+Presentation font changed
+    -> PRESENTATION_ONLY
+```
+
+```text
+Translation naturalness changed
+    -> RETRANSLATION_RECOMMENDED
+```
+
+```text
+Routing cost preference changed
+    -> FUTURE_EXECUTION_ONLY
+```
+
+```text
+OCR expected language changed
+    -> RE_OCR_RECOMMENDED
+```
+
+Only dependent artifacts SHOULD be affected.
+
+---
+
+# Semantic Diff
+
+Profile Revision diff SHOULD compare semantic fields, not just raw serialized JSON.
+
+Example:
+
+```text
+Revision 7 -> Revision 8
+
+Changed:
+    literalness
+    honorific policy
+    maximum output lines
+
+Unchanged:
+    target language
+    glossary policy
+```
+
+Impact classification MAY be derived from this semantic diff.
+
+---
+
+# Dependencies
+
+Profile dependencies MUST be explicit.
+
+Possible dependencies:
+
+* base Profile Revision,
+* required Context capability,
+* Glossary context requirement,
+* Character context requirement,
+* font-family identifier,
+* Validation Profile reference,
+* capability requirement.
+
+Hidden dependencies MUST NOT affect behavior.
+
+---
+
+# Dependency Graph
+
+Profile dependency graph MUST be acyclic.
+
+Example:
+
+```text
+CompositeProfile
+├── TranslationProfile
+├── ContextProfile
+└── ValidationProfile
+```
+
+TranslationProfile MUST NOT indirectly depend back on the CompositeProfile.
+
+---
+
+# Profile Hash
+
+Every immutable Profile Revision SHOULD have a canonical semantic hash.
+
+Hash SHOULD include:
+
+* Profile Type,
+* schema version,
+* normalized behavior configuration,
+* exact base Revision,
+* behavior-affecting compatibility.
+
+It SHOULD exclude clearly non-semantic mutable discovery metadata.
+
+---
+
+# Resolved Snapshot Hash
+
+Execution cache SHOULD prefer:
+
+```text
+Resolved Configuration Snapshot Hash
++
+Source Revision Hash
++
+Context Snapshot Hashes
++
+Capability / Pipeline Version
+```
+
+rather than mutable Profile ID.
+
+---
+
+# Session Integration
+
+Session MAY select:
+
+* exact Profile Revisions,
+* selection policies,
+* temporary overrides.
+
+Temporary Session overrides MUST NOT mutate Profile.
+
+They contribute to resolved immutable configuration.
+
+---
+
+# Project Integration
+
+Project MAY:
+
+* own Project Profiles,
+* select shared Profiles,
+* pin exact Revisions,
+* define defaults,
+* define selection policies.
+
+Project MUST NOT embed complete Profile runtime state.
+
+---
+
+# Book and Chapter Integration
+
+Optional Book or Chapter scope MAY provide explicit overrides or selections.
+
+Examples:
+
+* Chapter uses vertical OCR,
+* one arc uses another naming policy,
+* one Book uses different presentation.
+
+These are explicit scope selections.
+
+Book/Chapter MUST NOT be mandatory for Profile resolution.
+
+---
+
+# Translation Integration
+
+Translation Revision SHOULD preserve the immutable configuration actually used.
+
+Preferred reference:
+
+```text
+ResolvedConfigurationSnapshot
+```
+
+and where useful:
+
+```text
+ResolvedTranslationProfileSnapshot
+ResolvedContextProfileSnapshot
+ResolvedValidationProfileSnapshot
+```
+
+Historical Translation MUST remain reproducible after Profiles change.
+
+---
+
+# OCR Integration
+
+OCR execution/results SHOULD preserve:
+
+* resolved OCR configuration identity,
+* relevant pipeline version,
+* source Image identity/version,
+* recognition version.
+
+Profile does NOT own OCR result lifecycle.
+
+---
+
+# Presentation Integration
+
+Presentation output SHOULD preserve:
+
+* exact Presentation configuration,
+* Translation Revision,
+* source geometry/layout version,
+* rendering version,
+* font resolution metadata where required.
+
+Changing Presentation Profile MUST NOT alter Translation truth.
+
+---
+
+# Validation Integration
+
+Validation results SHOULD reference:
+
+* exact resolved Validation configuration,
+* validated artifact Revision,
+* rule revisions,
+* relevant context snapshots.
+
+Changing Validation Profile creates new validation interpretation.
+
+It MUST NOT rewrite historical findings.
+
+---
+
+# Provider Integration
+
+Provider Adapter receives normalized execution intent.
+
+```text
+Resolved Configuration
+        |
+        v
+Capability Request Model
+        |
+        v
+Provider Adapter
+        |
+        v
+Provider-Specific Parameters
+```
+
+Provider-specific parameter values remain outside canonical Profile definitions unless explicitly modeled as opaque optional hints.
+
+---
+
+# Import
+
+Import MUST create a reviewable plan.
+
+Recommended:
+
+```text
+ProfileImportPlan
+├── sourceFormat
+├── detectedProfileType
+├── schemaVersion
+├── proposedOwnerScope
+├── proposedProfile
+├── proposedRevisions[]
+├── unsupportedFields[]
+├── conflicts[]
+├── requiredMigrations[]
+└── validationFindings[]
+```
+
+Import provenance MUST NOT become Profile lifecycle.
+
+---
+
+# Export
+
+Profile export SHOULD preserve:
+
+* Profile identity where allowed,
+* exact Revisions,
+* Profile Type,
+* schema version,
+* configuration,
+* lineage,
+* compatibility,
+* content hash.
+
+Credentials and provider secrets MUST NEVER be exported as Profile data.
 
 ---
 
@@ -2634,1396 +2109,436 @@ Possible conflicts:
 Fork creates a new Profile identity from an existing Revision.
 
 ```text
-Source Profile Revision
-        ↓
+Source Revision
+     |
+     v
 New Profile ID
 New Revision 1
-Fork Lineage Reference
 ```
 
-Fork is useful when:
-
-* Project needs permanent specialization
-* Workspace wants independent control
-* User customizes a System Profile
-* Imported Profile should not track upstream
+Fork SHOULD preserve lineage where privacy/licensing permits.
 
 ---
 
-# Clone
+# Concurrency
 
-Clone may be equivalent to Fork without retaining public lineage.
+Profile editing SHOULD use optimistic concurrency.
 
-Recommended architecture should retain source reference where privacy and licensing permit it.
-
----
-
-# Profile Dependencies
-
-A Profile may reference:
-
-* Base Profile Revision
-* Glossary requirement
-* Character Context requirement
-* Validation Profile
-* Shared template
-* Font family identifiers
-* Capability requirement
-
-Dependencies must be explicit.
-
-Hidden dependencies make Profiles unsafe to reuse.
-
----
-
-# Dependency Graph
-
-Profile dependency graph must be acyclic.
-
-Example:
+Possible checks:
 
 ```text
-Composite Profile
-├── Translation Profile
-├── OCR Profile
-├── Presentation Profile
-└── Validation Profile
+expectedProfileVersion
+expectedActiveRevisionId
+expectedParentRevisionId
+contentHash
 ```
 
-A Translation Profile must not indirectly depend back on the Composite Profile.
+Published Revisions MUST never be mutated during merge.
 
----
-
-# Profile Hash
-
-Each Profile Revision should have a content hash.
-
-Hash should cover semantic configuration, including:
-
-* Profile Type
-* Schema version
-* Normalized configuration
-* Base Revision reference
-* Behavior-affecting compatibility fields
-
-Non-semantic metadata such as display description may be excluded according to canonicalization policy.
-
----
-
-# Canonicalization
-
-Before hashing:
-
-* Sort map keys
-* Normalize enums
-* Normalize language tags
-* Normalize numeric formats
-* Resolve default representation
-* Preserve ordered lists where order matters
-* Remove non-semantic whitespace
-* Validate extension namespace
-
----
-
-# Cache Integration
-
-Cache keys should use:
-
-* Resolved Profile Snapshot hash
-* Source Revision hash
-* Context Snapshot hashes
-* Pipeline version
-* Capability version
-* Provider behavior version where required
-
-Cache should not depend only on Profile ID.
-
-```text
-Profile ID
-```
-
-is insufficient because different revisions may produce different behavior.
-
----
-
-# Session Integration
-
-Session selects exact Profile Revisions or selection policies.
-
-Recommended Session references:
-
-```text
-Session
-├── Translation Profile Revision
-├── OCR Profile Revision
-├── Presentation Profile Revision
-├── Validation Profile Revision
-├── Context Profile Revision
-└── Routing Profile Revision
-```
-
-Temporary Session overrides do not mutate the selected Profile.
-
-They contribute to a Resolved Profile Snapshot.
-
----
-
-# Workspace Integration
-
-Workspace may provide:
-
-* Shared Profiles
-* Default Profiles
-* Mandatory Profile constraints
-* Profile visibility
-* Approval rules
-* Provider policy
-* Profile editing permissions
-
-Workspace does not automatically own User Profiles.
-
----
-
-# Project Integration
-
-Project may:
-
-* Select Workspace Profile Revisions
-* Own Project Profiles
-* Pin Profile Revisions
-* Define defaults
-* Restrict compatible Profile Types
-* Follow latest approved shared revisions
-* Clone shared Profiles
-* Require approved Profiles
-
----
-
-# Book and Chapter Integration
-
-Books and Chapters may override selected Profile Revisions for specific needs.
-
-Examples:
-
-* One Chapter contains vertical text
-* One story arc needs different naming rules
-* One bonus chapter uses a different Translation style
-* One volume has a different layout
-
-Overrides should be explicit and scoped.
-
----
-
-# Translation Integration
-
-Translation Revision should reference:
-
-* Translation Profile Revision or Resolved Snapshot
-* Context Profile Revision or Resolved Snapshot
-* Validation Profile Revision used
-* Routing decision reference where relevant
-
-The most important reproducibility reference is the immutable resolved configuration actually used.
-
----
-
-# OCR Integration
-
-OCR result should reference:
-
-* OCR Profile Revision
-* Resolved OCR Profile Snapshot
-* Preprocessing pipeline revision
-* Recognition engine version
-* Source Image Revision
-
----
-
-# Presentation Integration
-
-Rendered artifact should reference:
-
-* Presentation Profile Revision
-* Resolved Presentation Snapshot
-* Translation Revision
-* Source layout revision
-* Rendering engine revision
-* Font resolution information where required
-
-Presentation output may be regenerated without changing Translation truth.
-
----
-
-# Validation Integration
-
-Validation Result should reference:
-
-* Validation Profile Revision
-* Rule versions
-* Target artifact Revision
-* Context snapshots
-* Finding severity mapping
-
-Changing Validation Profile creates new validation results.
-
-It does not rewrite old findings.
-
----
-
-# Provider Adapter Integration
-
-Provider Adapter receives normalized request intent.
-
-Example:
-
-```text
-Resolved Translation Profile
-        ↓
-Translation Request Model
-        ↓
-Provider Adapter
-        ↓
-Provider-specific parameters
-```
-
-Provider-specific values may include:
-
-* Model ID
-* Temperature
-* Top-p
-* JSON mode
-* OCR feature flags
-* Maximum tokens
-* Safety settings
-
-These should not leak into canonical Profile schemas unless they represent portable semantics.
-
----
-
-# Provider Hints
-
-Profile may support optional provider hints.
-
-Recommended restrictions:
-
-* Hints are namespaced.
-* Hints are non-canonical.
-* Core behavior does not depend exclusively on them.
-* Unsupported hints can be ignored with warning.
-* Policy may forbid hints.
-* Hints do not contain credentials.
-
-Example:
-
-```text
-extensions:
-  provider.example:
-    preferred_reasoning_level: medium
-```
-
----
-
-# Provider Neutrality
-
-Core Profile fields should describe intent.
-
-Prefer:
-
-```text
-quality_tier: high
-```
-
-over:
-
-```text
-model: provider-x-model-2026
-```
-
-Prefer:
-
-```text
-output_structure: strict_json
-```
-
-over:
-
-```text
-provider_response_format: json_schema_v5
-```
-
-Provider adapters perform translation from intent to provider mechanics.
-
----
-
-# User Correction
-
-User correction may imply a useful Profile change.
-
-Example:
-
-* User repeatedly changes formal narration to natural narration.
-* User repeatedly reduces bubble text.
-* User repeatedly restores honorifics.
-* User repeatedly rejects one romanization system.
-
-The system may create a Profile Change Candidate.
-
-It must not silently mutate the active Profile.
-
----
-
-# Learning From Corrections
-
-Possible workflow:
-
-```text
-User Corrections
-        ↓
-Pattern Detection
-        ↓
-Profile Change Candidate
-        ↓
-Evaluation
-        ↓
-User Review
-        ↓
-New Profile Revision
-```
-
-Corrections remain attributable to their original artifacts.
-
----
-
-# Profile Recommendation
-
-CRAI may recommend Profiles based on:
-
-* Content type
-* Language pair
-* Project history
-* User choices
-* Device capability
-* Workspace policy
-* Cost preference
-* Quality requirement
-
-Recommendation is not automatic truth.
-
-The resolved choice must be visible and auditable.
-
----
-
-# Experiment
-
-Users may compare Profile Revisions.
-
-Example:
-
-```text
-Source Text
-├── Translation Profile Revision 7
-└── Translation Profile Revision 8
-```
-
-Experiment should record:
-
-* Input Revision
-* Context Snapshots
-* Profile Revisions
-* Provider decisions
-* Results
-* Ratings
-* Validation findings
-* Cost
-* Latency
-
-Experiment results are derived evaluation data.
-
----
-
-# A/B Comparison
-
-A/B comparison should avoid changing production defaults automatically.
-
-Promotion flow:
-
-```text
-Experiment Result
-→ Human Review
-→ Revision Approval
-→ Active Revision Update
-```
-
----
-
-# Permissions
-
-Possible Profile permissions:
-
-* `profile.view`
-* `profile.create`
-* `profile.edit`
-* `profile.review`
-* `profile.approve`
-* `profile.activate`
-* `profile.deprecate`
-* `profile.archive`
-* `profile.clone`
-* `profile.export`
-* `profile.import`
-* `profile.delete`
-* `profile.use`
-* `profile.lock`
-
-Permissions may vary by owner scope and Profile Type.
-
----
-
-# Role Examples
-
-## Translator
-
-May:
-
-* View approved Translation Profiles
-* Create Project Translation Profile drafts
-* Test Profile revisions
-
-May not:
-
-* Change Workspace policy
-* Approve Workspace Profile without permission
-
-## Reviewer
-
-May:
-
-* Review Profile test results
-* Approve selected Profile types
-* Compare revisions
-
-## Administrator
-
-May:
-
-* Manage Workspace Profiles
-* Set defaults
-* Control visibility
-* Archive Profiles
-
-## Reader
-
-May:
-
-* Use approved Profiles
-* Create private Session overrides
+Concurrent changes MAY produce parallel draft Revisions.
 
 ---
 
 # Deletion
 
-Referenced Profile Revisions must not be hard deleted.
+Referenced Profile Revisions MUST NOT normally be physically deleted.
 
 Preferred actions:
 
-* Archive Profile
-* Deprecate Revision
-* Hide from selection
-* Remove mutable metadata
-* Create tombstone
+* deprecate,
+* archive,
+* hide,
+* tombstone Profile identity.
 
-Historical operations require continued resolution of revision references.
-
----
-
-# Profile Tombstone
-
-A deleted unreferenced Profile may leave:
-
-```text
-Profile Tombstone
-├── Profile ID
-├── Profile Type
-├── Owner Scope
-├── Deleted At
-├── Deleted By
-└── Reason
-```
-
-Referenced revisions should remain retained according to audit policy.
+Historical operations MUST remain able to resolve exact references.
 
 ---
 
 # Retention
 
-Long-term retention should prioritize:
+Durable retention SHOULD prioritize:
 
-* Used Profile Revisions
-* Approved Profile Revisions
-* Profile lineage
-* Resolution snapshots
-* Audit records
-* Test results associated with published revisions
+* referenced Revisions,
+* approved Revisions,
+* Profile lineage,
+* resolved snapshots referenced by artifacts,
+* Review records,
+* audit records.
 
-Temporary candidates and failed imports may use shorter retention.
+Temporary Candidates and failed imports MAY have shorter retention.
 
 ---
 
-# Audit
+# Security
 
-Audit should record:
+Possible permissions include:
 
-* Profile creation
-* Revision creation
-* Import
-* Export
-* Review
-* Approval
-* Activation
-* Deprecation
-* Archive
-* Fork
-* Clone
-* Lock
-* Default selection change
-* Visibility change
-* Ownership transfer
-* Policy rejection
+```text
+profile.view
+profile.use
+profile.create
+profile.edit
+profile.review
+profile.approve
+profile.activate
+profile.deprecate
+profile.archive
+profile.clone
+profile.import
+profile.export
+profile.lock
+```
 
-Audit events should not include provider secrets.
+Authorization belongs to governance/security infrastructure.
+
+Profile domain defines the resource and scope against which permission is evaluated.
 
 ---
 
 # Events
 
-Typical Profile domain events include:
-
-* `ProfileCreated`
-* `ProfileMetadataUpdated`
-* `ProfileRevisionCreated`
-* `ProfileRevisionValidated`
-* `ProfileRevisionSubmittedForReview`
-* `ProfileRevisionApproved`
-* `ProfileRevisionRejected`
-* `ProfileRevisionLocked`
-* `ProfileActivated`
-* `ProfileDefaultChanged`
-* `ProfileDeprecated`
-* `ProfileArchived`
-* `ProfileForked`
-* `ProfileCloned`
-* `ProfileImported`
-* `ProfileExported`
-* `ProfileCandidateCreated`
-* `ProfileCandidatePromoted`
-* `ProfileCompatibilityChanged`
-* `ProfileImpactAssessed`
-* `ResolvedProfileSnapshotCreated`
-
----
-
-# Event Payload Example
+Core Profile domain events MAY include:
 
 ```text
-ProfileRevisionApproved
-├── Profile ID
-├── Profile Revision ID
-├── Profile Type
-├── Owner Scope
-├── Approved By
-├── Approved At
-├── Schema Version
-├── Content Hash
-├── Correlation ID
-└── Causation ID
+ProfileCreated
+ProfileMetadataUpdated
+ProfileActivated
+ProfileDeprecated
+ProfileArchived
+
+ProfileRevisionCreated
+ProfileRevisionPublished
+ProfileDefaultChanged
+
+ProfileForked
+ProfileCloned
 ```
 
-The complete configuration may be retrieved from canonical storage rather than copied into every event.
+Review/governance events MAY include:
+
+```text
+ProfileRevisionSubmittedForReview
+ProfileRevisionApproved
+ProfileRevisionRejected
+ProfileAuthorityChanged
+```
+
+Workflow events MAY include:
+
+```text
+ProfileCandidateCreated
+ProfileCandidatePromoted
+ProfileImported
+ResolvedProfileSnapshotCreated
+ResolvedConfigurationSnapshotCreated
+ProfileImpactAssessed
+```
+
+Not every Profile-related event belongs to the Profile Aggregate.
 
 ---
 
 # Persistence
 
-Recommended canonical tables or collections:
+Recommended canonical records:
 
 ```text
 Profile
-Profile Revision
-Profile Revision Parent
-Profile Applicability
-Profile Review
-Profile Lock
-Profile Fork Lineage
-Profile Default Selection
-Profile Tombstone
-Resolved Profile Snapshot
-```
-
-Separate derived or supporting data:
-
-```text
-Profile Search Index
-Profile Evaluation
-Profile Test Result
-Profile Recommendation
-Profile Candidate
-Profile Import Plan
-Profile Usage Projection
-```
-
----
-
-# Suggested Profile Record
-
-```text
-Profile
-├── id
-├── profile_type
-├── owner_scope_type
-├── owner_scope_id
-├── display_name
-├── description
-├── visibility
-├── lifecycle_state
-├── active_revision_id
-├── created_by
-├── created_at
-├── updated_at
-└── version
-```
-
----
-
-# Suggested Profile Revision Record
-
-```text
 ProfileRevision
-├── id
-├── profile_id
-├── revision_number
-├── parent_revision_id
-├── schema_version
-├── configuration_document
-├── compatibility_document
-├── review_state
-├── content_hash
-├── change_summary
-├── created_by
-├── created_at
-└── supersedes_revision_id
-```
-
----
-
-# Suggested Default Selection Record
-
-```text
+ProfileApplicability
 ProfileDefaultSelection
-├── id
-├── scope_type
-├── scope_id
-├── profile_type
-├── selection_mode
-├── profile_id
-├── profile_revision_id
-├── set_by
-├── set_at
-└── version
+ProfileAuthority
+ProfileReview
+ProfileForkLineage
+ProfileTombstone
 ```
 
----
-
-# Suggested Resolved Snapshot Record
+Resolved reproducibility records:
 
 ```text
 ResolvedProfileSnapshot
-├── id
-├── profile_type
-├── source_revision_ids
-├── override_references
-├── policy_revision_id
-├── resolved_configuration
-├── schema_version
-├── content_hash
-├── resolution_trace
-└── created_at
+ResolvedConfigurationSnapshot
 ```
 
----
-
-# Translation Profile Example
-
-```yaml
-profile_type: translation
-schema_version: 1
-
-languages:
-  source:
-    - zh-Hans
-    - zh-Hant
-  target:
-    - vi
-
-content:
-  supported_types:
-    - novel
-    - dialogue
-
-style:
-  mode: natural
-  meaning_preservation: high
-  structural_preservation: medium
-  literary_register: modern
-
-terminology:
-  use_glossary: true
-  required_terms: strict
-  preferred_terms: warning
-  unknown_terms: preserve_or_transliterate
-
-characters:
-  use_character_context: true
-  preserve_speech_profile: true
-  prevent_spoiler_reveals: true
-
-pronouns:
-  relationship_aware: true
-  avoid_unsupported_gender: true
-  uncertain_behavior: flag
-
-formatting:
-  preserve_paragraphs: true
-  preserve_emphasis: true
-  output_commentary: false
-```
-
-This is a provider-neutral example.
-
-It must not include provider API parameters.
-
----
-
-# Comic Translation Profile Example
-
-```yaml
-profile_type: translation
-schema_version: 1
-
-content:
-  supported_types:
-    - comic
-    - webtoon
-
-style:
-  mode: concise
-  meaning_preservation: high
-  naturalness: high
-
-dialogue:
-  preserve_fragments: true
-  preserve_character_voice: true
-  avoid_explanatory_expansion: true
-
-output:
-  maximum_lines: 4
-  maximum_characters: 120
-  preserve_segment_count: true
-  alternatives_on_ambiguity: false
-
-validation:
-  require_overflow_check: true
-```
-
----
-
-# OCR Profile Example
-
-```yaml
-profile_type: ocr
-schema_version: 1
-
-content_mode: comic
-
-languages:
-  expected:
-    - zh-Hans
-    - zh-Hant
-  allow_mixed_scripts: true
-
-orientation:
-  mode: mixed
-
-detection:
-  speech_bubbles: true
-  narration_boxes: true
-  sound_effects: optional
-  interface_text: ignore
-
-confidence:
-  auto_accept: 0.92
-  require_review: 0.65
-  reject_below: 0.35
-
-reading_order:
-  mode: automatic
-  fallback: top_to_bottom
-
-output:
-  region_geometry: required
-  line_geometry: required
-  alternatives: true
-```
-
----
-
-# Presentation Profile Example
-
-```yaml
-profile_type: presentation
-schema_version: 1
-
-content_mode: comic
-display_mode: overlay
-
-typography:
-  preferred_fonts:
-    - Noto Sans
-    - system-ui
-  minimum_font_size: 12
-  maximum_font_size: 28
-  line_height: 1.2
-  alignment: center
-
-overlay:
-  cover_original_text: true
-  preserve_bubble_background: true
-  padding: medium
-  low_confidence_indicator: true
-
-overflow:
-  strategy_order:
-    - wrap
-    - reduce_font_size
-    - external_caption
-    - require_review
-```
-
----
-
-# Validation Profile Example
-
-```yaml
-profile_type: validation
-schema_version: 1
-
-rules:
-  language_mismatch:
-    enabled: true
-    severity: error
-
-  glossary_required_term:
-    enabled: true
-    severity: error
-    block_approval: true
-
-  character_name_mismatch:
-    enabled: true
-    severity: error
-
-  pronoun_inconsistency:
-    enabled: true
-    severity: warning
-
-  spoiler_leak:
-    enabled: true
-    severity: blocking
-
-  presentation_overflow:
-    enabled: true
-    severity: warning
-    block_export: true
-```
-
----
-
-# Context Profile Example
-
-```yaml
-profile_type: context
-schema_version: 1
-
-sources:
-  current_text_block: required
-  neighboring_text_blocks:
-    previous: 6
-    next: 2
-  current_page: true
-  glossary_snapshot: required
-  character_context_snapshot: required
-  previous_translation: true
-  chapter_summary: optional
-
-spoilers:
-  boundary: reader_progress
-  future_identity_reveal: forbidden
-
-budget:
-  priority:
-    - current_source
-    - glossary
-    - character_context
-    - immediate_dialogue
-    - current_page
-    - chapter_summary
-  overflow_strategy: drop_lowest_priority
-```
-
----
-
-# Routing Profile Example
-
-```yaml
-profile_type: routing
-schema_version: 1
-
-quality_tier: standard
-cost_tier: balanced
-latency_tier: interactive
-privacy_tier: approved_providers_only
-
-requirements:
-  structured_output: true
-  chinese_to_vietnamese: true
-
-fallback:
-  order:
-    - another_model_same_provider
-    - another_approved_provider
-    - local_model
-  lower_quality_without_confirmation: false
-
-budget:
-  maximum_estimated_cost_per_operation: configured
-```
-
----
-
-# Profile Resolution Example
-
-Workspace default:
+Workflow/derived records:
 
 ```text
-Translation Profile Revision W4
+ProfileCandidate
+ProfileImportPlan
+ProfileEvaluation
+ProfileTestCase
+ProfileTestResult
+ProfileRecommendation
+ProfileUsageProjection
+ProfileSearchIndex
 ```
-
-Project override:
-
-```text
-Translation Profile Revision P7
-```
-
-Session override:
-
-```text
-Maximum output lines = 4
-```
-
-Workspace Policy:
-
-```text
-Cloud processing forbidden
-```
-
-Resolved result:
-
-```text
-Translation semantics:
-From P7
-
-Maximum output lines:
-4
-
-Processing restriction:
-Local only
-
-Resolved Profile Snapshot:
-RPS-42
-```
-
-The operation references `RPS-42`.
-
----
-
-# Profile Update Example
-
-Current Project selection:
-
-```text
-Translation Profile Revision 7
-```
-
-A new revision is approved:
-
-```text
-Translation Profile Revision 8
-```
-
-Possible behavior:
-
-* Existing Sessions remain pinned to Revision 7.
-* New Sessions use Revision 8.
-* User may explicitly upgrade an active Session.
-* Existing Translations remain unchanged.
-* CRAI calculates semantic impact.
-* Affected content may receive retranslation recommendations.
-
----
-
-# Session Override Example
-
-Selected Presentation Profile:
-
-```text
-Revision 3
-Font size: 18
-```
-
-User temporarily increases Session font scale:
-
-```text
-Font size override: 22
-```
-
-CRAI creates a resolved presentation snapshot.
-
-The original Presentation Profile Revision remains unchanged.
-
-The override may later be promoted into a new User Profile Revision.
-
----
-
-# Profile Fork Example
-
-Workspace Profile:
-
-```text
-Natural Vietnamese Novel
-Revision 9
-```
-
-Project needs stronger classical register.
-
-Project forks Revision 9:
-
-```text
-New Profile:
-Classical Cultivation Novel
-
-Revision 1:
-Base = Workspace Profile Revision 9
-Overrides:
-- narration register = classical
-- honorific preservation = strict
-```
-
-Future Workspace Profile changes do not silently alter the Project fork.
-
----
-
-# Provider Routing Example
-
-Routing Profile requests:
-
-```text
-Quality:
-High
-
-Privacy:
-Approved providers only
-
-Latency:
-Interactive
-```
-
-Routing service evaluates:
-
-* Workspace policy
-* Available provider configurations
-* Language support
-* Model capabilities
-* Current quota
-* Provider health
-* Cost
-
-The Profile does not select a provider directly unless an explicit allowlist is part of its intent.
 
 ---
 
 # Architecture Invariants
 
-1. Profile is a reusable configuration Aggregate Root.
-2. Profile ID is different from Profile Revision ID.
-3. Profile identity remains stable across revisions.
-4. Profile Revisions are immutable.
-5. Durable operations reference exact Profile Revisions or resolved snapshots.
-6. Active Revision is a selection hint, not historical identity.
-7. Profile is separate from User Preference.
-8. Profile is separate from Workspace Policy.
-9. Profile is separate from Provider Configuration.
-10. Profile is separate from Runtime Operation state.
-11. Profile is not a raw provider prompt.
-12. Core Profile configuration is provider-neutral.
-13. Provider credentials never belong to Profile.
-14. Provider-specific hints are optional and namespaced.
-15. Unsupported provider hints do not redefine core semantics.
-16. Each Profile Type has an explicit schema.
-17. Different Profile Types remain separate aggregates or typed instances.
-18. CRAI does not rely on one universal Profile.
-19. Composite Profiles reference exact Profile Revisions.
-20. Profile composition is resolved before operation execution.
-21. Every operation uses an immutable Resolved Profile Snapshot where overrides or inheritance apply.
-22. Resolution records source revisions and applied overrides.
-23. Workspace policy may restrict but is not copied into mutable Profile truth.
-24. Narrower Profile configuration cannot override mandatory policy.
-25. Profile inheritance pins exact base revisions.
-26. Profile dependency graphs are acyclic.
-27. Derived Profile Revisions preserve lineage.
-28. Profile clones receive independent identities.
-29. Profile forks preserve source lineage.
-30. Profile ownership is separate from applicability.
-31. Profile visibility does not imply permission.
-32. Workspace membership alone does not grant Profile editing permission.
-33. Profile schema versions remain interpretable historically.
-34. Schema migration never rewrites used Profile Revisions.
-35. Semantic Profile changes create new revisions.
-36. Profile changes do not rewrite existing Translation Revisions.
-37. Profile changes only stale artifacts when relevant semantic inputs changed.
-38. Presentation Profile changes do not alter Translation truth.
-39. Routing Profile changes do not alter completed Translation semantics.
-40. Validation Profile changes create new validation results.
-41. OCR Profile changes do not rewrite prior OCR results.
-42. Session overrides do not mutate Profiles.
-43. Useful Session overrides require explicit promotion.
-44. AI-generated Profile Candidates are not canonical until reviewed.
-45. User corrections do not silently alter approved Profiles.
-46. Profile import never silently overwrites approved revisions.
-47. Profile export excludes secrets.
-48. Used Profile Revisions are not hard deleted.
-49. Cache keys use revision or resolved snapshot hashes, not Profile ID alone.
-50. Every significant Profile lifecycle and approval action is auditable.
-51. Compatibility is validated before Profile use.
-52. Language compatibility uses canonical Language values.
-53. Context-affecting Profiles respect spoiler boundaries.
-54. Provider routing must respect Workspace policy, entitlement and quota.
-55. Profile evaluation results remain derived data.
-56. Profile recommendations resolve to exact revisions before execution.
+1. `profileId` and `profileRevisionId` are different identities.
 
----
+2. Profile represents reusable provider-neutral behavior intent.
 
-# Open Decisions
+3. Profile MUST NOT contain provider credentials.
 
-The following decisions should remain open until implementation and prototype testing:
+4. Profile MUST NOT own runtime execution state.
 
-* Whether every Profile Type uses one shared aggregate implementation
-* Whether each Profile Type has a dedicated aggregate
-* Whether Profile configuration is stored as JSON, typed columns or both
-* Whether Profile Revisions are event-sourced
-* Whether Profile metadata changes require revisions
-* Which metadata fields affect content hash
-* Whether descriptions are revisioned
-* Whether Active Revision must always be approved
-* Whether several revisions can be Active
-* Whether Profiles have a separate Recommended Revision
-* Whether Draft Revisions may be used in normal Sessions
-* Whether System Profiles may be hidden
-* Whether users may edit System Profiles through forking only
-* Whether Personal Profiles can be used in Team Workspaces
-* Whether Workspace administrators can inspect User Profiles
-* Whether Project Profiles may be shared outside their Project
-* Whether Profile visibility includes Public in MVP
-* Whether Profiles support Shared Link
-* Whether custom Profile Types are allowed
-* Whether extensions are allowed in MVP
-* How extension namespaces are registered
-* Whether provider hints are supported
-* Whether raw provider parameters are ever permitted
-* Whether Composite Profile is a core domain type
-* Whether Composite Profile references exact revisions only
-* Whether Composite Profile may follow latest approved revisions
-* Whether Profiles support multiple inheritance
-* Whether inheritance is limited to one base
-* Whether derived revisions store flattened configuration
-* Whether clones retain lineage
-* Whether forks retain upstream update notifications
-* Whether semantic diff is manually configured or schema-derived
-* How Profile change impact is calculated
-* Whether impact classification is stored on Revision
-* Whether Project Profile updates automatically mark Translations stale
-* Whether active Sessions automatically adopt new Profile Revisions
-* Whether Session profile upgrades fork the Session
-* Whether Profile upgrades apply at Chapter boundaries
-* Whether Profile selection is stored directly or through defaults
-* Whether Book and Chapter can own Profiles
-* Whether TextBlock-level Profile overrides are supported
-* Whether field-level operation overrides are supported
-* Which fields may be overridden at Session scope
-* Whether mandatory Workspace Profile fields exist
-* How Profile and Workspace Policy conflicts are presented
-* Whether Policy Resolution is included in Resolved Profile Snapshot
-* Whether Resolved Profile Snapshots are persisted permanently
-* Whether snapshots are content-addressed and deduplicated
-* Whether resolution traces are retained long term
-* Whether Profile test cases are part of Profile aggregate
-* Whether Profile approval requires passing tests
-* Whether Profile evaluation supports automatic promotion
-* Whether A/B experiments are supported in MVP
-* Whether user ratings affect recommendations
-* Whether AI may infer Profile Candidates from corrections
-* How many corrections are required before a recommendation
-* Whether inferred Profiles may include character-specific rules
-* Whether Character Speech Profile remains entirely in Character domain
-* Whether Translation Profile may override Character speech behavior
-* Whether Context Profile is independent from Translation Profile
-* Whether Validation Profile references Translation Profile constraints
-* Whether Presentation overflow may trigger automatic retranslation
-* Whether concise retranslation requires a new Translation Profile
-* Whether OCR preprocessing settings belong in OCR Profile or pipeline configuration
-* Whether Capture Profile is required
-* Whether Routing Profile belongs in domain or application configuration
-* Whether Cost Profile should be separate from Routing Profile
-* Whether Privacy Profile should be separate from Workspace Policy
-* Whether Export Profile is required for MVP
-* Whether Review Profile is required
-* Whether Notification Profile belongs in Workspace settings
-* Whether Profiles may reference Glossary IDs
-* Whether Profiles should reference exact Glossary Revisions
-* Whether terminology behavior belongs only in Translation Profile
-* Whether Context Profile controls Glossary inclusion
-* How Profile compatibility ranges are represented
-* Whether compatibility uses semantic version constraints
-* Whether Profile schema migration runs automatically
-* Whether old schemas remain executable indefinitely
-* Whether unknown imported fields are preserved
-* Whether Profiles can be imported with original IDs
-* Whether duplicate imported Profile IDs are remapped
-* Whether Profile packages include test datasets
-* Whether public Profile packages require signatures
-* Whether marketplace Profiles have licensing metadata
-* Whether Profile exports include authorship history
-* Whether Profile deletion is ever physically allowed
-* How long unused Draft Revisions are retained
-* Whether archived Profiles remain selectable by ID
-* Whether Profile use is recorded for usage analytics
-* Whether Profile use history is visible to administrators
-* Whether Profile search indexes configuration fields
-* Whether public Profiles may contain external links
-* Whether Profile examples contain copyrighted source content
-* Whether Workspace can require all operations to use approved Profiles
-* Whether Service Accounts may create Profile Revisions
-* Whether Profile Approval supports separation of duties
-* Whether locked Profile Revisions can be deprecated
-* Whether ownership transfer of Profile is supported
-* Whether Project transfer copies or retains Workspace Profile references
-* How Profile references behave during Workspace deletion
-* Whether local and cloud installations share System Profile identities
+5. Raw provider prompts MUST NOT be canonical Profile state.
+
+6. Published or referenced Profile Revisions are immutable.
+
+7. Durable executions reference exact Revisions or immutable resolved snapshots.
+
+8. Profile Types remain capability-coherent.
+
+9. CRAI MUST NOT create one universal Profile containing all behavior.
+
+10. Ownership and applicability are distinct.
+
+11. Optional Book/Chapter hierarchy levels MUST NOT be required for Profile resolution.
+
+12. Profile lifecycle is separate from Revision publication state.
+
+13. Review state is separate from Profile lifecycle.
+
+14. Authority/Lock is separate from Review.
+
+15. Candidate is a workflow artifact, not Profile lifecycle.
+
+16. Import provenance is not Profile lifecycle.
+
+17. Superseded is Revision lineage/status, not Review state.
+
+18. User Preference may select Profiles but does not replace them.
+
+19. Mandatory Policy overrides conflicting Profile intent.
+
+20. Provider Configuration is separate from Profile.
+
+21. Routing Profile expresses routing intent, not concrete runtime state.
+
+22. Concrete retry and fallback attempts remain runtime-owned.
+
+23. Translation Profile does not own Glossary Entries.
+
+24. Translation Profile does not own Character facts.
+
+25. Context Profile defines selection policy, not mutable context itself.
+
+26. Presentation Profile MUST NOT mutate Translation semantics.
+
+27. Validation semantic changes that modify Translation produce new Translation Revisions.
+
+28. Dynamic Profile selection resolves to exact Revisions before execution.
+
+29. `activeRevisionId` is a selection convenience, not execution identity.
+
+30. Profile publication does not automatically alter existing Sessions or operations.
+
+31. New Profile Revision does not automatically stale all old artifacts.
+
+32. Staleness is based on semantic impact.
+
+33. Semantic Profile diff SHOULD drive impact classification.
+
+34. ResolvedProfileSnapshot represents one Profile Type.
+
+35. ResolvedConfigurationSnapshot MAY compose several Profile Types for one operation.
+
+36. Resolution MUST preserve provenance through Resolution Trace.
+
+37. Mandatory policies that affect execution SHOULD be revision-addressable in resolved snapshots.
+
+38. Runtime capability validation MUST remain separate from Profile business identity.
+
+39. Profile dependency graph MUST be acyclic.
+
+40. Inheritance MUST reference exact base Revisions.
+
+41. Follow-latest is a selection policy and MUST resolve before execution.
+
+42. Cache identity MUST NOT rely on mutable Profile ID alone.
+
+43. Historical artifacts MUST preserve the effective configuration used.
+
+44. Profile import MUST NOT silently overwrite approved configuration.
+
+45. Referenced Profile Revisions MUST remain historically resolvable.
+
+46. Provider secrets MUST NOT appear in Profile export or events.
+
+47. Derived evaluation results MUST NOT silently mutate Profiles.
+
+48. Automatic recommendations MUST NOT silently change production defaults.
 
 ---
 
 # Recommended MVP Scope
 
-The first CRAI MVP should support:
+The first CRAI MVP SHOULD support:
 
-* Stable Profile identity
-* Immutable Profile Revisions
-* Profile Revision lineage
-* Content hash
-* Schema version
-* Profile ownership by System, User, Workspace and Project
-* Private and Workspace visibility
-* Draft, Active, Deprecated and Archived lifecycle states
-* Unreviewed, Approved and Rejected Review States
-* Active Revision
-* Exact Revision selection
-* Translation Profile
-* OCR Profile
-* Presentation Profile
-* Validation Profile
-* Basic Context Profile
-* Basic Routing Profile
-* Structured provider-neutral schemas
-* Source and target language compatibility
-* Novel and Comic content compatibility
-* Workspace default Profiles
-* Project default Profiles
-* Session Profile selection
-* Session-level temporary overrides
-* Operation-level resolved snapshots
-* Resolution trace
-* Workspace policy validation
-* Profile cloning
-* Profile forking
-* One exact base Profile Revision
-* Semantic revision diff
-* Basic Profile validation
-* Cross-field validation
-* Import from JSON and YAML
-* Export to JSON and YAML
-* Import Plan
-* No silent overwrite
-* Profile audit events
-* Profile permission checks
-* Profile deprecation
-* Retention of referenced revisions
-* Basic Profile change impact classification
-* Cache integration using resolved Profile hash
+* stable Profile identity,
+* immutable Profile Revisions,
+* schema versioning,
+* Translation Profile,
+* OCR Profile,
+* Presentation Profile,
+* Context Profile,
+* Validation Profile,
+* basic Routing Profile,
+* System defaults,
+* Project-scoped Profiles,
+* User/private Profiles where useful,
+* exact Revision selection,
+* Project default selection,
+* optional Chapter overrides,
+* Session overrides,
+* operation overrides,
+* Profile validation,
+* Language compatibility,
+* immutable ResolvedProfileSnapshot,
+* immutable ResolvedConfigurationSnapshot,
+* resolution trace,
+* Profile content hashes,
+* selective impact classification,
+* semantic Profile diff,
+* basic approval,
+* authority lock,
+* clone/fork,
+* one-level exact Revision inheritance,
+* JSON/YAML import/export,
+* audit events.
 
-The MVP may defer:
+MVP MAY defer:
 
-* Public Profile marketplace
-* Shared-link Profiles
-* Custom Profile Types
-* Arbitrary extension namespaces
-* Multiple inheritance
-* Dynamic follow-latest dependency chains
-* Automatic Profile merge
-* Real-time collaborative editing
-* AI-generated Profile activation
-* Automatic learning from corrections
-* Advanced Profile recommendations
-* A/B experiments
-* Automated quality evaluation
-* Provider-specific Profile editors
-* Public package signatures
-* License management
-* Composite Profile marketplace packages
-* Capture Profile
-* Recognition Profile
-* Audio Profile
-* Speech Profile outside Character domain
-* Advanced Export Profile
-* Review Profile
-* Accessibility Profile as a separate type
-* Cost Profile as a separate type
-* Privacy Profile as a separate type
-* Advanced schema migration
-* Cross-Workspace Profile sharing
-* Organization-wide Profile federation
-* Automatic Project migration to new revisions
-* Automatic retranslation after Profile updates
-* Multi-stage Profile approvals
-* Separation-of-duties enforcement
-* Version compatibility solvers
-* Semantic package dependency resolution
-* Profile usage billing
-* Profile analytics dashboards
-* Public rating and review systems
+* Composite Profile as a first-class domain type,
+* multi-level inheritance,
+* follow-latest inheritance,
+* Workspace marketplace,
+* public Profile sharing,
+* A/B testing automation,
+* Profile recommendations,
+* AI-generated Profile Candidates,
+* complex provider allow/deny preferences,
+* Profile packages,
+* signatures/licensing,
+* Organization-level ownership,
+* TextBlock-level overrides,
+* full Profile merge UI,
+* automatic Profile promotion,
+* advanced Profile analytics.
+
+---
+
+# Open Decisions
+
+The following SHOULD remain open until prototype validation:
+
+* whether CompositeProfile is a first-class domain resource,
+* whether Workspace ownership is required in MVP,
+* exact relationship between User Preference and Profile defaults,
+* whether Book-level Profile selection is required,
+* whether TextBlock-level overrides are needed,
+* which fields may be overridden at Session scope,
+* whether individual field overrides are persisted,
+* whether Routing Profile remains a Profile domain type,
+* whether Privacy intent belongs partly in Routing Profile or exclusively in Policy,
+* whether Cost/Quality become independent Profiles,
+* whether Export Profile is MVP-critical,
+* whether Context Profile remains independent from Translation Profile,
+* whether Validation Profile references Translation intent,
+* whether Presentation overflow can request concise retranslation automatically,
+* whether OCR preprocessing intent belongs fully in OCR Profile,
+* exact inheritance semantics,
+* whether derived Revisions persist flattened configuration,
+* how semantic Profile diff rules are represented,
+* whether change impact is schema-derived or manually classified,
+* ResolvedProfileSnapshot retention,
+* ResolvedConfigurationSnapshot deduplication,
+* long-term Resolution Trace retention,
+* Profile test-case ownership,
+* approval requirements,
+* Candidate workflow,
+* Profile schema migration lifetime,
+* unknown extension handling,
+* imported-ID behavior,
+* Profile deletion semantics,
+* ownership transfer,
+* Profile synchronization across Workspaces/installations.
+
+---
+
+# Ownership Summary
+
+```text
+Profile Domain
+
+Profile owns
+    stable Profile identity
+    Profile Type
+    ownership
+    lifecycle
+    discovery metadata
+    active/default Revision references
+
+ProfileRevision owns
+    immutable behavioral configuration
+    schema version
+    compatibility declaration
+    revision lineage
+    semantic content hash
+
+ProfileApplicability owns
+    where a Profile may be applied
+
+ProfileDefaultSelection owns
+    scope-level selection policy
+
+ProfileReview owns
+    approval decision for exact Revision
+
+ProfileAuthority owns
+    governance / lock restrictions
+
+ResolvedProfileSnapshot owns
+    immutable effective configuration
+    for one Profile Type
+
+ResolvedConfigurationSnapshot owns
+    immutable operation-level composition
+    across several Profile Types
+
+ProfileCandidate owns
+    unconfirmed suggested configuration
+
+Runtime owns
+    provider choice
+    attempts
+    retries
+    queue state
+    concrete fallback
+    latency
+    token/cost measurements
+
+Policy owns
+    mandatory constraints
+
+User Preference owns
+    general user choices
+    default Profile selections
+```
+
+Profile is therefore the reusable intent/configuration domain, while resolved operation configuration, mandatory policy and runtime execution remain explicitly separated.
 
 ---
 
 # Related Documents
 
+Domain:
+
 * `README.md`
-* `WORKSPACE.md`
 * `PROJECT.md`
 * `BOOK.md`
 * `CHAPTER.md`
@@ -4035,25 +2550,29 @@ The MVP may defer:
 * `GLOSSARY.md`
 * `CHARACTER.md`
 * `SESSION.md`
+* `WORKSPACE.md`
+
+Architecture:
+
 * `docs/architecture/CAPABILITY_MAP.md`
+* `docs/architecture/OWNERSHIP_MAP.md`
 * `docs/architecture/DATA_FLOW.md`
 * `docs/architecture/STATE_MACHINE.md`
 * `docs/architecture/EVENT_BUS.md`
 * `docs/architecture/MODULE_DEPENDENCY.md`
+
+AI:
+
 * `docs/architecture/ai/PIPELINE.md`
 * `docs/architecture/ai/CONTEXT.md`
-* `docs/architecture/ai/MEMORY.md`
 * `docs/architecture/ai/PROMPTS.md`
-* `docs/architecture/ai/REQUEST.md`
-* `docs/architecture/ai/RESPONSE.md`
 * `docs/architecture/ai/ROUTING.md`
 * `docs/architecture/ai/CACHE.md`
+
+Presentation:
+
 * `docs/architecture/presentation/LAYOUT.md`
 * `docs/architecture/presentation/TYPOGRAPHY.md`
 * `docs/architecture/presentation/FONTS.md`
-* `docs/architecture/security/AUTHORIZATION.md`
-* `docs/architecture/runtime/JOB.md`
-* `docs/architecture/runtime/QUEUE.md`
-* `docs/architecture/integration/PROVIDER.md`
-* `docs/architecture/operations/USAGE.md`
-* `docs/architecture/operations/QUOTA.md`
+
+Module contracts remain authoritative for execution behavior, routing, provider adapters, runtime state and capability-specific processing.

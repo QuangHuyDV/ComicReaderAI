@@ -1,3937 +1,2908 @@
-# CRAI Event Bus
+# CRAI Event Bus Architecture
 
-Version: 0.1
-Status: Draft
-Document Type: Architecture
-Path: `docs/architecture/EVENT_BUS.md`
+> **Project:** CRAI
+> **Path:** `doc/01-architecture/core/EVENT_BUS.md`
+> **Version:** 2.0.0
+> **Status:** Architecture Draft
+> **Runtime Model:** Runtime v2
+> **Owner:** CRAI Architecture
+> **Last Updated:** 2026-08-10
 
 ---
 
-## 1. Mục đích
+# 1. Purpose
 
-Tài liệu này định nghĩa cơ chế giao tiếp dựa trên sự kiện trong CRAI.
+This document defines the architecture-wide Event Bus model used by CRAI.
 
-Event Bus được sử dụng để:
+The Event Bus provides asynchronous distribution of committed facts between components without requiring producers to know all consumers.
 
-* tách rời các module
-* truyền tín hiệu giữa các bước xử lý
-* điều phối reading session
-* điều phối processing pipeline
-* đồng bộ state machine
-* hỗ trợ cancellation
-* hỗ trợ retry và fallback
-* theo dõi tiến trình xử lý
-* giảm phụ thuộc trực tiếp giữa các module
-* hỗ trợ logging, metrics và tracing
-
-Ví dụ luồng xử lý:
+Its primary role is:
 
 ```text
-Watcher
-    ↓ emits
-CONTENT_CHANGE_DETECTED
+Committed Fact
     ↓
-Session Orchestrator
-    ↓ emits
-PIPELINE_CREATE_REQUESTED
+Event
     ↓
-Pipeline Orchestrator
-    ↓ emits
-CONTENT_ACQUIRE_REQUESTED
+Event Bus
+    ↓
+0..N Consumers
 ```
 
-Các module không nên tự gọi trực tiếp toàn bộ chuỗi:
+The Event Bus does not own:
 
 ```text
-Watcher → Capture → OCR → Translation → Renderer
+commands
+use-case invocation
+Runtime scheduling
+WorkItem creation
+Attempt creation
+retry policy
+cancellation authority
+pipeline orchestration
+module state transitions
+telemetry transport
+UI-local interaction
 ```
 
-Thay vào đó, việc điều phối phải đi qua event và orchestrator tương ứng.
-
 ---
 
-## 2. Phạm vi
+# 2. Central Rule
 
-Tài liệu này định nghĩa:
-
-1. Vai trò của Event Bus
-2. Loại event
-3. Event envelope
-4. Quy ước đặt tên
-5. Quy tắc publish và subscribe
-6. Event theo application
-7. Event theo reading session
-8. Event theo processing pipeline
-9. Event cho OCR
-10. Event cho translation
-11. Event cho render
-12. Event cho retry, fallback và cancellation
-13. Event ordering
-14. Event deduplication
-15. Error handling
-16. Logging và observability
-17. Event versioning
-18. Event Bus cho MVP
-
-Tài liệu này không định nghĩa chi tiết:
-
-* implementation của Event Bus
-* framework hoặc thư viện cụ thể
-* API của OCR provider
-* API của translation provider
-* cấu trúc database
-* UI component cụ thể
-
----
-
-# 3. Nguyên tắc thiết kế
-
-## 3.1 Event là thông báo về điều đã xảy ra
-
-Event nên diễn đạt một sự việc đã xảy ra.
-
-Ví dụ đúng:
+The core rule is:
 
 ```text
-CONTENT_CHANGED
-OCR_COMPLETED
-TRANSLATION_FAILED
-SESSION_PAUSED
+An Event describes
+something that has already happened.
+
+It does not request
+something to happen.
 ```
 
-Không nên sử dụng event như một lời gọi hàm mơ hồ.
-
-Ví dụ không tốt:
+Therefore:
 
 ```text
-DO_OCR
-RUN_TRANSLATION
-CALL_RENDERER
+PreferenceChanged
+ReadingContextChanged
+ArtifactPublished
+UiCapabilityChanged
 ```
 
-Tuy nhiên, CRAI vẫn cần các event dạng yêu cầu để điều phối tác vụ bất đồng bộ.
+may be valid events.
 
-Do đó hệ thống phân biệt rõ:
+But:
 
 ```text
-Command Event
-Domain Event
-Result Event
-System Event
+StartTranslationRequested
+RetryPipelineRequested
+CancelAttemptRequested
+RenderRequested
 ```
+
+are commands/intents and must not be disguised as Event Bus events.
 
 ---
 
-## 3.2 Event không trực tiếp thay đổi state
+# 3. Event Bus Position
 
-Event chỉ là đầu vào cho state machine.
-
-Ví dụ:
+Preferred architecture:
 
 ```text
-Event:
-OCR_COMPLETED
-
-State transition:
-OCR_PROCESSING → SEGMENTING
+Commands / Queries
+        ↓
+Application / Module Contracts
+        ↓
+Owner commits state/result
+        ↓
+Event created
+        ↓
+Event Bus
+        ↓
+Interested Consumers
 ```
 
-Event handler không được tự ý sửa state bằng cách gán trực tiếp.
+Execution does not begin because a command-like event happened.
 
-Không hợp lệ:
-
-```text
-pipeline.state = "SEGMENTING"
-```
-
-Hợp lệ:
-
-```text
-stateTransitionService.transition({
-  entityId: pipelineId,
-  event: "OCR_COMPLETED",
-  expectedState: "OCR_PROCESSING",
-  nextState: "SEGMENTING"
-})
-```
+Execution begins because an authoritative contract accepted a command or Runtime admitted work.
 
 ---
 
-## 3.3 Module phát event không cần biết consumer
+# 4. Event Bus Is Not a Command Bus
 
-Ví dụ:
-
-```text
-OCR Module
-    ↓ emits
-OCR_COMPLETED
-```
-
-OCR Module không cần biết:
-
-* Segmentation Module có tồn tại hay không
-* UI có đang theo dõi tiến trình hay không
-* Metrics có ghi nhận event hay không
-* Cache có lưu OCR result hay không
-
-Các consumer tự đăng ký event phù hợp.
-
----
-
-## 3.4 Event phải có đủ context
-
-Mọi event thuộc reading session hoặc processing pipeline phải mang tối thiểu các identifier phù hợp:
-
-```text
-sessionId
-pipelineId
-contentRevision
-correlationId
-```
-
-Nhờ đó hệ thống có thể:
-
-* chống stale result
-* trace toàn bộ pipeline
-* phân biệt nhiều session
-* bỏ qua event cũ
-* xử lý cancellation chính xác
-
----
-
-## 3.5 Không truyền dữ liệu lớn không cần thiết
-
-Event không nên luôn chứa toàn bộ:
-
-* ảnh màn hình
-* document lớn
-* model result lớn
-* nội dung truyện dài
-
-Đối với dữ liệu lớn, event nên mang reference:
-
-```text
-artifactRef
-contentRef
-imageBufferRef
-temporaryFileRef
-cacheKey
-```
-
-Trong cùng process, implementation có thể sử dụng memory reference nội bộ.
-
-Nếu về sau tách process, reference phải có thể truy xuất qua storage hoặc IPC.
-
----
-
-## 3.6 Event handler phải ngắn và có trách nhiệm rõ ràng
-
-Event handler không nên xử lý toàn bộ pipeline.
-
-Handler chỉ nên:
-
-* kiểm tra event
-* kiểm tra state
-* xác nhận revision
-* gọi một use case hoặc service phù hợp
-* phát result event
-* ghi log cần thiết
-
-Không nên:
-
-```text
-CONTENT_CHANGED handler
-    → capture
-    → OCR
-    → translate
-    → render
-```
-
----
-
-## 3.7 Event handler phải có khả năng bỏ qua event
-
-Event có thể bị bỏ qua nếu:
-
-* session đã dừng
-* pipeline đã bị hủy
-* content revision đã cũ
-* state hiện tại không chấp nhận event
-* event đã được xử lý
-* source không còn hợp lệ
-
-Bỏ qua event stale không được xem là application error.
-
----
-
-# 4. Vai trò của Event Bus trong kiến trúc
-
-Event Bus là lớp giao tiếp nội bộ.
-
-```text
-Source Adapter
-Watcher
-Capture
-OCR
-Translation
-Renderer
-Cache
-UI
-Session Manager
-Pipeline Orchestrator
-        │
-        └── Event Bus
-```
-
-Event Bus không thay thế toàn bộ lời gọi hàm.
-
-Có thể gọi trực tiếp khi:
-
-* thao tác nội bộ trong cùng module
-* đọc repository
-* gọi utility thuần túy
-* validate dữ liệu
-* thực hiện tính toán đồng bộ
-* gọi dependency theo interface rõ ràng
-
-Nên dùng event khi:
-
-* giao tiếp giữa module
-* tác vụ bất đồng bộ
-* phát thông báo trạng thái
-* một event có nhiều consumer
-* cần cancellation hoặc retry
-* cần tracking toàn pipeline
-* cần tách producer khỏi consumer
-
----
-
-# 5. Thành phần kiến trúc
-
-## 5.1 Event Publisher
-
-Phát event vào Event Bus.
-
-Ví dụ:
-
-```text
-Screen Watcher
-OCR Engine
-Translation Engine
-Session Manager
-Pipeline Orchestrator
-Renderer
-```
-
----
-
-## 5.2 Event Subscriber
-
-Đăng ký nhận một hoặc nhiều event.
-
-Ví dụ:
-
-```text
-Pipeline Orchestrator subscribes CONTENT_STABLE
-UI subscribes PIPELINE_PROGRESS_CHANGED
-Metrics subscribes OCR_COMPLETED
-Cache subscribes TRANSLATION_COMPLETED
-```
-
----
-
-## 5.3 Event Dispatcher
-
-Có trách nhiệm:
-
-* nhận event
-* validate envelope
-* tìm subscriber
-* chuyển event đến handler
-* cô lập lỗi handler
-* ghi nhận thời gian xử lý
-* hỗ trợ unsubscribe
-* hỗ trợ cancellation nếu implementation cho phép
-
----
-
-## 5.4 Event Registry
-
-Lưu danh sách event được hệ thống chấp nhận.
-
-Mỗi event nên có:
-
-```text
-eventName
-eventVersion
-eventCategory
-payloadSchema
-producer
-consumer
-deliveryMode
-orderingRequirement
-```
-
-Event Registry giúp tránh:
-
-* tên event trùng
-* payload không nhất quán
-* sử dụng event chưa khai báo
-* thay đổi schema không kiểm soát
-
----
-
-## 5.5 Event Middleware
-
-Middleware có thể xử lý:
-
-* logging
-* tracing
-* metrics
-* validation
-* deduplication
-* permission
-* stale-result check
-* error boundary
-* performance profiling
-
----
-
-# 6. Phân loại event
-
-## 6.1 Command Event
-
-Thể hiện yêu cầu thực hiện một hành động.
-
-Quy ước hậu tố:
-
-```text
-_REQUESTED
-```
-
-Ví dụ:
-
-```text
-SESSION_START_REQUESTED
-CONTENT_CAPTURE_REQUESTED
-OCR_PROCESS_REQUESTED
-TRANSLATION_REQUESTED
-PIPELINE_CANCEL_REQUESTED
-```
-
-Command Event thường có một consumer chính.
-
----
-
-## 6.2 Domain Event
-
-Thông báo một thay đổi có ý nghĩa trong domain.
-
-Ví dụ:
-
-```text
-SESSION_STARTED
-CONTENT_CHANGED
-SOURCE_STABLE
-REGION_CHANGED
-PROVIDER_CHANGED
-```
-
-Domain Event có thể có nhiều consumer.
-
----
-
-## 6.3 Result Event
-
-Thông báo kết quả của một tác vụ.
-
-Quy ước hậu tố:
-
-```text
-_COMPLETED
-_FAILED
-_SKIPPED
-_CANCELLED
-```
-
-Ví dụ:
-
-```text
-OCR_COMPLETED
-OCR_FAILED
-TRANSLATION_COMPLETED
-RENDER_COMPLETED
-PIPELINE_CANCELLED
-```
-
----
-
-## 6.4 Progress Event
-
-Thông báo tiến trình nhưng không làm thay đổi stage chính.
-
-Quy ước:
-
-```text
-_PROGRESS_CHANGED
-```
-
-Ví dụ:
-
-```text
-OCR_PROGRESS_CHANGED
-TRANSLATION_PROGRESS_CHANGED
-PIPELINE_PROGRESS_CHANGED
-```
-
-Progress Event có thể bị throttle hoặc drop nếu event đến quá nhanh.
-
----
-
-## 6.5 System Event
-
-Phản ánh trạng thái của application hoặc runtime.
-
-Ví dụ:
-
-```text
-APPLICATION_STARTED
-APPLICATION_SUSPENDED
-NETWORK_STATUS_CHANGED
-RESOURCE_PRESSURE_DETECTED
-SCREEN_CAPTURE_PERMISSION_CHANGED
-```
-
----
-
-# 7. Event Envelope
-
-Mọi event phải sử dụng một envelope thống nhất.
-
-Ví dụ khái niệm:
-
-```ts
-interface EventEnvelope<TPayload> {
-  eventId: string;
-  eventName: string;
-  eventVersion: number;
-
-  occurredAt: string;
-  publishedAt: string;
-
-  sourceModule: string;
-
-  correlationId: string;
-  causationId?: string;
-
-  applicationInstanceId: string;
-
-  sessionId?: string;
-  pipelineId?: string;
-  taskId?: string;
-  contentRevision?: number;
-
-  priority?: EventPriority;
-  payload: TPayload;
-
-  metadata?: Record<string, unknown>;
-}
-```
-
----
-
-## 7.1 `eventId`
-
-Identifier duy nhất của event.
-
-Dùng để:
-
-* deduplicate
-* tracing
-* debug
-* kiểm tra event đã xử lý chưa
-
-Ví dụ:
-
-```text
-evt_01JCRAI8X2K5
-```
-
----
-
-## 7.2 `eventName`
-
-Tên event theo registry.
-
-Ví dụ:
-
-```text
-OCR_COMPLETED
-```
-
----
-
-## 7.3 `eventVersion`
-
-Phiên bản schema của event.
-
-Ví dụ:
-
-```text
-1
-```
-
-Khi payload thay đổi không tương thích, tăng version.
-
----
-
-## 7.4 `occurredAt`
-
-Thời điểm sự việc thực tế xảy ra.
-
-Ví dụ OCR hoàn thành lúc nào.
-
----
-
-## 7.5 `publishedAt`
-
-Thời điểm event được đưa lên Event Bus.
-
-Thông thường gần với `occurredAt`, nhưng có thể khác nếu:
-
-* event được buffer
-* event được retry
-* event được khôi phục
-* event được phát sau khi ghi storage
-
----
-
-## 7.6 `sourceModule`
-
-Module phát event.
-
-Ví dụ:
-
-```text
-screen-watcher
-ocr-engine
-translation-engine
-session-manager
-pipeline-orchestrator
-```
-
----
-
-## 7.7 `correlationId`
-
-Identifier liên kết toàn bộ hành trình xử lý.
-
-Một pipeline thường dùng chung một `correlationId`.
-
-Ví dụ:
-
-```text
-CONTENT_CHANGED
-CONTENT_CAPTURE_REQUESTED
-CONTENT_CAPTURED
-OCR_PROCESS_REQUESTED
-OCR_COMPLETED
-TRANSLATION_COMPLETED
-RENDER_COMPLETED
-```
-
-đều có cùng `correlationId`.
-
----
-
-## 7.8 `causationId`
-
-`eventId` của event trực tiếp gây ra event hiện tại.
-
-Ví dụ:
-
-```text
-CONTENT_CHANGED
-eventId = evt-001
-```
-
-gây ra:
-
-```text
-PIPELINE_CREATE_REQUESTED
-causationId = evt-001
-```
-
----
-
-## 7.9 `applicationInstanceId`
-
-Phân biệt các lần chạy ứng dụng.
-
-Điều này giúp tránh xử lý event từ runtime cũ sau khi application restart.
-
----
-
-## 7.10 `sessionId`
-
-Bắt buộc với event liên quan đến reading session.
-
----
-
-## 7.11 `pipelineId`
-
-Bắt buộc với event liên quan đến processing pipeline.
-
----
-
-## 7.12 `taskId`
-
-Identifier của một tác vụ cụ thể.
-
-Ví dụ:
-
-```text
-captureTaskId
-ocrTaskId
-translationTaskId
-renderTaskId
-```
-
----
-
-## 7.13 `contentRevision`
-
-Bắt buộc với event liên quan đến nội dung.
-
-Event có revision cũ hơn revision hiện tại phải được xem là stale.
-
----
-
-## 7.14 `priority`
-
-Mức ưu tiên của event.
-
-Đề xuất:
-
-```text
-CRITICAL
-HIGH
-NORMAL
-LOW
-```
-
-Ví dụ:
-
-```text
-APPLICATION_SHUTDOWN_REQUESTED → CRITICAL
-PIPELINE_CANCEL_REQUESTED → HIGH
-CONTENT_CHANGED → NORMAL
-OCR_PROGRESS_CHANGED → LOW
-```
-
----
-
-## 7.15 `payload`
-
-Dữ liệu riêng của event.
-
-Payload phải:
-
-* có schema rõ ràng
-* không chứa secret
-* không chứa dữ liệu dư thừa
-* không thay đổi sau khi publish
-
----
-
-## 7.16 `metadata`
-
-Dữ liệu bổ sung không thuộc domain chính.
-
-Ví dụ:
-
-```text
-trace flags
-debug information
-runtime platform
-provider latency
-feature flag
-```
-
-Không nên dựa vào metadata để thực hiện logic nghiệp vụ bắt buộc.
-
----
-
-# 8. Quy ước đặt tên event
-
-Tên event sử dụng:
-
-```text
-UPPER_SNAKE_CASE
-```
-
-Cấu trúc khuyến nghị:
-
-```text
-<SUBJECT>_<ACTION>_<STATUS>
-```
-
-Ví dụ:
-
-```text
-SESSION_START_REQUESTED
-SESSION_STARTED
-CONTENT_CAPTURE_REQUESTED
-CONTENT_CAPTURE_COMPLETED
-OCR_PROCESS_REQUESTED
-OCR_COMPLETED
-TRANSLATION_FAILED
-```
-
----
-
-## 8.1 Event yêu cầu
+Do not use:
 
 ```text
 *_REQUESTED
 ```
 
-Ví dụ:
+as the default Event Bus command pattern.
+
+Examples removed from the architecture:
 
 ```text
-APPLICATION_SHUTDOWN_REQUESTED
-SESSION_CREATE_REQUESTED
+SESSION_START_REQUESTED
+CONTENT_CAPTURE_REQUESTED
+OCR_PROCESS_REQUESTED
+TRANSLATION_REQUESTED
 PIPELINE_CANCEL_REQUESTED
+RENDER_REQUESTED
 ```
+
+These represent intent or command semantics.
+
+They belong to:
+
+```text
+Application Commands
+Module Contracts
+Runtime Contracts
+UiIntent
+```
+
+depending on owner.
 
 ---
 
-## 8.2 Event bắt đầu
+# 5. Event Bus Is Not Runtime Scheduler
+
+The Event Bus must not determine:
 
 ```text
-*_STARTED
+which WorkItem becomes READY
+which Attempt runs
+when retry occurs
+when cancellation commits
+which provider is selected
+which work gets queue priority
 ```
 
-Ví dụ:
-
-```text
-SESSION_STARTED
-OCR_STARTED
-TRANSLATION_STARTED
-```
-
-Không bắt buộc mọi tác vụ đều phát event `STARTED`.
-
-Chỉ nên phát nếu event này hữu ích cho:
-
-* state transition
-* UI progress
-* metrics
-* timeout tracking
+Those belong to Runtime and owning policies.
 
 ---
 
-## 8.3 Event hoàn thành
+# 6. Event Bus Is Not Pipeline Orchestrator
+
+CRAI v2 does not use:
 
 ```text
-*_COMPLETED
-```
-
-Ví dụ:
-
-```text
-CONTENT_CAPTURE_COMPLETED
-OCR_COMPLETED
-TRANSLATION_COMPLETED
-RENDER_COMPLETED
-```
-
----
-
-## 8.4 Event thất bại
-
-```text
-*_FAILED
-```
-
-Ví dụ:
-
-```text
-OCR_FAILED
-TRANSLATION_FAILED
-RENDER_FAILED
-```
-
-Payload phải chứa error classification.
-
----
-
-## 8.5 Event bị bỏ qua
-
-```text
-*_SKIPPED
-```
-
-Ví dụ:
-
-```text
-OCR_SKIPPED
-TRANSLATION_SKIPPED
-PIPELINE_SKIPPED
-```
-
-`SKIPPED` không phải lỗi.
-
----
-
-## 8.6 Event bị hủy
-
-```text
-*_CANCEL_REQUESTED
-*_CANCELLED
-```
-
-Ví dụ:
-
-```text
-PIPELINE_CANCEL_REQUESTED
-PIPELINE_CANCELLED
-OCR_CANCELLED
-```
-
----
-
-## 8.7 Event thay đổi
-
-```text
-*_CHANGED
-```
-
-Ví dụ:
-
-```text
-CONTENT_CHANGED
-REGION_CHANGED
-PROVIDER_CHANGED
-NETWORK_STATUS_CHANGED
-```
-
----
-
-# 9. Delivery Model
-
-## 9.1 In-process delivery
-
-Trong MVP, Event Bus có thể chạy hoàn toàn trong application process.
-
-Ưu điểm:
-
-* đơn giản
-* nhanh
-* không cần broker
-* dễ debug
-* phù hợp desktop application
-* ít tài nguyên
-
-Luồng:
-
-```text
-Publisher
+RecognitionCompleted
     ↓
-In-memory Event Bus
+Event Bus
     ↓
-Subscriber
+TextProcessingRequested
+
+TextProcessingCompleted
+    ↓
+Event Bus
+    ↓
+TranslationRequested
+```
+
+as execution control.
+
+Preferred:
+
+```text
+BusinessExecutionPlan
+        ↓
+Runtime dependency graph
+        ↓
+WorkItem readiness
+```
+
+Module events may describe completed facts.
+
+They do not directly command downstream modules.
+
+---
+
+# 7. Event Bus Is Not State Authority
+
+An Event Bus does not own state.
+
+Correct:
+
+```text
+Owner validates transition
+    ↓
+Owner commits state
+    ↓
+Event published
+```
+
+Incorrect:
+
+```text
+Event published
+    ↓
+subscriber decides state
+```
+
+The committed owner state remains authoritative even if event delivery later fails.
+
+---
+
+# 8. Event Bus Is Not Telemetry Bus
+
+Logging, Metrics and Tracing are observability transports.
+
+They must not require every diagnostic signal to become a business event.
+
+Preferred:
+
+```text
+Business Event
+    ├── Event Bus consumers
+    └── Diagnostics may observe
+
+Operational Telemetry
+    ↓
+Logging / Telemetry Infrastructure
+```
+
+Do not publish:
+
+```text
+LogRecorded
+MetricUpdated
+TraceStarted
+TraceCompleted
+```
+
+through the business Event Bus merely to support observability.
+
+---
+
+# 9. Event Bus Is Not UI Event Bus
+
+Native/UI-local events remain outside the business Event Bus by default.
+
+Examples:
+
+```text
+ButtonClicked
+PointerMoved
+ScrollChanged
+ViewOpened
+DialogResponded
+NotificationShown
+WindowResized
+```
+
+These belong to UI-local mechanisms.
+
+A semantic user action becomes a command/UiIntent through UI Adapter/Application.
+
+---
+
+# 10. Event Definition
+
+An Event is an immutable record of a committed fact.
+
+Conceptually:
+
+```text
+Event
+├── identity
+├── schema identity
+├── occurrence time
+├── producer
+├── correlation metadata
+├── causation metadata
+├── typed authority references
+└── immutable payload
 ```
 
 ---
 
-## 9.2 Inter-process delivery
+# 11. Event Categories
 
-Nếu CRAI tách thành nhiều process:
+CRAI v2 recognizes primarily:
 
 ```text
-UI Process
-Core Process
-OCR Worker
-Capture Worker
+Domain Event
+State/Capability Event
+Artifact Event
+Runtime Fact Event
+Integration/System Fact Event
 ```
 
-Event Bus có thể cần sử dụng:
+These categories remain factual.
 
-* IPC
-* local socket
-* named pipe
-* worker channel
-* process messaging
-
-Event envelope không nên phụ thuộc vào in-memory object không serialize được.
+There is no `Command Event` category.
 
 ---
 
-## 9.3 Persistent delivery
+# 12. Domain Event
 
-Phần lớn event runtime của CRAI không cần lưu bền vững.
+Represents a committed domain fact.
 
-Ví dụ không cần persist:
-
-```text
-OCR_PROGRESS_CHANGED
-SCREEN_FRAME_CHANGED
-RENDER_STARTED
-```
-
-Một số event hoặc state có thể cần persist gián tiếp:
+Examples:
 
 ```text
-SESSION_CONFIGURATION_CHANGED
-SESSION_STOPPED
-TRANSLATION_USER_EDITED
-GLOSSARY_ENTRY_UPDATED
-```
-
-Việc persist nên do module storage xử lý, không phải Event Bus tự lưu mọi event.
-
----
-
-# 10. Delivery Semantics
-
-Đối với MVP, delivery semantic đề xuất là:
-
-```text
-At-most-once trong cùng process
-```
-
-Tuy nhiên handler vẫn nên có khả năng idempotent khi phù hợp.
-
-Nếu về sau dùng IPC hoặc message broker, hệ thống có thể chuyển sang:
-
-```text
-At-least-once
-```
-
-Khi đó bắt buộc có:
-
-* event deduplication
-* idempotent handlers
-* processed event tracking cho event quan trọng
-
----
-
-# 11. Event Ordering
-
-## 11.1 Ordering theo session
-
-Event trong cùng một session phải được xử lý theo thứ tự hợp lý.
-
-Ví dụ:
-
-```text
-SESSION_STARTED
-CONTENT_CHANGED
-PIPELINE_CREATED
-SESSION_STOPPED
-```
-
-Không được xử lý `CONTENT_CHANGED` sau `SESSION_STOPPED`.
-
----
-
-## 11.2 Ordering theo pipeline
-
-Event của cùng một pipeline phải tôn trọng state machine.
-
-Ví dụ hợp lệ:
-
-```text
-OCR_STARTED
-OCR_COMPLETED
-TRANSLATION_STARTED
-```
-
-Ví dụ không hợp lệ:
-
-```text
-TRANSLATION_STARTED
-OCR_COMPLETED
-```
-
-trừ trường hợp pipeline không cần OCR.
-
----
-
-## 11.3 Không yêu cầu global ordering
-
-Không cần đảm bảo event giữa các session khác nhau có thứ tự toàn cục.
-
-Ví dụ:
-
-```text
-Session A: OCR_COMPLETED
-Session B: CONTENT_CHANGED
-```
-
-có thể được xử lý song song.
-
----
-
-## 11.4 Sequence Number
-
-Có thể bổ sung:
-
-```text
-sessionSequence
-pipelineSequence
-```
-
-Ví dụ:
-
-```ts
-sessionSequence: 27
-pipelineSequence: 8
-```
-
-Dùng để phát hiện:
-
-* event đến trễ
-* event sai thứ tự
-* event bị thiếu
-
-Trong MVP, `contentRevision` và state validation có thể đã đủ.
-
----
-
-# 12. Event Validation
-
-Trước khi dispatch, Event Bus phải kiểm tra:
-
-```text
-eventId tồn tại
-eventName đã đăng ký
-eventVersion được hỗ trợ
-occurredAt hợp lệ
-sourceModule tồn tại
-payload đúng schema
-identifier bắt buộc tồn tại
-```
-
-Đối với pipeline event:
-
-```text
-sessionId tồn tại
-pipelineId tồn tại
-contentRevision tồn tại
-correlationId tồn tại
-```
-
-Event không hợp lệ phải:
-
-* bị từ chối
-* được ghi log
-* tăng invalid event metric
-* không làm crash application
-
----
-
-# 13. Subscriber Failure Isolation
-
-Một subscriber thất bại không được ngăn subscriber khác nhận event.
-
-Ví dụ:
-
-```text
-OCR_COMPLETED
-    ├── Pipeline Orchestrator
-    ├── Cache
-    ├── Metrics
-    └── UI Progress
-```
-
-Nếu Metrics handler lỗi, Pipeline Orchestrator vẫn phải được xử lý.
-
-Event Dispatcher cần:
-
-* cô lập từng handler
-* bắt exception
-* ghi subscriber name
-* áp dụng timeout nếu cần
-* không propagate lỗi không kiểm soát
-
----
-
-# 14. Application Events
-
-## 14.1 Lifecycle Events
-
-```text
-APPLICATION_START_REQUESTED
-APPLICATION_STARTED
-APPLICATION_INITIALIZATION_STARTED
-APPLICATION_READY
-APPLICATION_BACKGROUND_ENTERED
-APPLICATION_FOREGROUND_ENTERED
-APPLICATION_SUSPEND_REQUESTED
-APPLICATION_SUSPENDED
-APPLICATION_RESUME_REQUESTED
-APPLICATION_RESUMED
-APPLICATION_SHUTDOWN_REQUESTED
-APPLICATION_SHUTTING_DOWN
-APPLICATION_TERMINATED
-APPLICATION_FATAL_ERROR_OCCURRED
+ReadingSessionCreated
+ReadingSessionPaused
+ReadingContextChanged
+PreferenceChanged
+SourceProfileChanged
 ```
 
 ---
 
-## 14.2 `APPLICATION_READY`
+# 13. State / Capability Event
 
-Phát khi các capability tối thiểu đã sẵn sàng.
+Represents an owner-confirmed capability or lifecycle fact.
 
-Payload đề xuất:
+Examples:
 
-```ts
-interface ApplicationReadyPayload {
-  availableCapabilities: string[];
-  degradedCapabilities: string[];
-  unavailableCapabilities: string[];
-  restoredSessionCount: number;
-}
+```text
+DiagnosticCapabilityChanged
+UiCapabilityChanged
+ProviderAvailabilityChanged
+ApplicationDegraded
+```
+
+Only publish when asynchronous consumers actually need the fact.
+
+---
+
+# 14. Artifact Event
+
+Represents a committed Artifact lifecycle fact.
+
+Examples:
+
+```text
+RecognitionArtifactPublished
+SourceDocumentArtifactPublished
+TranslationArtifactPublished
+PresentationArtifactPublished
+```
+
+Artifact event names must correspond to actual module contracts.
+
+Do not invent generic names if the module's `EVENTS.md` defines another canonical name.
+
+---
+
+# 15. Runtime Fact Event
+
+Runtime may expose selected committed execution facts.
+
+Possible examples:
+
+```text
+WorkItemSucceeded
+WorkItemFailed
+AttemptTimedOut
+RuntimeRevisionSuperseded
+```
+
+These events are facts.
+
+They are not how Runtime controls itself.
+
+---
+
+# 16. Integration/System Fact Event
+
+Represents external/platform facts that matter asynchronously.
+
+Examples:
+
+```text
+NetworkAvailabilityChanged
+ScreenCapturePermissionChanged
+ResourcePressureDetected
+```
+
+Only publish when another component genuinely requires asynchronous awareness.
+
+---
+
+# 17. Event Naming
+
+Preferred event naming:
+
+```text
+PascalCase past-tense fact
+```
+
+Examples:
+
+```text
+ReadingContextChanged
+PreferenceChanged
+TranslationArtifactPublished
+RuntimeRevisionSuperseded
+UiCapabilityChanged
+```
+
+Module-specific documents remain authoritative for exact names.
+
+---
+
+# 18. No `_REQUESTED` Convention
+
+The v1 pattern:
+
+```text
+<THING>_<ACTION>_REQUESTED
+```
+
+is removed from Event Bus architecture.
+
+A request is a:
+
+```text
+Command
+Intent
+Use-case request
+Runtime request
+```
+
+not a fact.
+
+---
+
+# 19. Completed / Failed Naming
+
+Names such as:
+
+```text
+RecognitionCompleted
+TranslationFailed
+```
+
+may be valid only if they describe a stable owner-owned fact.
+
+However, prefer stronger semantic names when possible.
+
+Example:
+
+```text
+TranslationArtifactPublished
+```
+
+communicates more architecture meaning than:
+
+```text
+TranslationCompleted
 ```
 
 ---
 
-## 14.3 `APPLICATION_FATAL_ERROR_OCCURRED`
+# 20. Event Is Not Necessarily Required
 
-Payload đề xuất:
+A committed fact does not require an Event Bus event unless asynchronous consumers need it.
 
-```ts
-interface ApplicationFatalErrorPayload {
-  errorCode: string;
-  message: string;
-  failedModule?: string;
-  recoverable: boolean;
-}
+Example:
+
+```text
+Preference successfully read
 ```
 
-Không chứa:
+does not require:
+
+```text
+PreferenceReadCompleted
+```
+
+unless there is a real consumer.
+
+Avoid event proliferation.
+
+---
+
+# 21. Event Envelope
+
+Canonical conceptual envelope:
+
+```text
+EventEnvelope<TPayload>
+├── eventId
+├── eventName
+├── eventVersion
+├── occurredAt
+├── publishedAt
+├── sourceModule
+├── correlationId?
+├── causationId?
+├── applicationInstanceId?
+├── authorityRefs?
+├── payload
+└── metadata?
+```
+
+---
+
+# 22. `eventId`
+
+Unique identity of one event occurrence.
+
+Used for:
+
+```text
+deduplication
+diagnostics
+delivery tracking
+debugging
+```
+
+`eventId` is the canonical event identity.
+
+---
+
+# 23. `eventName`
+
+Stable registered event type.
+
+Example:
+
+```text
+ReadingContextChanged
+```
+
+---
+
+# 24. `eventVersion`
+
+Schema compatibility version.
+
+Conceptually:
+
+```text
+1
+2
+3
+```
+
+It does not represent:
+
+```text
+ReadingContextRevision
+PreferenceRevision
+RuntimeRevisionId
+ArtifactVersion
+```
+
+---
+
+# 25. `occurredAt`
+
+The time the fact became true.
+
+---
+
+# 26. `publishedAt`
+
+The time the event was placed onto Event Bus.
+
+Normally:
+
+```text
+occurredAt <= publishedAt
+```
+
+They may differ due to:
+
+```text
+buffering
+transaction/outbox publication
+recovery
+IPC
+delivery retry
+```
+
+---
+
+# 27. `sourceModule`
+
+The owner that produced the fact.
+
+Examples:
+
+```text
+reading-session
+preferences
+recognition
+translation
+runtime
+diagnostics
+ui-adapter
+```
+
+---
+
+# 28. `correlationId`
+
+Groups related work/use-case activity.
+
+A CorrelationId is not event identity.
+
+Multiple events may share one CorrelationId.
+
+---
+
+# 29. `causationId`
+
+Optional identifier of the immediate cause.
+
+It may reference:
+
+```text
+commandId
+intentId
+eventId
+WorkItemId
+AttemptId
+```
+
+depending on the originating contract.
+
+Do not assume causation is always another event.
+
+---
+
+# 30. `applicationInstanceId`
+
+May distinguish application process instances.
+
+Useful for:
+
+```text
+crash recovery
+IPC
+stale process protection
+diagnostics
+```
+
+Not all events require it.
+
+---
+
+# 31. Typed Authority References
+
+Do not use a fixed legacy set:
+
+```text
+sessionId
+pipelineId
+taskId
+contentRevision
+```
+
+for every event.
+
+Instead, events carry owner-relevant typed references.
+
+Possible:
+
+```text
+sessionId
+readingContextRevision
+
+runtimeRevisionId
+workItemId
+attemptId
+
+artifactId
+artifactVersion
+
+preferenceRevision
+presentationRevision
+
+frontendId
+```
+
+Only fields relevant to that event should exist.
+
+---
+
+# 32. No Universal `pipelineId`
+
+`pipelineId` is not an architecture-wide event requirement in Runtime v2.
+
+Business pipeline topology and Runtime execution identity are distinct concepts.
+
+---
+
+# 33. No Universal `taskId`
+
+Use:
+
+```text
+WorkItemId
+AttemptId
+```
+
+where Runtime identity is required.
+
+Do not keep a generic `taskId` solely for legacy compatibility.
+
+---
+
+# 34. No Universal `contentRevision`
+
+Use the revision actually owned by the source domain.
+
+Examples:
+
+```text
+ReadingContextRevision
+PreferenceRevision
+PresentationRevision
+```
+
+Do not treat all changes as one numeric `contentRevision`.
+
+---
+
+# 35. Payload
+
+Payload contains data specific to the fact.
+
+Rules:
+
+```text
+immutable
+schema-defined
+minimal
+privacy-safe
+serializable where practical
+```
+
+---
+
+# 36. Large Payloads
+
+Events should not carry large raw objects such as:
+
+```text
+screenshots
+large OCR result graphs
+full documents
+full translation documents
+large diagnostic bundles
+```
+
+Prefer:
+
+```text
+ArtifactRef
+ContentRef
+BlobRef
+SnapshotRef
+```
+
+where architecture supports them.
+
+---
+
+# 37. References Must Be Stable Enough
+
+Do not place an unsafe process-only pointer into a public event if the architecture may later cross process boundaries.
+
+Bad:
+
+```text
+native image buffer pointer
+DOM node
+Qt pointer
+native window object
+```
+
+Preferred:
+
+```text
+opaque stable reference
+ArtifactId
+platform-neutral resource reference
+```
+
+---
+
+# 38. Metadata
+
+Metadata may include non-authoritative transport/diagnostic context.
+
+Examples:
+
+```text
+trace context
+safe debug flags
+schema hints
+transport metadata
+```
+
+Business decisions must not depend on optional metadata.
+
+---
+
+# 39. Privacy
+
+Event payload and metadata MUST NOT expose:
 
 ```text
 API key
 access token
-nội dung truyện
-ảnh chụp màn hình
+cookie
+private key
+provider secret
+raw screenshot
+raw OCR text
+full translation text
+clipboard content
 ```
+
+unless explicitly allowed by a narrowly defined internal contract.
+
+Default architecture should prefer references.
 
 ---
 
-# 15. Session Events
+# 40. Event Registry
 
-## 15.1 Session lifecycle
+CRAI may maintain a registry.
+
+Conceptually:
 
 ```text
-SESSION_CREATE_REQUESTED
-SESSION_CREATED
-SESSION_CONFIGURE_REQUESTED
-SESSION_CONFIGURATION_CHANGED
-SESSION_READY
-SESSION_START_REQUESTED
-SESSION_STARTED
-SESSION_PAUSE_REQUESTED
-SESSION_PAUSED
-SESSION_RESUME_REQUESTED
-SESSION_RESUMED
-SESSION_STOP_REQUESTED
-SESSION_STOPPING
-SESSION_STOPPED
-SESSION_ERROR_OCCURRED
-SESSION_RECOVERY_REQUESTED
-SESSION_RECOVERED
-SESSION_RECOVERY_FAILED
+EventDefinition
+├── eventName
+├── currentVersion
+├── ownerModule
+├── payloadSchema
+├── deliveryExpectation
+├── orderingScope?
+├── compatibilityPolicy
+└── privacyClassification
 ```
 
 ---
 
-## 15.2 `SESSION_CREATE_REQUESTED`
+# 41. Registry Consumer List
 
-Payload:
+A static list of consumers may be useful for documentation.
 
-```ts
-interface SessionCreateRequestedPayload {
-  sessionType:
-    | "TEXT_READING"
-    | "IMAGE_READING"
-    | "MANUAL_IMAGE"
-    | "CLIPBOARD"
-    | "DOCUMENT";
+It must not imply the producer owns those consumers.
 
-  sourceType: string;
-  initialConfiguration?: Record<string, unknown>;
-}
-```
+Consumers may evolve independently.
 
 ---
 
-## 15.3 `SESSION_CREATED`
+# 42. Event Publication Rule
 
-Payload:
-
-```ts
-interface SessionCreatedPayload {
-  sessionType: string;
-  sourceType: string;
-  createdAt: string;
-}
-```
-
-Event envelope phải có `sessionId`.
-
----
-
-## 15.4 `SESSION_CONFIGURATION_CHANGED`
-
-Payload có thể bao gồm các trường đã thay đổi:
-
-```ts
-interface SessionConfigurationChangedPayload {
-  changedFields: string[];
-  configurationVersion: number;
-  requiresPipelineCancellation: boolean;
-  requiresWatcherRestart: boolean;
-}
-```
-
-Không nhất thiết đưa toàn bộ settings vào event.
-
----
-
-## 15.5 `SESSION_STARTED`
-
-Payload:
-
-```ts
-interface SessionStartedPayload {
-  sourceType: string;
-  displayMode: string;
-  watcherMode?: string;
-}
-```
-
----
-
-## 15.6 `SESSION_PAUSE_REQUESTED`
-
-Payload:
-
-```ts
-interface SessionPauseRequestedPayload {
-  pausePolicy:
-    | "CANCEL_IMMEDIATELY"
-    | "FINISH_CURRENT_STAGE"
-    | "FINISH_CURRENT_PIPELINE";
-
-  reason: string;
-}
-```
-
----
-
-## 15.7 `SESSION_STOP_REQUESTED`
-
-Payload:
-
-```ts
-interface SessionStopRequestedPayload {
-  reason:
-    | "USER_REQUESTED"
-    | "APPLICATION_SHUTDOWN"
-    | "SOURCE_CLOSED"
-    | "SESSION_ERROR"
-    | "REPLACED_BY_NEW_SESSION";
-}
-```
-
----
-
-# 16. Source và Watcher Events
-
-## 16.1 Source events
+The canonical publication order is:
 
 ```text
-SOURCE_ATTACH_REQUESTED
-SOURCE_ATTACHED
-SOURCE_DETACHED
-SOURCE_UNAVAILABLE
-SOURCE_IDENTITY_CHANGED
-SOURCE_BOUNDS_CHANGED
-SOURCE_VISIBILITY_CHANGED
+validate operation
+    ↓
+commit authoritative state/result
+    ↓
+construct immutable event
+    ↓
+publish
 ```
 
 ---
 
-## 16.2 Watcher events
+# 43. Publish-After-Commit
+
+Never publish:
 
 ```text
-WATCHER_START_REQUESTED
-WATCHER_STARTED
-WATCHER_STOP_REQUESTED
-WATCHER_STOPPED
-WATCHER_FAILED
-CONTENT_CHANGE_DETECTED
-CONTENT_STABILITY_WAIT_STARTED
-CONTENT_STABLE
-CONTENT_STABILITY_TIMEOUT
+ReadingContextChanged
 ```
 
----
+before Reading Session has actually committed the new ReadingContextRevision.
 
-## 16.3 `CONTENT_CHANGE_DETECTED`
-
-Payload:
-
-```ts
-interface ContentChangeDetectedPayload {
-  changeType:
-    | "TEXT_CHANGED"
-    | "FRAME_CHANGED"
-    | "SCROLL_CHANGED"
-    | "PAGE_CHANGED"
-    | "IMAGE_LOADED"
-    | "CLIPBOARD_CHANGED"
-    | "MANUAL_TRIGGER";
-
-  sourceFingerprint?: string;
-  changedRegion?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-
-  changeMagnitude?: number;
-  detectedAt: string;
-}
-```
-
-Đây là event tần suất cao.
-
-Event Bus hoặc Watcher cần áp dụng:
-
-* debounce
-* coalescing
-* throttling
-* latest-event-wins
-
----
-
-## 16.4 `CONTENT_STABLE`
-
-Payload:
-
-```ts
-interface ContentStablePayload {
-  stableDurationMs: number;
-  sourceFingerprint?: string;
-  regionVersion: number;
-  stabilityMethod:
-    | "FRAME_HASH"
-    | "PIXEL_DIFF"
-    | "DOM_IDLE"
-    | "SCROLL_IDLE"
-    | "MANUAL";
-}
-```
-
----
-
-# 17. Pipeline Events
-
-## 17.1 Lifecycle
+Likewise:
 
 ```text
-PIPELINE_CREATE_REQUESTED
-PIPELINE_CREATED
-PIPELINE_STARTED
-PIPELINE_PROGRESS_CHANGED
-PIPELINE_COMPLETE_REQUESTED
-PIPELINE_COMPLETED
-PIPELINE_SKIP_REQUESTED
-PIPELINE_SKIPPED
-PIPELINE_CANCEL_REQUESTED
-PIPELINE_CANCELLING
-PIPELINE_CANCELLED
-PIPELINE_FAILED
-PIPELINE_STALE_DETECTED
+TranslationArtifactPublished
+```
+
+must not occur before Artifact publication commits.
+
+---
+
+# 44. Publication Failure
+
+If:
+
+```text
+state/result commit succeeds
+```
+
+but:
+
+```text
+event publication fails
+```
+
+the committed state/result remains authoritative.
+
+Do not rollback valid domain state solely because notification failed.
+
+---
+
+# 45. Reliable Publication
+
+If guaranteed notification becomes important, infrastructure may later use:
+
+```text
+transactional outbox
+durable local queue
+journal
+IPC retry
+```
+
+This is infrastructure policy.
+
+It does not change event semantics.
+
+---
+
+# 46. Event Consumption
+
+A subscriber may:
+
+```text
+update a read projection
+invalidate non-authoritative cache
+refresh UI/application projection
+trigger diagnostics
+record audit information
+schedule follow-up use-case evaluation through an explicit contract
+```
+
+A subscriber must not assume receiving an event grants business authority.
+
+---
+
+# 47. Event Handler Responsibilities
+
+A handler should:
+
+```text
+validate envelope
+validate supported version
+check consumer relevance
+deduplicate where required
+invoke bounded consumer logic
+record diagnostics
 ```
 
 ---
 
-## 17.2 `PIPELINE_CREATE_REQUESTED`
+# 48. Event Handler Must Remain Bounded
 
-Payload:
+Avoid:
 
-```ts
-interface PipelineCreateRequestedPayload {
-  triggerType:
-    | "CONTENT_CHANGED"
-    | "MANUAL_CAPTURE"
-    | "RETRY"
-    | "RESTORE"
-    | "PROVIDER_FALLBACK";
+```text
+event handler
+    ↓
+long provider request
+    ↓
+OCR
+    ↓
+Translation
+    ↓
+Presentation
+```
 
-  sourceType: string;
-  requiresStabilityWait: boolean;
-  priority: "HIGH" | "NORMAL" | "LOW";
-}
+Long-running work should be submitted through explicit Application/Runtime contracts.
+
+---
+
+# 49. Event Handler Is Not Runtime Worker
+
+Do not model:
+
+```text
+Async Subscriber = OCR Worker
+```
+
+as the core architecture.
+
+Runtime workers execute WorkItems/Attempts.
+
+The Event Bus may notify interested consumers of the resulting facts.
+
+---
+
+# 50. Subscriber Failure Isolation
+
+One subscriber failure should not prevent unrelated subscribers from receiving the event where the transport model supports isolation.
+
+Conceptually:
+
+```text
+Event
+ ├── Consumer A succeeds
+ ├── Consumer B fails
+ └── Consumer C succeeds
+```
+
+Consumer B failure does not invalidate the producer's committed fact.
+
+---
+
+# 51. Subscriber Errors
+
+Subscriber failures are:
+
+```text
+consumer-side failures
+```
+
+not producer domain failure.
+
+Infrastructure/Diagnostics records them separately.
+
+---
+
+# 52. Delivery Model — MVP
+
+Recommended MVP:
+
+```text
+in-process
+in-memory
+typed Event Bus
+```
+
+Advantages:
+
+```text
+simple
+fast
+low resource cost
+easy local debugging
+appropriate for desktop-first MVP
 ```
 
 ---
 
-## 17.3 `PIPELINE_CREATED`
+# 53. Future Inter-Process Delivery
 
-Payload:
+If CRAI later separates:
 
-```ts
-interface PipelineCreatedPayload {
-  triggerType: string;
-  initialState:
-    | "WAITING_FOR_STABILITY"
-    | "ACQUIRING_CONTENT";
-
-  createdAt: string;
-}
+```text
+UI process
+Core process
+Capture worker
+Recognition worker
 ```
 
-Envelope bắt buộc có:
+the logical Event Bus contract may use:
+
+```text
+IPC
+named pipe
+local socket
+process messaging
+```
+
+Event semantics should remain stable.
+
+---
+
+# 54. Serialization Boundary
+
+Public Event Bus schemas should avoid relying on:
+
+```text
+non-serializable framework objects
+raw pointers
+closures
+native controls
+SDK instances
+```
+
+---
+
+# 55. Persistent Event Store
+
+CRAI Event Bus is not an event-sourcing store by default.
+
+Events do not automatically become permanent application history.
+
+Persistence of domain state remains owner-specific.
+
+---
+
+# 56. Delivery Semantics
+
+Delivery semantics belong to Event Bus infrastructure.
+
+MVP may use:
+
+```text
+at-most-once in-process delivery
+```
+
+if that matches implementation.
+
+Future transports may provide:
+
+```text
+at-least-once
+```
+
+for selected events.
+
+Consumers must not assume exactly-once execution.
+
+---
+
+# 57. Exactly-Once Is Not Required
+
+Correctness must not depend on exactly-once delivery.
+
+Use:
+
+```text
+eventId
+idempotent consumer behavior
+authoritative state/revision checks
+```
+
+where duplication matters.
+
+---
+
+# 58. Event Identity
+
+Duplicate detection is based primarily on:
+
+```text
+eventId
+```
+
+for one subscriber.
+
+Do not define duplicate identity as:
 
 ```text
 sessionId
-pipelineId
-contentRevision
++ pipelineId
++ eventName
++ taskId
+```
+
+because those fields may describe different legitimate facts.
+
+---
+
+# 59. Correlation Is Not Deduplication
+
+Two different events may share:
+
+```text
 correlationId
 ```
 
+They must not be treated as duplicates.
+
 ---
 
-## 17.4 `PIPELINE_PROGRESS_CHANGED`
+# 60. Timestamp Is Not Deduplication
 
-Payload:
+Two events may have identical or near-identical timestamps.
 
-```ts
-interface PipelineProgressChangedPayload {
-  stage: string;
-  progress?: number;
-  messageCode?: string;
-}
-```
+Timestamp is not identity.
 
-Không nên phát quá nhiều event.
+---
 
-Khuyến nghị throttle:
+# 61. Ordering
+
+CRAI does not require global event ordering.
+
+Independent owners may publish concurrently.
+
+---
+
+# 62. Owner-Scoped Ordering
+
+Where an owner exposes monotonically increasing revisions, consumers should prefer those revisions to transport order.
+
+Example:
 
 ```text
-100–250 ms
+ReadingContextChanged
+revision = 13
 ```
 
-hoặc chỉ phát khi progress thay đổi đáng kể.
-
----
-
-## 17.5 `PIPELINE_STALE_DETECTED`
-
-Phát khi event hoặc result không còn thuộc nội dung hiện tại.
-
-Payload:
-
-```ts
-interface PipelineStaleDetectedPayload {
-  pipelineRevision: number;
-  currentRevision: number;
-  detectedAtStage: string;
-  resultCacheable: boolean;
-}
-```
-
----
-
-## 17.6 `PIPELINE_CANCEL_REQUESTED`
-
-Payload:
-
-```ts
-interface PipelineCancelRequestedPayload {
-  reason:
-    | "NEWER_CONTENT_AVAILABLE"
-    | "SESSION_PAUSED"
-    | "SESSION_STOPPED"
-    | "SOURCE_CHANGED"
-    | "REGION_CHANGED"
-    | "PROVIDER_CHANGED"
-    | "APPLICATION_SHUTDOWN"
-    | "TASK_TIMEOUT"
-    | "USER_CANCELLED"
-    | "RESOURCE_PRESSURE";
-
-  replacementPipelineId?: string;
-}
-```
-
----
-
-# 18. Content Acquisition Events
+arriving before:
 
 ```text
-CONTENT_ACQUIRE_REQUESTED
-CONTENT_ACQUIRE_STARTED
-CONTENT_ACQUIRE_COMPLETED
-CONTENT_ACQUIRE_SKIPPED
-CONTENT_ACQUIRE_FAILED
+ReadingContextChanged
+revision = 12
 ```
+
+allows the consumer to reject the older projection update.
 
 ---
 
-## 18.1 `CONTENT_ACQUIRE_REQUESTED`
+# 63. Runtime Ordering
 
-Payload:
+Do not infer Runtime execution ordering from event arrival.
 
-```ts
-interface ContentAcquireRequestedPayload {
-  acquisitionMode:
-    | "DOM_TEXT"
-    | "ACCESSIBILITY_TEXT"
-    | "SCREEN_CAPTURE"
-    | "WINDOW_CAPTURE"
-    | "REGION_CAPTURE"
-    | "FILE_READ"
-    | "CLIPBOARD_READ";
-
-  sourceRef: string;
-  regionVersion?: number;
-}
-```
-
----
-
-## 18.2 `CONTENT_ACQUIRE_COMPLETED`
-
-Payload:
-
-```ts
-interface ContentAcquireCompletedPayload {
-  contentType: "TEXT" | "IMAGE" | "DOCUMENT_FRAGMENT";
-  contentRef: string;
-  sizeBytes?: number;
-  width?: number;
-  height?: number;
-  acquiredAt: string;
-}
-```
-
-Không nên luôn đưa image buffer trực tiếp vào event payload.
-
----
-
-## 18.3 `CONTENT_ACQUIRE_FAILED`
-
-Payload:
-
-```ts
-interface ContentAcquireFailedPayload {
-  errorCode: string;
-  errorCategory:
-    | "TRANSIENT"
-    | "CONFIGURATION"
-    | "CONTENT"
-    | "PERMANENT";
-
-  retryable: boolean;
-  attempt: number;
-}
-```
-
----
-
-# 19. Normalization và Fingerprint Events
+Use:
 
 ```text
-CONTENT_NORMALIZE_REQUESTED
-CONTENT_NORMALIZE_COMPLETED
-CONTENT_NORMALIZE_FAILED
-
-CONTENT_FINGERPRINT_REQUESTED
-CONTENT_FINGERPRINT_COMPLETED
-CONTENT_FINGERPRINT_FAILED
+RuntimeRevisionId
+WorkItem dependency
+Attempt state
+Artifact provenance
 ```
+
+from authoritative Runtime contracts.
 
 ---
 
-## 19.1 `CONTENT_NORMALIZE_COMPLETED`
+# 64. No Pipeline Ordering Requirement
 
-Payload:
-
-```ts
-interface ContentNormalizeCompletedPayload {
-  normalizedContentRef: string;
-  appliedOperations: string[];
-  contentType: "TEXT" | "IMAGE";
-}
-```
-
----
-
-## 19.2 `CONTENT_FINGERPRINT_COMPLETED`
-
-Payload:
-
-```ts
-interface ContentFingerprintCompletedPayload {
-  contentFingerprint: string;
-  fingerprintAlgorithm: string;
-  duplicateOfCurrentContent: boolean;
-}
-```
-
----
-
-# 20. Cache Events
+v1-style:
 
 ```text
-CACHE_LOOKUP_REQUESTED
-CACHE_FULL_HIT
-CACHE_PARTIAL_HIT
-CACHE_MISS
-CACHE_WRITE_REQUESTED
-CACHE_WRITE_COMPLETED
-CACHE_WRITE_FAILED
-CACHE_ENTRY_INVALIDATED
-```
-
----
-
-## 20.1 `CACHE_LOOKUP_REQUESTED`
-
-Payload:
-
-```ts
-interface CacheLookupRequestedPayload {
-  contentFingerprint: string;
-  cacheLayers: Array<
-    | "CONTENT"
-    | "OCR"
-    | "TRANSLATION"
-    | "RENDER_LAYOUT"
-  >;
-
-  sourceLanguage?: string;
-  targetLanguage?: string;
-  ocrProfileVersion?: string;
-  translationProfileVersion?: string;
-  glossaryVersion?: string;
-}
-```
-
----
-
-## 20.2 `CACHE_FULL_HIT`
-
-Payload:
-
-```ts
-interface CacheFullHitPayload {
-  cacheKey: string;
-  resultRef: string;
-  cacheAgeMs: number;
-}
-```
-
----
-
-## 20.3 `CACHE_PARTIAL_HIT`
-
-Payload:
-
-```ts
-interface CachePartialHitPayload {
-  hitLayers: string[];
-  missedLayers: string[];
-  resultRefs: Record<string, string>;
-}
-```
-
----
-
-## 20.4 `CACHE_MISS`
-
-Payload:
-
-```ts
-interface CacheMissPayload {
-  missedLayers: string[];
-  lookupDurationMs: number;
-}
-```
-
----
-
-# 21. Text Extraction Events
-
-```text
-TEXT_EXTRACTION_REQUESTED
-TEXT_EXTRACTION_STARTED
-TEXT_EXTRACTION_COMPLETED
-TEXT_EXTRACTION_SKIPPED
-TEXT_EXTRACTION_FAILED
-TEXT_EXTRACTION_FALLBACK_REQUESTED
-```
-
----
-
-## 21.1 `TEXT_EXTRACTION_COMPLETED`
-
-Payload:
-
-```ts
-interface TextExtractionCompletedPayload {
-  extractedTextRef: string;
-  blockCount: number;
-  characterCount: number;
-  extractionMethod:
-    | "DOM"
-    | "ACCESSIBILITY"
-    | "EPUB"
-    | "TEXT_FILE"
-    | "CLIPBOARD";
-
-  detectedLanguage?: string;
-}
-```
-
----
-
-## 21.2 `TEXT_EXTRACTION_FALLBACK_REQUESTED`
-
-Dùng khi lấy text trực tiếp thất bại và cần chuyển sang OCR.
-
-Payload:
-
-```ts
-interface TextExtractionFallbackRequestedPayload {
-  failedMethod: string;
-  fallbackMethod: "SCREEN_CAPTURE_OCR";
-  reason: string;
-}
-```
-
----
-
-# 22. OCR Events
-
-```text
-OCR_PROCESS_REQUESTED
 OCR_STARTED
-OCR_PROGRESS_CHANGED
 OCR_COMPLETED
-OCR_SKIPPED
-OCR_FAILED
-OCR_RETRY_REQUESTED
-OCR_FALLBACK_REQUESTED
-OCR_CANCEL_REQUESTED
-OCR_CANCELLED
-```
-
----
-
-## 22.1 `OCR_PROCESS_REQUESTED`
-
-Payload:
-
-```ts
-interface OcrProcessRequestedPayload {
-  imageRef: string;
-  sourceLanguage?: string;
-
-  mode:
-    | "DOCUMENT"
-    | "COMIC"
-    | "SINGLE_REGION"
-    | "MULTI_REGION";
-
-  providerProfile: string;
-  preserveLayout: boolean;
-  detectReadingOrder: boolean;
-}
-```
-
----
-
-## 22.2 `OCR_STARTED`
-
-Payload:
-
-```ts
-interface OcrStartedPayload {
-  provider: string;
-  model?: string;
-  attempt: number;
-}
-```
-
----
-
-## 22.3 `OCR_COMPLETED`
-
-Payload:
-
-```ts
-interface OcrCompletedPayload {
-  ocrResultRef: string;
-  provider: string;
-  model?: string;
-
-  textBlockCount: number;
-  characterCount: number;
-  averageConfidence?: number;
-
-  detectedLanguage?: string;
-  durationMs: number;
-}
-```
-
-`ocrResultRef` trỏ tới dữ liệu chứa:
-
-```text
-recognizedText
-textBlocks
-boundingBoxes
-confidence
-readingOrder
-orientation
-```
-
----
-
-## 22.4 `OCR_FAILED`
-
-Payload:
-
-```ts
-interface OcrFailedPayload {
-  provider: string;
-  errorCode: string;
-
-  errorCategory:
-    | "TRANSIENT"
-    | "CONFIGURATION"
-    | "CONTENT"
-    | "PERMANENT";
-
-  retryable: boolean;
-  fallbackAvailable: boolean;
-  attempt: number;
-  durationMs: number;
-}
-```
-
----
-
-## 22.5 `OCR_FALLBACK_REQUESTED`
-
-Payload:
-
-```ts
-interface OcrFallbackRequestedPayload {
-  failedProvider: string;
-  fallbackProvider: string;
-  reason: string;
-  nextAttempt: number;
-}
-```
-
----
-
-# 23. Segmentation Events
-
-```text
-SEGMENTATION_REQUESTED
-SEGMENTATION_STARTED
-SEGMENTATION_COMPLETED
-SEGMENTATION_SKIPPED
-SEGMENTATION_FAILED
-```
-
----
-
-## 23.1 `SEGMENTATION_REQUESTED`
-
-Payload:
-
-```ts
-interface SegmentationRequestedPayload {
-  contentRef: string;
-
-  contentMode:
-    | "NOVEL"
-    | "COMIC"
-    | "DOCUMENT"
-    | "CLIPBOARD";
-
-  preserveParagraphs: boolean;
-  preserveRegions: boolean;
-  maxSegmentLength?: number;
-}
-```
-
----
-
-## 23.2 `SEGMENTATION_COMPLETED`
-
-Payload:
-
-```ts
-interface SegmentationCompletedPayload {
-  segmentsRef: string;
-  segmentCount: number;
-  totalCharacterCount: number;
-  durationMs: number;
-}
-```
-
-Mỗi segment cần giữ:
-
-```text
-segmentId
-sourceText
-sourceOrder
-sourceRegion
-segmentType
-contextReference
-```
-
----
-
-# 24. Translation Events
-
-```text
-TRANSLATION_REQUESTED
 TRANSLATION_STARTED
-TRANSLATION_PROGRESS_CHANGED
-TRANSLATION_SEGMENT_COMPLETED
-TRANSLATION_COMPLETED
-TRANSLATION_SKIPPED
-TRANSLATION_FAILED
-TRANSLATION_RETRY_REQUESTED
-TRANSLATION_FALLBACK_REQUESTED
-TRANSLATION_CANCEL_REQUESTED
-TRANSLATION_CANCELLED
 ```
+
+is not the architecture-wide Event Bus ordering model.
+
+Different WorkItems may overlap or execute concurrently.
 
 ---
 
-## 24.1 `TRANSLATION_REQUESTED`
+# 65. Event Sequence Numbers
 
-Payload:
+Owner-specific sequence numbers may exist if required.
 
-```ts
-interface TranslationRequestedPayload {
-  segmentsRef: string;
-
-  sourceLanguage: string;
-  targetLanguage: string;
-
-  providerProfile: string;
-  glossaryVersion?: string;
-  translationMemoryVersion?: string;
-
-  preserveFormatting: boolean;
-  useContext: boolean;
-}
-```
-
----
-
-## 24.2 `TRANSLATION_STARTED`
-
-Payload:
-
-```ts
-interface TranslationStartedPayload {
-  provider: string;
-  model?: string;
-  segmentCount: number;
-  attempt: number;
-}
-```
-
----
-
-## 24.3 `TRANSLATION_SEGMENT_COMPLETED`
-
-Event này chỉ cần thiết nếu UI hỗ trợ streaming hoặc progressive rendering.
-
-Payload:
-
-```ts
-interface TranslationSegmentCompletedPayload {
-  segmentId: string;
-  translatedSegmentRef: string;
-  completedSegmentCount: number;
-  totalSegmentCount: number;
-}
-```
-
-Có thể bị bỏ qua trong MVP để giảm độ phức tạp.
-
----
-
-## 24.4 `TRANSLATION_COMPLETED`
-
-Payload:
-
-```ts
-interface TranslationCompletedPayload {
-  translationResultRef: string;
-
-  provider: string;
-  model?: string;
-
-  segmentCount: number;
-  sourceCharacterCount: number;
-  translatedCharacterCount: number;
-
-  glossaryVersion?: string;
-  durationMs: number;
-}
-```
-
----
-
-## 24.5 `TRANSLATION_FAILED`
-
-Payload:
-
-```ts
-interface TranslationFailedPayload {
-  provider: string;
-  errorCode: string;
-
-  errorCategory:
-    | "TRANSIENT"
-    | "CONFIGURATION"
-    | "CONTENT"
-    | "PERMANENT";
-
-  retryable: boolean;
-  fallbackAvailable: boolean;
-  attempt: number;
-  durationMs: number;
-}
-```
-
----
-
-## 24.6 `TRANSLATION_FALLBACK_REQUESTED`
-
-Payload:
-
-```ts
-interface TranslationFallbackRequestedPayload {
-  failedProvider: string;
-  fallbackProvider: string;
-  reason: string;
-  nextAttempt: number;
-}
-```
-
----
-
-# 25. Post-processing Events
+Examples:
 
 ```text
-POST_PROCESSING_REQUESTED
-POST_PROCESSING_STARTED
-POST_PROCESSING_COMPLETED
-POST_PROCESSING_FAILED
+sessionEventSequence
+providerEventSequence
 ```
+
+They should not be introduced globally without a concrete consumer need.
 
 ---
 
-## 25.1 `POST_PROCESSING_COMPLETED`
+# 66. Stale Event Handling
 
-Payload:
+A stale Event Bus event is generally handled by consumer-side authority checks.
 
-```ts
-interface PostProcessingCompletedPayload {
-  processedResultRef: string;
-  appliedOperations: string[];
-  warningCodes?: string[];
-  durationMs: number;
-}
-```
-
-Hoạt động có thể gồm:
+Example:
 
 ```text
-format restoration
-punctuation normalization
-glossary override
-name normalization
-paragraph merging
-overflow preparation
+ReadingContextChanged
+revision = 12
+
+consumer already has revision = 13
 ```
 
----
-
-# 26. Render Events
+Result:
 
 ```text
-RENDER_PREPARATION_REQUESTED
-RENDER_LAYOUT_COMPLETED
-RENDER_LAYOUT_FAILED
-
-RENDER_REQUESTED
-RENDER_STARTED
-RENDER_COMPLETED
-RENDER_FAILED
-RENDER_FALLBACK_REQUESTED
-RENDER_CLEAR_REQUESTED
-RENDER_CLEARED
+ignore stale projection update
 ```
 
----
-
-## 26.1 `RENDER_PREPARATION_REQUESTED`
-
-Payload:
-
-```ts
-interface RenderPreparationRequestedPayload {
-  processedResultRef: string;
-
-  displayMode:
-    | "OVERLAY"
-    | "SIDE_PANEL"
-    | "FLOATING_WINDOW"
-    | "READER_VIEW"
-    | "EXPORT_ONLY";
-
-  targetRef: string;
-  regionVersion?: number;
-}
-```
-
----
-
-## 26.2 `RENDER_LAYOUT_COMPLETED`
-
-Payload:
-
-```ts
-interface RenderLayoutCompletedPayload {
-  renderLayoutRef: string;
-  displayMode: string;
-  textRegionCount: number;
-  overflowRegionCount: number;
-  durationMs: number;
-}
-```
-
----
-
-## 26.3 `RENDER_REQUESTED`
-
-Payload:
-
-```ts
-interface RenderRequestedPayload {
-  renderLayoutRef: string;
-  displayTargetRef: string;
-  expectedRegionVersion?: number;
-}
-```
-
-Trước khi render, consumer phải kiểm tra:
+No new global:
 
 ```text
-sessionId còn active
-pipelineId chưa bị hủy
-contentRevision còn hiện tại
-source identity còn đúng
-regionVersion còn đúng
+PipelineStaleDetected
 ```
+
+event is required.
 
 ---
 
-## 26.4 `RENDER_COMPLETED`
+# 67. Event Staleness vs Candidate Staleness
 
-Payload:
-
-```ts
-interface RenderCompletedPayload {
-  displayMode: string;
-  renderedRegionCount: number;
-  durationMs: number;
-}
-```
-
----
-
-## 26.5 `RENDER_FALLBACK_REQUESTED`
-
-Ví dụ fallback:
+Do not confuse:
 
 ```text
-OVERLAY → SIDE_PANEL
+stale event delivery
 ```
 
-Payload:
-
-```ts
-interface RenderFallbackRequestedPayload {
-  failedDisplayMode: string;
-  fallbackDisplayMode: string;
-  reason: string;
-}
-```
-
----
-
-# 27. User Editing Events
+with:
 
 ```text
-TRANSLATION_EDIT_REQUESTED
-TRANSLATION_EDITED
-TRANSLATION_EDIT_REVERTED
-GLOSSARY_SUGGESTION_CREATED
-GLOSSARY_UPDATE_REQUESTED
-GLOSSARY_UPDATED
+stale Candidate Artifact
 ```
+
+Candidate Artifact publication safety is enforced before publication by Runtime/owner authority.
+
+Event Bus is not the primary stale-result gate.
 
 ---
 
-## 27.1 `TRANSLATION_EDITED`
+# 68. Backpressure
 
-Payload:
+Event Bus infrastructure must protect the process from unbounded queues.
 
-```ts
-interface TranslationEditedPayload {
-  segmentId: string;
-  previousTextRef: string;
-  updatedTextRef: string;
-
-  updateGlossarySuggested: boolean;
-  updateTranslationMemorySuggested: boolean;
-}
-```
-
-Không nên đưa toàn bộ nội dung sửa trực tiếp vào log.
-
----
-
-## 27.2 `GLOSSARY_UPDATED`
-
-Payload:
-
-```ts
-interface GlossaryUpdatedPayload {
-  glossaryVersion: string;
-  changedEntryIds: string[];
-  affectedLanguagePairs: string[];
-}
-```
-
-Khi glossary thay đổi, cache translation cũ có thể:
-
-* giữ nguyên và dùng version key
-* hoặc bị invalidate theo policy
-
-Không nên xóa toàn bộ cache không cần thiết.
-
----
-
-# 28. Provider Events
+Possible policies:
 
 ```text
-PROVIDER_REGISTERED
-PROVIDER_CONFIGURATION_CHANGED
-PROVIDER_VALIDATION_REQUESTED
-PROVIDER_VALIDATION_COMPLETED
-PROVIDER_VALIDATION_FAILED
-PROVIDER_SELECTED
-PROVIDER_UNAVAILABLE
-PROVIDER_RATE_LIMITED
-PROVIDER_RECOVERED
+bounded queues
+consumer isolation
+coalescing
+droppable advisory events
+transport-specific backpressure
 ```
 
 ---
 
-## 28.1 `PROVIDER_CONFIGURATION_CHANGED`
+# 69. Not All Events Are Droppable
 
-Payload:
+Committed important facts should not be arbitrarily discarded if consumer correctness depends on them.
 
-```ts
-interface ProviderConfigurationChangedPayload {
-  providerType: "OCR" | "TRANSLATION";
-  providerId: string;
-  changedFields: string[];
-  requiresPipelineCancellation: boolean;
-}
-```
-
-Không chứa secret hoặc API key.
+If infrastructure cannot guarantee delivery, consumers should be able to resynchronize from authoritative state where practical.
 
 ---
 
-## 28.2 `PROVIDER_RATE_LIMITED`
+# 70. Snapshot Recovery
 
-Payload:
-
-```ts
-interface ProviderRateLimitedPayload {
-  providerType: "OCR" | "TRANSLATION";
-  providerId: string;
-  retryAfterMs?: number;
-  quotaScope?: string;
-}
-```
-
----
-
-# 29. Retry Events
+Preferred resilience pattern:
 
 ```text
-TASK_RETRY_SCHEDULED
-TASK_RETRY_STARTED
-TASK_RETRY_EXHAUSTED
+event missed
+    ↓
+consumer detects gap/staleness
+    ↓
+query authoritative snapshot
+    ↓
+rebuild projection
 ```
+
+This is preferable to requiring the Event Bus to be permanent history for every event.
 
 ---
 
-## 29.1 `TASK_RETRY_SCHEDULED`
+# 71. High-Frequency Signals
 
-Payload:
+High-frequency operational signals often should not be business events.
 
-```ts
-interface TaskRetryScheduledPayload {
-  failedStage: string;
-  attempt: number;
-  maxAttempts: number;
-  retryAt: string;
-  delayMs: number;
-  errorCode: string;
-}
-```
-
----
-
-## 29.2 `TASK_RETRY_EXHAUSTED`
-
-Payload:
-
-```ts
-interface TaskRetryExhaustedPayload {
-  failedStage: string;
-  attempts: number;
-  lastErrorCode: string;
-  fallbackAvailable: boolean;
-}
-```
-
----
-
-# 30. Cancellation Events
-
-Cancellation phải hỗ trợ nhiều cấp:
+Examples:
 
 ```text
-APPLICATION
-SESSION
-PIPELINE
-TASK
+OCR progress percentage
+translation token stream progress
+mouse movement
+frame-by-frame screen change
+trace span timing
+metric sample
 ```
 
-Events:
+Use:
 
 ```text
-APPLICATION_CANCEL_REQUESTED
-SESSION_CANCEL_REQUESTED
+local observable stream
+Runtime progress channel
+UI-local mechanism
+Telemetry
+```
+
+as appropriate.
+
+---
+
+# 72. Progress Events
+
+A module may define a progress event only when:
+
+1. another architectural consumer genuinely requires it;
+2. the event represents useful externally observable progress;
+3. frequency is bounded/throttled;
+4. dropping intermediate values is safe.
+
+Do not add generic progress events by default.
+
+---
+
+# 73. Content Change Signals
+
+Raw watcher/frame signals may be extremely high-frequency.
+
+These should generally be:
+
+```text
+Capture/Watcher-local stream
+```
+
+until a stable meaningful fact is committed.
+
+Example:
+
+```text
+many frame observations
+    ↓
+stability/change policy
+    ↓
+meaningful Source/ReadingContext fact
+```
+
+---
+
+# 74. Application Events
+
+Possible application-level facts:
+
+```text
+ApplicationReady
+ApplicationDegraded
+ApplicationStopping
+ApplicationStopped
+```
+
+Exact naming should match the Application architecture.
+
+Commands such as:
+
+```text
+ApplicationShutdownRequested
+```
+
+belong to Application command interfaces, not Event Bus taxonomy.
+
+---
+
+# 75. Reading Session Events
+
+Canonical Reading Session events are defined by:
+
+```text
+doc/02-modules/reading-session/EVENTS.md
+```
+
+This architecture file must not duplicate or override that file.
+
+Typical facts may include:
+
+```text
+ReadingSessionCreated
+ReadingSessionPaused
+ReadingSessionResumed
+ReadingSessionStopped
+ReadingContextChanged
+```
+
+Use the exact module-defined names.
+
+---
+
+# 76. Capture Events
+
+Capture event authority belongs to:
+
+```text
+doc/02-modules/capture/EVENTS.md
+```
+
+Avoid legacy names such as:
+
+```text
+CONTENT_CAPTURE_REQUESTED
+CAPTURE_RETRY_REQUESTED
+```
+
+in the architecture-level registry.
+
+---
+
+# 77. Recognition Events
+
+Recognition event authority belongs to:
+
+```text
+doc/02-modules/recognition/EVENTS.md
+```
+
+Avoid architecture-level assumptions such as:
+
+```text
+OCR_COMPLETED
+    ↓
+starts segmentation
+```
+
+Recognition events describe Recognition-owned facts only.
+
+---
+
+# 78. Text Processing Events
+
+Text Processing event authority belongs to:
+
+```text
+doc/02-modules/text-processing/EVENTS.md
+```
+
+Do not use generic segmentation events to command Translation.
+
+---
+
+# 79. Translation Events
+
+Translation event authority belongs to:
+
+```text
+doc/02-modules/translation/EVENTS.md
+```
+
+Events may describe:
+
+```text
+artifact publication
+capability change
+other stable Translation-owned facts
+```
+
+They do not own Runtime retry.
+
+---
+
+# 80. Presentation Events
+
+Presentation event authority belongs to:
+
+```text
+doc/02-modules/presentation/EVENTS.md
+```
+
+Presentation events must not be confused with native UI rendering events.
+
+---
+
+# 81. Preferences Events
+
+Preferences owns:
+
+```text
+PreferenceChanged
+```
+
+or the exact module-defined equivalent.
+
+There is no architecture-wide global:
+
+```text
+EffectivePreferencesChanged
+```
+
+authority.
+
+Effective state is contextual.
+
+---
+
+# 82. Diagnostics Events
+
+Diagnostics publishes only selected Diagnostics-owned state/capability facts.
+
+Observations such as:
+
+```text
+LogRecorded
+MetricUpdated
+TraceStarted
+```
+
+remain observability transport concerns rather than business Event Bus events.
+
+---
+
+# 83. UI Adapter Events
+
+UI-local events remain local by default.
+
+Only selected adapter capability/lifecycle facts should enter global Event Bus when Application has a genuine asynchronous dependency.
+
+---
+
+# 84. Runtime Events
+
+Runtime may publish selected facts, but Runtime does not control execution by consuming its own command-like Event Bus messages.
+
+Preferred execution path:
+
+```text
+Runtime API
+    ↓
+Runtime state/work graph
+```
+
+Event Bus:
+
+```text
+Runtime committed fact
+    ↓
+interested consumers
+```
+
+---
+
+# 85. Retry
+
+Retry is not requested by Event Bus.
+
+Correct:
+
+```text
+Attempt failed
+    ↓
+Runtime retry policy
+    ↓
+new Attempt
+```
+
+Optional fact:
+
+```text
+RetryExhausted
+```
+
+may be published if another consumer genuinely needs it.
+
+---
+
+# 86. Cancellation
+
+Cancellation commands go through explicit Runtime/Application contracts.
+
+Potential resulting facts may include:
+
+```text
+WorkItemCancelled
+AttemptCancelled
+RuntimeRevisionSuperseded
+```
+
+according to Runtime definitions.
+
+Do not use:
+
+```text
 PIPELINE_CANCEL_REQUESTED
 TASK_CANCEL_REQUESTED
-
-SESSION_CANCELLED
-PIPELINE_CANCELLED
-TASK_CANCELLED
 ```
 
-Trong thực tế, `SESSION_STOP_REQUESTED` có thể thay cho `SESSION_CANCEL_REQUESTED`.
-
-Không cần tạo event dư thừa nếu ý nghĩa đã được bao phủ rõ ràng.
+as Event Bus control messages.
 
 ---
 
-# 31. Error Events
+# 87. Provider Fallback
 
-Không nên sử dụng một event chung duy nhất như:
+Provider fallback is policy/execution behavior.
 
-```text
-ERROR_OCCURRED
-```
-
-cho toàn bộ hệ thống vì mất context.
-
-Nên dùng event cụ thể:
+It is not commanded by:
 
 ```text
-OCR_FAILED
-TRANSLATION_FAILED
-RENDER_FAILED
-WATCHER_FAILED
-SESSION_ERROR_OCCURRED
-APPLICATION_FATAL_ERROR_OCCURRED
+OCR_FALLBACK_REQUESTED
+TRANSLATION_FALLBACK_REQUESTED
 ```
 
-Tuy nhiên có thể có một subscriber toàn cục theo dõi mọi event có hậu tố:
+events.
 
-```text
-_FAILED
-```
-
-để ghi metrics và log.
+A provider availability change may be a factual event.
 
 ---
 
-## 31.1 Error payload chuẩn
+# 88. Cache Interaction
 
-Các result event thất bại nên sử dụng cấu trúc chung:
+Cache reads/writes should normally use explicit cache interfaces.
 
-```ts
-interface ErrorDescriptor {
-  errorCode: string;
-  errorCategory:
-    | "TRANSIENT"
-    | "CONFIGURATION"
-    | "CONTENT"
-    | "PERMANENT"
-    | "UNKNOWN";
+Avoid turning:
 
-  messageCode?: string;
-  retryable: boolean;
-  userActionRequired: boolean;
-
-  technicalDetails?: Record<string, unknown>;
-}
+```text
+CacheLookupRequested
+CacheWriteRequested
 ```
 
-`messageCode` dùng để UI ánh xạ sang thông báo đa ngôn ngữ.
+into business Event Bus messages.
 
-Không dùng exception message thô làm nội dung hiển thị trực tiếp cho người dùng.
+Cache invalidation facts may be events where multiple consumers require them.
 
 ---
 
-# 32. Event Coalescing
+# 89. UI Interaction
 
-Một số event có tần suất cao cần được gộp.
-
-Ví dụ:
+Correct:
 
 ```text
-CONTENT_CHANGE_DETECTED
-OCR_PROGRESS_CHANGED
-TRANSLATION_PROGRESS_CHANGED
-SOURCE_BOUNDS_CHANGED
-```
-
-## 32.1 Latest-event-wins
-
-Phù hợp với:
-
-```text
-CONTENT_CHANGE_DETECTED
-SOURCE_BOUNDS_CHANGED
-```
-
-Chỉ giữ event mới nhất trong cửa sổ debounce.
-
----
-
-## 32.2 Progress throttling
-
-Phù hợp với:
-
-```text
-OCR_PROGRESS_CHANGED
-TRANSLATION_PROGRESS_CHANGED
-```
-
-Chỉ publish khi:
-
-* vượt một khoảng thời gian tối thiểu
-* hoặc progress tăng đủ lớn
-* hoặc stage hoàn thành
-
----
-
-## 32.3 Change batching
-
-Đối với DOM mutation:
-
-```text
-Nhiều DOM mutation
+User
     ↓
-Batch trong 100–300 ms
+UI Adapter
     ↓
-Một CONTENT_CHANGE_DETECTED
+UiIntent
+    ↓
+Application Command
 ```
 
-Thông số cụ thể sẽ được chốt trong tài liệu performance hoặc watcher specification.
+Incorrect:
+
+```text
+User
+    ↓
+SESSION_START_REQUESTED Event
+```
+
+as the primary command route.
 
 ---
 
-# 33. Stale Event Handling
+# 90. Commands vs Events
 
-Mỗi handler liên quan đến pipeline cần kiểm tra:
+Summary:
 
-```text
-event.applicationInstanceId == currentApplicationInstanceId
-
-event.sessionId tồn tại
-session chưa STOPPING hoặc STOPPED
-
-event.pipelineId tồn tại
-pipeline chưa CANCELLING hoặc CANCELLED
-
-event.contentRevision == session.currentContentRevision
-```
-
-Nếu revision cũ:
-
-```text
-emit PIPELINE_STALE_DETECTED
-ignore side effects
-```
-
-Có thể lưu kết quả stale vào cache nếu:
-
-* dữ liệu hoàn chỉnh
-* cache key hợp lệ
-* không chứa reference đã hết hạn
-* policy cho phép
-
-Tuyệt đối không render kết quả stale.
+| Concept   | Direction                | Authority                       |
+| --------- | ------------------------ | ------------------------------- |
+| Command   | caller → owner           | asks owner to act               |
+| Query     | caller → owner           | asks owner for information      |
+| UiIntent  | UI → Application         | semantic user intention         |
+| Event     | owner → 0..N consumers   | reports committed fact          |
+| Telemetry | producer → observability | reports operational measurement |
 
 ---
 
-# 34. Deduplication
+# 91. Command Outcome
 
-Trong in-process MVP, duplicate event ít xảy ra nhưng vẫn cần quy tắc.
-
-Event được xem là duplicate nếu:
+A command may return:
 
 ```text
-eventId đã được xử lý bởi cùng subscriber
+accepted result
+rejection
+error
+new snapshot
+async operation reference
 ```
 
-Hoặc với một số command:
-
-```text
-sessionId + pipelineId + eventName + taskId
-```
-
-giống event đã xử lý.
-
-Subscriber quan trọng nên idempotent.
-
-Ví dụ:
-
-```text
-PIPELINE_CANCEL_REQUESTED
-SESSION_PAUSE_REQUESTED
-CACHE_WRITE_REQUESTED
-```
-
-Nhận lại event giống nhau không được gây lỗi nghiêm trọng.
+It does not need a matching `*_COMPLETED` Event Bus event unless asynchronous consumers need that fact.
 
 ---
 
-# 35. Event Handler Priority
+# 92. Request/Result Pair Is Not Mandatory
 
-Một số event cần xử lý ưu tiên.
-
-Ví dụ:
-
-```text
-APPLICATION_SHUTDOWN_REQUESTED
-SESSION_STOP_REQUESTED
-PIPELINE_CANCEL_REQUESTED
-```
-
-Đề xuất ưu tiên:
-
-```text
-CRITICAL
-- application shutdown
-- fatal error
-- security or permission revocation
-
-HIGH
-- cancellation
-- session stop
-- content revision replacement
-
-NORMAL
-- pipeline stage results
-- source changes
-
-LOW
-- progress
-- analytics
-- non-critical metrics
-```
-
-Event priority không được phá vỡ state validation.
-
----
-
-# 36. Request và Result Correlation
-
-Một command event thường có result event tương ứng.
-
-Ví dụ:
+v1-style:
 
 ```text
 OCR_PROCESS_REQUESTED
     ↓
-OCR_STARTED
-    ↓
 OCR_COMPLETED
 ```
 
-hoặc:
+is removed as a universal pattern.
+
+Runtime/contract invocation already provides request/execution correlation through:
 
 ```text
-OCR_PROCESS_REQUESTED
-    ↓
-OCR_FAILED
-```
-
-Các event này phải dùng cùng:
-
-```text
-correlationId
-sessionId
-pipelineId
-contentRevision
-taskId
-```
-
-`causationId` tạo chuỗi nguyên nhân.
-
----
-
-# 37. Synchronous và Asynchronous Subscribers
-
-## 37.1 Synchronous subscriber
-
-Phù hợp với:
-
-* schema validation
-* state guard
-* event enrichment
-* metrics nhẹ
-* local state update nhanh
-
-Không được thực hiện tác vụ dài.
-
----
-
-## 37.2 Asynchronous subscriber
-
-Phù hợp với:
-
-* capture
-* OCR
-* translation
-* disk I/O
-* render phức tạp
-* provider request
-
-Async subscriber phải:
-
-* hỗ trợ cancellation token
-* có timeout
-* phát result event
-* không giữ Event Bus thread
-* xử lý exception
-
----
-
-# 38. Event Bus không thay thế Orchestrator
-
-Event Bus chỉ chuyển event.
-
-Pipeline Orchestrator chịu trách nhiệm quyết định:
-
-```text
-event nào dẫn đến stage nào
-stage nào được chạy tiếp
-khi nào retry
-khi nào fallback
-khi nào cancel
-khi nào kết thúc pipeline
-```
-
-Ví dụ:
-
-```text
-OCR_COMPLETED
-    ↓
-Pipeline Orchestrator kiểm tra state
-    ↓
-OCR_PROCESSING → SEGMENTING
-    ↓
-SEGMENTATION_REQUESTED
-```
-
-OCR Module không tự phát trực tiếp `TRANSLATION_REQUESTED`.
-
-Điều này giúp giữ pipeline logic tại một nơi.
-
----
-
-# 39. Module Responsibility
-
-## 39.1 Application Coordinator
-
-Subscribe:
-
-```text
-APPLICATION_START_REQUESTED
-APPLICATION_SHUTDOWN_REQUESTED
-APPLICATION_SUSPEND_REQUESTED
-APPLICATION_RESUME_REQUESTED
-```
-
-Publish:
-
-```text
-APPLICATION_READY
-APPLICATION_SHUTTING_DOWN
-APPLICATION_TERMINATED
+WorkItemId
+AttemptId
+CorrelationId
 ```
 
 ---
 
-## 39.2 Session Manager
-
-Subscribe:
+# 93. Correlation Example
 
 ```text
-SESSION_CREATE_REQUESTED
-SESSION_CONFIGURE_REQUESTED
-SESSION_START_REQUESTED
-SESSION_PAUSE_REQUESTED
-SESSION_RESUME_REQUESTED
-SESSION_STOP_REQUESTED
-SESSION_RECOVERY_REQUESTED
+StartReadingIntent
+correlationId = C1
+
+ReadingContextChanged
+correlationId = C1
+
+Runtime work
+correlationId = C1
+
+PresentationArtifactPublished
+correlationId = C1
 ```
 
-Publish:
+Different events remain distinct via EventId.
+
+---
+
+# 94. Causation Example
 
 ```text
-SESSION_CREATED
-SESSION_READY
-SESSION_STARTED
-SESSION_PAUSED
-SESSION_RESUMED
-SESSION_STOPPED
-SESSION_ERROR_OCCURRED
+Command:
+ChangeReadingContext
+commandId = CMD-1
+
+Event:
+ReadingContextChanged
+causationId = CMD-1
+```
+
+Causation does not require another event.
+
+---
+
+# 95. Event Versioning
+
+Compatible additions may include:
+
+```text
+optional field
+optional metadata
+new enum value with explicit unknown/fallback handling
+```
+
+Breaking changes require a new event schema version.
+
+---
+
+# 96. Breaking Changes
+
+Examples:
+
+```text
+remove required field
+change field type
+change event semantic meaning
+change ownership
+change required authority reference
+```
+
+These require version/contract migration.
+
+---
+
+# 97. Event Semantic Stability
+
+Do not reuse an existing event name for a different fact.
+
+Example:
+
+If:
+
+```text
+RecognitionArtifactPublished
+```
+
+means an accepted Artifact became authoritative, it must never later mean merely “provider call finished.”
+
+---
+
+# 98. Unknown Event Version
+
+Consumer behavior should be explicit:
+
+```text
+reject
+ignore safely
+fallback to supported version
+request resynchronization
+```
+
+depending on compatibility contract.
+
+---
+
+# 99. Subscriber Version Independence
+
+Producer and consumer deployment/version evolution must not silently reinterpret payload semantics.
+
+---
+
+# 100. Event Validation
+
+Before dispatch, infrastructure may validate:
+
+```text
+EventId present
+eventName registered
+eventVersion supported
+occurredAt valid
+sourceModule valid
+payload schema valid
+required authority references present
 ```
 
 ---
 
-## 39.3 Watcher Module
+# 101. Semantic Validation
 
-Subscribe:
+Event Bus validates transport/schema-level requirements.
+
+It should not duplicate full domain validation.
+
+Domain semantic validity was established before publication by the owner.
+
+---
+
+# 102. Event Middleware
+
+Allowed infrastructure concerns may include:
 
 ```text
-WATCHER_START_REQUESTED
-WATCHER_STOP_REQUESTED
-```
-
-Publish:
-
-```text
-WATCHER_STARTED
-CONTENT_CHANGE_DETECTED
-CONTENT_STABLE
-WATCHER_FAILED
-WATCHER_STOPPED
+schema validation
+trace-context propagation
+dispatch metrics
+deduplication support
+subscriber isolation
+serialization
+privacy/redaction guard
 ```
 
 ---
 
-## 39.4 Pipeline Orchestrator
+# 103. Event Middleware Must Not Own Business Policy
 
-Subscribe:
-
-```text
-CONTENT_STABLE
-PIPELINE_CREATE_REQUESTED
-CONTENT_ACQUIRE_COMPLETED
-CONTENT_NORMALIZE_COMPLETED
-CONTENT_FINGERPRINT_COMPLETED
-CACHE_FULL_HIT
-CACHE_PARTIAL_HIT
-CACHE_MISS
-TEXT_EXTRACTION_COMPLETED
-OCR_COMPLETED
-SEGMENTATION_COMPLETED
-TRANSLATION_COMPLETED
-POST_PROCESSING_COMPLETED
-RENDER_LAYOUT_COMPLETED
-RENDER_COMPLETED
-*_FAILED
-PIPELINE_CANCEL_REQUESTED
-```
-
-Publish:
+Do not put into Event Bus middleware:
 
 ```text
-PIPELINE_CREATED
-CONTENT_ACQUIRE_REQUESTED
-CONTENT_NORMALIZE_REQUESTED
-CONTENT_FINGERPRINT_REQUESTED
-CACHE_LOOKUP_REQUESTED
-TEXT_EXTRACTION_REQUESTED
-OCR_PROCESS_REQUESTED
-SEGMENTATION_REQUESTED
-TRANSLATION_REQUESTED
-POST_PROCESSING_REQUESTED
-RENDER_PREPARATION_REQUESTED
-RENDER_REQUESTED
-PIPELINE_COMPLETED
-PIPELINE_FAILED
+retry business work
+select provider
+decide downstream stage
+mutate Reading Session
+publish Artifacts
+change Preferences
 ```
 
 ---
 
-## 39.5 OCR Module
+# 104. Logging
 
-Subscribe:
-
-```text
-OCR_PROCESS_REQUESTED
-OCR_CANCEL_REQUESTED
-```
-
-Publish:
-
-```text
-OCR_STARTED
-OCR_PROGRESS_CHANGED
-OCR_COMPLETED
-OCR_FAILED
-OCR_CANCELLED
-```
-
----
-
-## 39.6 Translation Module
-
-Subscribe:
-
-```text
-TRANSLATION_REQUESTED
-TRANSLATION_CANCEL_REQUESTED
-```
-
-Publish:
-
-```text
-TRANSLATION_STARTED
-TRANSLATION_PROGRESS_CHANGED
-TRANSLATION_COMPLETED
-TRANSLATION_FAILED
-TRANSLATION_CANCELLED
-```
-
----
-
-## 39.7 Renderer
-
-Subscribe:
-
-```text
-RENDER_PREPARATION_REQUESTED
-RENDER_REQUESTED
-RENDER_CLEAR_REQUESTED
-```
-
-Publish:
-
-```text
-RENDER_LAYOUT_COMPLETED
-RENDER_LAYOUT_FAILED
-RENDER_STARTED
-RENDER_COMPLETED
-RENDER_FAILED
-RENDER_CLEARED
-```
-
----
-
-## 39.8 Cache Module
-
-Subscribe:
-
-```text
-CACHE_LOOKUP_REQUESTED
-CACHE_WRITE_REQUESTED
-CACHE_ENTRY_INVALIDATED
-```
-
-Publish:
-
-```text
-CACHE_FULL_HIT
-CACHE_PARTIAL_HIT
-CACHE_MISS
-CACHE_WRITE_COMPLETED
-CACHE_WRITE_FAILED
-```
-
----
-
-## 39.9 UI Module
-
-Subscribe:
-
-```text
-APPLICATION_READY
-SESSION_*
-PIPELINE_PROGRESS_CHANGED
-OCR_PROGRESS_CHANGED
-TRANSLATION_PROGRESS_CHANGED
-RENDER_COMPLETED
-*_FAILED
-PROVIDER_*
-```
-
-Publish:
-
-```text
-SESSION_CREATE_REQUESTED
-SESSION_START_REQUESTED
-SESSION_PAUSE_REQUESTED
-SESSION_RESUME_REQUESTED
-SESSION_STOP_REQUESTED
-REGION_CHANGE_REQUESTED
-PROVIDER_VALIDATION_REQUESTED
-TRANSLATION_EDIT_REQUESTED
-```
-
-UI không được gọi trực tiếp OCR hoặc translation provider.
-
----
-
-# 40. Event Flow: Text Reading
-
-```mermaid
-sequenceDiagram
-    participant W as Text Watcher
-    participant B as Event Bus
-    participant P as Pipeline Orchestrator
-    participant E as Text Extractor
-    participant T as Translation
-    participant R as Renderer
-
-    W->>B: CONTENT_CHANGE_DETECTED
-    B->>P: CONTENT_CHANGE_DETECTED
-
-    P->>B: PIPELINE_CREATE_REQUESTED
-    B->>P: PIPELINE_CREATED
-
-    P->>B: CONTENT_ACQUIRE_REQUESTED
-    B->>E: CONTENT_ACQUIRE_REQUESTED
-    E->>B: CONTENT_ACQUIRE_COMPLETED
-
-    B->>P: CONTENT_ACQUIRE_COMPLETED
-    P->>B: CONTENT_NORMALIZE_REQUESTED
-    P->>B: CONTENT_FINGERPRINT_REQUESTED
-    P->>B: CACHE_LOOKUP_REQUESTED
-
-    B->>P: CACHE_MISS
-    P->>B: TEXT_EXTRACTION_REQUESTED
-    B->>E: TEXT_EXTRACTION_REQUESTED
-    E->>B: TEXT_EXTRACTION_COMPLETED
-
-    B->>P: TEXT_EXTRACTION_COMPLETED
-    P->>B: SEGMENTATION_REQUESTED
-    B->>P: SEGMENTATION_COMPLETED
-
-    P->>B: TRANSLATION_REQUESTED
-    B->>T: TRANSLATION_REQUESTED
-    T->>B: TRANSLATION_COMPLETED
-
-    B->>P: TRANSLATION_COMPLETED
-    P->>B: POST_PROCESSING_REQUESTED
-    B->>P: POST_PROCESSING_COMPLETED
-
-    P->>B: RENDER_PREPARATION_REQUESTED
-    B->>R: RENDER_PREPARATION_REQUESTED
-    R->>B: RENDER_LAYOUT_COMPLETED
-
-    B->>P: RENDER_LAYOUT_COMPLETED
-    P->>B: RENDER_REQUESTED
-    B->>R: RENDER_REQUESTED
-    R->>B: RENDER_COMPLETED
-
-    B->>P: RENDER_COMPLETED
-    P->>B: PIPELINE_COMPLETED
-```
-
-Sơ đồ trên mang tính khái niệm.
-
-Một số tác vụ nội bộ như normalize hoặc segmentation có thể được triển khai cùng process nhưng vẫn phải giữ boundary rõ ràng.
-
----
-
-# 41. Event Flow: Image Reading
-
-```mermaid
-sequenceDiagram
-    participant W as Screen Watcher
-    participant B as Event Bus
-    participant P as Pipeline Orchestrator
-    participant C as Capture Module
-    participant O as OCR Module
-    participant T as Translation
-    participant R as Renderer
-
-    W->>B: CONTENT_CHANGE_DETECTED
-    B->>P: CONTENT_CHANGE_DETECTED
-
-    P->>B: CONTENT_STABILITY_WAIT_STARTED
-    W->>B: CONTENT_STABLE
-    B->>P: CONTENT_STABLE
-
-    P->>B: PIPELINE_CREATE_REQUESTED
-    B->>P: PIPELINE_CREATED
-
-    P->>B: CONTENT_ACQUIRE_REQUESTED
-    B->>C: CONTENT_ACQUIRE_REQUESTED
-    C->>B: CONTENT_ACQUIRE_COMPLETED
-
-    B->>P: CONTENT_ACQUIRE_COMPLETED
-    P->>B: CONTENT_NORMALIZE_REQUESTED
-    B->>P: CONTENT_NORMALIZE_COMPLETED
-
-    P->>B: CONTENT_FINGERPRINT_REQUESTED
-    B->>P: CONTENT_FINGERPRINT_COMPLETED
-
-    P->>B: CACHE_LOOKUP_REQUESTED
-    B->>P: CACHE_MISS
-
-    P->>B: OCR_PROCESS_REQUESTED
-    B->>O: OCR_PROCESS_REQUESTED
-    O->>B: OCR_COMPLETED
-
-    B->>P: OCR_COMPLETED
-    P->>B: SEGMENTATION_REQUESTED
-    B->>P: SEGMENTATION_COMPLETED
-
-    P->>B: TRANSLATION_REQUESTED
-    B->>T: TRANSLATION_REQUESTED
-    T->>B: TRANSLATION_COMPLETED
-
-    B->>P: TRANSLATION_COMPLETED
-    P->>B: POST_PROCESSING_REQUESTED
-    B->>P: POST_PROCESSING_COMPLETED
-
-    P->>B: RENDER_PREPARATION_REQUESTED
-    B->>R: RENDER_PREPARATION_REQUESTED
-    R->>B: RENDER_LAYOUT_COMPLETED
-
-    B->>P: RENDER_LAYOUT_COMPLETED
-    P->>B: RENDER_REQUESTED
-    B->>R: RENDER_REQUESTED
-    R->>B: RENDER_COMPLETED
-
-    B->>P: RENDER_COMPLETED
-    P->>B: PIPELINE_COMPLETED
-```
-
----
-
-# 42. Event Flow: Nội dung mới xuất hiện khi đang dịch
-
-```mermaid
-sequenceDiagram
-    participant W as Watcher
-    participant B as Event Bus
-    participant P as Pipeline Orchestrator
-    participant T as Translation Module
-    participant R as Renderer
-
-    T->>B: TRANSLATION_STARTED
-    W->>B: CONTENT_CHANGE_DETECTED
-    B->>P: CONTENT_CHANGE_DETECTED
-
-    P->>B: PIPELINE_CANCEL_REQUESTED
-    B->>T: TRANSLATION_CANCEL_REQUESTED
-
-    T->>B: TRANSLATION_CANCELLED
-    B->>P: PIPELINE_CANCELLED
-
-    P->>B: PIPELINE_CREATE_REQUESTED
-    B->>P: PIPELINE_CREATED
-
-    Note over P: contentRevision tăng
-
-    T-->>B: TRANSLATION_COMPLETED của revision cũ
-    B->>P: TRANSLATION_COMPLETED
-
-    Note over P: Kết quả bị đánh dấu stale
-    P->>B: PIPELINE_STALE_DETECTED
-    P--xR: Không render kết quả cũ
-```
-
-Ngay cả khi provider không hỗ trợ hủy request, stale-result check vẫn bảo vệ session.
-
----
-
-# 43. Event Flow: OCR retry và fallback
-
-```mermaid
-sequenceDiagram
-    participant P as Pipeline Orchestrator
-    participant B as Event Bus
-    participant O1 as OCR Provider A
-    participant O2 as OCR Provider B
-
-    P->>B: OCR_PROCESS_REQUESTED
-    B->>O1: OCR_PROCESS_REQUESTED
-    O1->>B: OCR_FAILED
-    B->>P: OCR_FAILED
-
-    P->>B: TASK_RETRY_SCHEDULED
-    P->>B: OCR_PROCESS_REQUESTED
-    B->>O1: OCR_PROCESS_REQUESTED
-    O1->>B: OCR_FAILED
-    B->>P: OCR_FAILED
-
-    P->>B: OCR_FALLBACK_REQUESTED
-    P->>B: OCR_PROCESS_REQUESTED
-    B->>O2: OCR_PROCESS_REQUESTED
-    O2->>B: OCR_COMPLETED
-
-    B->>P: OCR_COMPLETED
-    P->>B: SEGMENTATION_REQUESTED
-```
-
----
-
-# 44. Event và State Machine Mapping
-
-Một số mapping quan trọng:
-
-| Event                         | Current State                         | Next State                            |
-| ----------------------------- | ------------------------------------- | ------------------------------------- |
-| `SESSION_CREATE_REQUESTED`    | Không tồn tại                         | `CREATED`                             |
-| `SESSION_CONFIGURE_REQUESTED` | `CREATED`                             | `CONFIGURING`                         |
-| `SESSION_READY`               | `CONFIGURING`                         | `READY`                               |
-| `SESSION_START_REQUESTED`     | `READY`                               | `WATCHING`                            |
-| `CONTENT_CHANGE_DETECTED`     | `WATCHING`                            | Giữ `WATCHING` hoặc chuẩn bị pipeline |
-| `PIPELINE_CREATED`            | Session `WATCHING`                    | Session `PROCESSING`                  |
-| `OCR_PROCESS_REQUESTED`       | `SEGMENTING` trước đó hoặc cache miss | Pipeline `OCR_PROCESSING`             |
-| `OCR_COMPLETED`               | `OCR_PROCESSING`                      | `SEGMENTING`                          |
-| `TRANSLATION_COMPLETED`       | `TRANSLATING`                         | `POST_PROCESSING`                     |
-| `RENDER_COMPLETED`            | `RENDERING`                           | `COMPLETED`                           |
-| `PIPELINE_COMPLETED`          | Session `PROCESSING`                  | `DISPLAYING` hoặc `WATCHING`          |
-| `PIPELINE_CANCEL_REQUESTED`   | Active pipeline state                 | `CANCELLING`                          |
-| `PIPELINE_CANCELLED`          | `CANCELLING`                          | `CANCELLED`                           |
-| `SESSION_PAUSE_REQUESTED`     | Active session state                  | `PAUSED`                              |
-| `SESSION_STOP_REQUESTED`      | Non-final state                       | `STOPPING`                            |
-| `SESSION_STOPPED`             | `STOPPING`                            | `STOPPED`                             |
-
-Bảng đầy đủ về state transition nằm trong:
-
-```text
-docs/architecture/STATE_MACHINE.md
-```
-
----
-
-# 45. Event Registry mẫu
-
-Event Registry có thể được biểu diễn bằng code hoặc configuration.
-
-Ví dụ khái niệm:
-
-```ts
-const eventRegistry = {
-  OCR_COMPLETED: {
-    version: 1,
-    category: "RESULT",
-    producer: ["ocr-module"],
-    consumers: [
-      "pipeline-orchestrator",
-      "cache-module",
-      "metrics-module"
-    ],
-    orderingScope: "PIPELINE",
-    payloadSchema: "OcrCompletedPayload"
-  },
-
-  CONTENT_CHANGE_DETECTED: {
-    version: 1,
-    category: "DOMAIN",
-    producer: ["screen-watcher", "text-watcher"],
-    consumers: ["pipeline-orchestrator"],
-    orderingScope: "SESSION",
-    deliveryMode: "LATEST_EVENT_WINS",
-    payloadSchema: "ContentChangeDetectedPayload"
-  }
-};
-```
-
----
-
-# 46. Event Versioning
-
-## 46.1 Compatible change
-
-Có thể giữ nguyên version khi:
-
-* thêm trường optional
-* thêm enum value mà consumer có fallback
-* thêm metadata không bắt buộc
-
----
-
-## 46.2 Breaking change
-
-Phải tăng version khi:
-
-* xóa trường
-* đổi kiểu dữ liệu
-* đổi ý nghĩa trường
-* đổi trường optional thành bắt buộc
-* thay đổi semantic của event
-
-Ví dụ:
-
-```text
-OCR_COMPLETED v1
-OCR_COMPLETED v2
-```
-
-Trong giai đoạn chuyển tiếp, Event Bus có thể hỗ trợ cả hai version.
-
----
-
-# 47. Logging
-
-Mỗi event quan trọng nên ghi:
+Event Bus infrastructure may log safe dispatch metadata:
 
 ```text
 eventId
 eventName
 eventVersion
 sourceModule
-sessionId
-pipelineId
-taskId
-contentRevision
 correlationId
 occurredAt
-dispatchDurationMs
-subscriberCount
+publishedAt
+dispatch duration
+subscriber identity
+delivery outcome
 ```
 
-Không log mặc định:
+---
+
+# 105. Typed References in Logs
+
+Where useful:
 
 ```text
-recognizedText
-translatedText
-ảnh chụp màn hình
+sessionId
+runtimeRevisionId
+workItemId
+attemptId
+artifactId
+```
+
+may be logged.
+
+Avoid unnecessary high-cardinality metrics.
+
+---
+
+# 106. Logging Privacy
+
+Do not log event payload content merely because it passed through Event Bus.
+
+Especially avoid:
+
+```text
+recognized text
+translated text
+screen image
 clipboard content
-API key
-access token
-provider secret
+credentials
 ```
 
 ---
 
-## 47.1 Log level
+# 107. Metrics
+
+Event Bus infrastructure may expose operational metrics such as:
 
 ```text
-TRACE
-- progress event
-- handler timing chi tiết
-
-DEBUG
-- pipeline stage event
-- cache hit/miss
-- retry scheduling
-
-INFO
-- application lifecycle
-- session lifecycle
-- pipeline completed
-
-WARN
-- transient failure
-- fallback
-- stale event
-- dropped progress event
-
-ERROR
-- pipeline failed
-- session error
-- subscriber handler failed
-
-FATAL
-- application cannot continue
+event_bus_published_total
+event_bus_dispatched_total
+event_bus_invalid_total
+event_bus_duplicate_total
+event_bus_handler_failed_total
+event_bus_dispatch_duration
+event_bus_queue_depth
+event_bus_queue_delay
 ```
+
+These are Telemetry metrics.
+
+They are not Event Bus events.
 
 ---
 
-# 48. Metrics
+# 108. Metric Labels
 
-Event Bus nên cung cấp metrics:
-
-```text
-event_published_total
-event_dispatched_total
-event_dropped_total
-event_invalid_total
-event_duplicate_total
-event_stale_total
-event_handler_failed_total
-event_dispatch_duration
-event_handler_duration
-event_queue_size
-event_queue_delay
-```
-
-Phân loại theo:
+Use low-cardinality labels such as:
 
 ```text
 eventName
 sourceModule
-subscriberModule
-priority
-sessionType
-pipelineStage
+consumerModule
+deliveryOutcome
 ```
 
-Không đưa nội dung truyện vào metrics.
+Avoid:
+
+```text
+SessionId
+ArtifactId
+WorkItemId
+AttemptId
+full source URL
+```
+
+as metric labels.
 
 ---
 
-# 49. Backpressure
+# 109. Tracing
 
-Nếu producer tạo event nhanh hơn consumer xử lý, Event Bus phải có backpressure policy.
+Event Bus may propagate trace context.
 
-Đối với event quan trọng:
+Conceptually:
+
+```text
+correlationId
+traceparent?
+tracestate?
+```
+
+Actual trace transport belongs to Telemetry infrastructure.
+
+---
+
+# 110. Event Bus Failure
+
+Event Bus infrastructure failure should be handled according to event criticality and delivery model.
+
+It must not redefine producer state.
+
+---
+
+# 111. Consumer Resynchronization
+
+Consumers should prefer current authoritative snapshots when event history is incomplete.
+
+Example:
+
+```text
+Settings UI missed PreferenceChanged
+    ↓
+GetPreferencesSnapshot
+    ↓
+rebuild ViewModel
+```
+
+---
+
+# 112. No Event Replay Assumption
+
+Unless explicitly implemented later, consumers must not assume the Event Bus can replay all historical events.
+
+---
+
+# 113. Event Bus and Persistence
+
+Persistence belongs to owning modules/Storage.
+
+Event Bus does not automatically save all events.
+
+If an outbox is introduced, it is delivery infrastructure rather than domain history.
+
+---
+
+# 114. Event Bus and Artifact Store
+
+An Artifact reference in an event does not make Event Bus responsible for Artifact lifecycle.
+
+Artifact ownership remains with the producing architecture/module.
+
+---
+
+# 115. Event Bus and Cache
+
+The Event Bus may notify cache invalidation if appropriate.
+
+Cache ownership, keying and eviction remain in Cache infrastructure/policy.
+
+---
+
+# 116. Event Bus and Resource Lifecycle
+
+Event delivery must not extend large resource lifetime indefinitely.
+
+References used in events should have explicit lifetime semantics when necessary.
+
+---
+
+# 117. Application Shutdown
+
+Shutdown is invoked through Application command/lifecycle control.
+
+Possible fact after commit:
+
+```text
+ApplicationStopping
+```
+
+may be published to consumers that need asynchronous cleanup awareness.
+
+---
+
+# 118. Session Stop
+
+Session stop is invoked through Reading Session/Application contract.
+
+Possible resulting fact:
+
+```text
+ReadingSessionStopped
+```
+
+is an event.
+
+Do not send:
 
 ```text
 SESSION_STOP_REQUESTED
-PIPELINE_CANCEL_REQUESTED
-OCR_COMPLETED
-TRANSLATION_COMPLETED
 ```
 
-không được drop tùy tiện.
-
-Đối với event tần suất cao:
-
-```text
-CONTENT_CHANGE_DETECTED
-OCR_PROGRESS_CHANGED
-TRANSLATION_PROGRESS_CHANGED
-```
-
-có thể:
-
-* coalesce
-* throttle
-* giữ event mới nhất
-* drop intermediate progress
+through Event Bus as the primary stop mechanism.
 
 ---
 
-## 49.1 Queue limits
+# 119. Runtime Supersession
 
-Có thể thiết lập:
+When a new RuntimeRevision supersedes an old one:
 
 ```text
-maxGlobalQueueSize
-maxQueueSizePerSession
-maxQueueSizePerEventType
+Runtime commits supersession
+    ↓
+optional RuntimeRevisionSuperseded event
 ```
 
-Khi vượt giới hạn:
+Consumers may update projections.
 
-1. loại progress event cũ
-2. coalesce change event
-3. ưu tiên cancellation và shutdown
-4. ghi warning metric
-5. không làm application hết bộ nhớ
+Execution cancellation remains Runtime-owned.
 
 ---
 
-# 50. Thread Safety
-
-Nếu Event Bus chạy đa luồng:
-
-* payload phải immutable sau publish
-* state transition phải atomic
-* subscriber registry phải thread-safe
-* unsubscribe không được phá dispatch đang chạy
-* event ordering scope phải được bảo vệ
-* cancellation token phải thread-safe
-
-Có thể xử lý event theo:
+# 120. Artifact Publication Example
 
 ```text
-Một serial queue cho mỗi session
+Recognition Attempt completes
+    ↓
+Candidate RecognitionArtifact
+    ↓
+authority validation
+    ↓
+Published RecognitionArtifact
+    ↓
+RecognitionArtifactPublished
+    ↓
+Event Bus
 ```
 
-Trong khi cho phép các session khác chạy song song.
-
-Đây là mô hình phù hợp vì:
-
-* giữ ordering trong session
-* đơn giản hóa state machine
-* vẫn hỗ trợ multi-session concurrency
+The event occurs last.
 
 ---
 
-# 51. Security và Privacy
+# 121. Downstream Execution Example
 
-Event payload không được chứa:
+After Recognition Artifact publication:
 
 ```text
-API key
-access token
-refresh token
-provider secret
-mật khẩu
-cookie nhạy cảm
+Runtime dependency graph
 ```
 
-Đối với nội dung truyện:
+already determines whether Text Processing WorkItem becomes READY.
 
-* chỉ truyền reference khi có thể
-* không persist event payload mặc định
-* không gửi telemetry chứa source text
-* không log OCR hoặc translation text
-* xóa temporary content theo retention policy
-* phân biệt local event và cloud provider request
-
-Event Bus phải nằm trong trust boundary của application.
-
-Nếu dùng IPC:
-
-* xác thực process
-* giới hạn endpoint local
-* kiểm tra schema
-* không nhận event tùy ý từ process ngoài
-* không deserialize object không an toàn
+The event does not command Text Processing.
 
 ---
 
-# 52. Testing Strategy
-
-## 52.1 Unit test
-
-Kiểm tra:
-
-* event validation
-* event registry
-* handler registration
-* handler isolation
-* ordering
-* deduplication
-* stale revision rejection
-* priority
-* unsubscribe
-* error handling
-
----
-
-## 52.2 State transition test
-
-Ví dụ:
+# 122. Preference Example
 
 ```text
-Given pipeline state OCR_PROCESSING
-When OCR_COMPLETED revision hiện tại
-Then state chuyển sang SEGMENTING
-And SEGMENTATION_REQUESTED được publish
+SetPreference command
+    ↓
+Preferences validates
+    ↓
+commit PreferenceRevision N+1
+    ↓
+PreferenceChanged
+    ↓
+Event Bus
+```
+
+Possible consumers:
+
+```text
+Application projection
+UI settings projection
+cache invalidation
+diagnostics
 ```
 
 ---
 
-## 52.3 Stale event test
+# 123. Reading Context Example
 
 ```text
-Given current contentRevision = 12
-When TRANSLATION_COMPLETED revision = 11
-Then không render
-And PIPELINE_STALE_DETECTED được publish
+ChangeReadingContext command
+    ↓
+Reading Session commits revision 18
+    ↓
+ReadingContextChanged
+```
+
+Business Pipeline/Application may separately evaluate new execution requirements through explicit orchestration.
+
+---
+
+# 124. Diagnostics Example
+
+Diagnostics may observe:
+
+```text
+ReadingContextChanged
+```
+
+to correlate health data.
+
+It does not need:
+
+```text
+LogRecorded
+MetricUpdated
+TraceCompleted
+```
+
+events from Event Bus.
+
+---
+
+# 125. UI Example
+
+```text
+PreferenceChanged
+    ↓
+Application/settings projection
+    ↓
+UI Adapter builds new ViewModel
+```
+
+UI Adapter does not need to subscribe to every internal Runtime/module event.
+
+---
+
+# 126. Common Architecture Mistake — Command Event
+
+Wrong:
+
+```text
+TranslationRequested
+    ↓
+Event Bus
+    ↓
+Translation starts
+```
+
+Correct:
+
+```text
+Application/Runtime
+    ↓
+Translation WorkItem / module contract
 ```
 
 ---
 
-## 52.4 Cancellation test
+# 127. Common Architecture Mistake — Event-Driven Stage Chain
+
+Wrong:
 
 ```text
-Given pipeline đang TRANSLATING
-When PIPELINE_CANCEL_REQUESTED
-Then translation task nhận cancellation
-And pipeline chuyển CANCELLING
-And kết quả hoàn thành muộn không được render
+RecognitionCompleted
+    ↓
+TextProcessingCompleted
+    ↓
+TranslationCompleted
+    ↓
+PresentationCompleted
+```
+
+as execution control.
+
+Correct:
+
+```text
+BusinessExecutionPlan
+    ↓
+Runtime dependency graph
 ```
 
 ---
 
-## 52.5 Subscriber failure test
+# 128. Common Architecture Mistake — Event Bus Retry
+
+Wrong:
 
 ```text
-Given OCR_COMPLETED có ba subscribers
-When metrics subscriber throw exception
-Then pipeline orchestrator vẫn xử lý
-And cache subscriber vẫn xử lý
-And lỗi metrics được ghi log
+TranslationFailed
+    ↓
+RetryRequested Event
+```
+
+Correct:
+
+```text
+Attempt Failed
+    ↓
+Runtime Retry Policy
 ```
 
 ---
 
-## 52.6 High-frequency event test
+# 129. Common Architecture Mistake — Event Bus Cancellation
 
-Kiểm tra:
-
-* hàng trăm frame change event
-* event coalescing
-* queue không tăng vô hạn
-* cancellation được ưu tiên
-* không tạo hàng trăm pipeline
-
----
-
-# 53. Suggested Internal Interfaces
-
-Ví dụ khái niệm:
-
-```ts
-interface EventBus {
-  publish<TPayload>(
-    event: EventEnvelope<TPayload>
-  ): Promise<void>;
-
-  subscribe<TPayload>(
-    eventName: string,
-    handler: EventHandler<TPayload>
-  ): Subscription;
-
-  unsubscribe(subscriptionId: string): void;
-}
-```
-
-```ts
-interface EventHandler<TPayload> {
-  handle(
-    event: EventEnvelope<TPayload>,
-    context: EventHandlerContext
-  ): Promise<void>;
-}
-```
-
-```ts
-interface EventHandlerContext {
-  cancellationToken: CancellationToken;
-  logger: Logger;
-  traceContext: TraceContext;
-}
-```
-
-Đây chỉ là cấu trúc tham khảo, không bắt buộc sử dụng TypeScript.
-
----
-
-# 54. MVP Event Bus Recommendation
-
-Đối với phiên bản đầu, Event Bus nên có:
+Wrong:
 
 ```text
-In-memory
-In-process
-Typed event
-Async handler support
-One serial queue per session
-Global priority queue đơn giản
-Cancellation token
-Event schema validation
-Subscriber error isolation
-Correlation ID
-Content revision validation
-Progress throttling
-Content change coalescing
+PipelineCancelRequested
+    ↓
+all stages subscribe
 ```
 
-MVP chưa cần:
+Correct:
 
 ```text
-Kafka
-RabbitMQ
-Redis Pub/Sub
-Event sourcing
-Persistent event log
-Distributed transaction
-Exactly-once delivery
-Cross-device synchronization
-```
-
-Các giải pháp trên sẽ làm hệ thống phức tạp không cần thiết đối với desktop application ban đầu.
-
----
-
-# 55. Bộ event tối thiểu cho MVP
-
-Không cần triển khai toàn bộ event trong tài liệu ngay từ đầu.
-
-Bộ event tối thiểu đề xuất:
-
-## Application
-
-```text
-APPLICATION_READY
-APPLICATION_SHUTDOWN_REQUESTED
-APPLICATION_SHUTTING_DOWN
-```
-
-## Session
-
-```text
-SESSION_CREATE_REQUESTED
-SESSION_CREATED
-SESSION_START_REQUESTED
-SESSION_STARTED
-SESSION_PAUSE_REQUESTED
-SESSION_PAUSED
-SESSION_RESUME_REQUESTED
-SESSION_RESUMED
-SESSION_STOP_REQUESTED
-SESSION_STOPPED
-SESSION_ERROR_OCCURRED
-```
-
-## Watcher
-
-```text
-WATCHER_START_REQUESTED
-WATCHER_STOP_REQUESTED
-CONTENT_CHANGE_DETECTED
-CONTENT_STABLE
-WATCHER_FAILED
-```
-
-## Pipeline
-
-```text
-PIPELINE_CREATE_REQUESTED
-PIPELINE_CREATED
-PIPELINE_COMPLETED
-PIPELINE_SKIPPED
-PIPELINE_CANCEL_REQUESTED
-PIPELINE_CANCELLED
-PIPELINE_FAILED
-PIPELINE_STALE_DETECTED
-```
-
-## Content
-
-```text
-CONTENT_ACQUIRE_REQUESTED
-CONTENT_ACQUIRE_COMPLETED
-CONTENT_ACQUIRE_FAILED
-
-CONTENT_NORMALIZE_REQUESTED
-CONTENT_NORMALIZE_COMPLETED
-CONTENT_NORMALIZE_FAILED
-
-CONTENT_FINGERPRINT_REQUESTED
-CONTENT_FINGERPRINT_COMPLETED
-```
-
-## Cache
-
-```text
-CACHE_LOOKUP_REQUESTED
-CACHE_FULL_HIT
-CACHE_PARTIAL_HIT
-CACHE_MISS
-CACHE_WRITE_REQUESTED
-```
-
-## OCR
-
-```text
-OCR_PROCESS_REQUESTED
-OCR_COMPLETED
-OCR_FAILED
-OCR_CANCEL_REQUESTED
-OCR_CANCELLED
-```
-
-## Segmentation
-
-```text
-SEGMENTATION_REQUESTED
-SEGMENTATION_COMPLETED
-SEGMENTATION_FAILED
-```
-
-## Translation
-
-```text
-TRANSLATION_REQUESTED
-TRANSLATION_COMPLETED
-TRANSLATION_FAILED
-TRANSLATION_CANCEL_REQUESTED
-TRANSLATION_CANCELLED
-```
-
-## Render
-
-```text
-RENDER_PREPARATION_REQUESTED
-RENDER_LAYOUT_COMPLETED
-RENDER_REQUESTED
-RENDER_COMPLETED
-RENDER_FAILED
-RENDER_CLEAR_REQUESTED
+Application/Reading Session command
+    ↓
+Runtime cancellation authority
 ```
 
 ---
 
-# 56. Architectural Decisions Derived from This Document
+# 130. Common Architecture Mistake — Event Bus Telemetry
 
-Tài liệu này dẫn đến các quyết định kiến trúc sau:
-
-1. CRAI sử dụng Event Bus nội bộ để giao tiếp giữa các module chính.
-2. MVP sử dụng in-memory, in-process Event Bus.
-3. Event được chia thành command, domain, result, progress và system event.
-4. Event name sử dụng `UPPER_SNAKE_CASE`.
-5. Command Event sử dụng hậu tố `_REQUESTED`.
-6. Result Event sử dụng `_COMPLETED`, `_FAILED`, `_SKIPPED` hoặc `_CANCELLED`.
-7. Mọi pipeline event phải mang `sessionId`, `pipelineId`, `contentRevision` và `correlationId`.
-8. Mọi event phải có `eventId` và `eventVersion`.
-9. Event payload không được chứa secret.
-10. Dữ liệu lớn nên được truyền qua reference thay vì nhúng trực tiếp.
-11. Event Bus không trực tiếp quyết định pipeline flow.
-12. Pipeline Orchestrator là nơi quyết định bước xử lý tiếp theo.
-13. Event handler không được tự ý gán state.
-14. State transition phải đi qua State Transition Service.
-15. Event thuộc cùng một session cần giữ ordering.
-16. Các session khác nhau có thể xử lý song song.
-17. Event tần suất cao phải được throttle hoặc coalesce.
-18. Cancellation và shutdown event có mức ưu tiên cao.
-19. Subscriber failure phải được cô lập.
-20. Stale result phải bị từ chối trước khi gây side effect.
-21. Progress event có thể bị drop nhưng result event không được drop tùy tiện.
-22. Event Bus không được dùng làm persistent event store trong MVP.
-23. Không sử dụng broker bên ngoài trong MVP.
-24. UI chỉ phát command và subscribe result; UI không gọi trực tiếp OCR hoặc translation provider.
-
----
-
-# 57. Open Questions
-
-## 57.1 Event dispatch
-
-* handler chạy tuần tự hay song song theo event?
-* có giới hạn số async handler đồng thời không?
-* một subscriber chậm có ảnh hưởng subscriber khác không?
-
-## 57.2 Session queue
-
-* mỗi session dùng một serial queue riêng?
-* task OCR và translation có queue tài nguyên riêng?
-* manual image session có được ưu tiên hơn watcher tự động không?
-
-## 57.3 Data reference
-
-* dùng in-memory object reference hay temporary artifact store?
-* reference sống bao lâu?
-* module nào chịu trách nhiệm giải phóng?
-* khi tách process sẽ truyền image buffer bằng cách nào?
-
-## 57.4 Progress event
-
-* có cần OCR progress trong MVP không?
-* có cần translation theo từng segment không?
-* UI cần mức chi tiết tiến trình nào?
-
-## 57.5 Event persistence
-
-* session configuration event có cần lưu audit không?
-* translation edit có cần history không?
-* glossary update có cần event history không?
-
-## 57.6 Error propagation
-
-* event failure nào làm pipeline retry?
-* event failure nào làm session recovering?
-* event failure nào chỉ hiện warning?
-* khi subscriber hạ tầng lỗi có cần retry handler không?
-
-## 57.7 Render streaming
-
-* render chỉ sau khi toàn bộ bản dịch hoàn tất?
-* hay render từng segment khi dịch xong?
-* progressive render có gây nhấp nháy hoặc phá trải nghiệm đọc không?
-
----
-
-# 58. Related Documents
+Wrong:
 
 ```text
-.meta/AI_BOOT.md
-.meta/MODULES.md
-.meta/MODULES_RULE.md
-.meta/USER_JOURNEY.md
-
-docs/architecture/CAPABILITY_MAP.md
-docs/architecture/STATE_MACHINE.md
-docs/architecture/MODULE_DEPENDENCY.md
+MetricUpdated
+TraceCompleted
+LogRecorded
 ```
 
-Các tên state và transition trong tài liệu này phải đồng nhất với:
+as business events.
+
+Correct:
 
 ```text
-docs/architecture/STATE_MACHINE.md
-```
-
-Danh sách producer, consumer và module ownership phải đồng nhất với:
-
-```text
-docs/architecture/MODULE_DEPENDENCY.md
+Telemetry / Logging infrastructure
 ```
 
 ---
 
-# 59. Document Status
+# 131. Common Architecture Mistake — UI Event Bus
 
-Tài liệu hiện ở trạng thái Draft.
+Wrong:
 
-Trước khi chuyển sang Accepted, cần chốt tối thiểu:
+```text
+ButtonClicked
+DialogOpened
+WindowResized
+```
 
-* Event Bus chạy trong một hay nhiều process
-* ordering model theo session
-* cách biểu diễn content reference
-* event handler concurrency
-* cancellation propagation
-* progress event cần thiết cho MVP
-* event coalescing policy
-* subscriber failure policy
-* bộ event tối thiểu sẽ triển khai trước
+on global Event Bus.
+
+Correct:
+
+```text
+UI-local mechanism
+```
+
+---
+
+# 132. Common Architecture Mistake — Generic `StateChanged`
+
+Avoid:
+
+```text
+StateChanged
+```
+
+without owner/domain semantics.
+
+Prefer:
+
+```text
+ReadingContextChanged
+UiCapabilityChanged
+DiagnosticCapabilityChanged
+```
+
+where a real event is required.
+
+---
+
+# 133. Common Architecture Mistake — Every Result Is Event
+
+Do not publish:
+
+```text
+ReadPreferenceCompleted
+CacheLookupCompleted
+ValidationCompleted
+```
+
+simply because a function returned.
+
+Use direct contract results unless asynchronous consumers need a fact.
+
+---
+
+# 134. Common Architecture Mistake — Event as Transaction Authority
+
+Event Bus delivery success must not determine whether owner state was committed.
+
+State authority precedes publication.
+
+---
+
+# 135. Architecture Invariants
+
+1. Events describe committed facts.
+
+2. Event Bus contains no command-event category.
+
+3. `*_REQUESTED` is not the standard event pattern.
+
+4. Commands use explicit Application/module/Runtime contracts.
+
+5. UiIntent is not a business Event Bus event.
+
+6. Event Bus does not orchestrate stage execution.
+
+7. Event Bus does not create WorkItems.
+
+8. Event Bus does not create Attempts.
+
+9. Event Bus does not own Runtime retry.
+
+10. Event Bus does not own cancellation authority.
+
+11. Event Bus does not select providers.
+
+12. Event Bus does not publish Artifacts.
+
+13. Event Bus does not own state transitions.
+
+14. Owner state commits before event publication.
+
+15. Publication failure does not rollback committed owner state.
+
+16. Event Bus is not telemetry transport.
+
+17. Event Bus is not logging transport.
+
+18. Event Bus is not tracing transport.
+
+19. Event Bus is not UI-local event transport.
+
+20. EventId is event identity.
+
+21. CorrelationId is not deduplication identity.
+
+22. Timestamp is not deduplication identity.
+
+23. There is no universal pipelineId requirement.
+
+24. There is no universal taskId requirement.
+
+25. There is no universal contentRevision requirement.
+
+26. Typed authority references are preferred.
+
+27. EventVersion is schema version only.
+
+28. Large payloads use references where practical.
+
+29. Public events contain no native/platform objects.
+
+30. Event payloads remain privacy-safe.
+
+31. Subscribers do not gain ownership from event reception.
+
+32. Subscriber failure does not invalidate producer state.
+
+33. Global event ordering is not required.
+
+34. Runtime ordering is not inferred from Event Bus order.
+
+35. Stale-result validation occurs before Artifact publication.
+
+36. Event Bus is not the primary stale-result authority.
+
+37. Consumers may recover from snapshots.
+
+38. Event Bus need not be event-sourced.
+
+39. Delivery semantics belong to infrastructure.
+
+40. Exactly-once delivery is not required.
+
+41. Consumer idempotency is required where duplicate delivery matters.
+
+42. Module `EVENTS.md` documents remain authoritative for module-specific facts.
+
+---
+
+# 136. MVP Event Bus
+
+Recommended MVP:
+
+```text
+typed
+in-process
+in-memory
+bounded
+subscriber-isolated
+schema-validated
+instrumented
+```
+
+No external broker required.
+
+---
+
+# 137. Minimal MVP Event Set
+
+Do not define a huge global event catalog in advance.
+
+Implement only facts with real consumers.
+
+Likely early candidates may include:
+
+```text
+ApplicationReady
+ReadingSessionCreated
+ReadingSessionStopped
+ReadingContextChanged
+PreferenceChanged
+selected ArtifactPublished facts
+selected capability changes
+```
+
+Exact names must come from module-specific `EVENTS.md`.
+
+---
+
+# 138. MVP Exclusions
+
+Do not introduce in MVP unless demonstrated necessary:
+
+```text
+Command Events
+PipelineRequested events
+OCRRequested events
+TranslationRequested events
+RenderRequested events
+RetryRequested events
+FallbackRequested events
+CancelRequested events
+per-token progress events
+per-frame events
+global UI lifecycle events
+generic telemetry events
+```
+
+---
+
+# 139. Testing — Fact Semantics
+
+Verify every registered Event Bus event represents a fact already committed by its owner.
+
+---
+
+# 140. Testing — No Command Events
+
+Search registry for:
+
+```text
+Requested
+Request
+CommandEvent
+```
+
+and verify such entries are absent from business Event Bus taxonomy unless explicitly documented as an exception.
+
+---
+
+# 141. Testing — Publish After Commit
+
+Inject publication failure.
+
+Verify owner state/result remains committed.
+
+---
+
+# 142. Testing — Deduplication
+
+Deliver the same EventId twice to one consumer.
+
+Verify required idempotent handling.
+
+---
+
+# 143. Testing — Correlation
+
+Deliver two different EventIds with the same CorrelationId.
+
+Verify they are treated as separate events.
+
+---
+
+# 144. Testing — Ordering
+
+Deliver owner revisions out of transport order.
+
+Verify stale consumer projection does not overwrite newer state.
+
+---
+
+# 145. Testing — Subscriber Isolation
+
+Fail one subscriber.
+
+Verify unrelated consumers still receive/process the event where transport guarantees allow it.
+
+---
+
+# 146. Testing — Privacy
+
+Attempt to publish payload containing:
+
+```text
+secret
+raw screenshot
+raw OCR text
+raw translation text
+native UI object
+```
+
+Verify rejection/redaction according to policy.
+
+---
+
+# 147. Testing — Runtime Isolation
+
+Verify no Event Bus subscriber directly creates:
+
+```text
+WorkItem
+Attempt
+Runtime retry
+Runtime cancellation transition
+```
+
+outside explicit Runtime contracts.
+
+---
+
+# 148. Testing — UI Isolation
+
+Verify UI-local events do not enter global Event Bus by default.
+
+---
+
+# 149. Testing — Telemetry Isolation
+
+Verify:
+
+```text
+logs
+metrics
+traces
+```
+
+use observability infrastructure rather than business Event Bus events.
+
+---
+
+# 150. Testing — Snapshot Recovery
+
+Drop one non-durable event.
+
+Verify an affected projection can resynchronize from authoritative owner state where required.
+
+---
+
+# 151. Related Documents
+
+```text
+doc/01-architecture/core/
+├── EVENT_BUS.md
+├── EVENT_CONVENTION.md
+├── STATE_MACHINE.md
+├── DATA_FLOW.md
+├── CAPABILITY_MAP.md
+└── README.md
+
+doc/01-architecture/runtime/
+├── BUSINESS_PIPELINE_ORCHESTRATION.md
+├── PIPELINE_RUNTIME.md
+├── CANCELLATION.md
+├── RETRY_POLICY.md
+├── WORK_QUEUE.md
+├── SCHEDULER.md
+└── RUNTIME_OBSERVABILITY.md
+
+doc/01-architecture/modules/
+├── MODULE_MAP.md
+├── MODULE_DEPENDENCY.md
+└── OWNERSHIP_MAP.md
+
+doc/02-modules/
+├── reading-session/
+├── capture/
+├── recognition/
+├── text-processing/
+├── translation/
+├── presentation/
+├── preferences/
+├── diagnostics/
+└── ui-adapter/
+
+doc/03-infrastructure/
+├── event-bus/
+├── logging/
+└── telemetry/
+```
+
+---
+
+# 152. Documentation Authority
+
+This file defines:
+
+```text
+architecture-wide Event Bus role
+fact-only event semantics
+command/event separation
+Event envelope
+delivery principles
+ordering principles
+deduplication principles
+publication semantics
+privacy constraints
+Runtime/UI/Telemetry boundaries
+```
+
+It does not define the complete event catalog of every module.
+
+---
+
+# 153. Module Event Authority
+
+Module-specific event definitions belong to:
+
+```text
+02-modules/<module>/EVENTS.md
+```
+
+Architecture documents may show examples but must not contradict those files.
+
+---
+
+# 154. Infrastructure Authority
+
+Implementation details such as:
+
+```text
+queue structure
+subscription API
+dispatch algorithm
+backpressure implementation
+handler timeout
+serialization
+IPC transport
+```
+
+belong to:
+
+```text
+03-infrastructure/event-bus/
+```
+
+---
+
+# 155. Completion Criteria
+
+This document is synchronized when:
+
+* Event Bus is fact-only;
+* command-event category is removed;
+* `_REQUESTED` event convention is removed;
+* Runtime execution no longer depends on event-driven stage chaining;
+* retry is not Event Bus-owned;
+* cancellation is not Event Bus-owned;
+* provider fallback is not Event Bus-owned;
+* Artifact publication occurs before publication events;
+* event envelope uses typed authority references;
+* `pipelineId/taskId/contentRevision` are not universal required fields;
+* Event Bus is separated from Telemetry/Logging;
+* Event Bus is separated from UI-local events;
+* consumer failure does not invalidate producer state;
+* EventId is deduplication identity;
+* correlation/causation semantics are explicit;
+* delivery/order semantics do not recreate pipeline authority;
+* module-specific EVENTS documents remain authoritative.
+
+---
+
+# 156. Summary
+
+CRAI v1 effectively allowed:
+
+```text
+Command Event
+    ↓
+Event Bus
+    ↓
+Pipeline Orchestrator
+    ↓
+Requested Stage Event
+    ↓
+Module
+```
+
+Runtime v2 uses:
+
+```text
+Command / UiIntent
+    ↓
+Application / Module Contract
+    ↓
+Business Execution Planning
+    ↓
+Runtime
+    ↓
+WorkItems / Attempts
+    ↓
+Committed Result / State
+    ↓
+Event
+    ↓
+Event Bus
+    ↓
+Interested Consumers
+```
+
+The central invariant is:
+
+```text
+Commands ask.
+
+Runtime executes.
+
+Owners commit.
+
+Events report.
+
+The Event Bus
+never becomes the authority
+for the other three.
+```

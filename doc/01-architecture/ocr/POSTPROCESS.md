@@ -1,7 +1,7 @@
 # OCR Postprocessing
 
 > **Status:** Draft
-> **Version:** 1.1
+> **Version:** 1.2.0
 > **Layer:** OCR Architecture
 > **Depends On:** Detection, Recognition, Text Direction, Layout Analysis
 > **Next Layer:** Quality Assessment, Reading Order
@@ -73,8 +73,8 @@ Postprocessing không chịu trách nhiệm:
 * Text Direction Analysis
 * Rendering
 * Runtime scheduling
-* Runtime retry
-* cancellation authority
+* Runtime same-work retry
+* Runtime cancellation authority
 * Event Bus behavior
 * global cache lifecycle
 
@@ -202,8 +202,8 @@ Các result phải tham chiếu cùng semantic source:
 
 * Image identity
 * Image version
-* Session/Revision khi contract yêu cầu
-* compatible OCR execution context
+* ExecutionScope / ExecutionRevision correlation khi Runtime contract yêu cầu
+* compatible OCR semantic execution context
 
 ---
 
@@ -511,7 +511,22 @@ nếu canonical contract không thể tạo.
 
 Postprocessing chỉ phân loại semantic validity.
 
-Runtime sở hữu execution response.
+Semantic validity không trực tiếp quyết định execution action.
+
+Ownership của action phụ thuộc concern:
+
+```text
+Same-work Retry
+    → Runtime Retry Policy
+
+Alternative execution / Fallback
+    → AI Routing / Recovery
+
+Continue / Stop downstream Business flow
+    → Business Pipeline Orchestration
+```
+
+Runtime giữ execution mechanics và execution authority cho Runtime-owned hoặc resolved work.
 
 ---
 
@@ -617,7 +632,7 @@ Có thể gồm:
 * Pipeline Version
 * Profile Version
 
-Identity exact form sẽ phụ thuộc Runtime/Artifact contract.
+Exact Runtime Artifact identity và publication identity phụ thuộc Runtime Artifact contract. OCR Document vẫn sở hữu semantic document identity và upstream lineage.
 
 ---
 
@@ -666,7 +681,7 @@ Lineage giúp:
 * debugging
 * compatibility
 * reproducibility
-* stale-result detection
+* semantic compatibility / lineage checks
 
 ---
 
@@ -921,7 +936,7 @@ OCR Document compatibility có thể phụ thuộc:
 
 Postprocessing chỉ định nghĩa semantic compatibility.
 
-Runtime/Storage quyết định lifecycle cụ thể.
+Runtime Cache Policy quyết định cache lifecycle; Persistence/Storage owner quyết định persisted lifecycle. Postprocessing chỉ định nghĩa OCR Document semantic compatibility.
 
 ---
 
@@ -943,7 +958,9 @@ Downstream không cần biết:
 
 # 45. Multi-Provider Assembly
 
-Một OCR Document có thể được tạo từ nhiều Provider.
+Một OCR Document có thể được assemble từ upstream results do nhiều Provider tạo ra.
+
+Postprocessing không tự chọn, compose hoặc switch Provider. Multi-provider execution choice phải được resolve trước bởi AI Routing / Provider Management / Recovery hoặc Business/OCR strategy owner tương ứng.
 
 Ví dụ:
 
@@ -970,19 +987,34 @@ CRAI OCR Document
 
 Postprocessing không sở hữu:
 
+* ExecutionScope hoặc ExecutionRevision
+* WorkItem hoặc Attempt lifecycle
 * queue state
-* WorkItem state
-* Attempt
-* retry decision
+* execution state
+* Runtime Retry Policy hoặc retry budget
 * cancellation authority
-* stale-result authority
 * Scheduler behavior
+* execution authority
+* stale-result rejection
+* Runtime Artifact publication
 
-Runtime sở hữu execution.
+Runtime sở hữu execution mechanics và execution authority trên.
+
+Postprocessing chỉ tạo:
+
+* semantic OCR Document candidate
+* Validation Report
+* Postprocessing-specific semantic failure information
+* OCR Document semantic compatibility information
+* execution hoặc resource hints khi contract cho phép
+
+Khi Postprocessing execution hoàn thành, Runtime Control quyết định completion còn execution authority hay phải bị reject vì stale hoặc cancelled trước Runtime Artifact publication.
+
+Postprocessing không quyết định downstream Business continuation.
 
 ---
 
-# 47. Retry Integration
+# 47. Retry and Recovery Integration
 
 Postprocessing có thể báo:
 
@@ -990,10 +1022,28 @@ Postprocessing có thể báo:
 * consistency failure
 * missing required data
 * structural corruption
+* Retry hint
+* Recovery recommendation
 
-Quality/Runtime có thể dùng các signal này.
+Quality hoặc authoritative policy owner có thể sử dụng các signal này làm evidence.
 
-Postprocessing không tự retry upstream stage.
+Postprocessing không tự retry upstream stage và không tự chọn alternative execution.
+
+Ownership:
+
+```text
+Same-work Retry
+    → Runtime Retry Policy
+
+Alternative execution / Fallback
+    → AI Routing / Recovery
+
+Downstream Business continuation
+    → Business Pipeline Orchestration
+
+Scheduling
+    → Runtime Scheduler
+```
 
 ---
 
@@ -1013,7 +1063,7 @@ Global cache:
 * eviction
 * cleanup
 
-thuộc Runtime.
+thuộc Runtime Cache Policy.
 
 ---
 
@@ -1050,7 +1100,9 @@ OCRDocumentInvalid
 UnsupportedContractVersion
 ```
 
-Các lỗi phải map về Runtime Error Model khi crossing execution boundary.
+Postprocessing sở hữu semantic meaning của các Postprocessing-specific errors.
+
+Các lỗi phải map về Runtime Error Model khi crossing Runtime execution boundary; Runtime không redefine Postprocessing semantics.
 
 ---
 
@@ -1066,7 +1118,7 @@ Useful measurements:
 * output size
 * Contract Version
 
-Telemetry transport thuộc Runtime/Infrastructure.
+Runtime Observability sở hữu execution correlation; telemetry transport và lifecycle thuộc Infrastructure.
 
 ---
 
@@ -1079,8 +1131,9 @@ Do đó:
 * không log full OCR Document mặc định
 * diagnostics chỉ lưu metadata cần thiết
 * provider metadata phải được sanitize
-* serialization/persistence phải tuân Privacy Profile
+* serialization/persistence phải tuân resolved Privacy Profile và persistence policy
 * local-only content giữ local boundary
+* Runtime Artifact publication và transport không được làm mất resolved privacy constraints
 
 ---
 
@@ -1126,7 +1179,7 @@ OCR Postprocessing phải luôn đảm bảo:
 
 10. Không thay đổi Direction semantics.
 
-11. Chỉ validate, normalize, merge và assemble.
+11. Chỉ validate, normalize, merge, complete aggregate metadata và assemble.
 
 12. OCR Document phải provider-neutral.
 
@@ -1144,15 +1197,27 @@ OCR Postprocessing phải luôn đảm bảo:
 
 19. Postprocessing không sở hữu Runtime scheduling.
 
-20. Postprocessing không sở hữu Runtime retry.
+20. Postprocessing không sở hữu Runtime Retry Policy hoặc retry budget.
 
 21. Postprocessing không sở hữu cancellation authority.
 
-22. Postprocessing không sở hữu global cache lifecycle.
+22. Postprocessing không sở hữu Runtime execution authority hoặc stale-result decision.
 
-23. Quality Assessment không được thay thế bằng Postprocessing validation.
+23. Postprocessing không sở hữu Runtime Artifact publication.
 
-24. Reading Order không được tính trong Postprocessing.
+24. Postprocessing không sở hữu downstream Business continuation.
+
+25. Postprocessing không sở hữu global cache lifecycle.
+
+26. Postprocessing không tự chọn Provider hoặc Provider Fallback.
+
+27. Quality Assessment không được thay thế bằng Postprocessing validation.
+
+28. Reading Order không được tính trong Postprocessing.
+
+29. OCR Document semantic compatibility không bị Runtime Cache Policy redefine.
+
+30. Runtime Artifact identity không được thay thế semantic OCR Document identity và lineage.
 
 ---
 
@@ -1204,22 +1269,31 @@ Không cần ngay:
 
 # 56. Ownership References
 
-| Concern                | Owner               |
-| ---------------------- | ------------------- |
-| Region / Geometry      | `DETECTION.md`      |
-| Recognition Text Model | `RECOGNITION.md`    |
-| Writing Direction      | `TEXT_DIRECTION.md` |
-| Layout Tree            | `LAYOUT.md`         |
-| OCR Document           | `POSTPROCESS.md`    |
-| Quality Report         | `QUALITY.md`        |
-| Reading Order          | `READING_ORDER.md`  |
-| Provider Contract      | `PROVIDERS.md`      |
-| Retry                  | Runtime             |
-| Cancellation           | Runtime             |
-| Scheduling             | Runtime             |
-| Cache Lifecycle        | Runtime             |
-| Event Transport        | Event Bus           |
-| Telemetry Transport    | Infrastructure      |
+| Concern | Owner |
+| --- | --- |
+| Region / Geometry | `DETECTION.md` |
+| Recognition Text Model | `RECOGNITION.md` |
+| Writing Direction | `TEXT_DIRECTION.md` |
+| Layout Tree | `LAYOUT.md` |
+| OCR Document | `POSTPROCESS.md` |
+| OCR Document semantic identity / lineage | `POSTPROCESS.md` |
+| OCR Document semantic compatibility | `POSTPROCESS.md` |
+| Quality Report | `QUALITY.md` |
+| Reading Order | `READING_ORDER.md` |
+| Provider Contract / Adapter | `PROVIDERS.md` |
+| Provider selection / eligibility | AI Routing / Provider Management |
+| Alternative execution / Fallback | AI Routing / Recovery |
+| Same-work Retry | Runtime Retry Policy |
+| Cancellation Authority | Runtime Control / Cancellation |
+| Scheduling | Runtime Scheduler |
+| Execution Authority / stale-result rejection | Runtime Control |
+| Runtime Artifact identity / publication | Runtime Artifact boundary |
+| Business continuation | Business Pipeline Orchestration |
+| Cache Lifecycle | Runtime Cache Policy |
+| Persisted Storage Lifecycle | Persistence / Storage owner |
+| Event Transport | Event Bus |
+| Execution Error Normalization | Runtime Error Model |
+| Telemetry Transport | Infrastructure |
 
 ---
 
@@ -1270,5 +1344,5 @@ Quality evaluates the document.
 
 Reading Order defines precedence.
 
-Runtime owns execution.
+Runtime owns execution mechanics and execution authority.
 ```

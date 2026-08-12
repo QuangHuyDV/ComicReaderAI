@@ -1,1000 +1,1246 @@
-# runtime/MEMORY_MODEL.md
-
 # Runtime Memory Model
 
-> Project: CRAI  
-> Version: 1.0  
-> Status: Architecture Draft
+* **Document:** Runtime Architecture / Memory Model
+* **Version:** 2.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-Tài liệu này định nghĩa cách CRAI Runtime quản lý ownership, lifetime, retention, memory usage và physical disposal của runtime resources.
+This document defines how CRAI Runtime manages execution-time resource ownership, lifetime, retention, sharing, resource pressure and physical disposal.
 
-Memory là một phần của resource lifecycle, không phải toàn bộ resource model.
+Memory is one dimension of Runtime resource lifecycle.
 
-Runtime resource có thể gồm:
+Runtime resources may include:
 
 ```text
-Memory Resource
-Artifact Resource
-Native Resource
-GPU Resource
-Provider Resource
+Managed Memory
+Runtime Artifact Backing
+Native Memory
+GPU Memory
+Provider / Model Runtime Resource
 Operating-System Handle
-Temporary File or Mapping
+Temporary File / Mapping
+Process / IPC Resource
+UI / Graphics Resource
 ```
 
-Tài liệu này tập trung vào:
+This document focuses on:
 
-- bounded runtime memory;
-- immutable Artifact;
-- lightweight reference;
-- explicit ownership;
-- scoped lease;
-- logical disposal;
-- physical disposal;
-- memory/resource pressure;
-- attempt-local và shared resource;
-- deterministic-enough cleanup;
-- privacy-safe retention.
+* bounded Runtime memory;
+* immutable Runtime Artifacts;
+* lightweight references;
+* explicit resource ownership;
+* scoped leases;
+* logical disposal;
+* physical disposal;
+* Runtime resource pressure;
+* Attempt-local and shared resources;
+* draining resources;
+* privacy-safe retention;
+* truthful resource accounting.
 
 ---
 
-## 2. Core Philosophy
+# 2. Core Philosophy
 
-CRAI tuân theo nguyên tắc:
+CRAI follows:
 
 ```text
 Resource ownership determines lifetime.
 
-Memory usage is a consequence of lifetime.
+Lifetime determines resource pressure.
 ```
 
-Mọi large resource phải có:
+Every significant Runtime resource SHOULD have:
 
-- logical owner;
-- retention class;
-- lifetime boundary;
-- size or cost estimate;
-- release condition;
-- disposal owner;
-- observability metadata.
+```text
+logical owner
+lifetime boundary
+resource class
+size/cost estimate
+retention class
+release condition
+disposal owner
+observability metadata
+```
 
-Large payload phải được chia sẻ qua immutable reference hoặc scoped lease thay vì copy qua queue, event hoặc component boundary.
+Large payloads SHOULD cross Runtime boundaries through:
+
+```text
+immutable reference
+or
+scoped lease
+```
+
+rather than repeated copying.
 
 ---
 
-## 3. Architectural Position
+# 3. Architectural Position
+
+Canonical Runtime hierarchy:
 
 ```text
-Session
-  ↓
-Revision
-  ↓
+Application Instance
+        |
+        v
+ExecutionScope
+        |
+        v
+ExecutionRevision
+        |
+        v
 WorkItem
-  ↓
+        |
+        v
 Attempt
-  ↓
+        |
+        v
 Runtime Resources
-    ├── Attempt-local Resource
-    ├── Shared Artifact
-    ├── Provider Resource
-    ├── Native/GPU Resource
-    └── UI Resource
 ```
 
-Ownership và lifetime phải được tách khỏi business meaning.
-
-Business Module sở hữu semantic meaning của data.
-
-Runtime sở hữu execution-time resource lifecycle.
-
-Storage sở hữu durable persistence capability, không phải runtime memory ownership.
-
----
-
-## 4. Scope
-
-Tài liệu này bao phủ:
-
-- runtime resource categories;
-- session/revision/attempt lifetime;
-- Revision Registry;
-- Artifact Store;
-- Resource Lease;
-- retention tracking;
-- ownership transfer;
-- logical và physical disposal;
-- memory budget;
-- GPU/native resource;
-- provider lifetime resource;
-- queue payload policy;
-- cache retention;
-- memory pressure;
-- resource leak;
-- metrics và diagnostics;
-- MVP policy.
-
-Không định nghĩa:
-
-- persistent schema;
-- disk cache format;
-- provider SDK internals;
-- GC implementation;
-- exact image-processing algorithm;
-- process topology;
-- Storage migration/retention policy.
-
----
-
-## 5. Runtime Resource Categories
-
-Runtime resource được chia theo lifetime và sharing semantics.
-
-### 5.1 Attempt-Local Resource
-
-Chỉ tồn tại trong một Attempt.
-
-Ví dụ:
-
-- temporary buffer;
-- request builder;
-- image tile;
-- provider response body;
-- intermediate tensor;
-- temporary geometry graph.
-
-### 5.2 Shared Runtime Artifact
-
-Immutable data được nhiều component hoặc Attempt tham chiếu.
-
-Ví dụ:
-
-- Source Image Artifact;
-- Recognition Artifact;
-- Source Document Artifact;
-- Translation Artifact;
-- Presentation Artifact.
-
-### 5.3 Session-Scoped Resource
-
-Tồn tại trong một active session.
-
-Ví dụ:
-
-- session configuration snapshot reference;
-- current presentation reference;
-- session glossary index;
-- source observation state.
-
-### 5.4 Runtime-Global Resource
-
-Tồn tại theo application/runtime lifetime.
-
-Ví dụ:
-
-- provider client;
-- reusable worker pool;
-- configuration snapshot registry;
-- shared model handle;
-- bounded buffer pool.
-
-### 5.5 External Resource
-
-Do external system hoặc OS giữ.
-
-Ví dụ:
-
-- HTTP request;
-- process;
-- window capture handle;
-- GPU context;
-- file mapping;
-- native model context.
-
----
-
-## 6. Resource Classification Table
-
-| Resource | Default owner | Lifetime | Shared |
-|---|---|---|---|
-| Candidate Artifact | Producer Attempt | Attempt until transfer | No |
-| Accepted Artifact | Artifact Store | Retention/Lease governed | Yes |
-| Temporary Buffer | Worker Execution | Attempt | No |
-| Queue Metadata | Work Queue | Queued position | No |
-| Revision Metadata | Revision Store | Revision | Yes |
-| Provider Request | Provider Adapter | Attempt/request | No |
-| Provider Client | Provider Manager | Provider/runtime | Yes |
-| GPU Context | Provider Manager or Resource Manager | Provider/runtime | Maybe |
-| Artifact Lease | Lease holder | Scoped operation | No |
-| UI Presentation Reference | Presentation | Display lifetime | Yes |
-| Persistent Snapshot | Storage | Durable policy | Yes, outside runtime memory |
-
----
-
-## 7. Control Memory
-
-Control memory phải nhỏ và bounded.
-
-Có thể chứa:
-
-- SessionId;
-- RevisionId;
-- WorkItemId;
-- AttemptId;
-- CancellationContextRef;
-- scheduler metadata;
-- queue metadata;
-- state snapshots;
-- event envelope;
-- metrics counter.
-
-Không chứa:
-
-- screenshot;
-- large text payload;
-- model tensor;
-- provider body;
-- secret;
-- complete Artifact payload.
-
----
-
-## 8. Session Memory
-
-Session memory chứa runtime metadata cần để vận hành một session:
-
-- current RevisionRef;
-- source/capture descriptor;
-- configuration snapshot reference;
-- active presentation reference;
-- session cancellation context;
-- session-scoped retained ArtifactRef;
-- provider/runtime preference reference.
-
-Reading Module vẫn sở hữu business state của Reading Session.
-
-Session close revoke runtime ownership, nhưng physical disposal chờ active lease và drain.
-
----
-
-## 9. Revision Memory
-
-Revision là runtime ownership boundary cho execution intent hiện tại.
-
-Conceptual model:
+Runtime Resources MAY include:
 
 ```text
-Revision
-├── Revision Metadata
-├── BusinessPlanRef
-├── Input ArtifactRefs
-├── Accepted Output ArtifactRefs
-├── WorkItemRefs
-├── Resource Accounting
-└── Drain State
+Attempt-Local Resource
+Shared Runtime Artifact
+ExecutionScope-Scoped Resource
+Runtime-Global Resource
+External / Native Resource
+Presentation Resource
+Provider Runtime Resource
 ```
-
-Revision không chứa mutable large payload trực tiếp.
 
 ---
 
-## 10. Revision Lifetime
+# 4. Ownership Boundary
+
+```text
+Business Module
+    owns semantic meaning.
+
+Runtime
+    owns execution-time resource lifecycle.
+
+Runtime Artifact Store
+    owns published Runtime Artifact lifecycle.
+
+Resource Manager
+    owns physical resource accounting/disposal coordination.
+
+Storage
+    owns durable persistence capability.
+
+Presentation/Application
+    owns UI/Presentation resource semantics.
+
+Provider Runtime Gateway / Adapter
+    owns provider execution-runtime objects.
+```
+
+---
+
+# 5. Non-Goals
+
+This document does NOT define:
+
+* Domain persistence schema;
+* durable cache file format;
+* provider SDK internals;
+* Garbage Collector implementation;
+* Recognition/OCR algorithms;
+* Translation algorithms;
+* process topology;
+* Business configuration;
+* Storage migration policy;
+* cache semantic compatibility.
+
+---
+
+# 6. Runtime Resource Categories
+
+## 6.1 Attempt-Local Resource
+
+Exists only for one physical Attempt.
+
+Examples:
+
+```text
+temporary buffer
+request builder
+provider response body
+image tile
+intermediate tensor
+temporary geometry structure
+temporary serialization buffer
+```
+
+Default owner:
+
+```text
+Worker / Execution Adapter
+```
+
+---
+
+## 6.2 Shared Runtime Artifact
+
+Immutable execution data that may be referenced across WorkItems/Attempts.
+
+Examples:
+
+```text
+Source Runtime Artifact
+Recognition Runtime Artifact
+Source Document Runtime Artifact
+Translation Runtime Artifact
+Presentation Input Runtime Artifact
+```
+
+These names describe execution payloads.
+
+They are NOT automatically canonical Domain resources.
+
+---
+
+## 6.3 ExecutionScope-Scoped Resource
+
+Runtime resource retained for one ExecutionScope.
+
+Examples MAY include:
+
+```text
+ExecutionScope runtime configuration reference
+current ExecutionRevision reference
+scope cancellation context
+scope-local ArtifactRef set
+scope resource-accounting state
+scope-local execution index
+```
+
+Avoid storing business-owned mutable state here.
+
+---
+
+## 6.4 ExecutionRevision-Scoped Resource
+
+Runtime resource retained only while one ExecutionRevision remains relevant/draining.
+
+Examples:
+
+```text
+BusinessExecutionPlan reference
+WorkItem references
+accepted Runtime Artifact references
+execution accounting
+drain state
+```
+
+---
+
+## 6.5 Runtime-Global Resource
+
+Lives for application/runtime lifetime.
+
+Examples:
+
+```text
+worker pool
+bounded buffer pool
+Artifact index infrastructure
+configuration snapshot registry
+provider runtime registry
+shared local model handle
+```
+
+---
+
+## 6.6 External / Native Resource
+
+Owned physically by OS, driver, library, external runtime or process.
+
+Examples:
+
+```text
+HTTP request
+subprocess
+capture handle
+GPU context
+GPU allocation
+file mapping
+native model context
+IPC handle
+graphics surface
+```
+
+---
+
+# 7. Resource Classification
+
+| Resource                   | Default logical owner                                | Lifetime                           |
+| -------------------------- | ---------------------------------------------------- | ---------------------------------- |
+| Candidate Runtime Artifact | Producer Attempt                                     | Attempt until transfer/discard     |
+| Published Runtime Artifact | Runtime Artifact Store                               | Retention/lease governed           |
+| Temporary Buffer           | Worker / Adapter                                     | Attempt                            |
+| Queue Metadata             | Work Queue                                           | Queued position                    |
+| ExecutionRevision Metadata | Execution State Store                                | Revision lifecycle                 |
+| Provider Request           | Execution Adapter                                    | Attempt/child-operation lifetime   |
+| Provider Client            | Provider Runtime Gateway / Adapter                   | Runtime/provider-instance lifetime |
+| Local Model Handle         | Provider Runtime Gateway + Resource Manager          | Runtime/provider lifetime          |
+| GPU Allocation             | Resource-owning runtime component + Resource Manager | Explicit                           |
+| Runtime Artifact Lease     | Lease holder                                         | Scoped use                         |
+| Presentation Resource      | Presentation/Application                             | Presentation lifetime              |
+| Durable Business Snapshot  | Storage / Business owner                             | Outside Runtime resource ownership |
+
+---
+
+# 8. Control Memory
+
+Control memory MUST remain lightweight and bounded.
+
+It MAY contain:
+
+```text
+ApplicationInstanceId
+ExecutionScopeId
+ExecutionRevisionId
+WorkItemId
+AttemptId
+CancellationContextRef
+RuntimeConfigurationSnapshotId
+Scheduler metadata
+Queue metadata
+state references
+event envelope
+metrics counters
+```
+
+It MUST NOT contain:
+
+```text
+full screenshot
+large source text
+large translated text
+model tensor
+raw provider body
+secret
+full Artifact payload
+```
+
+---
+
+# 9. ExecutionScope Memory
+
+ExecutionScope runtime memory MAY contain:
+
+```text
+current ExecutionRevisionRef
+Runtime configuration reference
+scope cancellation context
+scope-local ArtifactRefs
+execution accounting
+runtime priority metadata
+```
+
+It SHOULD NOT own:
+
+```text
+Reading Session business state
+Glossary truth
+Translation Profile semantics
+Presentation preferences
+Provider Configuration
+```
+
+---
+
+# 10. ExecutionRevision Memory
+
+Recommended:
+
+```text
+ExecutionRevision
+├── ExecutionRevisionMetadata
+├── BusinessExecutionPlanRef
+├── InputArtifactRefs[]
+├── AcceptedRuntimeArtifactRefs[]
+├── WorkItemRefs[]
+├── ResourceAccounting
+└── DrainState
+```
+
+ExecutionRevision metadata MUST remain lightweight.
+
+---
+
+# 11. ExecutionRevision Lifetime
+
+Recommended:
 
 ```text
 CREATED
-  ↓
+    |
+    v
 CURRENT
-  ↓
-SUPERSEDED
-  ↓
+    |
+    +--> SUPERSEDED
+    |
+    +--> CANCELLED
+    |
+    v
 DRAINING
-  ↓
+    |
+    v
 DISPOSED
 ```
 
-Khi superseded:
+When authority is lost:
 
-- commit authority mất ngay;
-- new lease có thể bị từ chối theo policy;
-- queued work bị remove;
-- running Attempt được drain/cancel;
-- physical payload chưa chắc được free ngay.
-
----
-
-## 11. Runtime Revision Registry
-
-`Revision Store` được hiểu là Runtime Revision Registry.
-
-Nó quản lý:
-
-- Revision identity;
-- current/superseded state;
-- Revision-to-WorkItem relation;
-- Revision-to-ArtifactRef relation;
-- resource accounting metadata;
-- disposal eligibility.
-
-Nó không phải durable Storage.
-
-Nó không sở hữu Artifact payload vật lý.
+* no new relevant execution should be materialized;
+* queued work may be removed;
+* running Attempts drain/cancel;
+* new leases MAY be denied depending on resource semantics;
+* existing valid leases remain protected;
+* physical payload is not necessarily released immediately.
 
 ---
 
-## 12. Artifact Store
+# 12. Execution State Store
 
-Artifact Store quản lý immutable runtime Artifact.
-
-Trách nhiệm:
-
-- register candidate;
-- atomic publication;
-- Artifact identity;
-- metadata;
-- retention owner;
-- lease tracking;
-- size estimate;
-- lookup;
-- cache retention;
-- disposal eligibility;
-- backing resource reference.
-
-Artifact Store không quyết định scheduling hoặc business semantics.
-
----
-
-## 13. Artifact Model
+Execution State Store manages Runtime metadata such as:
 
 ```text
-Artifact
-├── ArtifactId
-├── ArtifactType
-├── ContentIdentity
-├── ProducerWorkItemId
-├── ProducerAttemptId
-├── ProducerVersion
-├── CreatedAt
-├── SizeEstimate
-├── RetentionClass
-├── RetentionOwners
-├── BackingResourceRef
-└── IntegrityMetadata
+ExecutionScope identity
+ExecutionRevision identity
+current/superseded state
+ExecutionRevision → WorkItem relation
+ExecutionRevision → RuntimeArtifactRef relation
+resource accounting metadata
+drain/disposal eligibility
 ```
 
-Exact structure là implementation-specific.
+It is NOT durable Domain Storage.
+
+It does NOT own physical Artifact payload.
 
 ---
 
-## 14. Artifact Immutability
+# 13. Runtime Artifact Store
 
-Artifact đã publish không được mutate.
+Runtime Artifact Store owns published immutable Runtime Artifacts.
 
-Thay đổi tạo Artifact mới.
+Responsibilities MAY include:
+
+* Artifact registration;
+* Artifact identity;
+* atomic publication;
+* Artifact metadata;
+* retention ownership;
+* lease tracking;
+* size estimate;
+* Runtime lookup;
+* backing-resource reference;
+* disposal eligibility.
+
+It MUST NOT own:
+
+* Business result semantics;
+* cache semantic compatibility;
+* Scheduler policy;
+* durable Domain truth.
+
+---
+
+# 14. Runtime Artifact Model
+
+Recommended:
 
 ```text
-Artifact v1
-    ↓ correction or transformation
-Artifact v2
+RuntimeArtifact
+├── artifactId
+├── artifactType
+├── producerWorkItemId
+├── producerAttemptId
+├── producerExecutionRevisionId
+├── contentIdentity?
+├── outputContractVersion?
+├── createdAt
+├── sizeEstimate
+├── retentionClass
+├── retentionOwners[]
+├── backingResourceRef
+└── integrityMetadata
 ```
 
-Immutability hỗ trợ:
-
-- safe sharing;
-- deterministic cache key;
-- stale validation;
-- reduced locking;
-- retry isolation;
-- traceability.
+Exact implementation remains open.
 
 ---
 
-## 15. Artifact Identity vs Physical Payload
+# 15. Runtime Artifact Immutability
 
-Nhiều Revision có thể tham chiếu cùng Artifact.
+Published Runtime Artifact MUST be immutable.
 
-Nhiều Artifact metadata cũng có thể dùng chung backing payload nếu identity và compatibility cho phép.
+Transformation/correction creates another result:
 
 ```text
-Revision A ─┐
-            ├── ArtifactRef X → one physical payload
-Revision B ─┘
+Artifact A
+    |
+    v
+Transformation
+    |
+    v
+Artifact B
 ```
 
-Architecture không bắt buộc payload duplication.
+Immutability supports:
+
+* safe sharing;
+* reduced locking;
+* cache identity;
+* stale-result safety;
+* retry isolation;
+* traceability.
 
 ---
 
-## 16. Lightweight WorkItem Reference
+# 16. Runtime Artifact vs Business Result
 
-WorkItem và Queue chỉ mang metadata nhẹ:
+Critical distinction:
 
 ```text
-SessionId
-RevisionId
+Runtime Artifact
+    = accepted execution payload
+```
+
+```text
+Business Result
+    = owner-module accepted semantic result
+```
+
+Runtime Artifact ownership does NOT imply Domain ownership.
+
+---
+
+# 17. Artifact Publication Flow
+
+Recommended:
+
+```text
+Worker produces temporary output
+        |
+        v
+Artifact Candidate
+        |
+        v
+Runtime execution-authority validation
+        |
+        v
+Runtime Artifact Store publishes
+        |
+        v
+ArtifactRef
+        |
+        v
+Owning Business Module validates/commits semantics
+```
+
+Cache promotion normally occurs only after required Business acceptance.
+
+---
+
+# 18. Candidate Ownership
+
+Before publication:
+
+```text
+Producer Attempt
+```
+
+owns candidate output.
+
+After successful publication:
+
+```text
+Runtime Artifact Store
+```
+
+owns Runtime Artifact lifecycle.
+
+Producer MUST release its temporary ownership/reference according to transfer protocol.
+
+---
+
+# 19. Lightweight WorkItem / Queue References
+
+WorkItem/Queue metadata SHOULD contain:
+
+```text
+ExecutionScopeId
+ExecutionRevisionId
 WorkItemId
 AttemptId
 BusinessStageId
 WorkType
-InputArtifactRefs
-RequestedOutputType
-ConfigurationVersion
-ExecutionContextRef
+InputArtifactRefs[]
+RuntimeConfigurationSnapshotId
+ExecutionBindingReference?
 CancellationContextRef
 ```
 
-Không mang:
-
-- full image;
-- full Source Document;
-- provider response;
-- mutable business object;
-- secret.
+No large payload.
 
 ---
 
-## 17. Ownership Model
+# 20. Ownership Model
 
-Mọi resource phải có một logical owner tại mỗi thời điểm.
+Every resource MUST have an explicit logical owner.
 
-Owner có thể là:
-
-- Application Bootstrap;
-- Runtime Component;
-- Session Runtime;
-- Revision Registry;
-- Artifact Store;
-- Worker Execution;
-- Provider Manager;
-- Provider Adapter;
-- Presentation;
-- Resource Manager;
-- Cache retention policy;
-- Storage boundary.
-
-Ownership transfer phải explicit.
-
----
-
-## 18. Ownership Transfer
-
-Ví dụ:
+Possible owners:
 
 ```text
-Worker creates temporary output
-        ↓
-Candidate Artifact registered
-        ↓
-Runtime Control validates authority
-        ↓
-Artifact Store accepts ownership
-        ↓
-Worker releases producer ownership
+Application Bootstrap
+Runtime Control
+Execution State Store
+Runtime Artifact Store
+Worker / Attempt
+Work Queue
+Provider Runtime Gateway
+Execution Adapter
+Presentation/Application
+Resource Manager
+Cache Retention
+Storage Boundary
 ```
 
-Sau transfer, producer không được dispose backing payload độc lập.
+Ownership transfer MUST be explicit.
 
 ---
 
-## 19. Retention Tracking
+# 21. Ownership vs Retention
 
-Architecture yêu cầu retention explicit, nhưng không bắt buộc reference counting.
+Ownership and retention are related but distinct.
 
-Implementation có thể dùng:
-
-- reference count;
-- lease table;
-- owner set;
-- pin count;
-- generation token;
-- managed reference;
-- explicit handle.
-
-Yêu cầu duy nhất:
+A Runtime Artifact may have one lifecycle owner:
 
 ```text
-A resource cannot be physically disposed
-while a valid owner or lease still exists.
+Runtime Artifact Store
+```
+
+while multiple retention reasons exist:
+
+```text
+ExecutionRevision retention
+ExecutionScope retention
+Cache retention
+Presentation retention
+Diagnostic retention
 ```
 
 ---
 
-## 20. Resource Lease
+# 22. Retention Tracking
 
-`ResourceLease` là abstraction tổng quát.
+Implementation MAY use:
 
-Các dạng có thể gồm:
+* lease table;
+* owner set;
+* reference count;
+* pin count;
+* generation token;
+* explicit handle;
+* managed reference.
+
+Architecture requires only:
 
 ```text
-ArtifactLease
+Physical disposal MUST NOT occur
+while a valid owner, retention or lease remains.
+```
+
+---
+
+# 23. Resource Lease
+
+`ResourceLease` is the generic safe-use abstraction.
+
+Possible:
+
+```text
+RuntimeArtifactLease
 GpuResourceLease
 NativeHandleLease
 ProviderResourceLease
 CaptureSurfaceLease
+GraphicsResourceLease
 ```
 
-Lease phải:
+Lease SHOULD be:
 
-- scoped;
-- immutable/read-only mặc định;
-- có owner;
-- có acquisition time;
-- có release path;
-- cancel-safe;
-- observable;
-- không được giữ vô hạn không phát hiện.
+* scoped;
+* read-only where possible;
+* associated with owner;
+* timestamped;
+* releasable;
+* cancellation-safe;
+* observable;
+* leak-detectable.
 
 ---
 
-## 21. Lease Acquisition
+# 24. Lease Acquisition
 
 ```text
 Resolve ResourceRef
-    ↓
-Validate resource state
-    ↓
+        |
+        v
+Validate Resource State
+        |
+        v
 Acquire Lease
-    ↓
-Use resource
-    ↓
+        |
+        v
+Use Resource
+        |
+        v
 Release Lease
 ```
 
-Nếu logical disposal đã bắt đầu, new lease có thể bị deny.
+After logical disposal begins, new lease acquisition MAY be denied.
+
+Existing valid leases remain protected until their termination rules permit release.
 
 ---
 
-## 22. Logical Disposal
+# 25. Logical Disposal
 
-Logical disposal nghĩa là resource không còn hợp lệ cho new runtime work.
-
-Actions:
-
-- remove active index;
-- deny new lease;
-- release retention owner;
-- revoke commit authority nếu liên quan;
-- mark pending physical disposal.
-
-Logical disposal không đồng nghĩa memory đã free.
-
----
-
-## 23. Physical Disposal
-
-Physical disposal chỉ xảy ra khi:
-
-- no retention owner;
-- no active lease;
-- no UI ownership;
-- no provider/native usage;
-- cleanup policy cho phép;
-- required diagnostics retention hết.
+Logical disposal means:
 
 ```text
-Logical disposal
-    ↓
+resource is no longer eligible
+for new runtime use/retention
+```
+
+Possible actions:
+
+* remove active index;
+* deny new lease;
+* remove retention ownership;
+* mark pending physical disposal;
+* reject new use through stale/invalid references.
+
+Logical disposal MUST NOT be defined as:
+
+```text
+Domain commit revocation
+Presentation commit revocation
+```
+
+Those belong to their respective owners.
+
+---
+
+# 26. Physical Disposal
+
+Physical disposal occurs only when safe.
+
+Typical conditions:
+
+```text
+no active owner
+no retention owner
+no valid lease
+no active physical operation
+no Presentation retention
+no provider/native use
+diagnostic retention expired
+cleanup safe
+```
+
+Recommended:
+
+```text
+Logical Disposal
+        |
+        v
 Drain
-    ↓
-Lease count = 0
-    ↓
-Physical disposal
+        |
+        v
+No Owners / Retention / Leases
+        |
+        v
+Physical Disposal
 ```
 
 ---
 
-## 24. Retention Classes
+# 27. Retention Classes
+
+Recommended:
 
 ```text
 EPHEMERAL
 ATTEMPT_SCOPED
-REVISION_SCOPED
-SESSION_SCOPED
+EXECUTION_REVISION_SCOPED
+EXECUTION_SCOPE_SCOPED
 CACHE_ELIGIBLE
 APPLICATION_SCOPED
 EXTERNAL_LIFETIME
 ```
 
-Retention class mô tả intended maximum lifetime, không thay ownership.
+Retention class describes intended maximum lifetime.
+
+It does NOT replace ownership/lease state.
 
 ---
 
-## 25. Attempt-Local Resource
+# 28. Attempt-Local Resource
 
-Attempt-local resource:
+Attempt-local resources:
 
-- do Worker hoặc Provider Adapter sở hữu;
-- không publish trước validation;
-- release khi Attempt kết thúc;
-- không được retained bởi event handler;
-- không tự chuyển thành shared Artifact;
-- có bounded size/cost.
+* belong to Worker/Adapter;
+* remain bounded;
+* are not shared by default;
+* are released at Attempt terminal cleanup;
+* do not become shared Runtime Artifact automatically;
+* are not retained through Event/Queue references.
 
 ---
 
-## 26. Shared Artifact Retention
+# 29. Shared Runtime Artifact Retention
 
-Shared Artifact có thể có nhiều retention owner:
+Published Runtime Artifact MAY have multiple retention reasons:
 
 ```text
-Revision retention
+ExecutionRevision retention
+ExecutionScope retention
 Cache retention
-UI retention
+Presentation retention
 Diagnostic retention
 ```
 
-Physical payload chỉ cần tồn tại một lần nếu implementation hỗ trợ.
+Physical payload MAY be shared once where implementation allows.
 
 ---
 
-## 27. Cache Promotion
+# 30. Cache Promotion
 
-Cache promotion là thay đổi retention ownership, không phải copy payload.
+Cache promotion means:
 
 ```text
-Revision-scoped Artifact
-        ↓ validation
-Cache Policy approves
-        ↓
-Cache retention owner added
-        ↓
-Payload unchanged
+add cache retention
 ```
 
-Failed, canceled, stale, abandoned hoặc unvalidated output không promote trong MVP.
+not:
+
+```text
+copy payload
+```
+
+Correct:
+
+```text
+Business-accepted reusable result
+        |
+        v
+Cache Policy approves retention
+        |
+        v
+Cache retention added
+```
 
 ---
 
-## 28. Cache Eviction
+# 31. Cache Eviction
 
-Cache eviction nghĩa là:
-
-```text
-Remove cache retention owner
-```
-
-Không nghĩa là:
+Cache eviction means:
 
 ```text
-Free payload immediately
+remove cache retention
 ```
 
-Payload còn nếu Revision, UI hoặc Lease vẫn giữ.
+It does NOT mean:
+
+```text
+free payload immediately
+```
+
+Payload remains while any other owner/retention/lease exists.
 
 ---
 
-## 29. Artifact Store vs Storage
+# 32. Runtime Artifact Store vs Cache Policy
 
 ```text
-Artifact Store
-    → runtime immutable artifact lifecycle
+Runtime Artifact Store
+    owns execution Artifact lifecycle
 
+Cache Policy
+    owns reuse-retention decision
+```
+
+Artifact Store SHOULD NOT own semantic cache policy.
+
+---
+
+# 33. Runtime Artifact Store vs Storage
+
+```text
+Runtime Artifact Store
+    -> volatile/runtime Artifact lifecycle
+```
+
+```text
 Storage
-    → durable persistence, versioning, retention, recovery
+    -> durable persistence
+       recovery
+       durable retention
+       schema/versioning
 ```
 
-Artifact Store không mặc định durable.
-
-Storage không quản lý active lease, queue hoặc revision authority.
+Runtime Artifact Store is not durable by default.
 
 ---
 
-## 30. Large Payload Policy
+# 34. Large Payload Policy
 
-Payload được coi là large nếu copy có ảnh hưởng đáng kể đến:
+A payload is considered large when copying materially affects:
 
-- latency;
-- RAM;
-- GPU transfer;
-- GC/allocation pressure;
-- serialization cost;
-- IPC cost.
+* latency;
+* RAM;
+* GPU transfers;
+* allocation/GC pressure;
+* serialization cost;
+* IPC cost.
 
-Large payload không được copy mặc định.
+Default:
+
+```text
+reference / lease
+```
+
+rather than copy.
 
 ---
 
-## 31. Image Resource
+# 35. Copy Policy
 
-Image pipeline có thể tạo nhiều representation:
+Copy MAY be required for:
+
+* format conversion;
+* immutable snapshot;
+* process isolation;
+* GPU/CPU transfer;
+* provider encoding;
+* API ownership contract;
+* thread-affinity safety;
+* security boundary.
+
+Convenience-only copies SHOULD be avoided.
+
+---
+
+# 36. Image Resources
+
+Image processing may involve:
 
 ```text
 Capture Surface
 CPU Buffer
 Preprocessed View
-Model Tensor
+Tensor
 Preview Surface
+Graphics Texture
 ```
 
-Mỗi representation phải có:
+Every representation SHOULD declare:
 
-- owner;
-- lifetime;
-- size estimate;
-- release point;
-- sharing policy;
-- backing resource type.
-
----
-
-## 32. Image Copy Policy
-
-Copy chỉ được phép khi cần cho:
-
-- format conversion;
-- immutable snapshot;
-- process boundary;
-- GPU/CPU transfer;
-- API ownership contract;
-- provider encoding;
-- thread-affinity safety.
-
-Copy vì convenience bị tránh.
+* owner;
+* resource type;
+* lifetime;
+* size estimate;
+* release point;
+* sharing policy;
+* backing-resource type.
 
 ---
 
-## 33. Frame Retention
+# 37. Frame Retention
 
-MVP chỉ giữ bounded frame set:
+Runtime SHOULD retain only a bounded set of frames.
 
-- latest observed frame;
-- previous comparison frame;
-- current stable source Artifact;
-- small bounded draining set;
-- optional currently displayed previous presentation data.
-
-Không giữ unbounded frame history.
-
----
-
-## 34. Frame Deduplication
-
-Nếu content identity tương thích:
+Possible MVP guidance:
 
 ```text
-New frame
-    ↓
-Fingerprint matches accepted Artifact
-    ↓
-Reuse ArtifactRef
+latest observed frame
+previous comparison frame
+current stable source Runtime Artifact
+small bounded draining set
+optional previous displayed presentation resource
 ```
 
-Revision metadata mới vẫn có thể được tạo nếu timeline yêu cầu.
+No unbounded frame history.
 
 ---
 
-## 35. Recognition Resource
+# 38. Recognition Resources
 
-Recognition Module có thể dùng:
+Recognition execution MAY create:
 
-- preprocessing buffer;
-- model tensor;
-- region structure;
-- provider response;
-- normalized recognition Artifact.
+* preprocessing buffers;
+* tensors;
+* geometry structures;
+* provider responses;
+* normalized Runtime Artifacts.
 
-Temporary resource phải release sau khi accepted candidate được tạo hoặc Attempt kết thúc.
+Runtime does not hard-code OCR/Layout internals.
 
-Runtime không hard-code OCR/Layout internals.
-
----
-
-## 36. Translation Resource
-
-Translation execution có thể dùng:
-
-- Source Document reference;
-- bounded context;
-- provider request buffer;
-- provider response;
-- glossary snapshot reference;
-- normalized Translation Artifact.
-
-Raw provider request/response không retained mặc định.
+Temporary resources are released after output transfer or Attempt cleanup.
 
 ---
 
-## 37. Presentation Resource
+# 39. Translation Resources
 
-Presentation có thể sở hữu:
+Translation execution MAY use:
 
-- Presentation ArtifactRef;
-- text/layout model;
-- render surface;
-- font layout cache;
-- UI dispatch handle.
+* Source Document reference;
+* bounded context;
+* request buffer;
+* provider response;
+* glossary reference;
+* normalized Translation Runtime Artifact.
 
-Chỉ current hoặc explicitly retained previous presentation được giữ.
+Raw provider request/response is Attempt-local by default.
 
 ---
 
-## 38. Previous Presentation Retention
+# 40. Presentation Resources
 
-UI có thể giữ previous valid presentation đến khi replacement ready.
+Presentation/Application MAY own:
+
+* Presentation ArtifactRef;
+* text/layout model;
+* render surface;
+* graphics texture;
+* font layout cache;
+* UI dispatch handle.
+
+Runtime Memory Model only defines resource lifecycle interactions.
+
+Presentation owns visible state semantics.
+
+---
+
+# 41. Previous Presentation Retention
+
+Presentation MAY retain a previous accepted representation until replacement is successfully committed.
+
+Example:
 
 ```text
-Old presentation visible
-    ↓
-New revision processing
-    ↓
+Old accepted presentation visible
+        |
+        v
+New execution processing
+        |
+        v
 New presentation committed
-    ↓
-Old UI retention released
+        |
+        v
+Old Presentation retention released
 ```
 
-UI phải phân biệt displayed revision và processing revision.
+Runtime does not call this “previous Runtime Revision commit ownership”.
 
 ---
 
-## 39. Provider Lifetime Resource
+# 42. Provider Runtime Resources
 
-Provider Manager có thể sở hữu:
+Provider Runtime Gateway / Execution Adapter MAY own:
 
-- client;
-- connection pool;
-- loaded model;
-- tokenizer;
-- native context;
-- GPU context;
-- reusable buffer pool.
+* client;
+* connection pool;
+* loaded model;
+* tokenizer;
+* process;
+* native context;
+* reusable buffer pool.
 
-Đây là provider-lifetime resource, không phải Attempt-local resource.
-
----
-
-## 40. Provider Request Resource
-
-Per-request resource gồm:
-
-- encoded request;
-- prompt/request body;
-- response body;
-- temporary tensor;
-- request handle;
-- timeout/cancellation handle.
-
-Phải release sau completion/cancellation/abandonment khi physical execution thực sự cho phép.
+Resource Manager provides physical accounting/pressure coordination.
 
 ---
 
-## 41. Local Model Residency
+# 43. Provider Request Resources
 
-Possible policy:
+Attempt-level provider resources MAY include:
+
+* encoded request;
+* response body;
+* request handle;
+* timeout/cancellation state;
+* temporary tensor;
+* stream buffer.
+
+Release occurs after physical operation permits cleanup.
+
+Logical abandonment does not imply immediate release.
+
+---
+
+# 44. Local Model Residency
+
+Possible runtime residency policies MAY include:
 
 ```text
 ALWAYS_RESIDENT
-SESSION_RESIDENT
+EXECUTION_SCOPE_RESIDENT
 ON_DEMAND
 IDLE_TIMEOUT
 ```
 
-Provider Manager và Runtime Configuration sở hữu policy.
+Policy ownership belongs to:
 
-Memory Model chỉ yêu cầu:
+```text
+Provider Runtime / Provider configuration owner
++
+Runtime resource configuration
+```
 
-- estimated cost;
-- explicit load/unload;
-- pressure-aware admission;
-- no unsafe speculative load.
+Memory Model only requires:
 
----
-
-## 42. GPU Resource
-
-GPU resource quản lý riêng với RAM.
-
-Ví dụ:
-
-- capture surface;
-- tensor;
-- model allocation;
-- UI texture;
-- shared graphics handle.
-
-GPU resource cần explicit disposal khi platform yêu cầu.
-
-GC không được coi là guarantee cho timely GPU cleanup.
+* explicit load/unload;
+* cost estimate;
+* bounded residency;
+* pressure awareness;
+* observable lifecycle.
 
 ---
 
-## 43. Native Resource
+# 45. GPU Resources
 
-Native resource có thể gồm:
+GPU resources require explicit lifecycle where platform requires it.
 
-- image handle;
-- OCR/model context;
-- window capture handle;
-- memory mapping;
-- file handle;
-- process handle;
-- IPC handle.
+Examples:
 
-Managed wrapper phải có explicit lifecycle contract.
+```text
+tensor
+model allocation
+capture surface
+graphics texture
+shared graphics handle
+```
+
+GC MUST NOT be treated as sufficient timely cleanup.
 
 ---
 
-## 44. Buffer Pooling
+# 46. Native Resources
 
-Pooling chỉ dùng sau profiling.
+Examples:
+
+```text
+native image handle
+model context
+capture handle
+file mapping
+file handle
+process handle
+IPC handle
+```
+
+Managed wrappers MUST expose explicit disposal/lifetime semantics.
+
+---
+
+# 47. Buffer Pooling
+
+Pooling SHOULD be introduced only after profiling.
 
 Risks:
 
-- oversized retention;
-- stale private content;
-- use-after-return;
-- cross-thread misuse;
-- hidden global memory.
+* oversized retention;
+* stale sensitive data;
+* use-after-return;
+* hidden global memory;
+* cross-thread misuse.
 
-Pool phải bounded, observable và có clear owner.
-
----
-
-## 45. Buffer Pool Rules
-
-1. Rented buffer có một temporary owner.
-2. Không return khi còn reference/lease.
-3. Sau return, buffer invalid ngay.
-4. Sensitive data được clear khi policy yêu cầu.
-5. Oversized buffer có thể discard.
-6. Pool capacity bounded.
-7. Pool pressure observable.
-8. Pool không trở thành hidden durable cache.
-
----
-
-## 46. Context Memory
-
-Translation context phải bounded.
-
-Có thể dùng:
-
-- current unit;
-- nearby unit;
-- bounded glossary;
-- bounded recent-name context;
-- short rolling summary.
-
-Không truyền complete reading history mặc định.
-
----
-
-## 47. Context Budget
-
-Context limit có thể theo:
-
-- unit count;
-- character count;
-- token estimate;
-- byte size;
-- memory class.
-
-Exact value thuộc Translation configuration.
-
----
-
-## 48. Runtime Resource Budget
-
-Runtime dùng budget tổng quát:
+Pool MUST be:
 
 ```text
-Runtime Resource Budget
-├── Managed Memory Budget
-├── Native Memory Budget
-├── GPU Budget
-├── Artifact Budget
-├── Lease Budget
-├── Provider Resource Budget
-├── UI Resource Budget
-└── Diagnostics Budget
+bounded
+observable
+explicitly owned
 ```
-
-Budget là control limit, không nhất thiết physical partition.
 
 ---
 
-## 49. Resource Pressure Levels
+# 48. Buffer Pool Rules
+
+1. Rented buffer has one temporary owner.
+
+2. Buffer cannot return while referenced/leased.
+
+3. Returned buffer becomes invalid immediately.
+
+4. Sensitive data is cleared when policy requires.
+
+5. Oversized buffers MAY be discarded.
+
+6. Pool capacity is bounded.
+
+7. Pool pressure is observable.
+
+8. Pool MUST NOT become hidden durable/cache storage.
+
+---
+
+# 49. Context Memory Boundary
+
+Business modules MAY construct bounded execution context.
+
+Memory Model only requires bounded resource usage.
+
+It MUST NOT define Translation semantic context composition.
+
+Examples of possible resource limits:
+
+```text
+byte count
+token estimate
+unit count
+memory class
+```
+
+Exact semantic context belongs to owning module/AI architecture.
+
+---
+
+# 50. Runtime Resource Budget
+
+Recommended:
+
+```text
+RuntimeResourceBudget
+├── ManagedMemoryBudget
+├── NativeMemoryBudget
+├── GpuMemoryBudget
+├── ArtifactBudget
+├── LeaseBudget
+├── ProviderRuntimeBudget
+├── PresentationResourceBudget
+├── TemporaryStorageBudget
+└── DiagnosticsBudget
+```
+
+Budgets are control limits, not necessarily physical partitions.
+
+---
+
+# 51. Resource Pressure Levels
+
+Recommended:
 
 ```text
 NORMAL
@@ -1003,59 +1249,105 @@ HIGH
 CRITICAL
 ```
 
-Transition nên có hysteresis.
+Transitions SHOULD use hysteresis.
 
 ---
 
-## 50. Resource Pressure Signal
+# 52. Resource Pressure Ownership
 
-Memory/Resource Manager chỉ phát signal và accounting.
-
-Luồng đúng:
+Critical distinction:
 
 ```text
-Resource pressure detected
-        ↓
-Budget state updated
-        ↓
-Scheduler reduces admission
-        ↓
-Runtime Control coordinates cancellation/cleanup
+Resource Manager
+    detects/accounts pressure
+
+Scheduler
+    changes admission
+
+Runtime Control
+    coordinates execution cancellation/supersession
+
+Cache Policy
+    releases cache retention
+
+Provider Runtime Gateway
+    unloads eligible runtime resources
+
+Artifact Store / Resource Manager
+    performs eligible disposal
 ```
 
-Memory component không tự quyết định business failure.
+No single component owns every pressure response.
 
 ---
 
-## 51. Pressure Response Order
+# 53. Pressure Signal Flow
+
+```text
+Resource Pressure Detected
+        |
+        v
+Resource State Projection
+        |
+        +--> Scheduler
+        |       reduces admission
+        |
+        +--> Runtime Control
+        |       may cancel obsolete work
+        |
+        +--> Cache Policy
+        |       releases low-value retention
+        |
+        +--> Provider Runtime Gateway
+        |       may unload idle resources
+        |
+        v
+Eligible Physical Disposal
+```
+
+---
+
+# 54. Pressure Response Guidance
+
+Possible ordered response:
 
 1. stop speculative work;
-2. stop cache warming;
-3. release expired cache retention;
-4. evict low-value cache retention;
-5. dispose obsolete Revision;
-6. stop background admission;
-7. reduce expensive concurrency;
-8. unload idle provider resource;
-9. reject non-critical admission;
-10. fail current processing safely nếu invariant không thể giữ.
 
-Control path và current useful work được bảo vệ cao nhất.
+2. stop cache warming;
+
+3. expire/release low-value cache retention;
+
+4. stop Background/Maintenance admission;
+
+5. remove/supersede obsolete execution;
+
+6. reduce expensive concurrency;
+
+7. unload eligible idle provider/model runtime;
+
+8. reject non-critical admission;
+
+9. cancel expensive obsolete execution;
+
+10. fail current work safely only when Runtime invariants cannot otherwise be preserved.
+
+Each action remains owned by its authoritative component.
 
 ---
 
-## 52. Admission Cost Hint
+# 55. Admission Cost Hints
 
-WorkItem có thể cung cấp:
+Work MAY expose estimates such as:
 
 ```text
-MemoryCostHint
+ManagedMemoryCostHint
 GpuCostHint
-NativeResourceHint
+NativeCostHint
 ArtifactCostHint
+TemporaryStorageCostHint
 ```
 
-Hint có thể là:
+Possible classes:
 
 ```text
 SMALL
@@ -1064,536 +1356,639 @@ LARGE
 UNKNOWN
 ```
 
-hoặc estimated range.
-
-Hint không phải guarantee.
+Hints are estimates, not guarantees.
 
 ---
 
-## 53. Memory and Cancellation
+# 56. Memory and Cancellation
 
-Cancellation revoke logical value ngay, nhưng physical memory có thể còn.
+Cancellation revokes execution authority before physical resources necessarily disappear.
 
 ```text
-Authority revoked
-    ↓
-Attempt draining
-    ↓
-Lease released
-    ↓
-Physical resource disposed
+Authority Revoked
+        |
+        v
+Attempt / Child Operation Draining
+        |
+        v
+Leases Released
+        |
+        v
+Retention Released
+        |
+        v
+Physical Resource Disposal
 ```
 
-Draining resource phải được accounting riêng.
+Draining resources remain accounted.
 
 ---
 
-## 54. Draining Resource
+# 57. Draining Resource
 
-Draining resource thuộc work đã mất authority nhưng chưa cleanup vật lý.
+A draining resource belongs to execution that has lost current authority but is not yet physically releasable.
 
-Metrics nên phân biệt:
+Metrics SHOULD distinguish:
 
-- active;
-- cached;
-- draining;
-- provider-resident;
-- UI-retained;
-- diagnostics-retained.
+```text
+active
+cache-retained
+execution-draining
+provider-resident
+presentation-retained
+diagnostic-retained
+```
 
 ---
 
-## 55. Memory and Retry
+# 58. Memory and Retry
 
-Retry giữ same shared input Artifact, nhưng release Attempt-local resource.
+Retry preserves compatible shared input references but releases Attempt-local resources.
 
 ```text
 Attempt 1 ends
-    ↓
+        |
+        v
 Release Attempt-local resources
-    ↓
-Keep compatible shared ArtifactRefs
-    ↓
-Attempt 2 created
+        |
+        v
+Retain compatible shared ArtifactRefs
+        |
+        v
+Attempt 2 may be created
 ```
 
-Non-cancelable provider resource có thể vẫn draining; admission phải xét resource truth.
+If Attempt 1 physical operation still drains, truthful resource accounting applies.
 
 ---
 
-## 56. Queue Memory
+# 59. Queue Memory
 
-Queue chỉ giữ lightweight metadata và ArtifactRef.
+Work Queue stores lightweight metadata and references only.
 
-Queue không acquire long-lived payload ownership.
-
-Queue không giữ lease suốt thời gian pending trừ khi có explicit policy rất ngắn và bounded.
+Queue SHOULD NOT hold long-lived Artifact leases while waiting unless an explicit short bounded protocol requires it.
 
 ---
 
-## 57. Event Memory
+# 60. Event Memory
 
-Event chỉ mang lightweight identity và reference.
+Events carry lightweight identity/reference data.
 
 Preferred:
 
 ```text
-ATTEMPT_COMPLETED
-├── SessionId
-├── RevisionId
+AttemptCompleted
+├── ExecutionScopeId
+├── ExecutionRevisionId
 ├── WorkItemId
 ├── AttemptId
-└── ArtifactRef
+└── RuntimeArtifactRef?
 ```
 
-Không nhúng full payload.
+No embedded large payload.
 
 ---
 
-## 58. Diagnostics Memory
+# 61. Diagnostics Memory
 
-Standard diagnostics không giữ:
+Ordinary diagnostics MUST NOT retain:
 
-- screenshot;
-- source text;
-- translated text;
-- raw prompt;
-- provider body;
-- secret.
+* screenshot;
+* source text;
+* translated text;
+* Prompt;
+* provider body;
+* secret.
 
-Debug content chỉ khi:
-
-- explicit enable;
-- bounded;
-- short-lived;
-- redacted;
-- privacy-aware.
+Sensitive debug content requires explicit bounded/privacy-authorized mode.
 
 ---
 
-## 59. Resource Leak
+# 62. Resource Leak
 
-Leak có thể gồm:
-
-- managed memory leak;
-- lease leak;
-- native handle leak;
-- GPU resource leak;
-- provider session leak;
-- event subscription leak;
-- stale UI retention;
-- unbounded context;
-- queue metadata retention;
-- process/IPC handle leak.
-
----
-
-## 60. Disposal Eligibility
-
-Revision/resource đủ điều kiện disposal khi:
-
-- no current authority;
-- no pending queue ownership;
-- no running Attempt use;
-- no active lease;
-- no UI retention;
-- no cache retention;
-- no required diagnostics retention;
-- physical cleanup safe.
-
----
-
-## 61. Disposal Coordination
-
-Resource Manager hoặc Artifact Store điều phối physical disposal.
-
-Worker chỉ:
-
-- release local resource;
-- release lease;
-- report cleanup outcome.
-
-Worker không dispose shared Artifact độc lập.
-
----
-
-## 62. Automatic Memory Management
-
-Automatic memory management có thể thu hồi ordinary object.
-
-Architecture không dựa vào nó cho timely cleanup của:
-
-- native resource;
-- GPU resource;
-- file mapping;
-- process handle;
-- pooled buffer;
-- capture surface;
-- provider handle.
-
----
-
-## 63. Metrics
-
-Runtime nên đo:
-
-- total process memory;
-- managed heap estimate;
-- native memory estimate;
-- GPU memory estimate;
-- active Artifact memory;
-- cache retention memory;
-- Attempt-local memory;
-- provider-resident memory;
-- draining memory;
-- UI-retained memory;
-- Artifact count;
-- Artifact reference count;
-- active lease count;
-- lease lifetime;
-- native handle count;
-- GPU resource count;
-- queue metadata memory;
-- disposal latency;
-- resource admission reject count;
-- pressure state.
-
----
-
-## 64. Size Accounting
-
-Large Artifact cần estimated size đủ để:
-
-- admission;
-- eviction;
-- diagnostics;
-- profiling;
-- capacity planning.
-
-Không yêu cầu perfect byte accounting trong MVP.
-
----
-
-## 65. Resource Diagnostics
-
-Diagnostics cần trả lời:
-
-- resource type nào lớn nhất;
-- Revision nào retained;
-- owner nào giữ retention;
-- lease nào quá hạn;
-- provider nào giữ memory;
-- bao nhiêu resource đang draining;
-- resource nào vượt lifetime;
-- cache/UI/diagnostics giữ bao nhiêu.
-
----
-
-## 66. Privacy
-
-Sensitive resource chỉ tồn tại khi cần.
-
-Runtime phải:
-
-- không tự ghi Artifact xuống disk;
-- tránh crash dump chứa content nếu configurable;
-- clear pooled buffer khi cần;
-- không gửi raw payload qua telemetry;
-- release source image sớm;
-- tách durable persistence sang Storage policy.
-
----
-
-## 67. MVP Resource Policy
-
-MVP sử dụng:
-
-- process-local in-memory Artifact Store;
-- bounded queue;
-- low worker concurrency;
-- current Revision;
-- optional previous displayed Revision;
-- small draining set;
-- bounded memory cache;
-- explicit native/GPU cleanup;
-- no implicit persistent Artifact cache;
-- no custom pooling trước profiling.
-
----
-
-## 68. MVP Retention Guidance
-
-| Resource | MVP retention |
-|---|---|
-| Observation frame | latest + previous |
-| Current stable source | 1 current |
-| Previous displayed presentation | at most 1 |
-| Draining Revision | small bounded count |
-| Shared Artifact | bounded by owner/lease/cache |
-| Background Artifact | disabled or strict bounded |
-| Debug content | disabled by default |
-| Local model | one large model class at a time unless profiled |
-| Provider response | Attempt-local only |
-
----
-
-## 69. Example: Normal Execution
+Possible leaks:
 
 ```text
-Source Artifact accepted
-    ↓
-Worker acquires Artifact Lease
-    ↓
+managed memory
+lease
+native handle
+GPU allocation
+provider runtime resource
+event subscription
+Presentation retention
+queue metadata
+process/IPC handle
+temporary file
+buffer pool
+```
+
+---
+
+# 63. Disposal Eligibility
+
+A Runtime resource becomes physically disposable when:
+
+* no valid logical owner remains;
+* no retention owner remains;
+* no active lease remains;
+* no active physical operation remains;
+* Presentation no longer retains it;
+* cache retention released;
+* diagnostic retention expired;
+* disposal is safe.
+
+ExecutionRevision authority alone is not sufficient to determine disposal.
+
+---
+
+# 64. Disposal Coordination
+
+```text
+Worker
+    releases Attempt-local ownership / leases
+
+Runtime Artifact Store
+    coordinates published Artifact disposal eligibility
+
+Provider Runtime Gateway / Adapter
+    releases provider/runtime-owned resources
+
+Resource Manager
+    coordinates physical resource cleanup/accounting
+```
+
+Worker MUST NOT independently dispose shared Runtime Artifact backing.
+
+---
+
+# 65. Automatic Memory Management
+
+Automatic GC MAY reclaim ordinary managed objects.
+
+Architecture MUST NOT rely on GC for timely cleanup of:
+
+```text
+native resources
+GPU resources
+file mappings
+process handles
+capture surfaces
+provider handles
+pooled buffers
+graphics resources
+```
+
+---
+
+# 66. Metrics
+
+Runtime SHOULD measure:
+
+```text
+process memory
+managed heap estimate
+native memory
+GPU memory
+active Runtime Artifact memory
+cache-retained memory
+Attempt-local memory
+provider-resident memory
+draining memory
+Presentation-retained memory
+temporary-storage use
+Runtime Artifact count
+active lease count
+lease lifetime
+native-handle count
+GPU allocation count
+queue metadata memory
+disposal latency
+resource admission rejection
+pressure state
+```
+
+---
+
+# 67. Size Accounting
+
+Large resources SHOULD have approximate size/cost sufficient for:
+
+* admission;
+* eviction;
+* diagnostics;
+* profiling;
+* capacity planning.
+
+Exact byte-perfect accounting is not required for MVP.
+
+---
+
+# 68. Diagnostics Questions
+
+Resource diagnostics SHOULD answer:
+
+```text
+which resource class consumes most?
+which ExecutionRevision retains resources?
+which owner/retention keeps them alive?
+which leases exceed expected lifetime?
+which provider runtime retains memory?
+how much resource is draining?
+which resource exceeded intended lifetime?
+how much is held by cache / Presentation / diagnostics?
+```
+
+---
+
+# 69. Privacy
+
+Sensitive resource lifetime SHOULD be minimized.
+
+Runtime SHOULD:
+
+* avoid implicit disk persistence;
+* avoid content-bearing crash dumps where configurable;
+* clear pooled buffers when required;
+* avoid raw payload in telemetry;
+* release source images as early as safe;
+* defer durable persistence to Storage/Business policy.
+
+---
+
+# 70. MVP Resource Policy
+
+CRAI MVP SHOULD use:
+
+```text
+process-local Runtime Artifact Store
+bounded Work Queues
+low bounded worker concurrency
+one current ExecutionRevision per lineage
+small bounded draining ExecutionRevision set
+bounded memory cache
+explicit native/GPU cleanup
+no implicit durable Artifact cache
+no custom pooling before profiling
+truthful provider/model residency accounting
+```
+
+---
+
+# 71. MVP Retention Guidance
+
+| Resource                               | MVP retention                                     |
+| -------------------------------------- | ------------------------------------------------- |
+| Observation frame                      | latest + previous comparison where needed         |
+| Current stable source Runtime Artifact | current required                                  |
+| Previous displayed presentation        | at most one by default                            |
+| Draining ExecutionRevision             | small bounded count                               |
+| Shared Runtime Artifact                | bounded by ownership/lease/cache                  |
+| Background Artifact                    | disabled or strictly bounded                      |
+| Debug content                          | disabled by default                               |
+| Local model                            | tightly bounded / one large class unless profiled |
+| Provider response                      | Attempt-local only                                |
+
+---
+
+# 72. Example — Normal Execution
+
+```text
+Source Runtime Artifact available
+        |
+        v
+Worker acquires ResourceLease
+        |
+        v
 Attempt-local buffers created
-    ↓
+        |
+        v
 Candidate output produced
-    ↓
-Authority validated
-    ↓
-Artifact Store accepts ownership
-    ↓
-Worker releases lease and temporary resources
+        |
+        v
+Execution authority validated
+        |
+        v
+Runtime Artifact Store publishes
+        |
+        v
+Worker releases lease/temp resources
+        |
+        v
+Business Module validates semantic result
 ```
 
 ---
 
-## 70. Example: Rapid Revision Replacement
+# 73. Example — Rapid ExecutionRevision Replacement
 
 ```text
-Revision A current
-    ↓
-Revision B created
-    ↓
-Revision A authority revoked
-    ↓
-New leases denied where appropriate
-    ↓
-Running Attempt drains
-    ↓
-Lease released
-    ↓
-Revision A retention removed
-    ↓
-Physical disposal
+ExecutionRevision A CURRENT
+        |
+        v
+ExecutionRevision B created
+        |
+        v
+A execution authority revoked
+        |
+        v
+new work for A stops
+        |
+        v
+A running Attempt drains
+        |
+        v
+leases released
+        |
+        v
+A retention released
+        |
+        v
+physical disposal when safe
 ```
 
 ---
 
-## 71. Example: Shared Artifact
+# 74. Example — Shared Runtime Artifact
 
 ```text
-Revision A ─┐
-            ├── same ArtifactRef
-Revision B ─┘
+ExecutionRevision A ─┐
+                     ├── RuntimeArtifactRef X
+ExecutionRevision B ─┘
 ```
 
-Payload không duplicate.
+One physical payload MAY satisfy both references.
 
 ---
 
-## 72. Example: Cache Eviction with Active Lease
+# 75. Example — Cache Eviction with Active Lease
 
 ```text
 Cache retention removed
-    ↓
+        |
+        v
 Worker lease still active
-    ↓
-Payload remains
-    ↓
-Lease released
-    ↓
-No owner remains
-    ↓
-Physical disposal
+        |
+        v
+payload remains
+        |
+        v
+lease released
+        |
+        v
+no owner/retention remains
+        |
+        v
+physical disposal
 ```
 
 ---
 
-## 73. Example: Critical Resource Pressure
+# 76. Example — Critical Resource Pressure
 
 ```text
 Pressure = CRITICAL
-    ↓
-Scheduler stops non-critical admission
-    ↓
-Cache retention reduced
-    ↓
-Obsolete Revision canceled/drained
-    ↓
-Idle provider resource unloaded
-    ↓
-Current work preserved if safe
+        |
+        +--> Scheduler stops non-critical admission
+        |
+        +--> Cache Policy releases low-value retention
+        |
+        +--> Runtime Control cancels obsolete execution
+        |
+        +--> Provider Runtime unloads eligible idle resources
+        |
+        v
+Resource Manager disposes eligible resources
 ```
 
 ---
 
-## 74. Architecture Invariants
+# 77. Architecture Invariants
 
-1. Large payload không đi qua Queue.
-2. Published Artifact immutable.
-3. Mọi large resource có logical owner.
-4. Ownership transfer explicit.
-5. Retention tracking explicit.
-6. Resource Lease scoped và observable.
-7. Physical disposal chờ owner/lease hết.
-8. Logical disposal tách physical disposal.
-9. Scheduler không sở hữu payload.
-10. Work Queue không sở hữu payload.
-11. Worker chỉ sở hữu Attempt-local resource trừ khi transfer.
-12. Revision không sở hữu cache retention.
-13. Cache promotion không copy payload mặc định.
-14. Cache eviction không invalidate active lease.
-15. Artifact Store khác Storage.
-16. Native/GPU resource có explicit lifecycle.
-17. GC không đảm bảo timely native cleanup.
-18. Resource budget bounded.
-19. Resource pressure chỉ tạo signal; Scheduler quyết định admission.
-20. Cancellation revoke authority trước disposal.
-21. Retry giữ shared input, release Attempt-local resource.
-22. Draining resource được accounting.
-23. UI retention bounded.
-24. Runtime Revision history bounded.
-25. Diagnostics không giữ user content mặc định.
-26. Resource leak observable.
-27. Lease lifetime không được unbounded không phát hiện.
-28. Provider capacity phản ánh physical reality.
-29. Resource cleanup failure không revive work.
-30. Runtime vẫn correct khi toàn bộ cache bị evict.
+1. Large payloads do not travel through Work Queue.
 
----
+2. Published Runtime Artifacts are immutable.
 
-## 75. Testing Requirements
+3. Every significant Runtime resource has explicit logical ownership.
 
-Test phải bao phủ:
+4. Ownership transfer is explicit.
 
-- repeated source update;
-- rapid Revision replacement;
-- active lease during disposal;
-- cache promotion without copy;
-- cache eviction with active lease;
-- cancellation with draining provider;
-- retry same shared Artifact;
-- session close;
-- previous presentation release;
-- native handle cleanup;
-- GPU cleanup;
-- provider model load/unload;
-- queue payload lightweight;
-- lease leak detection;
-- resource pressure transition;
-- bounded Revision retention;
-- Artifact reuse;
-- cleanup idempotency;
-- privacy retention;
-- long-running memory stabilization.
+5. Retention tracking is explicit.
 
----
+6. ResourceLease is scoped and observable.
 
-## 76. Profiling Requirements
+7. Physical disposal waits for ownership/retention/lease eligibility.
 
-Profile:
+8. Logical disposal and physical disposal are distinct.
 
-- source Artifact size;
-- copy count;
-- peak Attempt-local memory;
-- provider resident memory;
-- GPU memory;
-- context size;
-- presentation surface memory;
-- cancellation drain latency;
-- lease lifetime;
-- cache hit/retention;
-- long-session resource trend;
-- native handle trend.
+9. Scheduler does not own payload.
 
----
+10. Work Queue does not own payload.
 
-## 77. Open Questions
+11. Worker owns Attempt-local resource unless ownership is explicitly transferred.
 
-- Runtime stack quản lý native resource thế nào?
-- Capture surface CPU hay GPU-backed?
-- Artifact Store dùng lease table hay managed reference?
-- Default RAM/GPU budget là bao nhiêu?
-- Previous presentation giữ trong trường hợp nào?
-- Local model nào vào MVP?
-- Provider worker có chạy isolated process không?
-- Large document import dùng streaming thế nào?
-- Resource lease timeout có cần hard limit không?
-- Artifact backing store có memory mapping không?
-- Device minimum RAM/GPU là bao nhiêu?
+12. ExecutionRevision is not Cache ownership.
+
+13. Cache promotion normally adds retention rather than copying payload.
+
+14. Cache eviction does not invalidate active lease.
+
+15. Runtime Artifact Store and Storage remain separate.
+
+16. Runtime Artifact and Business Result remain separate.
+
+17. Native/GPU resources have explicit lifecycle.
+
+18. GC does not guarantee timely native/GPU cleanup.
+
+19. Runtime resource budgets are bounded.
+
+20. Resource Manager does not decide Business failure.
+
+21. Scheduler owns admission reaction to resource pressure.
+
+22. Runtime Control owns execution-authority cancellation/supersession.
+
+23. Cache Policy owns cache-retention release.
+
+24. Provider Runtime owns provider/model unload decisions.
+
+25. Cancellation revokes execution authority before physical disposal.
+
+26. Retry preserves compatible shared input and releases Attempt-local resource.
+
+27. Draining resources remain accounted.
+
+28. Presentation retention is bounded and Presentation-owned.
+
+29. ExecutionRevision history/resource retention is bounded.
+
+30. Diagnostics do not retain user content by default.
+
+31. Resource leaks are observable.
+
+32. Lease lifetime cannot be unbounded without detection.
+
+33. Provider capacity reflects physical reality.
+
+34. Cleanup failure does not revive revoked execution.
+
+35. Runtime remains correct if cache retention is completely removed.
+
+36. ExecutionScope/ExecutionRevision terminology is canonical.
+
+37. ReadingSession business state is not Runtime memory ownership.
+
+38. Provider Management is not the Runtime physical resource owner.
+
+39. Runtime Artifact publication does not imply Business commit.
+
+40. Physical resource disposal never depends solely on execution freshness.
 
 ---
 
-## 78. Related Documents
+# 78. Recommended MVP
 
-| Document | Relationship |
-|---|---|
-| `PIPELINE_RUNTIME.md` | Revision, WorkItem, Attempt và Artifact |
-| `RUNTIME_COMPONENTS.md` | Artifact Store, Revision Store, Resource Manager |
-| `WORK_QUEUE.md` | Lightweight queued reference |
-| `SCHEDULER.md` | Resource-aware admission |
-| `CANCELLATION.md` | Authority revocation và drain |
-| `RETRY_POLICY.md` | Attempt-local cleanup và shared input |
-| `CACHE_POLICY.md` | Retention promotion/eviction |
-| `RESOURCE_LIFECYCLE.md` | Ownership transfer và physical disposal |
-| `THREADING_MODEL.md` | Thread/process resource affinity |
-| `PERFORMANCE_MODEL.md` | Resource pressure và useful latency |
-| `RUNTIME_CONFIG.md` | Budget và limits |
-| `RUNTIME_OBSERVABILITY.md` | Resource metrics |
-| `../../modules/storage/README.md` | Durable persistence boundary |
+CRAI MVP SHOULD support:
 
----
+* explicit Runtime resource ownership;
+* ExecutionScope/ExecutionRevision resource scopes;
+* immutable Runtime Artifact;
+* RuntimeArtifactRef;
+* ResourceLease;
+* process-local Artifact Store;
+* explicit ownership transfer;
+* logical/physical disposal separation;
+* bounded RAM/native/GPU budgets;
+* cache retention;
+* Presentation retention;
+* provider/model residency accounting;
+* draining-resource accounting;
+* pressure signals;
+* explicit native/GPU cleanup;
+* leak diagnostics;
+* privacy-safe resource telemetry.
 
-## 79. Completion Criteria
+MVP MAY defer:
 
-`MEMORY_MODEL.md` được xem là đồng bộ khi:
-
-- memory được đặt trong resource ownership/lifetime model;
-- Runtime Revision Registry và Artifact Store tách rõ;
-- Storage boundary rõ;
-- Resource Lease tổng quát hơn Artifact Lease;
-- Stage vocabulary được loại bỏ khỏi runtime reference;
-- WorkItem dùng ArtifactRef;
-- retention tracking không bắt buộc reference count;
-- logical/physical disposal tách rõ;
-- cache promotion không copy payload;
-- resource budget có RAM/GPU/native/Artifact/Lease;
-- Scheduler sở hữu admission;
-- retry/cancellation/drain khớp Runtime v2;
-- leak, metrics và MVP policy đầy đủ.
+* custom buffer pooling;
+* memory-mapped Artifact backing;
+* distributed Artifact Store;
+* remote lease protocol;
+* GPU memory defragmentation;
+* sophisticated adaptive budgets;
+* cross-process shared-memory Artifact transport.
 
 ---
 
-## 80. Summary
+# 79. Open Decisions
 
-CRAI sử dụng resource-oriented memory model:
+The following remain open:
+
+* exact ResourceLease implementation;
+* Artifact Store retention representation;
+* Resource Manager API;
+* ownership-transfer protocol;
+* backing-resource abstraction;
+* RAM/native/GPU default budgets;
+* ExecutionScope retention policy;
+* ExecutionRevision drain limits;
+* provider/model residency policy;
+* Presentation previous-resource retention;
+* capture surface backing;
+* memory-mapped backing;
+* process-isolated resource ownership;
+* lease leak threshold;
+* hard vs soft resource limits;
+* resource cleanup retry;
+* minimum device RAM/GPU requirements.
+
+---
+
+# 80. Related Documents
+
+Runtime:
+
+* `PIPELINE_RUNTIME.md`
+* `RUNTIME_COMPONENTS.md`
+* `WORK_QUEUE.md`
+* `SCHEDULER.md`
+* `CANCELLATION.md`
+* `RETRY_POLICY.md`
+* `CACHE_POLICY.md`
+* `RESOURCE_LIFECYCLE.md`
+* `THREADING_MODEL.md`
+* `PERFORMANCE_MODEL.md`
+* `RUNTIME_CONFIG.md`
+* `RUNTIME_OBSERVABILITY.md`
+
+External:
+
+* `../plugin/PLUGIN_LIFECYCLE.md`
+* `../../02-modules/provider-management/`
+* `../../02-modules/presentation/`
+* `../../02-modules/storage/`
+
+---
+
+# 81. Completion Criteria
+
+`MEMORY_MODEL.md` is synchronized when:
+
+* Runtime uses ExecutionScope/ExecutionRevision terminology;
+* ReadingSession business state is excluded from Runtime memory ownership;
+* Execution State Store and Runtime Artifact Store remain distinct;
+* Runtime Artifact and Business Result remain distinct;
+* Provider Runtime resources are separated from Provider Management;
+* ResourceLease remains generic;
+* queue/work metadata remains lightweight;
+* ownership transfer remains explicit;
+* logical/physical disposal remain separate;
+* cache promotion does not copy payload by default;
+* cache eviction does not imply immediate physical disposal;
+* resource pressure ownership is partitioned correctly;
+* Runtime resource budgets cover managed/native/GPU/Artifact/lease/provider/Presentation resources;
+* Retry/cancellation/drain semantics match Runtime v2;
+* native/GPU cleanup remains explicit;
+* diagnostics/privacy remain bounded and content-safe.
+
+---
+
+# 82. Summary
+
+CRAI Runtime Memory Model follows:
 
 ```text
-Explicit Owner
-    ↓
+Explicit Resource Owner
+        |
+        v
 Defined Lifetime
-    ↓
+        |
+        v
 Immutable Artifact or Scoped Resource
-    ↓
-Lightweight Reference
-    ↓
+        |
+        v
+Lightweight Reference / Lease
+        |
+        v
 Bounded Retention
-    ↓
+        |
+        v
 Logical Disposal
-    ↓
+        |
+        v
 Physical Disposal When Safe
 ```
 
-Ranh giới cốt lõi:
+The central rule is:
 
 ```text
 Ownership determines lifetime.
 
-Lifetime determines memory pressure.
+Authority determines whether execution may still matter.
 
-Leases protect active use.
+Retention determines how long a reusable resource stays available.
 
-Retention changes do not require payload copies.
+Leases protect active physical use.
 
-Storage remains a separate durable persistence capability.
+These are related but separate concepts.
 ```

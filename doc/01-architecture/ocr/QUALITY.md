@@ -1,11 +1,11 @@
 # OCR Quality Assessment
 
 > **Status:** Draft
-> **Version:** 1.1
+> **Version:** 1.2.0
 > **Layer:** OCR Architecture
 > **Depends On:** OCR Postprocessing
 > **Consumes:** OCR Document
-> **Next Layer:** Runtime Decision, Reading Order, Text Processing
+> **Next Layer:** Reading Order, Runtime Policy Consumers, Text Processing
 
 ---
 
@@ -69,7 +69,7 @@ Quality Assessment không chịu trách nhiệm:
 * image enhancement
 * Runtime scheduling
 * Runtime retry execution
-* provider switching execution
+* provider switching or fallback execution
 * cancellation authority
 * Event Bus behavior
 
@@ -85,7 +85,7 @@ Quality Assessment hướng tới:
 * multi-dimensional evaluation
 * deterministic classification where possible
 * explicit quality issues
-* Runtime-friendly output
+* policy-consumer-friendly output
 * benchmark-friendly metrics
 * non-mutating evaluation
 
@@ -128,8 +128,8 @@ OCR Document
     ├──► Quality Assessment
     │        ↓
     │    Quality Report
-    │        ↓
-    │    Runtime Decision
+    │        │
+    │        └──► Runtime Retry Policy / Routing / Business Orchestration
     │
     └──► Reading Order
 ```
@@ -178,7 +178,7 @@ Một khía cạnh độc lập được dùng để đánh giá OCR Document.
 
 ## Quality Grade
 
-Phân loại dễ dùng cho Runtime hoặc UI.
+Phân loại dễ dùng cho policy consumers hoặc UI.
 
 Ví dụ:
 
@@ -594,9 +594,9 @@ Error
 Critical
 ```
 
-Severity không đồng nghĩa Runtime action.
+Severity không đồng nghĩa execution action.
 
-Runtime có thể map severity theo policy riêng.
+Các authoritative policy owners có thể map severity thành decision theo concern tương ứng.
 
 ---
 
@@ -735,7 +735,7 @@ Exact policy vẫn thuộc profile.
 
 ---
 
-# 32. Grade vs Runtime Decision
+# 32. Grade vs Execution Decision
 
 Grade không phải command.
 
@@ -745,9 +745,25 @@ Ví dụ:
 Grade = Poor
 ```
 
-không có nghĩa Quality tự chạy Retry.
+không có nghĩa Quality tự chạy Retry, Fallback, Stop hoặc Continue.
 
-Runtime mới quyết định action.
+Decision owner phụ thuộc loại action:
+
+```text
+Same-work Retry
+    → Runtime Retry Policy
+
+Alternative execution / Fallback
+    → AI Routing / Recovery
+
+Continue / Stop downstream business flow
+    → Business Pipeline Orchestration
+
+Manual Review handling
+    → Business / Presentation owner
+```
+
+Runtime chỉ thực thi những execution decision thuộc Runtime authority hoặc resolved execution plan tương ứng.
 
 ---
 
@@ -794,11 +810,13 @@ Quality sở hữu:
 what is recommended
 ```
 
-Runtime sở hữu:
+Quality không sở hữu:
 
 ```text
-whether the recommendation is executed
+whether the recommendation becomes an action
 ```
+
+Action authority phụ thuộc recommendation type.
 
 Ví dụ:
 
@@ -806,9 +824,23 @@ Ví dụ:
 Quality
     → RetryRecognition recommended
 
-Runtime
-    → decides Retry / Continue / Stop
+Runtime Retry Policy
+    → decides whether same-work Retry is allowed
+
+Quality
+    → SwitchProvider recommended
+
+AI Routing / Recovery
+    → decides whether an alternative execution binding is selected
+
+Quality
+    → Continue recommended
+
+Business Pipeline Orchestration
+    → decides whether downstream business work continues
 ```
+
+Runtime execution authority không đồng nghĩa Runtime sở hữu mọi business hoặc routing decision.
 
 ---
 
@@ -834,7 +866,7 @@ SwitchProvider
 
 Priority phải explicit.
 
-Runtime không nên suy luận priority từ array order.
+Consumer không nên suy luận priority từ array order.
 
 ---
 
@@ -864,7 +896,7 @@ Có thể liên kết với:
 * Quality Profile Version
 * Quality Strategy Version
 
-Exact artifact identity thuộc Runtime/Artifact contract.
+Exact Runtime Artifact identity và publication identity thuộc Runtime Artifact contract.
 
 ---
 
@@ -1007,14 +1039,14 @@ Quality semantics phải giữ provider-neutral để comparison có ý nghĩa.
 
 Reading Order có thể consume OCR Document độc lập.
 
-Nếu pipeline policy yêu cầu quality gate trước Reading Order:
+Nếu Business/OCR pipeline policy yêu cầu quality gate trước Reading Order:
 
 ```text
 OCR Document
     ↓
 Quality Report
     ↓
-Runtime Decision
+Pipeline / Business Decision
     ↓
 Reading Order
 ```
@@ -1027,30 +1059,53 @@ OCR Document
     └── Reading Order
 ```
 
-Execution ordering cụ thể thuộc Runtime/Pipeline orchestration.
+Business-stage dependency và continuation thuộc Business Pipeline Orchestration.
+
+Runtime Scheduler chỉ thực thi dependency-ready work theo resolved plan.
 
 Quality không sở hữu Reading Order.
 
 ---
 
-# 48. Runtime Integration
+# 48. Runtime and Policy Integration
 
-Runtime có thể consume:
+Quality Report có thể được nhiều consumer sử dụng:
+
+* Runtime Retry Policy
+* AI Routing / Recovery
+* Business Pipeline Orchestration
+* Presentation hoặc Manual Review flow
+* diagnostics và benchmark tooling
+
+Các consumer có thể đọc:
 
 * Quality Grade
 * Quality Score
 * Quality Issues
 * Recommendations
 
-để quyết định:
+Ownership không được gom vào một Runtime Decision chung.
 
-* Continue
-* Retry
-* Fallback
-* Stop
-* Manual Review
+Canonical split:
 
-Runtime vẫn là execution authority.
+```text
+Retry
+    → Runtime Retry Policy
+
+Fallback / alternative execution
+    → AI Routing / Recovery
+
+Continue / Stop business pipeline
+    → Business Pipeline Orchestration
+
+Manual Review presentation/workflow
+    → Business / Presentation owner
+
+Execution mechanics and authority
+    → Runtime
+```
+
+Quality Report chỉ là evidence và recommendation input.
 
 ---
 
@@ -1083,9 +1138,13 @@ Quality có thể recommend:
 SwitchProvider
 ```
 
-nhưng không chọn hoặc kích hoạt provider trực tiếp.
+nhưng không chọn hoặc kích hoạt Provider trực tiếp.
 
-Provider selection/routing execution thuộc owner tương ứng.
+AI Routing / Recovery sở hữu quyết định chọn alternative execution khi policy cho phép.
+
+Provider Integration cung cấp provider capability, availability và normalized provider metadata.
+
+Runtime chỉ thực thi resolved ExecutionBinding; Runtime không tự trở thành provider-routing authority.
 
 ---
 
@@ -1148,7 +1207,7 @@ Quality Diagnostics có thể chứa:
 * confidence coverage
 * grade decision
 * missing metadata
-* fallback evaluation rule
+* recovery recommendation evaluation rule
 
 Diagnostics không nên chứa raw OCR text nếu không cần thiết.
 
@@ -1230,25 +1289,37 @@ Quality Assessment phải luôn đảm bảo:
 
 14. Recommendation không phải command.
 
-15. Runtime mới sở hữu action execution.
+15. Recommendation không chuyển ownership của action sang Quality.
 
-16. Quality Report phải provider-neutral.
+16. Action decision phải thuộc authoritative owner của concern tương ứng.
 
-17. Quality Report phải tham chiếu exact OCR Document revision.
+17. Runtime sở hữu execution mechanics và execution authority, không mặc định sở hữu Routing hoặc Business continuation decision.
 
-18. Published Quality Report phải immutable.
+18. Same-work Retry decision thuộc Runtime Retry Policy.
 
-19. Quality Profile/Strategy phải versioned khi thay đổi semantics.
+19. Alternative execution hoặc Fallback decision thuộc AI Routing / Recovery.
 
-20. Quality không sở hữu Runtime scheduling.
+20. Continue hoặc Stop downstream Business flow thuộc Business Pipeline Orchestration.
 
-21. Quality không sở hữu Runtime retry execution.
+21. Quality Report phải provider-neutral.
 
-22. Quality không sở hữu cancellation authority.
+22. Quality Report phải tham chiếu exact OCR Document revision.
 
-23. Quality không sở hữu global cache lifecycle.
+23. Published Quality Report phải immutable.
 
-24. Quality Diagnostics không được leak sensitive OCR content mặc định.
+24. Quality Profile và Quality Strategy phải versioned khi thay đổi semantics.
+
+25. Quality không sở hữu Runtime scheduling.
+
+26. Quality không sở hữu Runtime retry execution.
+
+27. Quality không sở hữu cancellation authority.
+
+28. Quality không sở hữu provider routing hoặc fallback execution.
+
+29. Quality không sở hữu global cache lifecycle.
+
+30. Quality Diagnostics không được leak sensitive OCR content mặc định.
 
 ---
 
@@ -1305,24 +1376,27 @@ Không cần ngay:
 
 # 60. Ownership References
 
-| Concern                      | Owner                          |
-| ---------------------------- | ------------------------------ |
-| OCR Document                 | `POSTPROCESS.md`               |
-| Detection Confidence         | `DETECTION.md`                 |
-| Recognition Confidence       | `RECOGNITION.md`               |
-| Direction Confidence         | `TEXT_DIRECTION.md`            |
-| Layout Quality Signals       | `LAYOUT.md`                    |
-| Quality Report               | `QUALITY.md`                   |
-| Quality Score / Grade        | `QUALITY.md`                   |
-| Quality Issues               | `QUALITY.md`                   |
-| Recommendations              | `QUALITY.md`                   |
-| Reading Order                | `READING_ORDER.md`             |
-| Retry Execution              | Runtime                        |
-| Provider Switching Execution | Runtime / Provider Integration |
-| Scheduling                   | Runtime                        |
-| Cache Lifecycle              | Runtime                        |
-| Event Transport              | Event Bus                      |
-| Telemetry Transport          | Infrastructure                 |
+| Concern | Owner |
+| --- | --- |
+| OCR Document | `POSTPROCESS.md` |
+| Detection Confidence | `DETECTION.md` |
+| Recognition Confidence | `RECOGNITION.md` |
+| Direction Confidence | `TEXT_DIRECTION.md` |
+| Layout Quality Signals | `LAYOUT.md` |
+| Quality Report | `QUALITY.md` |
+| Quality Score / Grade | `QUALITY.md` |
+| Quality Issues | `QUALITY.md` |
+| Recommendations | `QUALITY.md` |
+| Reading Order | `READING_ORDER.md` |
+| Same-work Retry Decision / Execution | Runtime Retry Policy |
+| Provider Switching / Fallback Decision | AI Routing / Recovery |
+| Provider capability / availability metadata | `PROVIDERS.md` |
+| Business Continue / Stop Decision | Business Pipeline Orchestration |
+| Scheduling | Runtime Scheduler |
+| Execution Authority | Runtime Control |
+| Cache Lifecycle | Runtime Cache Policy |
+| Event Transport | Event Bus |
+| Telemetry Transport | Infrastructure |
 
 ---
 
@@ -1365,8 +1439,17 @@ Postprocessing
 Quality
     → evaluates how trustworthy that document is
 
+Runtime Retry Policy
+    → decides same-work Retry
+
+AI Routing / Recovery
+    → decides alternative execution / Fallback
+
+Business Pipeline Orchestration
+    → decides downstream Business continuation
+
 Runtime
-    → decides what action to execute
+    → executes resolved Runtime work with execution authority
 ```
 
 Nguyên tắc quan trọng nhất:
@@ -1376,7 +1459,7 @@ Quality evaluates.
 
 Quality recommends.
 
-Runtime decides.
+The authoritative policy owner decides.
 
-Runtime executes.
+Runtime executes Runtime-owned or resolved execution work.
 ```

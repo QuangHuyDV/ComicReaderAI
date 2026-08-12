@@ -1,376 +1,698 @@
-# runtime/RUNTIME_COMPONENTS.md
-
 # Runtime Components
 
-## 1. Purpose
-
-Tài liệu này xác định các **logical runtime component** của CRAI, trách nhiệm của từng component, ownership đối với runtime state, quan hệ phụ thuộc và lifecycle khi ứng dụng đang hoạt động.
-
-Tài liệu này đóng vai trò là bản đồ tổng hợp của Runtime Architecture.
-
-Tài liệu này không:
-
-- mô tả class, package hoặc framework cụ thể;
-- thay thế tài liệu chi tiết của từng runtime concern;
-- biến các Business Module thành Runtime Component;
-- quyết định process topology hoặc công nghệ triển khai;
-- mô tả provider implementation cụ thể.
+* **Document:** Runtime Architecture / Runtime Components
+* **Version:** 2.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 2. Runtime Component Definition
+# 1. Purpose
 
-Trong CRAI, **Runtime Component** là một đơn vị trách nhiệm logic tham gia trực tiếp vào việc:
+This document defines the logical runtime components of CRAI and their ownership boundaries.
 
-- khởi động và dừng runtime;
-- quản lý runtime state;
-- điều phối revision và WorkItem;
-- kiểm soát scheduling, cancellation và retry;
-- quản lý artifact và resource;
-- thực thi công việc;
-- xác nhận quyền commit kết quả;
-- thu thập observability.
+It acts as the high-level component map for Runtime Architecture.
 
-Runtime Component không đồng nghĩa với:
+The Runtime architecture coordinates:
 
-- Business Module;
-- source-code module;
-- class;
-- thread;
-- process;
-- service độc lập.
+* application runtime startup and shutdown,
+* execution scopes,
+* WorkItem admission and execution,
+* cancellation,
+* retry execution,
+* execution authority,
+* immutable runtime artifacts,
+* physical resource lifecycle,
+* provider/runtime invocation,
+* runtime observability.
 
-Một Runtime Component có thể được triển khai bằng một hoặc nhiều object, thread, queue hoặc process tùy Technology Stack và Process Topology về sau.
+This document does NOT:
 
----
-
-## 3. Runtime Architecture Principles
-
-Runtime Architecture tuân theo các nguyên tắc sau:
-
-1. `Runtime Control` là **single logical writer** đối với runtime state và authority.
-2. `Scheduler` là nơi duy nhất quyết định WorkItem nào được admission.
-3. Worker không tự tạo downstream work.
-4. Worker và Provider Adapter không tự retry.
-5. Queue, worker concurrency và provider concurrency luôn bounded.
-6. Large payload chỉ được trao đổi bằng `ArtifactRef`.
-7. Artifact là immutable sau khi publish.
-8. Mỗi WorkItem chỉ có một terminal outcome được chấp nhận.
-9. Mỗi lần retry tạo một `AttemptId` mới.
-10. Stale result không có commit authority.
-11. Cancellation là control flow hợp lệ, không mặc định là failure.
-12. Runtime Component chỉ giao tiếp qua contract, command, event hoặc artifact reference.
-13. Runtime Architecture không sở hữu business semantics của Capture, Recognition, Translation, Presentation hoặc Storage.
-14. Telemetry failure không được làm sai runtime correctness.
-15. Shutdown phải dừng admission trước khi cleanup resource.
+* define concrete classes or packages;
+* choose frameworks;
+* define process topology;
+* turn Business Modules into Runtime Components;
+* own business workflow semantics;
+* define provider implementations;
+* replace detailed Runtime documents.
 
 ---
 
-## 4. Runtime Overview
+# 2. Runtime Component Definition
+
+A **Runtime Component** is a logical responsibility participating in execution of CRAI work while the application is running.
+
+A Runtime Component may participate in:
+
+* runtime startup/shutdown;
+* execution-state management;
+* WorkItem admission;
+* Attempt execution;
+* cancellation;
+* retry execution;
+* execution-authority validation;
+* runtime artifact management;
+* resource lifecycle;
+* provider/runtime access;
+* runtime telemetry.
+
+A Runtime Component is NOT automatically:
+
+* a Business Module;
+* a source-code module;
+* a class;
+* a thread;
+* a process;
+* a service;
+* a deployment unit.
+
+One logical Runtime Component MAY be implemented through multiple objects, queues, threads or processes.
+
+---
+
+# 3. Core Runtime Concepts
+
+The canonical runtime execution hierarchy is:
+
+```text
+Application Instance
+        |
+        v
+Execution Scope
+        |
+        v
+Execution Revision
+        |
+        v
+WorkItem
+        |
+        v
+Attempt
+```
+
+For CRAI reading flows:
+
+```text
+Execution Scope
+    MAY correspond to
+Reading Session execution
+```
+
+but Runtime does not own Reading Session business semantics.
+
+---
+
+# 3.1 Execution Revision
+
+Runtime MUST use:
+
+```text
+ExecutionRevision
+```
+
+for runtime freshness/authority semantics.
+
+Avoid using the unqualified word:
+
+```text
+Revision
+```
+
+where it can be confused with:
+
+* TranslationRevision,
+* CharacterRevision,
+* ProfileRevision,
+* other Domain revisions.
+
+Recommended identity:
+
+```text
+ExecutionRevisionId
+```
+
+---
+
+# 3.2 Execution Revision vs Domain Revision
+
+```text
+ExecutionRevision
+    = runtime generation / execution authority
+```
+
+```text
+TranslationRevision
+CharacterRevision
+ProfileRevision
+    = domain history
+```
+
+They are unrelated concepts unless explicitly linked through references.
+
+---
+
+# 3.3 WorkItem
+
+A `WorkItem` represents one logical unit of executable work.
+
+Recommended conceptual structure:
+
+```text
+WorkItem
+├── workItemId
+├── executionScopeId
+├── executionRevisionId
+├── operationType
+├── handlerReference
+├── inputArtifactRefs[]
+├── configurationReference
+├── priority
+├── deadline?
+├── cancellationScope
+└── correlationContext
+```
+
+A WorkItem does NOT contain large payloads.
+
+---
+
+# 3.4 Attempt
+
+An `Attempt` is one physical execution attempt of one WorkItem.
+
+```text
+WorkItem
+   |
+   +--> Attempt 1
+   +--> Attempt 2
+   +--> Attempt 3
+```
+
+Retry creates a new:
+
+```text
+AttemptId
+```
+
+while preserving:
+
+```text
+WorkItemId
+```
+
+unless a higher-level recovery mechanism explicitly creates another logical WorkItem.
+
+---
+
+# 4. Runtime Architecture Principles
+
+1. Runtime ownership is explicitly partitioned.
+
+2. Runtime Control is the single logical authority for **execution orchestration state**, not every Runtime Component's internal state.
+
+3. Scheduler is the authority for Runtime WorkItem admission.
+
+4. Worker executes Attempts but does not own logical WorkItem state.
+
+5. Worker MUST NOT create downstream business work.
+
+6. Worker and Provider Adapter MUST NOT independently perform orchestration-level Retry.
+
+7. Retry and Fallback remain distinct concepts.
+
+8. Queue and concurrency MUST remain bounded.
+
+9. Large payloads MUST move through `ArtifactRef` or another explicit large-payload handle.
+
+10. Published Runtime Artifacts are immutable.
+
+11. A WorkItem accepts at most one logical terminal outcome.
+
+12. Retry creates a new Attempt identity.
+
+13. Late/stale results have no execution acceptance authority.
+
+14. Cancellation is valid control flow and is not automatically Failure.
+
+15. Runtime does not own Capture, Recognition, Translation, Presentation or Storage business semantics.
+
+16. Runtime authority validation does not replace Business Module validation.
+
+17. Runtime Artifact Store does not replace durable business persistence.
+
+18. Runtime telemetry does not become authoritative runtime state.
+
+19. Telemetry failure MUST NOT corrupt Runtime correctness.
+
+20. Shutdown MUST stop admission before destructive resource cleanup.
+
+---
+
+# 5. Runtime Overview
 
 ```text
 Application Bootstrap
         |
         v
-Runtime Configuration
+Runtime Configuration Snapshot
         |
         v
 Runtime Control
         |
-        +--------------------+----------------------+-------------------+
-        |                    |                      |                   |
-        v                    v                      v                   v
-Session Runtime          Scheduler           Cancellation         Observability
-        |                    |                 Coordinator
-        |                    |
-        |                    v
-        |               Work Queues
-        |                    |
-        |                    v
-        |              Worker Execution
-        |                    |
-        |                    v
-        |              Provider Manager
-        |
-        +--------------------+----------------------+
-                             |
-                             v
-                    Revision / Artifact State
-                             |
-             +---------------+----------------+
-             |                                |
-             v                                v
-       Revision Store                   Artifact Store
-                                              |
-                                              v
-                                      Resource Manager
+        +-------------------+--------------------+
+        |                   |                    |
+        v                   v                    v
+Execution Scope         Scheduler          Cancellation
+Runtime                     |               Coordination
+                            v
+                       Work Queues
+                            |
+                            v
+                     Worker Execution
+                            |
+                            v
+                 Execution Adapter Gateway
+                            |
+                            v
+                      Attempt Outcome
+                            |
+                            v
+                     Runtime Control
+                            |
+              +-------------+-------------+
+              |                           |
+              v                           v
+     Execution State Store          Runtime Artifact Store
+                                          |
+                                          v
+                                   Resource Management
 ```
 
-Các Business Module tham gia pipeline thông qua public contract và worker execution, nhưng không trở thành Runtime Component chỉ vì chúng có stage được thực thi.
+Cross-cutting:
+
+```text
+Runtime Observability
+Event Bus
+Configuration
+Security
+```
 
 ---
 
-## 5. Component Groups
+# 6. Component Groups
 
-Runtime Component được tổ chức thành sáu nhóm trách nhiệm:
+Runtime responsibilities are organized into:
 
 ```text
 Runtime Foundation
-Runtime Control
-Execution
-State and Data
-Integration
+
+Execution Authority
+
+Scheduling and Execution
+
+Execution State and Data
+
+Integration Boundaries
+
+Resource Lifecycle
+
 Observability
 ```
 
 ---
 
-# 6. Runtime Foundation
+# 7. Runtime Foundation
 
-## 6.1 Application Bootstrap
+## 7.1 Application Bootstrap
 
 ### Purpose
 
-Chuẩn bị môi trường và khởi tạo Runtime theo boot sequence đã xác định.
+Initialize the runtime environment according to the boot sequence.
 
 ### Responsibilities
 
-- khởi tạo dependency cần thiết;
-- load và validate configuration ban đầu;
-- tạo Runtime Configuration snapshot;
-- wiring Runtime Component;
-- đăng ký provider và adapter;
-- khởi tạo Event Bus và Observability;
-- khởi động Runtime Control;
-- chuyển runtime sang trạng thái sẵn sàng;
-- xử lý startup failure theo boot policy.
+Application Bootstrap MAY:
+
+* initialize required infrastructure;
+* obtain validated Runtime Configuration;
+* initialize Event Bus;
+* initialize telemetry foundations;
+* initialize runtime stores;
+* initialize Plugin/Provider runtime integration;
+* wire Runtime Components;
+* activate Runtime Control;
+* transition application runtime to ready state;
+* handle startup failure.
 
 ### Ownership
 
-Application Bootstrap chỉ sở hữu resource trong giai đoạn khởi tạo cho đến khi ownership được chuyển giao rõ ràng cho component tương ứng.
+Bootstrap owns only temporary initialization ownership.
+
+Resources MUST be explicitly transferred to their long-lived owners.
 
 ### Lifetime
 
 ```text
 APPLICATION_STARTING
-        ↓
+        |
+        v
 BOOTSTRAPPING
-        ↓
-RUNTIME_READY | STARTUP_FAILED
+        |
+        +--> RUNTIME_READY
+        |
+        +--> STARTUP_FAILED
 ```
 
-Sau khi runtime sẵn sàng, Bootstrap không tiếp tục điều phối runtime operation.
-
-### Related Document
-
-- `BOOT_SEQUENCE.md`
-- `RUNTIME_CONFIG.md`
-
----
-
-## 6.2 Runtime Configuration
-
-### Purpose
-
-Cung cấp configuration hợp lệ, typed, versioned và nhất quán cho Runtime.
-
-### Responsibilities
-
-- load configuration từ các nguồn được phép;
-- áp dụng application default;
-- validate configuration;
-- tạo immutable configuration snapshot;
-- phát hành configuration version;
-- quản lý activation boundary;
-- xác định hot-reload boundary;
-- từ chối configuration không hợp lệ;
-- cung cấp secret reference thay vì phát tán secret trực tiếp.
-
-### Ownership
-
-Runtime Configuration sở hữu:
-
-- active runtime configuration version;
-- configuration snapshot;
-- validation result;
-- configuration activation state.
-
-### Rules
-
-- WorkItem phải tham chiếu configuration version cần thiết.
-- Configuration đang dùng bởi một WorkItem không bị mutate.
-- Secret value không được đưa vào event hoặc telemetry.
-- Business Module vẫn sở hữu business configuration của chính nó; Runtime Configuration chỉ quản lý cách snapshot và cấp phát configuration cho runtime execution.
-
-### Related Document
-
-- `RUNTIME_CONFIG.md`
-
----
-
-# 7. Runtime Control
-
-## 7.1 Runtime Control
-
-### Purpose
-
-Là authority trung tâm đối với runtime state, revision authority, WorkItem lifecycle và việc chấp nhận terminal outcome.
-
-### Responsibilities
-
-- quản lý runtime lifecycle;
-- quản lý session runtime state;
-- tiếp nhận command từ Application và worker;
-- tạo và chuyển trạng thái revision;
-- tạo logical WorkItem;
-- yêu cầu Scheduler admission;
-- chấp nhận hoặc từ chối completion;
-- xác định stale result;
-- tạo downstream work sau khi upstream result hợp lệ;
-- áp dụng cancellation và retry decision;
-- cho phép hoặc từ chối presentation commit;
-- điều phối graceful shutdown.
-
-### Ownership
-
-Runtime Control là single logical writer đối với:
-
-- active runtime state;
-- session runtime state;
-- current revision authority;
-- WorkItem logical state;
-- accepted terminal outcome;
-- retry lineage;
-- commit authority;
-- runtime shutdown state.
-
-### Non-responsibilities
-
-Runtime Control không:
-
-- thực thi OCR hoặc Translation;
-- chứa provider implementation;
-- giữ large payload;
-- tự quản lý worker thread;
-- thực hiện persistence nghiệp vụ;
-- thay thế Business Module hoặc Pipeline Orchestrator ở mức business workflow.
+After successful startup, Bootstrap MUST NOT become the normal runtime orchestrator.
 
 ### Related Documents
 
-- `PIPELINE_RUNTIME.md`
-- `PIPELINE_ORCHESTRATION.md`
-- `CANCELLATION.md`
-- `RETRY_POLICY.md`
+* `BOOT_SEQUENCE.md`
+* `RUNTIME_CONFIG.md`
 
 ---
 
-## 7.2 Session Runtime
+## 7.2 Runtime Configuration Snapshot
 
 ### Purpose
 
-Biểu diễn trạng thái runtime của một Reading Session đang hoạt động.
+Provide immutable configuration identity required for Runtime execution.
+
+### Boundary
+
+Runtime Configuration does NOT own every CRAI configuration source.
+
+Preferred:
+
+```text
+Configuration Architecture / Infrastructure
+        |
+        v
+Resolved Runtime Configuration
+        |
+        v
+Runtime Configuration Snapshot
+```
 
 ### Responsibilities
 
-- duy trì liên kết giữa `SessionId` và current revision;
-- tiếp nhận pause, resume và stop authority;
-- quản lý session-scoped runtime resource;
-- giữ session configuration snapshot reference;
-- cô lập WorkItem, queue priority và cancellation scope theo session;
-- hỗ trợ session drain và cleanup.
+* validate Runtime-required configuration;
+* produce immutable runtime snapshots;
+* assign configuration revision/version;
+* expose activation state;
+* define runtime hot-reload boundary;
+* retain secret references rather than secret values.
 
-### Ownership
+### Rules
 
-Session Runtime sở hữu runtime metadata của session, không sở hữu business data của Reading Module.
-
-### Distinction
-
-```text
-Reading Module
-    → sở hữu business meaning và business state của Reading Session
-
-Session Runtime
-    → sở hữu execution state cần để session được vận hành
-```
-
-### Lifetime
-
-```text
-CREATED
-  ↓
-ACTIVE
-  ↔
-PAUSED
-  ↓
-STOPPING
-  ↓
-STOPPED
-```
+* in-flight execution uses an immutable configuration reference;
+* configuration changes MUST NOT silently mutate an Attempt;
+* raw secrets MUST NOT enter WorkItems or events;
+* Business Modules retain ownership of business configuration semantics.
 
 ---
 
-## 7.3 Authority Validator
+# 8. Execution Authority
+
+## 8.1 Runtime Control
 
 ### Purpose
 
-Xác nhận một result hoặc side effect còn quyền được chấp nhận tại thời điểm commit.
+Coordinate execution-level state and authority.
 
-Authority Validator có thể là trách nhiệm nội bộ của Runtime Control trong MVP, chưa bắt buộc là standalone component.
+Runtime Control is the logical authority for:
 
-### Validation Inputs
+```text
+Execution Scope
+Execution Revision
+WorkItem logical state
+accepted WorkItem outcome
+execution relevance
+cancellation authority
+retry lineage
+runtime shutdown coordination
+```
 
-- `SessionId`;
-- `RevisionId`;
-- `WorkItemId`;
-- `AttemptId`;
-- current revision;
-- terminal state;
-- cancellation state;
-- configuration version;
-- target presentation version khi cần.
+It is NOT the owner of every mutable runtime state.
+
+---
+
+### Responsibilities
+
+Runtime Control MAY:
+
+* create execution scopes;
+* create `ExecutionRevision`;
+* materialize WorkItems from orchestration commands;
+* request Scheduler admission;
+* track logical WorkItem state;
+* accept or reject Attempt outcomes;
+* detect stale results;
+* revoke execution authority;
+* coordinate cancellation;
+* coordinate Retry requests;
+* record accepted Runtime Artifact references;
+* notify an owning Orchestrator that an execution result is accepted;
+* coordinate graceful shutdown.
+
+---
+
+### Runtime Control Does Not Decide Business Workflow
+
+Critical boundary:
+
+```text
+Business / Pipeline Orchestrator
+        |
+        v
+decides logical next work
+        |
+        v
+Runtime Control
+        |
+        v
+materializes executable WorkItem
+```
+
+Runtime Control MUST NOT independently infer:
+
+```text
+OCR complete
+    -> therefore translate
+
+Translation complete
+    -> therefore render
+```
+
+unless such sequencing is explicitly represented by an orchestration contract.
+
+---
+
+### Ownership
+
+Runtime Control is the single logical writer for its own execution-authority state:
+
+```text
+current Execution Revision per execution scope
+WorkItem logical state
+accepted WorkItem terminal outcome
+execution acceptance authority
+cancellation authority
+retry lineage
+runtime shutdown coordination state
+```
+
+It does NOT own:
+
+* Scheduler admission state;
+* Runtime Configuration state;
+* provider health;
+* Artifact physical resource state;
+* telemetry state;
+* Business Module state.
+
+---
+
+### Non-Responsibilities
+
+Runtime Control does NOT:
+
+* perform Recognition;
+* perform Translation;
+* select AI Models;
+* implement providers;
+* own business persistence;
+* own UI state;
+* own Provider Configuration;
+* own Domain revisions;
+* determine business-valid result semantics.
+
+### Related Documents
+
+* `PIPELINE_RUNTIME.md`
+* `PIPELINE_ORCHESTRATION.md`
+* `CANCELLATION.md`
+* `RETRY_POLICY.md`
+
+---
+
+## 8.2 Execution Scope Runtime
+
+### Purpose
+
+Represent runtime execution metadata associated with an active application/business scope.
+
+For current CRAI reading flows this MAY correspond to:
+
+```text
+ReadingSession execution scope
+```
+
+### Responsibilities
+
+* associate execution scope with current Execution Revision;
+* maintain cancellation scope;
+* maintain execution priority;
+* hold configuration references;
+* track runtime-owned resources;
+* support pause/resume/drain where the owning business workflow permits it.
+
+### Boundary
+
+```text
+Reading Module
+    = Reading Session business semantics
+
+Execution Scope Runtime
+    = runtime metadata used to execute it
+```
+
+Runtime MUST NOT redefine Reading Session business lifecycle.
+
+---
+
+## 8.3 Execution Authority Validator
+
+### Purpose
+
+Determine whether an Attempt result is still eligible for Runtime acceptance.
+
+This MAY remain an internal responsibility of Runtime Control in MVP.
+
+### Inputs
+
+Possible inputs:
+
+```text
+executionScopeId
+executionRevisionId
+workItemId
+attemptId
+currentExecutionRevisionId
+WorkItem terminal state
+cancellation state
+configuration identity
+supersession state
+```
 
 ### Decisions
 
 ```text
 ACCEPT
 REJECT_STALE
-REJECT_CANCELED
+REJECT_CANCELLED
 REJECT_DUPLICATE
 REJECT_INVALID_STATE
 ```
 
-### Rules
+---
 
-- Worker completion không đồng nghĩa result được chấp nhận.
-- Artifact publication và presentation commit đều phải đi qua authority validation phù hợp.
-- Validation phải xảy ra trước mọi side effect có thể quan sát được.
+### Execution Authority Is Not Business Validation
+
+Critical distinction:
+
+```text
+Runtime Authority Validation
+    asks:
+    "Is this result still current and eligible?"
+```
+
+```text
+Business Validation
+    asks:
+    "Is this result correct/acceptable for the capability?"
+```
+
+Both MAY be required.
 
 ---
 
-# 8. Execution Components
+### Business Commit Boundary
 
-## 8.1 Scheduler
+Recommended:
+
+```text
+Attempt Result
+      |
+      v
+Runtime Authority Validation
+      |
+      v
+Accepted Execution Result
+      |
+      v
+Owning Business Module
+      |
+      v
+Business Validation / Commit
+```
+
+Runtime authority MUST NOT be interpreted as automatic domain commit authorization.
+
+---
+
+### Presentation Boundary
+
+Runtime MAY confirm:
+
+```text
+this result is current
+```
+
+but Presentation/Application owns:
+
+```text
+whether/how it becomes visible
+```
+
+Runtime Control MUST NOT become the Presentation state owner.
+
+---
+
+# 9. Scheduling and Execution
+
+## 9.1 Scheduler
 
 ### Purpose
 
-Quyết định WorkItem nào được admission, defer, replace hoặc reject.
+Own Runtime WorkItem admission decisions.
 
 ### Responsibilities
 
-- xét dependency readiness;
-- xét revision authority;
-- xét queue capacity;
-- xét priority;
-- xét worker concurrency;
-- xét provider concurrency;
-- xét resource budget;
-- ưu tiên current revision;
-- loại bỏ obsolete queued work;
-- admission retry attempt;
-- giữ capacity cho control và cancellation;
-- tạo backpressure khi overload.
+Scheduler MAY consider:
 
-### Decisions
+* dependency readiness;
+* execution relevance;
+* queue capacity;
+* priority;
+* worker capacity;
+* resource budget;
+* execution deadline;
+* current Execution Revision;
+* retry admission;
+* shutdown/drain state.
+
+Possible decisions:
 
 ```text
 ADMIT
@@ -379,501 +701,688 @@ REJECT
 REPLACE
 ```
 
-### Ownership
+---
 
-Scheduler sở hữu scheduling decision và admission state, nhưng không sở hữu business result hoặc WorkItem terminal outcome.
+### Scheduler Authority
 
-### Non-responsibilities
+Scheduler is the only Runtime component that determines whether a logical WorkItem/Attempt enters Runtime execution capacity.
 
-Scheduler không:
+This does NOT mean downstream external systems cannot reject an invocation.
 
-- thực thi WorkItem;
-- tự tạo retry;
-- tự quyết định business stage kế tiếp;
-- mutate runtime authority;
-- giữ artifact payload.
+Example:
 
-### Related Documents
+```text
+Scheduler
+    admits WorkItem
 
-- `SCHEDULER.md`
-- `WORK_QUEUE.md`
-- `PERFORMANCE_MODEL.md`
+Provider Gateway
+    may later return RATE_LIMITED
+```
+
+The latter is an execution outcome, not Runtime admission.
 
 ---
 
-## 8.2 Work Queues
+### Non-Responsibilities
+
+Scheduler does NOT:
+
+* execute WorkItems;
+* decide business next stage;
+* create Retry decisions;
+* mutate Runtime Control authority;
+* own Artifact payloads;
+* select business provider/model routes.
+
+---
+
+## 9.2 Work Queues
 
 ### Purpose
 
-Giữ các WorkItem đã được admission hoặc đang chờ execution theo bounded capacity.
-
-### Responsibilities
-
-- lưu immutable WorkItem reference;
-- duy trì priority order;
-- hỗ trợ current-revision preference;
-- loại obsolete queued work;
-- hỗ trợ latest-work replacement khi phù hợp;
-- cung cấp queue metrics;
-- áp dụng bounded capacity;
-- hỗ trợ drain khi shutdown.
+Hold admitted executable work using bounded capacity.
 
 ### Queue Content
 
-Queue chỉ chứa dữ liệu nhẹ:
+Queue entries SHOULD contain lightweight execution metadata:
 
 ```text
-SessionId
-RevisionId
-WorkItemId
-AttemptId
-Stage
-Priority
-InputArtifactRefs
-ConfigurationVersion
-CancellationContext
+executionScopeId
+executionRevisionId
+workItemId
+attemptId
+operationType
+handlerReference
+priority
+inputArtifactRefs
+configurationReference
+cancellationReference
+deadline
 ```
 
-Queue không chứa:
+Queue MUST NOT contain:
 
-- image buffer;
-- OCR payload lớn;
-- translated document;
-- mutable provider DTO;
-- secret.
+* screenshots;
+* large OCR output;
+* full translated documents;
+* mutable provider DTOs;
+* secrets.
+
+---
 
 ### Ownership
 
-Queue sở hữu vị trí chờ execution, không sở hữu logical WorkItem state hoặc Artifact.
+Queue owns:
 
-### Related Document
+```text
+queued execution position
+```
 
-- `WORK_QUEUE.md`
+It does NOT own:
+
+```text
+WorkItem logical state
+Artifact ownership
+Business state
+```
 
 ---
 
-## 8.3 Worker Execution
+## 9.3 Worker Execution
 
 ### Purpose
 
-Thực thi một Attempt của WorkItem đã được Scheduler cấp.
+Physically execute one Attempt.
 
 ### Responsibilities
 
-- nhận immutable execution input;
-- acquire Artifact Lease;
-- gọi Business Module contract hoặc Provider Adapter phù hợp;
-- cooperative cancellation;
-- tạo temporary output;
-- chuẩn hóa execution outcome;
-- publish completion command về Runtime Control;
-- release lease và temporary resource.
+Worker MAY:
+
+* receive immutable execution input;
+* acquire Artifact leases;
+* resolve public capability/handler contracts;
+* invoke Business Module or Execution Adapter;
+* cooperate with cancellation;
+* produce temporary execution output;
+* normalize execution outcome;
+* submit completion command;
+* release leases/resources.
+
+---
 
 ### Worker Rules
 
-Worker không được:
+Worker MUST NOT:
 
-- mutate Runtime Control state trực tiếp;
-- tự tạo downstream WorkItem;
-- tự retry;
-- commit UI trực tiếp;
-- promote artifact thành accepted output khi chưa được validation;
-- giữ resource sau terminal cleanup;
-- tự coi completion là success được chấp nhận.
-
-### Completion Output
-
-```text
-AttemptCompleted
-AttemptFailed
-AttemptCanceled
-AttemptAbandoned
-```
-
-Runtime Control quyết định terminal outcome logic cuối cùng, bao gồm `STALE`.
-
-### Related Documents
-
-- `PIPELINE_RUNTIME.md`
-- `THREADING_MODEL.md`
-- `ERROR_MODEL.md`
+* mutate Runtime Control state directly;
+* create downstream WorkItems;
+* perform orchestration-level Retry;
+* select a new fallback route on its own;
+* commit Domain state;
+* commit UI/Presentation directly;
+* treat physical completion as accepted logical success;
+* retain resources after terminal cleanup without explicit lease.
 
 ---
 
-## 8.4 Cancellation Coordinator
+### Attempt Outcomes
+
+Possible physical Attempt outcomes:
+
+```text
+SUCCEEDED
+FAILED
+CANCELLED
+ABANDONED
+```
+
+`STALE` is normally an acceptance decision made after the Attempt outcome is reported.
+
+---
+
+## 9.4 Cancellation Coordinator
 
 ### Purpose
 
-Áp dụng cancellation theo đúng scope và propagation order.
+Coordinate cancellation propagation.
 
-Cancellation Coordinator có thể là trách nhiệm nội bộ của Runtime Control trong MVP.
-
-### Responsibilities
-
-- tiếp nhận cancellation request;
-- revoke authority;
-- loại queued work;
-- signal running attempt;
-- hủy delayed retry;
-- theo dõi drain;
-- ngăn canceled work được hồi sinh;
-- chuẩn hóa cancellation outcome.
+This MAY remain internal to Runtime Control in MVP.
 
 ### Cancellation Scopes
 
 ```text
 APPLICATION
-SESSION
-REVISION
+EXECUTION_SCOPE
+EXECUTION_REVISION
 WORK_ITEM
 ATTEMPT
 ```
 
-### Related Document
-
-- `CANCELLATION.md`
-
----
-
-## 8.5 Retry Coordinator
-
-### Purpose
-
-Đánh giá và tạo retry attempt mới khi failure còn phù hợp với current runtime state.
-
-Retry Coordinator có thể là trách nhiệm nội bộ của Runtime Control trong MVP.
-
 ### Responsibilities
 
-- phân loại failure;
-- kiểm tra relevance;
-- kiểm tra retry budget;
-- áp dụng backoff và jitter;
-- tôn trọng provider `Retry-After`;
-- hủy delayed retry khi stale hoặc canceled;
-- tạo `AttemptId` mới;
-- yêu cầu Scheduler admission;
-- hỗ trợ provider fallback như một new attempt.
-
-### Rules
-
-- Attempt cũ không được resume.
-- Retry không làm thay đổi logical WorkItem identity.
-- Worker và Provider Adapter không tự retry.
-- Retry phải kiểm tra cache hoặc existing accepted artifact lại khi phù hợp.
+* receive cancellation requests;
+* revoke relevant execution authority;
+* remove cancellable queued work;
+* signal active Attempts;
+* cancel delayed Retry;
+* coordinate drain;
+* prevent cancelled work from being resurrected.
 
 ### Related Document
 
-- `RETRY_POLICY.md`
+* `CANCELLATION.md`
 
 ---
 
-# 9. State and Data Components
-
-## 9.1 Revision Store
+## 9.5 Retry Coordinator
 
 ### Purpose
 
-Lưu runtime metadata của các revision đang hoạt động hoặc đang drain.
+Apply Runtime Retry Policy to an eligible WorkItem failure.
+
+This MAY remain internal to Runtime Control in MVP.
 
 ### Responsibilities
 
-- tạo revision metadata;
-- lưu revision state;
-- xác định current revision theo session;
-- giữ revision-to-WorkItem relation;
-- giữ input/output ArtifactRef;
-- hỗ trợ authority validation;
-- hỗ trợ revision supersession;
-- loại revision metadata khi đủ điều kiện cleanup.
+* classify normalized failure;
+* verify WorkItem is still relevant;
+* check retry budget;
+* calculate delay/backoff;
+* respect normalized `Retry-After`;
+* cancel delayed Retry when stale/cancelled;
+* create a new `AttemptId`;
+* request Scheduler admission.
+
+---
+
+### Retry Boundary
+
+Runtime Retry SHOULD normally mean:
+
+```text
+same WorkItem
++
+compatible execution binding
++
+new Attempt
+```
+
+---
+
+### Fallback Boundary
+
+Critical rule:
+
+```text
+Retry
+    !=
+Fallback
+```
+
+If another architecture decides:
+
+```text
+new Provider
+new Model
+new RoutePlan
+new execution binding
+```
+
+that is a Fallback/Recovery decision.
+
+Runtime MAY execute the resulting new Attempt but MUST NOT silently select that fallback itself.
+
+For AI operations:
+
+```text
+AI Fallback / Routing
+    chooses new RoutePlan
+
+Runtime
+    executes resulting Attempt
+```
+
+---
+
+### Worker/Adapter Retry
+
+Worker and Provider Adapter MUST NOT hide orchestration-level Retry loops.
+
+Low-level transport retry MAY exist only when explicitly defined as part of the adapter contract and semantically invisible to Runtime attempt identity.
+
+---
+
+# 10. Execution State and Data
+
+## 10.1 Execution State Store
+
+### Purpose
+
+Store runtime metadata required to support Execution Revision and WorkItem authority.
+
+This replaces ambiguous usage of generic:
+
+```text
+Revision Store
+```
+
+---
+
+### Responsibilities
+
+* store Execution Revision metadata;
+* map execution scope to current Execution Revision;
+* track WorkItems;
+* retain accepted ArtifactRefs;
+* support supersession;
+* support authority validation;
+* support drain/cleanup eligibility.
 
 ### Ownership
 
-Revision Store sở hữu runtime metadata, không sở hữu nội dung artifact vật lý.
+Runtime Control is the logical writer.
 
-### Rules
-
-- Runtime Control là writer duy nhất.
-- Worker chỉ đọc snapshot hoặc reference được cấp.
-- Revision cũ có thể còn tồn tại để drain resource nhưng không còn authority.
-
-### Related Documents
-
-- `PIPELINE_RUNTIME.md`
-- `MEMORY_MODEL.md`
+Store implementation MAY be separate.
 
 ---
 
-## 9.2 Artifact Store
+### Execution Revision Record
+
+Recommended:
+
+```text
+ExecutionRevisionRecord
+├── executionRevisionId
+├── executionScopeId
+├── state
+├── parentRevisionId?
+├── supersededBy?
+├── workItemRefs[]
+├── acceptedArtifactRefs[]
+├── configurationReference
+├── createdAt
+└── authorityState
+```
+
+---
+
+## 10.2 Runtime Artifact Store
 
 ### Purpose
 
-Quản lý artifact immutable được tạo và sử dụng trong Runtime.
+Manage immutable execution artifacts used by Runtime.
+
+### Runtime Artifact
+
+A Runtime Artifact is:
+
+```text
+immutable execution data
++
+runtime metadata
++
+explicit ownership/retention
+```
+
+It is NOT automatically a canonical Domain artifact.
+
+---
 
 ### Responsibilities
 
-- register artifact;
-- atomic publication;
-- cấp `ArtifactId` và `ArtifactRef`;
-- lưu artifact metadata;
-- cung cấp artifact lookup;
-- quản lý cache ownership khi có;
-- phối hợp Artifact Lease;
-- xác định artifact eligibility for disposal;
-- hỗ trợ memory hoặc temporary backing store tùy implementation.
+* register Runtime Artifact;
+* assign `ArtifactId` / `ArtifactRef`;
+* perform atomic publication;
+* retain artifact metadata;
+* resolve ArtifactRefs;
+* coordinate leases;
+* determine disposal eligibility;
+* support temporary/memory/file backing.
 
-### Artifact Examples
+---
+
+### Runtime Artifact Examples
+
+Possible examples:
 
 ```text
-SourceImageArtifact
-StructuredTextArtifact
-RecognitionArtifact
-SourceDocumentArtifact
-TranslationArtifact
-PresentationArtifact
+CapturedImageExecutionArtifact
+RecognitionExecutionArtifact
+StructuredTextExecutionArtifact
+TranslationExecutionArtifact
+PresentationInputArtifact
 ```
 
-Tên artifact cụ thể do contract kiến trúc tương ứng định nghĩa.
+Names are illustrative.
 
-### Distinction from Storage Module
+Owning architecture defines semantic payload contracts.
+
+---
+
+### Runtime Artifact vs Domain Artifact
 
 ```text
-Artifact Store
-    → runtime object lifecycle, immutable artifacts, temporary reuse
+Runtime Artifact
+    = execution payload
+```
+
+```text
+TranslationRevision
+TextBlock Revision
+GlossarySnapshot
+    = domain truth/history
+```
+
+Runtime MUST NOT collapse these concepts.
+
+---
+
+### Runtime Artifact Store vs Storage
+
+```text
+Runtime Artifact Store
+    -> execution retention
+       immutable temporary artifacts
+       runtime leases
 
 Storage Module
-    → durable persistence capability, snapshots, retention, recovery,
-      schema evolution và persistence contract
+    -> durable persistence
+       recovery
+       retention
+       schema evolution
 ```
-
-Artifact Store không phải repository nghiệp vụ và không mặc định là durable storage.
-
-### Related Documents
-
-- `CACHE_POLICY.md`
-- `MEMORY_MODEL.md`
-- `RESOURCE_LIFECYCLE.md`
 
 ---
 
-## 9.3 Resource Manager
+### Cache Boundary
+
+Runtime Artifact Store MUST NOT own canonical Cache Policy.
+
+Cache architecture MAY reference/promote compatible artifacts.
+
+Artifact Store only executes its runtime retention/lookup responsibility.
+
+---
+
+## 10.3 Resource Manager
 
 ### Purpose
 
-Quản lý lifecycle vật lý của resource được Runtime sử dụng.
+Manage physical resources owned or leased by Runtime.
 
-Resource Manager hiện là logical responsibility, chưa bắt buộc thành standalone module trong MVP.
-
-### Responsibilities
-
-- resource registration;
-- ownership transfer;
-- lease tracking;
-- disposal eligibility check;
-- physical disposal;
-- cleanup retry;
-- shutdown cleanup ordering;
-- phát hiện resource leak.
+This MAY remain a logical responsibility rather than a standalone component in MVP.
 
 ### Resource Types
 
-- memory buffer;
-- temporary file;
-- native handle;
-- GPU resource;
-- provider connection;
-- process handle;
-- artifact backing storage.
+Examples:
 
-### Rules
+```text
+memory buffer
+temporary file
+native handle
+GPU allocation
+provider connection
+process handle
+Artifact backing resource
+```
 
-- Mất logical authority không đồng nghĩa có thể dispose ngay.
-- Artifact chỉ được dispose khi không còn owner hoặc lease.
-- Cleanup failure phải observable.
-- Resource không được tồn tại vô hạn chỉ vì cleanup từng thất bại.
+### Responsibilities
+
+* resource registration;
+* ownership transfer;
+* lease tracking;
+* disposal eligibility;
+* physical cleanup;
+* cleanup retry;
+* leak detection;
+* shutdown cleanup ordering.
+
+---
+
+### Key Rule
+
+```text
+Logical authority lost
+    !=
+resource immediately disposable
+```
+
+A resource may remain physically alive while an existing lease drains.
+
+---
+
+# 11. Integration Boundaries
+
+## 11.1 Event Bus
+
+### Purpose
+
+Transport typed asynchronous events.
+
+Event Bus MUST NOT own orchestration.
+
+### Event Bus Does Not
+
+* replace Runtime Control;
+* replace Scheduler;
+* create business pipeline sequence;
+* own query semantics;
+* mutate state owners;
+* transport raw secrets;
+* transport large payloads where ArtifactRef is appropriate.
 
 ### Related Documents
 
-- `RESOURCE_LIFECYCLE.md`
-- `MEMORY_MODEL.md`
+* `../core/EVENT_BUS.md`
 
 ---
 
-# 10. Integration Components
-
-## 10.1 Event Bus
+## 11.2 Provider Runtime Gateway
 
 ### Purpose
 
-Phân phối typed event giữa các thành phần mà không chuyển ownership hoặc trực tiếp điều phối pipeline.
-
-### Responsibilities
-
-- publish;
-- subscribe;
-- dispatch;
-- ordering theo scope đã định;
-- subscriber failure isolation;
-- event tracing;
-- duplicate/stale metadata support;
-- bounded progress event handling.
-
-### Rules
-
-Event Bus không:
-
-- thay Runtime Control;
-- thay Scheduler;
-- thay Query Interface;
-- tự động tạo chuỗi pipeline;
-- chứa secret hoặc large payload;
-- mutate state owner trực tiếp.
-
-### Related Document
-
-- `../core/EVENT_BUS.md`
-- `../core/EVENT_STANDARD.md` nếu tồn tại trong cấu trúc dự án
+Expose runtime execution access to provider-backed implementations without transferring Provider Management ownership into Runtime.
 
 ---
 
-## 10.2 Provider Manager
+### Why Not Canonical Provider Manager
 
-### Purpose
+Canonical provider semantics already belong to Provider Management.
 
-Quản lý provider capability, provider instance và runtime availability.
+Runtime therefore SHOULD distinguish:
 
-### Responsibilities
+```text
+Provider Management
+    = provider configuration,
+      enablement,
+      credentials references,
+      provider policy
+```
 
-- provider registration;
-- capability lookup;
-- lifecycle;
-- health state;
-- concurrency limit;
-- rate-limit state;
-- provider selection input;
-- provider fallback availability;
-- mapping provider instance với secret reference;
-- shutdown và cleanup.
+from:
 
-### Rules
-
-Provider Manager không:
-
-- chứa business policy dịch hoặc OCR;
-- trực tiếp quyết định retry;
-- phát tán raw provider DTO;
-- trả secret value cho component không có quyền;
-- tự commit provider result.
-
-Provider selection về mặt business thuộc module hoặc policy sở hữu use case; Provider Manager cung cấp runtime availability và execution access.
-
-### Related Documents
-
-- `RUNTIME_CONFIG.md`
-- `RETRY_POLICY.md`
-- `ERROR_MODEL.md`
-- Provider Architecture trong giai đoạn sau nếu có
+```text
+Provider Runtime Gateway
+    = executable runtime access
+      and short-lived availability
+```
 
 ---
 
-## 10.3 Secret Access Boundary
-
-### Purpose
-
-Cấp quyền sử dụng secret mà không phát tán secret qua runtime contract.
-
-Secret Access Boundary thường thuộc Infrastructure hoặc Platform, không nhất thiết là Runtime Component độc lập.
-
 ### Responsibilities
 
-- resolve secret reference;
-- enforce access scope;
-- sử dụng secure storage;
-- hỗ trợ credential rotation;
-- redaction trong logs và errors;
-- không expose plain-text secret vượt quá adapter cần sử dụng.
+Provider Runtime Gateway MAY:
 
-### Rules
-
-- Event không chứa secret.
-- WorkItem không chứa secret.
-- Configuration snapshot chỉ chứa secret reference.
-- Provider Adapter chỉ nhận quyền truy cập tối thiểu cần thiết.
+* expose executable provider/adapter instances;
+* resolve execution bindings produced by owning routing/selection logic;
+* expose normalized runtime availability;
+* enforce provider-instance concurrency;
+* expose rate-limit signals;
+* invoke provider adapter contracts;
+* coordinate provider runtime shutdown;
+* normalize execution failures.
 
 ---
 
-# 11. Observability Component
+### Non-Responsibilities
 
-## 11.1 Runtime Observability
+Provider Runtime Gateway does NOT:
+
+* own Provider Configuration;
+* own credentials;
+* decide Translation/OCR business policy;
+* choose AI Model RoutePlan;
+* choose Fallback route;
+* perform Retry orchestration;
+* own authoritative Health projection;
+* expose raw provider DTOs;
+* commit provider result.
+
+---
+
+### AI Boundary
+
+For AI:
+
+```text
+AI Routing
+    chooses RoutePlan
+
+Provider Runtime Gateway
+    resolves executable deployment/adapter
+
+Worker
+    invokes it
+```
+
+---
+
+### Plugin Boundary
+
+A provider implementation MAY be supplied by a Plugin.
+
+Runtime consumes the public executable capability.
+
+Runtime does NOT depend on concrete plugin implementation identity unless required by an explicit binding.
+
+---
+
+## 11.3 Secret Access Boundary
 
 ### Purpose
 
-Cung cấp khả năng quan sát Runtime mà không làm thay đổi correctness hoặc làm lộ user content.
+Allow privileged adapters to use credentials without distributing raw secret material through Runtime contracts.
 
-### Responsibilities
+This responsibility normally belongs to Infrastructure/Secret Management.
 
-- metrics;
-- traces;
-- structured logs;
-- runtime events;
-- bounded recent-event buffer;
-- diagnostic snapshots;
-- queue and scheduler telemetry;
-- revision and WorkItem timeline;
-- provider health telemetry;
-- resource leak indicators;
-- startup và shutdown diagnostics.
+### Runtime Rules
 
-### Correlation Model
+* WorkItems contain secret references only;
+* events MUST NOT contain raw secrets;
+* configuration snapshots contain references;
+* Runtime telemetry MUST redact sensitive values;
+* provider adapters receive only minimum required secret access.
+
+---
+
+# 12. Runtime Observability
+
+## 12.1 Purpose
+
+Provide operational visibility without changing Runtime semantics.
+
+### Signals
+
+Runtime Observability MAY include:
+
+* structured logs;
+* metrics;
+* traces;
+* runtime events;
+* diagnostic snapshots;
+* queue metrics;
+* Scheduler decisions;
+* WorkItem timelines;
+* Attempt timelines;
+* provider invocation telemetry;
+* resource leak indicators;
+* startup/shutdown telemetry.
+
+---
+
+## 12.2 Correlation
+
+Recommended:
 
 ```text
 ApplicationInstanceId
-    ↓
-SessionId
-    ↓
-RevisionId
-    ↓
+        |
+        v
+ExecutionScopeId
+        |
+        v
+ExecutionRevisionId
+        |
+        v
 WorkItemId
-    ↓
+        |
+        v
 AttemptId
 ```
 
-### Privacy Rule
+Other operations MAY add:
 
 ```text
-No Content by Default
+requestId
+routePlanId
+streamId
+responseId
+correlationId
 ```
 
-Standard telemetry không chứa:
-
-- screenshot;
-- OCR text;
-- source text;
-- translated text;
-- prompt;
-- source URL;
-- window title;
-- credential;
-- provider request body.
-
-### Rules
-
-- Telemetry export không được block Runtime Control.
-- Telemetry failure không được thay đổi terminal outcome.
-- Progress event phải được throttle.
-- Diagnostic content có user data chỉ được tạo trong chế độ explicit và phải được redaction.
-
-### Related Document
-
-- `RUNTIME_OBSERVABILITY.md`
-- `PERFORMANCE_MODEL.md`
-- `ERROR_MODEL.md`
+without conflating their meanings.
 
 ---
 
-# 12. Business Module Boundary
+## 12.3 Privacy
 
-Runtime không được tạo các component kiểu:
+Default:
+
+```text
+NO CONTENT
+```
+
+Ordinary telemetry MUST NOT contain:
+
+* screenshots;
+* OCR/source text;
+* translated text;
+* Prompt;
+* full AI Context;
+* source URL unless explicitly permitted;
+* window title unless explicitly permitted;
+* credentials;
+* provider request bodies.
+
+---
+
+## 12.4 Telemetry Boundary
+
+Telemetry does NOT own:
+
+* Runtime state;
+* Usage Ledger;
+* Audit;
+* Provider Health truth;
+* Domain truth.
+
+Derived Health projections MAY consume telemetry.
+
+---
+
+# 13. Business Module Boundary
+
+Runtime MUST NOT create mirror components such as:
 
 ```text
 Capture Runtime
@@ -883,390 +1392,691 @@ Presentation Runtime
 Storage Runtime
 ```
 
-chỉ để phản chiếu tên Business Module.
+merely to reflect Business Module names.
 
-Business Module sở hữu:
+---
 
-- business state;
-- business rule;
-- business contract;
-- business data;
-- business result semantics.
-
-Runtime sở hữu:
-
-- execution state;
-- scheduling;
-- attempt;
-- authority;
-- cancellation;
-- retry;
-- artifact lifecycle;
-- runtime observability.
-
-Quan hệ đúng:
+## Business Modules Own
 
 ```text
-Runtime Worker
-    ↓ invokes public contract
-Business Module
-    ↓ produces result
-Runtime Control
-    ↓ validates authority
-Artifact Store / Presentation Commit
+business state
+business rules
+business contracts
+business validation
+business result semantics
+domain commit
 ```
 
 ---
 
-# 13. Runtime Interaction Model
+## Runtime Owns
 
 ```text
-Application Command
-        ↓
+execution state
+execution authority
+WorkItem admission
+Attempt execution
+cancellation
+Retry execution
+runtime Artifact lifecycle
+physical resource coordination
+runtime observability
+```
+
+---
+
+# 14. Runtime / Business Interaction
+
+Correct interaction:
+
+```text
+Business / Pipeline Orchestrator
+        |
+        v
+requests logical work
+        |
+        v
 Runtime Control
-        ↓ creates logical work
+        |
+        v
 Scheduler
-        ↓ admits
+        |
+        v
 Work Queue
-        ↓ dispatches
-Worker Execution
-        ↓ invokes module/provider contract
-Temporary Result
-        ↓ completion command
+        |
+        v
+Worker
+        |
+        v
+Public Module / Adapter Contract
+        |
+        v
+Attempt Result
+        |
+        v
 Runtime Control
-        ↓ validates authority
-Accepted Artifact Publication
-        ↓
-Downstream Scheduling or Presentation Commit
+        |
+        v
+Execution Authority Validation
+        |
+        v
+Accepted Execution Result
+        |
+        v
+Owning Business Module / Orchestrator
+        |
+        v
+Business Commit or Next Logical Work
 ```
 
-Event Bus có thể phát notification ở các bước phù hợp nhưng không sở hữu flow trên.
+This prevents Runtime from becoming the business workflow owner.
 
 ---
 
-# 14. Component Ownership Summary
+# 15. Downstream Work
 
-| Component | Primary ownership |
-|---|---|
-| Application Bootstrap | Startup sequence và initial ownership transfer |
-| Runtime Configuration | Active configuration snapshot và version |
-| Runtime Control | Runtime state, revision authority, WorkItem logical state, accepted outcome |
-| Session Runtime | Session-scoped execution metadata |
-| Authority Validator | Commit-authority decision |
-| Scheduler | Admission decision |
-| Work Queues | Bounded queued-work position |
-| Worker Execution | Physical execution của một Attempt |
-| Cancellation Coordinator | Cancellation propagation |
-| Retry Coordinator | Retry decision và creation của new Attempt |
-| Revision Store | Revision runtime metadata |
-| Artifact Store | Artifact registry, metadata và runtime retention |
-| Resource Manager | Physical resource lifecycle |
-| Event Bus | Event distribution |
-| Provider Manager | Provider runtime availability và lifecycle |
-| Secret Access Boundary | Controlled secret resolution |
-| Runtime Observability | Runtime telemetry và diagnostic state |
+Critical boundary:
 
----
+```text
+Runtime does not infer business next steps.
+```
 
-# 15. Logical Responsibility vs Standalone Component
+Instead:
 
-Không phải mọi mục trong tài liệu này đều phải trở thành component độc lập trong MVP.
-
-## Likely Standalone Runtime Components
-
-- Runtime Control;
-- Runtime Configuration;
-- Scheduler;
-- Work Queues;
-- Revision Store;
-- Artifact Store;
-- Worker Execution;
-- Event Bus;
-- Runtime Observability;
-- Provider Manager.
-
-## May Remain Internal Responsibilities in MVP
-
-- Session Runtime;
-- Authority Validator;
-- Cancellation Coordinator;
-- Retry Coordinator;
-- Resource Manager;
-- Secret Access Boundary.
-
-Việc tách thành implementation component riêng chỉ được quyết định sau khi Technology Stack và Process Topology được chốt.
+```text
+Accepted Execution Result
+        |
+        v
+Business / Pipeline Orchestrator
+        |
+        v
+Next Work Decision
+        |
+        v
+Runtime Control
+        |
+        v
+new WorkItem
+```
 
 ---
 
-# 16. Lifetime Model
+# 16. Component Ownership Summary
 
-## 16.1 Application Lifetime
+| Component                      | Primary Ownership                               |
+| ------------------------------ | ----------------------------------------------- |
+| Application Bootstrap          | Startup sequence and initial ownership transfer |
+| Runtime Configuration Snapshot | Active immutable runtime configuration identity |
+| Runtime Control                | Execution authority and logical WorkItem state  |
+| Execution Scope Runtime        | Scope-specific execution metadata               |
+| Execution Authority Validator  | Current/stale/cancelled acceptance decision     |
+| Scheduler                      | Runtime WorkItem admission                      |
+| Work Queues                    | Bounded queued execution position               |
+| Worker Execution               | Physical Attempt execution                      |
+| Cancellation Coordinator       | Cancellation propagation coordination           |
+| Retry Coordinator              | Same-WorkItem Retry execution                   |
+| Execution State Store          | Execution Revision and WorkItem metadata        |
+| Runtime Artifact Store         | Immutable runtime execution artifacts           |
+| Resource Manager               | Physical resource ownership and disposal        |
+| Event Bus                      | Asynchronous event distribution                 |
+| Provider Runtime Gateway       | Executable provider/adapter runtime access      |
+| Secret Access Boundary         | Privileged secret usage boundary                |
+| Runtime Observability          | Runtime telemetry and diagnostics               |
+
+---
+
+# 17. Logical Responsibility vs Standalone Component
+
+Not every logical responsibility needs its own implementation component.
+
+## Likely Standalone
+
+* Runtime Control;
+* Runtime Configuration Snapshot;
+* Scheduler;
+* Work Queues;
+* Execution State Store;
+* Runtime Artifact Store;
+* Worker Execution;
+* Event Bus;
+* Runtime Observability;
+* Provider Runtime Gateway.
+
+## MAY Remain Internal
+
+* Execution Scope Runtime;
+* Execution Authority Validator;
+* Cancellation Coordinator;
+* Retry Coordinator;
+* Resource Manager;
+* Secret Access Boundary.
+
+Final implementation boundaries depend on:
+
+* Technology Stack;
+* Process Topology;
+* performance requirements;
+* isolation requirements.
+
+---
+
+# 18. Lifetime Model
+
+## 18.1 Application Lifetime
 
 ```text
 Bootstrap
-Runtime Configuration
+Runtime Configuration Snapshot
 Runtime Control
 Scheduler
 Work Queues
-Revision Store
-Artifact Store
-Provider Manager
+Execution State Store
+Runtime Artifact Store
+Provider Runtime Gateway
 Event Bus
 Runtime Observability
 ```
 
-## 16.2 Session Lifetime
+---
+
+## 18.2 Execution Scope Lifetime
 
 ```text
-Session Runtime
-Session cancellation scope
-Current revision metadata
-Session-scoped artifact ownership
-Session configuration reference
+Execution Scope Runtime
+Cancellation Scope
+Current Execution Revision
+Scope Artifact Ownership
+Configuration Reference
 ```
 
-## 16.3 Revision Lifetime
+---
+
+## 18.3 Execution Revision Lifetime
 
 ```text
-Revision metadata
-Logical WorkItems
+ExecutionRevisionRecord
+WorkItems
 Accepted ArtifactRefs
-Revision authority
-Revision cancellation scope
+Authority
+Cancellation Scope
 ```
 
-## 16.4 Attempt Lifetime
+---
+
+## 18.4 WorkItem Lifetime
+
+```text
+WorkItemId
+logical WorkItem state
+Attempt lineage
+accepted terminal outcome
+```
+
+---
+
+## 18.5 Attempt Lifetime
 
 ```text
 AttemptId
 Worker execution context
 Artifact leases
-Provider request
-Temporary resources
-Execution outcome
+execution binding
+provider request
+temporary resources
+Attempt outcome
 ```
 
-Resource physical lifetime có thể dài hơn logical Attempt lifetime trong thời gian drain hoặc cleanup.
+Physical resources MAY outlive the logical Attempt while draining or cleaning up.
 
 ---
 
-# 17. Threading and Process Boundary
+# 19. Threading and Process Boundary
 
-Runtime Component không tự động sở hữu dedicated thread.
+Logical Runtime Components do not automatically own dedicated threads.
 
-Execution context logic gồm:
+Possible execution contexts:
 
 ```text
 UI Context
 Runtime Control Context
-Observation/Capture Context
+Capture/Observation Context
 CPU Worker Pool
 Provider I/O Context
 GPU Context
+Plugin Process
 Optional Isolated Process
 ```
 
-Quy tắc:
+Rules:
 
-- Runtime Control là single logical writer, không nhất thiết là một OS thread riêng.
-- Worker pool không mutate Runtime Control state.
-- Queue không bị component ngoài thao tác trực tiếp.
-- Provider callback chỉ gửi completion command.
-- UI commit diễn ra trên UI Context sau authority validation.
-- Process boundary được xác định trong `PROCESS_TOPOLOGY.md`, không phải tài liệu này.
+1. Runtime Control is a single logical writer, not necessarily one dedicated OS thread.
 
-### Related Document
+2. Worker pools MUST NOT mutate Runtime Control state directly.
 
-- `THREADING_MODEL.md`
+3. Queue internals MUST NOT be manipulated by arbitrary components.
+
+4. Provider callbacks submit normalized completion signals.
+
+5. Presentation commits occur in the appropriate Presentation/UI context.
+
+6. Process topology MUST NOT change contract semantics.
+
+7. `PROCESS_TOPOLOGY.md` owns process deployment decisions.
 
 ---
 
-# 18. Failure Isolation
+# 20. Failure Isolation
 
-Failure được cô lập theo scope:
+Typical flow:
 
 ```text
 Attempt Failure
-    ↓
-WorkItem Failure or Retry Decision
-    ↓
-Revision Degradation or Failure
-    ↓
-Session remains active when recoverable
+      |
+      v
+Retry / Failure Decision
+      |
+      v
+WorkItem Outcome
+      |
+      v
+Execution Revision Degradation
+      |
+      v
+Execution Scope MAY remain active
 ```
 
-Một provider hoặc worker failure không mặc định làm toàn Runtime dừng.
-
-Runtime chỉ chuyển sang fatal shutdown khi:
-
-- invariant cốt lõi bị phá;
-- Runtime Control không còn đáng tin cậy;
-- Artifact/Resource ownership không thể bảo toàn;
-- configuration hoặc security boundary gây trạng thái không an toàn;
-- tiếp tục chạy có nguy cơ làm sai dữ liệu hoặc side effect.
-
-### Related Document
-
-- `ERROR_MODEL.md`
+One provider/plugin/worker failure MUST NOT automatically stop the entire Runtime.
 
 ---
 
-# 19. Startup and Shutdown
+## Fatal Runtime Failure
 
-## Startup Order
+Runtime SHOULD enter fatal shutdown only when continuing cannot preserve core invariants.
 
-Startup order được định nghĩa bởi `BOOT_SEQUENCE.md`, nhìn chung phải đảm bảo:
+Examples:
+
+* Runtime Control authority cannot be trusted;
+* execution state becomes irreconcilable;
+* Artifact/resource ownership cannot be preserved;
+* required security boundary is broken;
+* required runtime configuration becomes unsafe;
+* continued execution risks corrupt side effects/data.
+
+---
+
+# 21. Startup
+
+General startup dependency order:
 
 ```text
-Configuration
-    ↓
-Observability foundation
-    ↓
-Storage/Infrastructure dependencies required for runtime
-    ↓
+Validated Configuration
+        |
+        v
+Telemetry Foundation
+        |
+        v
+Required Infrastructure
+        |
+        v
 Event Bus
-    ↓
-Artifact and Revision state
-    ↓
-Provider Manager
-    ↓
-Scheduler and queues
-    ↓
-Runtime Control activation
-    ↓
-Accept new session
+        |
+        v
+Execution State / Artifact Stores
+        |
+        v
+Plugin / Provider Runtime Integration
+        |
+        v
+Provider Runtime Gateway
+        |
+        v
+Scheduler / Queues
+        |
+        v
+Runtime Control
+        |
+        v
+Accept New Execution Scopes
 ```
 
-## Shutdown Order
+Exact order belongs to `BOOT_SEQUENCE.md`.
+
+---
+
+# 22. Shutdown
+
+Recommended:
 
 ```text
-Stop new admission
-    ↓
-Revoke authority / cancel active work
-    ↓
-Remove queued work
-    ↓
-Drain running attempts
-    ↓
-Release leases
-    ↓
-Dispose session and revision resources
-    ↓
-Stop providers and workers
-    ↓
-Flush bounded diagnostics
-    ↓
-Dispose runtime infrastructure
+Stop New Execution Scope Creation
+        |
+        v
+Stop Scheduler Admission
+        |
+        v
+Revoke / Quiesce Execution Authority
+        |
+        v
+Remove Cancelled/Obsolete Queued Work
+        |
+        v
+Drain or Cancel Active Attempts
+        |
+        v
+Release Artifact Leases
+        |
+        v
+Dispose Scope / Revision Runtime State
+        |
+        v
+Stop Workers / Provider Runtime
+        |
+        v
+Flush Bounded Critical Diagnostics
+        |
+        v
+Dispose Runtime Infrastructure
 ```
 
-Shutdown chi tiết phải thống nhất giữa:
+---
 
-- `BOOT_SEQUENCE.md`;
-- `CANCELLATION.md`;
-- `RESOURCE_LIFECYCLE.md`;
-- `THREADING_MODEL.md`;
-- `RUNTIME_OBSERVABILITY.md`.
+# 23. Dependency Rules
+
+1. Runtime Components communicate through explicit public/runtime contracts.
+
+2. Runtime Control MUST NOT depend on concrete provider implementations.
+
+3. Worker MUST NOT deep-import Runtime Control implementation.
+
+4. Scheduler MUST NOT invoke Business Modules directly.
+
+5. Event Bus MUST NOT mutate state owners.
+
+6. Runtime Artifact Store MUST NOT own durable business persistence policy.
+
+7. Storage MUST NOT manage runtime queues or execution authority.
+
+8. Provider Adapter MUST NOT perform hidden orchestration-level Retry.
+
+9. UI/Presentation MUST NOT invoke Workers or Providers directly.
+
+10. Raw secrets MUST NOT appear in WorkItem/event contracts.
+
+11. Components MUST NOT mutate each other's private queues/state/resources.
+
+12. Ownership transfer MUST be explicit.
+
+13. Deep implementation imports across component boundaries are forbidden.
+
+14. Process boundaries MUST preserve logical contracts.
+
+15. Runtime correctness MUST NOT depend on telemetry availability.
+
+16. Runtime MUST NOT infer business workflow progression.
+
+17. Runtime Retry MUST NOT silently become provider/model Fallback.
+
+18. Provider Runtime Gateway MUST consume Provider Management state rather than redefine it.
 
 ---
 
-# 20. Dependency Rules
+# 24. Runtime Invariants
 
-1. Runtime Component chỉ phụ thuộc public contract hoặc runtime abstraction.
-2. Runtime Control không phụ thuộc provider implementation.
-3. Worker không import Runtime Control implementation.
-4. Scheduler không gọi Business Module trực tiếp.
-5. Event Bus không mutate state owner.
-6. Artifact Store không sở hữu business persistence policy.
-7. Storage Module không quản lý runtime queue hoặc revision authority.
-8. Provider Adapter không tự retry.
-9. UI không gọi worker hoặc provider trực tiếp.
-10. Secret không vượt qua boundary dưới dạng event payload hoặc WorkItem field.
-11. Component ngang hàng không thao tác queue, state hoặc resource nội bộ của nhau.
-12. Mọi ownership transfer phải explicit.
-13. Deep import vào implementation nội bộ bị cấm.
-14. Process boundary không được làm thay đổi contract semantics.
-15. Runtime correctness không phụ thuộc telemetry availability.
+1. Runtime Control is the logical authority for execution-orchestration state.
 
----
+2. Runtime Control does NOT own every Runtime Component's state.
 
-# 21. Runtime Invariants
+3. Current Execution Revision has current execution authority.
 
-1. Runtime Control là single logical writer.
-2. Current revision có quyền ưu tiên cao nhất.
-3. Scheduler là nơi duy nhất quyết định admission.
-4. Worker không tạo downstream work.
-5. Worker và Provider Adapter không tự retry.
-6. Queue và concurrency luôn bounded.
-7. Large payload chỉ truyền qua ArtifactRef.
-8. Artifact đã publish là immutable.
-9. Mỗi WorkItem chỉ chấp nhận một terminal outcome.
-10. Retry tạo AttemptId mới.
-11. Late attempt không overwrite accepted outcome mới hơn.
-12. Stale result không được commit.
-13. Cancellation không mặc định là failure.
-14. Artifact chỉ dispose khi không còn owner hoặc lease.
-15. Runtime state và physical resource lifetime được quản lý tách biệt.
-16. Business Module ownership không bị Runtime chiếm đoạt.
-17. Storage Module và Artifact Store là hai boundary khác nhau.
-18. UI không bị block bởi worker, provider hoặc telemetry.
-19. Shutdown dừng admission trước cleanup.
-20. Telemetry failure không phá runtime correctness.
+4. Scheduler owns Runtime WorkItem admission.
 
----
+5. Worker owns physical Attempt execution only.
 
-# 22. Related Documents
+6. Worker does not create downstream business work.
 
-| Document | Relationship |
-|---|---|
-| `BOOT_SEQUENCE.md` | Startup, activation và shutdown sequence |
-| `RUNTIME_CONFIG.md` | Configuration ownership và snapshot |
-| `PIPELINE_ORCHESTRATION.md` | Quyền điều phối stage và business workflow boundary |
-| `PIPELINE_RUNTIME.md` | Revision, WorkItem, Attempt và completion flow |
-| `SCHEDULER.md` | Admission policy |
-| `WORK_QUEUE.md` | Bounded queue và queued-work lifecycle |
-| `CANCELLATION.md` | Cancellation scope và propagation |
-| `RETRY_POLICY.md` | Retry eligibility và new Attempt |
-| `CACHE_POLICY.md` | Artifact reuse và cache promotion |
-| `MEMORY_MODEL.md` | Revision Store, Artifact Store và Artifact Lease |
-| `THREADING_MODEL.md` | Execution context và concurrency boundary |
-| `RESOURCE_LIFECYCLE.md` | Ownership transfer, lease và disposal |
-| `PERFORMANCE_MODEL.md` | Useful-result performance và overload policy |
-| `ERROR_MODEL.md` | RuntimeError và terminal outcome |
-| `RUNTIME_OBSERVABILITY.md` | Metrics, traces, logs và diagnostics |
+7. Worker and Provider Adapter do not independently perform orchestration Retry.
 
----
+8. Retry and Fallback are separate.
 
-# 23. Completion Criteria
+9. Queue and concurrency are bounded.
 
-`RUNTIME_COMPONENTS.md` được xem là đồng bộ khi:
+10. Large payloads use ArtifactRefs/explicit handles.
 
-- mọi Runtime Component có ownership rõ ràng;
-- Runtime Component không trùng với Business Module;
-- Runtime Control, Scheduler và Worker có boundary riêng;
-- Revision, WorkItem và Attempt được sử dụng nhất quán;
-- Artifact Store được phân biệt rõ với Storage Module;
-- retry và cancellation thuộc Runtime Control policy;
-- queue, concurrency và resource đều bounded;
-- lifecycle application, session, revision và attempt được mô tả;
-- startup và shutdown không mâu thuẫn với tài liệu chi tiết;
-- logical responsibility và standalone implementation được phân biệt;
-- dependency không tạo vòng;
-- terminology thống nhất với toàn bộ thư mục `runtime/`.
+11. Published Runtime Artifacts are immutable.
+
+12. One WorkItem accepts at most one logical terminal outcome.
+
+13. Retry creates a new AttemptId.
+
+14. Late Attempts cannot overwrite an already accepted newer outcome.
+
+15. Stale results cannot become accepted execution results.
+
+16. Cancellation is not automatically Failure.
+
+17. Runtime authority validation does not replace Business validation.
+
+18. Runtime Artifact and Domain Artifact are different concepts.
+
+19. Execution Revision and Domain Revision are different concepts.
+
+20. Runtime Artifact Store and Storage are separate boundaries.
+
+21. Cache Policy is not owned by Runtime Artifact Store.
+
+22. Resource lifetime may outlive logical Attempt lifetime while leased/draining.
+
+23. Artifact disposal requires ownership/lease eligibility.
+
+24. Business Modules retain business semantics and commit authority.
+
+25. Runtime does not own Presentation semantics.
+
+26. Provider Management remains separate from Provider Runtime Gateway.
+
+27. AI Routing remains separate from Runtime execution.
+
+28. Plugin lifecycle remains separate from Runtime provider invocation.
+
+29. Runtime telemetry is not authoritative state.
+
+30. Telemetry failure does not change execution outcome.
+
+31. Shutdown stops admission before destructive cleanup.
+
+32. New runtime implementations must preserve these logical ownership boundaries.
 
 ---
 
-# 24. Summary
+# 25. Recommended MVP
 
-CRAI Runtime được tổ chức quanh một nguyên tắc trung tâm:
+CRAI MVP SHOULD implement:
+
+* Application Bootstrap;
+* immutable Runtime Configuration snapshots;
+* Runtime Control;
+* Execution Scope Runtime;
+* Execution Revision;
+* WorkItem;
+* Attempt;
+* Scheduler;
+* bounded Work Queues;
+* Worker Execution;
+* cancellation propagation;
+* same-binding Retry;
+* Execution State Store;
+* immutable Runtime Artifact Store;
+* Artifact leases;
+* basic Resource Manager;
+* Event Bus;
+* Provider Runtime Gateway;
+* Secret Access Boundary;
+* structured Runtime Observability;
+* graceful shutdown.
+
+MVP SHOULD keep these internal where practical:
 
 ```text
-Runtime Control owns authority.
-Scheduler owns admission.
-Workers own execution.
-Artifact Store owns runtime artifacts.
-Resource Manager owns physical lifecycle.
-Business Modules own business semantics.
-Storage owns durable persistence capability.
+Execution Authority Validator
+Cancellation Coordinator
+Retry Coordinator
+Execution Scope Runtime
 ```
 
-Tài liệu này là bản đồ component cấp cao. Mọi hành vi chi tiết phải được định nghĩa trong tài liệu runtime chuyên biệt tương ứng và không được làm sai các ownership boundary nêu trên.
+rather than creating unnecessary standalone services.
+
+---
+
+# 26. Deferred Runtime Capabilities
+
+MVP MAY defer:
+
+* distributed Runtime Control;
+* distributed Scheduler;
+* distributed Work Queues;
+* durable queue replay;
+* multi-process Runtime state consensus;
+* speculative execution;
+* provider racing;
+* complex WorkItem DAG execution;
+* hot process migration;
+* distributed Artifact Store;
+* remote worker fleet;
+* automatic fallback selection inside Runtime;
+* autonomous workflow progression.
+
+---
+
+# 27. Open Decisions
+
+The following remain open until Runtime detailed documents/prototyping confirm them:
+
+* exact `ExecutionRevision` schema;
+* exact WorkItem contract;
+* exact Attempt contract;
+* Execution Scope identity;
+* Scheduler admission algorithm;
+* queue topology;
+* cancellation representation;
+* Retry budget ownership;
+* Runtime Control concurrency model;
+* Execution State persistence;
+* Runtime Artifact representation;
+* Artifact publication protocol;
+* Artifact lease implementation;
+* Resource Manager implementation;
+* Provider Runtime Gateway interface;
+* plugin/provider runtime interaction;
+* Configuration snapshot format;
+* shutdown timeout;
+* stale-result handling details;
+* recovery after host crash;
+* process topology;
+* whether Runtime Control is an actor/event-loop/locked state machine;
+* exact orchestration interface between Business Pipeline and Runtime.
+
+---
+
+# 28. Related Documents
+
+| Document                    | Relationship                                 |
+| --------------------------- | -------------------------------------------- |
+| `BOOT_SEQUENCE.md`          | Startup and shutdown sequencing              |
+| `RUNTIME_CONFIG.md`         | Runtime Configuration snapshot               |
+| `PIPELINE_ORCHESTRATION.md` | Business/runtime orchestration boundary      |
+| `PIPELINE_RUNTIME.md`       | ExecutionRevision, WorkItem and Attempt flow |
+| `SCHEDULER.md`              | WorkItem admission                           |
+| `WORK_QUEUE.md`             | Bounded queued-work lifecycle                |
+| `CANCELLATION.md`           | Cancellation scopes and propagation          |
+| `RETRY_POLICY.md`           | Retry eligibility and Attempt creation       |
+| `CACHE_POLICY.md`           | Runtime artifact reuse/cache promotion       |
+| `MEMORY_MODEL.md`           | Runtime memory/artifact ownership            |
+| `THREADING_MODEL.md`        | Execution and concurrency contexts           |
+| `RESOURCE_LIFECYCLE.md`     | Ownership, lease and disposal                |
+| `PERFORMANCE_MODEL.md`      | Runtime performance/backpressure             |
+| `ERROR_MODEL.md`            | Runtime error/outcome model                  |
+| `RUNTIME_OBSERVABILITY.md`  | Logs, metrics, traces and diagnostics        |
+| `PROCESS_TOPOLOGY.md`       | Process boundaries                           |
+
+Related external architecture:
+
+* `../ai/ROUTING.md`
+* `../ai/RETRY.md`
+* `../ai/FALLBACK.md`
+* `../ai/OBSERVABILITY.md`
+* `../plugin/PLUGIN_LIFECYCLE.md`
+* `../plugin/PLUGIN_SYSTEM.md`
+* `../../02-modules/provider-management/`
+
+---
+
+# 29. Completion Criteria
+
+`RUNTIME_COMPONENTS.md` is synchronized when:
+
+* Runtime Components have explicit ownership;
+* Runtime is not a mirror of Business Modules;
+* Runtime Control is not a God Component;
+* Runtime Control/Scheduler/Worker boundaries are distinct;
+* Execution Revision is clearly separated from Domain Revision;
+* WorkItem/Attempt identity is consistent;
+* Retry and Fallback are distinct;
+* Runtime does not select AI/provider fallback itself;
+* downstream business workflow remains Orchestrator-owned;
+* Runtime Artifact is distinct from Domain Artifact;
+* Artifact Store is distinct from Storage and Cache Policy;
+* Provider Runtime Gateway is distinct from Provider Management;
+* execution authority is distinct from business validation;
+* queue/concurrency/resources are bounded;
+* startup/shutdown ownership is consistent;
+* telemetry is non-authoritative;
+* terminology matches the rest of `runtime/`.
+
+---
+
+# 30. Summary
+
+CRAI Runtime is organized around the following ownership model:
+
+```text
+Business / Pipeline Orchestrator
+    owns logical workflow progression.
+
+Runtime Control
+    owns execution authority.
+
+Scheduler
+    owns Runtime admission.
+
+Workers
+    own physical Attempt execution.
+
+Execution State Store
+    owns Runtime execution metadata storage.
+
+Runtime Artifact Store
+    owns immutable Runtime execution artifacts.
+
+Resource Manager
+    owns physical resource lifecycle.
+
+Provider Runtime Gateway
+    owns executable provider runtime access.
+
+Business Modules
+    own business semantics and domain commit.
+
+Provider Management
+    owns provider configuration and governance.
+
+Storage
+    owns durable persistence capability.
+```
+
+The central rule is:
+
+```text
+Runtime executes work.
+
+Runtime does not own the meaning of the work.
+```

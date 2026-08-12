@@ -1,7 +1,7 @@
 # Session Domain
 
 * **Document:** Domain / Session
-* **Version:** 1.0.0
+* **Version:** 2.0.0
 * **Status:** Draft
 * **Owner:** CRAI Architecture
 
@@ -9,79 +9,77 @@
 
 # Purpose
 
-The Session domain defines how CRAI represents a bounded period in which a user reads, captures, translates, reviews or presents content.
+A `Session` represents a bounded, resumable user working context inside CRAI.
 
-A Session preserves the working context required to continue an interrupted reading or translation workflow without treating temporary runtime state as permanent domain truth.
+A Session exists so a user can:
 
-Session may preserve:
+* read content,
+* translate while reading,
+* review results,
+* navigate content,
+* preview Presentation,
+* temporarily adjust behavior,
+* recover after interruption,
+* continue on another client or device.
 
-* Current Project
-* Current Book and Chapter
-* Current Page
-* Reader position
-* Active content source
-* Source and target languages
-* Selected Translation Profile
-* Selected Presentation Profile
-* Temporary glossary overrides
-* Temporary character context
-* Display mode
-* Capture mode
-* Pending user review
-* Navigation history
-* Resume information
-* Device or client context
-* References to active processing operations
+A Session preserves enough working state to continue the user experience without treating temporary runtime state as permanent domain truth.
 
-The Session domain must remain independent from:
+A Session MAY preserve:
 
-* HTTP sessions
-* Authentication tokens
-* Browser cookies
-* WebSocket connections
-* AI provider conversations
-* Runtime processes
-* Background workers
-* In-memory caches
-* Operating-system windows
+* active Project,
+* current content location,
+* reading/resume position,
+* selected Profile revisions or selection policies,
+* source/target language selections,
+* Session-level preferences,
+* temporary overrides,
+* review navigation state,
+* Presentation preferences,
+* bounded working context,
+* checkpoint information,
+* references to relevant operations.
 
 ---
 
 # Domain Role
 
-Session coordinates a user-facing working context.
+Conceptually:
 
 ```text
 User
-  │
-  ▼
+  |
+  v
 Session
-  ├── Content Context
-  ├── Reading Position
-  ├── Language Selection
-  ├── Profile Selection
-  ├── Temporary Overrides
-  ├── Presentation State
-  ├── Review State
-  └── Resume State
+  |
+  +--> Content Location
+  +--> Resume Position
+  +--> Profile Selections
+  +--> Language Selections
+  +--> Session Preferences
+  +--> Temporary Overrides
+  +--> Review Navigation
+  +--> Presentation Preferences
+  +--> Working Context
 ```
 
-Session references domain objects but does not own them.
+Session coordinates domain resources.
+
+It does NOT own those resources merely because they are used within the Session.
+
+Typical references:
 
 ```text
 Session
-├── Project Reference
-├── Book Reference
-├── Chapter Reference
-├── Page Reference
-├── Text Block References
-├── Translation References
-├── Glossary Snapshot Reference
-├── Character Context Reference
-└── Profile Revision References
+├── Project
+├── optional Book
+├── Chapter
+├── optional Page
+├── optional TextBlock
+├── Translation references
+├── Profile selections
+├── Glossary context references
+└── Character context references
 ```
-
-A Session may coordinate actions across several aggregates while remaining a separate aggregate itself.
 
 ---
 
@@ -89,587 +87,533 @@ A Session may coordinate actions across several aggregates while remaining a sep
 
 Authentication answers:
 
-> Who is allowed to access the system?
+```text
+Who may access CRAI?
+```
 
 Session answers:
 
-> What content and working context is the user currently using?
+```text
+What working context is the user currently using?
+```
 
-These are different concepts.
+Therefore:
 
 ```text
 Authentication Session
-≠
-CRAI Reading Session
+    !=
+CRAI Session
 ```
 
-An authentication token may expire while a CRAI Session remains resumable.
+Authentication credentials MUST NOT be stored as Session domain state.
 
-A user may sign in from another device and reopen an existing CRAI Session.
-
-Authentication credentials must never be stored inside the Session aggregate.
+Authentication lifetime MUST NOT define Session lifetime.
 
 ---
 
 # Session Is Not Runtime Execution
 
-A Session is not:
+Session is not:
 
-* Translation Job
-* OCR Job
-* Capture Process
-* Browser Process
-* Provider Request
-* Queue Consumer
-* Worker Lease
-* WebSocket Connection
-* AI conversation thread
-* Cache entry
+* OCR Job,
+* Translation Execution,
+* Capture Process,
+* provider request,
+* queue task,
+* worker lease,
+* WebSocket connection,
+* browser process,
+* AI conversation thread.
 
-Runtime operations may reference a Session for correlation.
-
-The Session must not become dependent on the lifetime of those operations.
+Runtime operations MAY reference:
 
 ```text
-Session
-    │
-    ├── starts Translation Operation
-    ├── starts OCR Operation
-    └── receives Operation Result
+sessionId
 ```
 
-When a worker restarts, the Session remains valid.
+for correlation and context.
 
-When a Session closes, historical Translation and OCR results remain valid.
+Their lifecycle remains independently owned.
+
+Worker restart MUST NOT invalidate Session identity.
 
 ---
 
 # Session Is Not Business Content
 
-Session does not own:
+Session MUST NOT own:
 
-* Book content
-* Chapter content
-* Page images
-* TextBlock text
-* Translation truth
-* Glossary truth
-* Character identity
-* Language definitions
-* Presentation artifacts
+* Project content,
+* Book content,
+* Chapter content,
+* Pages,
+* Images,
+* TextBlocks,
+* Translation truth,
+* Glossary truth,
+* Character truth,
+* Profile definitions,
+* Review decisions,
+* Presentation artifacts.
 
-Session stores references to exact identities or revisions where reproducibility matters.
+Closing or deleting a Session MUST NOT delete those resources.
 
 ---
 
 # Aggregate Boundary
 
-Session should be modeled as an Aggregate Root.
+Session SHOULD be an independently addressable Aggregate Root.
 
-```text
-Session Aggregate
-├── Session
-├── Session Context
-├── Reading Position
-├── Session Preferences
-├── Temporary Overrides
-├── Navigation State
-├── Review Queue State
-├── Resume State
-└── Lifecycle State
-```
-
-The aggregate owns:
-
-* Session identity
-* Session lifecycle
-* Current content location
-* Selected working profiles
-* Temporary Session-level overrides
-* User navigation context
-* Resume state
-* Device-independent working state
-* Session-level optimistic concurrency
-
-The aggregate does not own:
-
-* Durable content aggregates
-* Runtime job state
-* Provider request history
-* Browser DOM
-* Image capture buffers
-* Translation results
-* OCR results
-* Global user preferences
-* Device-specific secrets
-
----
-
-# Responsibilities
-
-The Session domain is responsible for:
-
-* Creating a resumable reading or translation context
-* Tracking the active Project and content location
-* Tracking reader progress during the Session
-* Selecting source and target languages
-* Selecting exact Profile Revisions
-* Selecting applicable glossary and character context
-* Managing temporary Session-level overrides
-* Preserving presentation and interaction mode
-* Coordinating pending review state
-* Supporting pause, resume and close
-* Supporting recovery after interruption
-* Supporting multi-device continuation
-* Emitting Session lifecycle events
-* Maintaining Session revision consistency
-* Providing correlation context to application workflows
-
-The Session domain is not responsible for:
-
-* Authenticating users
-* Authorizing every referenced aggregate
-* Executing OCR
-* Executing Translation
-* Managing provider retries
-* Maintaining WebSocket connections
-* Persisting browser cookies
-* Downloading remote content
-* Rendering overlays
-* Capturing screenshots
-* Scheduling workers
-* Storing provider chat memory
-
----
-
-# Session Identity
-
-Each Session has a stable identifier.
-
-```text
-Session ID
-```
-
-Session identity persists through:
-
-* Pause and resume
-* Temporary disconnection
-* Application restart
-* Device change
-* Profile changes
-* Navigation changes
-* Runtime operation failures
-
-A Session should receive a new identity when the user intentionally starts a separate working context.
-
----
-
-# Session Revision
-
-Session state changes frequently.
-
-The system may represent this using:
-
-* Aggregate version
-* Immutable Session revisions
-* Event-sourced state
-* Periodic snapshots plus events
-
-Recommended conceptual model:
-
-```text
-Session Revision
-├── Session Revision ID
-├── Session ID
-├── Revision Number
-├── Current Context
-├── Current Position
-├── Selected Profiles
-├── Temporary Overrides
-├── Presentation State
-├── Parent Revision
-├── Changed By
-├── Changed At
-└── Content Hash
-```
-
-Unlike Translation Revision, not every pointer movement needs a long-term immutable business revision.
-
-The implementation may compact high-frequency navigation updates while preserving significant Session transitions.
-
----
-
-# Durable and Ephemeral Session State
-
-Session state should be classified into two categories.
-
-## Durable Session State
-
-Should normally survive application restart:
-
-* Session ID
-* User or owner reference
-* Project reference
-* Book reference
-* Chapter reference
-* Current logical Page
-* Reading progress
-* Source and target language
-* Profile revision selections
-* Temporary glossary overrides
-* Temporary character overrides
-* Review queue position
-* Session mode
-* Pause state
-* Resume checkpoint
-
-## Ephemeral Client State
-
-May remain local to a device or process:
-
-* Current mouse position
-* Hovered TextBlock
-* Animation progress
-* Open tooltip
-* Temporary drag position
-* Active network connection
-* Unsubmitted text selection
-* UI focus
-* Current scroll velocity
-* In-memory image bitmap
-* Uncommitted capture buffer
-
-Ephemeral state may be checkpointed when useful, but it is not canonical Session truth by default.
-
----
-
-# Session Ownership
-
-A Session should identify its owner.
-
-Possible ownership models:
-
-* User-owned
-* Workspace-owned
-* Anonymous local
-* Shared collaborative
-* System-created
-
-Recommended MVP ownership:
+Recommended aggregate:
 
 ```text
 Session
-├── Owner User ID
-└── Project ID
+├── sessionId
+├── ownerReference
+├── projectId
+├── sessionType
+├── lifecycleStatus
+├── currentContext
+├── resumePosition
+├── profileSelections
+├── languageSelections
+├── sessionPreferences
+├── activeOverrideReferences
+├── reviewNavigationReference?
+├── presentationPreferences
+├── latestCheckpointId?
+├── parentSessionId?
+├── createdAt
+├── updatedAt
+└── version
 ```
 
-Anonymous local Sessions may use a local installation identity rather than an authenticated account.
+The Session Aggregate owns:
+
+* stable Session identity,
+* Session lifecycle,
+* Project scope,
+* current logical working location,
+* resume position,
+* Session selections,
+* Session preferences,
+* temporary override references,
+* bounded navigation state,
+* checkpoint references,
+* fork lineage,
+* optimistic concurrency.
+
+It does NOT own:
+
+* runtime operations,
+* Profile Revisions,
+* Glossary Entries,
+* Character Revisions,
+* Speaker Attribution,
+* Review decisions,
+* long-term Reading Progress,
+* Presentation artifacts,
+* provider state.
 
 ---
 
-# Session Scope
+# Identity
 
-A Session may be scoped to:
+Every Session has a stable `sessionId`.
 
-* Project
-* Book
-* Chapter
-* Page
-* External reading source
-* Imported document
-* Review workflow
-* Translation workflow
+Session identity remains stable across:
 
-Recommended default:
+* pause/resume,
+* client reconnect,
+* application restart,
+* navigation,
+* Profile selection changes,
+* runtime operation failure,
+* device handoff.
+
+A new Session identity SHOULD be created when the user deliberately starts a separate working context.
+
+---
+
+# Project Scope
+
+For CRAI MVP:
 
 ```text
-Session belongs to one Project.
+Session
+    belongs to exactly one Project
 ```
 
-A Session may navigate among Books within the same Project if project policy permits it.
+The Session MAY navigate within that Project.
 
-Cross-Project navigation should normally create a new Session or require an explicit context switch.
+Example:
+
+```text
+Project
+├── Book A
+├── Book B
+└── direct Chapters
+```
+
+Changing to a different Project SHOULD normally:
+
+* close/fork the current working context,
+* or create a new Session.
+
+A Session MUST NOT silently mutate its Project ownership while preserving incompatible working context.
+
+---
+
+# Optional Content Hierarchy
+
+Session MUST respect the optional hierarchy established by the content domain.
+
+Possible locations include:
+
+```text
+Project
+└── Book
+    └── Chapter
+        └── Page
+```
+
+```text
+Project
+└── Chapter
+    └── TextBlock
+```
+
+```text
+Project
+└── Chapter
+    └── native text position
+```
+
+Book and Page MUST NOT be required for every Session.
 
 ---
 
 # Session Types
 
-Recommended Session Types:
+Recommended high-level types:
 
-* Reading
-* Live Translation
-* Batch Translation Review
-* OCR Review
-* Glossary Review
-* Character Review
-* Presentation Preview
-* Import Review
-* Editing
-* Mixed
-* Custom
+```text
+READING
+LIVE_TRANSLATION
+REVIEW
+PRESENTATION
+EDITING
+MIXED
+```
 
-Session Type describes the primary user workflow.
+More specific review type SHOULD be represented separately.
 
-It does not restrict the Session from invoking related capabilities unless policy says otherwise.
+Example:
 
----
+```text
+sessionType: REVIEW
+reviewType: TRANSLATION
+```
 
-# Reading Session
+rather than creating many lifecycle-level Session types such as:
 
-A Reading Session focuses on continuity and minimal interruption.
+```text
+OCR_REVIEW
+GLOSSARY_REVIEW
+CHARACTER_REVIEW
+IMPORT_REVIEW
+```
 
-It may preserve:
-
-* Current page or paragraph
-* Reading direction
-* Overlay visibility
-* Translation display mode
-* Zoom
-* Font size
-* Last approved Translation
-* Current chapter
-* Read progress
-* Recently visited locations
+unless implementation experience proves those need distinct domain semantics.
 
 ---
 
-# Live Translation Session
+# Session Type Is Intent
 
-A Live Translation Session follows content as the user reads.
+Session Type describes the primary workflow.
 
-It may coordinate:
+It does NOT define capability ownership.
 
-* Browser text extraction
-* Screen capture
-* Page detection
-* OCR requests
-* Translation requests
-* Overlay presentation
-* Automatic navigation
-* Context updates
+Example:
 
-The Session stores configuration and progress.
+```text
+READING
+```
 
-Runtime capture and translation pipelines remain outside the aggregate.
+may still trigger:
 
----
+* OCR,
+* Translation,
+* Presentation.
 
-# Review Session
+`LIVE_TRANSLATION` may still include:
 
-A Review Session focuses on a bounded review queue.
+* reading,
+* review,
+* Presentation.
 
-It may preserve:
-
-* Review type
-* Ordered item references
-* Current review item
-* Filters
-* Decisions made
-* Deferred items
-* Completion progress
-
-Review decisions belong to their relevant domain aggregates.
-
-Session only tracks navigation and outstanding work.
+Capabilities remain independently owned.
 
 ---
 
 # Session Lifecycle
 
-Recommended lifecycle states:
+Recommended lifecycle:
 
 ```text
-Created
-→ Active
-→ Paused
-→ Active
-→ Completed
-→ Closed
+CREATED
+   |
+   v
+ACTIVE
+   |
+   +--> PAUSED
+   |      |
+   |      v
+   |    ACTIVE
+   |
+   +--> ENDED
+          |
+          v
+       ARCHIVED
 ```
 
-Alternative terminal states:
+Recommended core statuses:
 
 ```text
-Abandoned
-Expired
-Archived
-```
-
-Possible lifecycle:
-
-```text
-Created
-  │
-  ▼
-Active
-  ├── Paused ──────┐
-  │                 │
-  │◄────────────────┘
-  │
-  ├── Completed
-  ├── Abandoned
-  ├── Expired
-  └── Closed
+CREATED
+ACTIVE
+PAUSED
+ENDED
+ARCHIVED
 ```
 
 ---
 
-# Created State
+# Why Simplify Lifecycle
 
-A newly created Session has:
+The previous distinctions:
 
-* Stable Session ID
-* Owner
-* Session Type
-* Initial Project context
-* Initial language configuration
-* Initial profile selections
-* Creation time
+```text
+COMPLETED
+CLOSED
+ABANDONED
+EXPIRED
+```
 
-It may not yet have a content position.
+describe useful reasons but create overlapping terminal semantics.
 
----
+Instead, Session SHOULD use:
 
-# Active State
+```text
+lifecycleStatus: ENDED
+endReason:
+    COMPLETED
+    USER_CLOSED
+    ABANDONED
+    EXPIRED
+    ACCESS_REVOKED
+    SYSTEM_CLOSED
+```
 
-An Active Session may:
-
-* Navigate content
-* Start application operations
-* Update working context
-* Save progress
-* Create checkpoints
-* Receive processing results
-* Add temporary overrides
-
-Only one client may hold the primary editing lease in the MVP, though several clients may read the Session.
+This keeps lifecycle simple while preserving why the Session ended.
 
 ---
 
-# Paused State
+# Created
 
-A Paused Session preserves resumable state but should not continue automatic processing unless explicitly configured.
+`CREATED` means the Session exists but may not yet have a fully resolved content position.
 
-Pause may stop:
+It MUST have:
 
-* Auto capture
-* Auto navigation
-* Automatic OCR
-* Automatic Translation
-* Overlay updates
-* Reading timers
-
-Pause does not cancel already persisted domain results.
+* Session ID,
+* owner,
+* Project,
+* Session Type,
+* initial configuration intent.
 
 ---
 
-# Completed State
+# Active
 
-Completed means the Session’s intended workflow has finished.
+`ACTIVE` means the Session is available for normal interaction.
+
+An Active Session MAY:
+
+* navigate,
+* update working state,
+* create checkpoints,
+* change Session selections,
+* start application workflows,
+* create temporary overrides.
+
+---
+
+# Paused
+
+`PAUSED` means the working context is preserved but automatic user-facing behavior SHOULD stop unless explicitly configured.
+
+Pause MAY request stopping:
+
+* automatic capture,
+* auto navigation,
+* automatic OCR request generation,
+* automatic Translation request generation,
+* live Presentation refresh.
+
+Pause MUST NOT invalidate already published domain artifacts.
+
+---
+
+# Ended
+
+`ENDED` means the Session is no longer intended for active continuation.
+
+Ending SHOULD:
+
+* commit a meaningful checkpoint,
+* record `endReason`,
+* stop Session-driven automation,
+* release coordination leases,
+* preserve durable external results.
+
+An Ended Session MAY be forked or reopened according to policy.
+
+---
+
+# Archived
+
+`ARCHIVED` means the Session is retained but hidden from ordinary active history.
+
+Archive is primarily retention/discoverability state.
+
+It MUST NOT affect referenced domain artifacts.
+
+---
+
+# Session Revision
+
+Session state may change frequently.
+
+A full immutable business revision for every pointer movement is unnecessary.
+
+Implementation MAY use:
+
+* aggregate versioning,
+* meaningful immutable state revisions,
+* periodic snapshots,
+* event sourcing,
+* checkpoint-based persistence.
+
+Critical rule:
+
+```text
+high-frequency UI movement
+    != durable Session revision
+```
+
+---
+
+# Significant Session Revision
+
+A durable revision MAY be warranted when:
+
+* Project/context changes,
+* Chapter changes,
+* Profile selection changes,
+* target language changes,
+* major override changes,
+* lifecycle changes,
+* device handoff occurs,
+* review workflow scope changes.
+
+The exact persistence strategy remains an implementation decision.
+
+---
+
+# Durable vs Ephemeral State
+
+Session state MUST distinguish:
+
+```text
+Durable Working State
+```
+
+from:
+
+```text
+Ephemeral Client State
+```
+
+---
+
+# Durable Working State
 
 Examples:
 
-* Chapter fully reviewed
-* Reading task completed
-* Translation review queue exhausted
-* Import review completed
+* Session identity,
+* Project scope,
+* logical content location,
+* resume position,
+* Profile selections,
+* language selections,
+* Session preferences,
+* active Session overrides,
+* review position,
+* Session mode,
+* latest checkpoint,
+* fork lineage.
 
-Completed Sessions may remain reopenable according to policy.
-
----
-
-# Closed State
-
-Closed means the Session is no longer intended for active continuation.
-
-Closing should:
-
-* Save the latest checkpoint
-* Release runtime leases
-* Stop automatic operations
-* Preserve referenced domain results
-* Record the close reason
-* Emit a lifecycle event
-
-Closing a Session must not delete content, Translations or review decisions.
+These values SHOULD normally survive restart.
 
 ---
 
-# Abandoned State
+# Ephemeral Client State
 
-Abandoned indicates that the user intentionally stopped the workflow without completion.
+Examples:
 
-The Session remains available for:
+* mouse coordinates,
+* current hover,
+* animation state,
+* UI focus,
+* scroll velocity,
+* temporary drag state,
+* network connection,
+* decoded bitmap,
+* uncommitted capture buffer.
 
-* Audit
-* Analytics
-* Recovery
-* Reference
-
-Abandoned state should not imply that created domain artifacts are invalid.
-
----
-
-# Expired State
-
-Expiration may apply to inactive or temporary Sessions.
-
-Expiration policy may depend on:
-
-* Anonymous ownership
-* Local storage limits
-* Workspace policy
-* Last activity
-* Security requirements
-
-Expiration should affect the Session container, not referenced durable domain objects.
-
----
-
-# Archived State
-
-Archived Sessions remain persisted but are hidden from ordinary active-session lists.
-
-Archiving may follow:
-
-* Completion
-* Closure
-* Retention policy
-* User action
+They MUST NOT become canonical Session domain truth by default.
 
 ---
 
 # Current Context
 
-Current Context identifies where the Session is operating.
+`SessionContext` identifies the logical working scope.
 
 Recommended structure:
 
 ```text
-Session Context
-├── Project ID
-├── Book ID
-├── Chapter ID
-├── Page ID
-├── Page Revision or Image Version
-├── TextBlock ID
-├── TextBlock Revision
-├── External Source Reference
-├── Context Type
-└── Updated At
+SessionContext
+├── projectId
+├── bookId?
+├── chapterId?
+├── pageId?
+├── textBlockId?
+├── textBlockRevision?
+├── imageId?
+├── externalSourceReference?
+├── contextType
+└── updatedAt
 ```
 
-Not every field is required in every Session.
+Not every field is required.
 
-A novel Session may use Chapter and paragraph position without Page.
-
-A browser-based comic Session may use an external source reference and captured Page identity.
+The context MUST remain internally compatible.
 
 ---
 
 # Content Location
 
-A content location should use stable domain identifiers whenever available.
+Content location SHOULD prefer stable domain identities when available.
 
 Examples:
 
@@ -678,1630 +622,1466 @@ Project / Book / Chapter / Page
 ```
 
 ```text
-Project / Book / Chapter / TextBlock
+Project / Chapter / TextBlock
 ```
 
 ```text
-External Source / Resource / DOM Locator
+External Resource / DOM Locator
 ```
 
 ```text
-Captured Document / Page / Image Region
+Chapter / Image / Region
 ```
 
-A Session should not rely solely on temporary screen coordinates.
+Temporary device coordinates MUST NOT be the sole durable content identity.
 
 ---
 
-# Reading Position
+# Resume Position
 
-Reading Position represents where the user should resume.
+Resume Position answers:
+
+```text
+Where should this Session continue?
+```
 
 Recommended structure:
 
 ```text
-Reading Position
-├── Position Type
-├── Content Reference
-├── Logical Order
-├── Offset
-├── Viewport Anchor
-├── Progress Fraction
-├── Reading Direction
-├── Captured At
-└── Confidence
+ResumePosition
+├── positionType
+├── logicalContentReference
+├── logicalOffset?
+├── progressHint?
+├── visualResumeHint?
+├── capturedAt
+└── confidence?
 ```
-
-Possible Position Types:
-
-* Page
-* TextBlock
-* Paragraph
-* Sentence
-* Character Offset
-* Image Region
-* DOM Locator
-* Scroll Anchor
-* Review Item
-* Timeline Point
 
 ---
 
-# Logical and Visual Position
+# Position Types
 
-Logical content position and visual viewport position must remain separate.
-
-```text
-Logical Position
-= Chapter 12, Page 8, TextBlock 4
-```
+Possible types include:
 
 ```text
-Visual Position
-= scroll offset 1,428 px, zoom 125%
+PAGE
+TEXT_BLOCK
+PARAGRAPH
+SENTENCE
+CHARACTER_OFFSET
+IMAGE_REGION
+DOM_LOCATOR
+REVIEW_ITEM
+EXTERNAL_POSITION
 ```
 
-Logical position is more durable.
-
-Visual position may be device-specific and should be treated as a resume hint.
+A Session MUST NOT assume all reading positions are Page-based.
 
 ---
 
-# Reader Progress
+# Logical vs Visual Position
 
-Reader progress may be expressed as:
+Logical and visual positions MUST remain distinct.
 
-* Current chapter
-* Current page
-* Highest completed page
-* Fraction of Book
-* Fraction of Chapter
-* Last confirmed location
-* Read item set
+```text
+Logical:
+    Chapter 12 / Page 8 / TextBlock 4
+```
 
-Session progress is working state.
+```text
+Visual hint:
+    scrollY 1428
+    zoom 125%
+```
 
-Long-term reading history may belong to a separate Progress or Library domain.
+Logical position is durable.
 
-Session may publish progress updates to that domain.
+Visual position is primarily a resume hint and MAY be client-specific.
+
+---
+
+# Reading Progress Boundary
+
+Session owns:
+
+```text
+current/resume reading position
+```
+
+It SHOULD NOT be the authoritative source of long-term reading history.
+
+Long-term reading data MAY eventually belong to:
+
+```text
+ReadingProgress
+Library
+ReadingHistory
+```
+
+Session MAY publish committed progress checkpoints to that domain.
 
 ---
 
 # Progress Commit
 
-High-frequency navigation should not require a durable write for every pixel.
+High-frequency reading changes SHOULD be compacted.
 
-Recommended progress flow:
+Recommended flow:
 
 ```text
-Client Navigation
-       │
-       ▼
-Ephemeral Position
-       │
-       ├── periodic checkpoint
-       ├── meaningful page transition
-       ├── pause
-       ├── close
-       └── device handoff
-       ▼
-Committed Reading Position
+Client position
+      |
+      v
+Ephemeral state
+      |
+      +--> meaningful navigation
+      +--> periodic checkpoint
+      +--> pause
+      +--> handoff
+      +--> end
+      |
+      v
+Committed Resume Position
 ```
 
-The checkpoint frequency is an application policy.
+Session persistence MUST NOT become a pixel-level analytics stream.
+
+---
+
+# Navigation State
+
+Session MAY maintain bounded:
+
+* back stack,
+* forward stack,
+* recent locations,
+* pinned Session locations.
+
+Navigation state is interaction context.
+
+It MUST NOT alter canonical content ordering.
 
 ---
 
 # Navigation History
 
-Session may preserve recent navigation history.
+Navigation history SHOULD remain bounded.
 
-Recommended structure:
+It MAY include:
 
 ```text
-Navigation Entry
-├── Content Location
-├── Entered At
-├── Left At
-├── Navigation Cause
-└── Resume Eligibility
+NavigationEntry
+├── location
+├── enteredAt
+├── leftAt?
+├── cause
+└── resumeEligible
 ```
 
-Possible causes:
-
-* Next Page
-* Previous Page
-* Search Result
-* Glossary Reference
-* Character Reference
-* Review Finding
-* External Link
-* Resume
-* User Jump
-* Automatic Follow
-
-Navigation history should be bounded.
-
-It is not intended to become a complete analytics log.
-
----
-
-# Navigation Stack
-
-A Session may preserve:
-
-* Back stack
-* Forward stack
-* Recent locations
-* Pinned locations
-
-Navigation stack is Session-owned interaction state.
-
-It must not alter the canonical ordering of Book, Chapter or Page aggregates.
+It is not intended to become permanent user analytics.
 
 ---
 
 # Session Mode
 
-Session Mode controls the current interaction behavior.
-
-Recommended values:
-
-* Manual
-* Assisted
-* Automatic
-* Review
-* Presentation
-* Read Only
-
-## Manual
-
-User explicitly initiates capture, OCR and Translation.
-
-## Assisted
-
-The system detects likely content and proposes actions.
-
-## Automatic
-
-The system may capture and process content according to configured policies.
-
-## Review
-
-The Session prioritizes findings and decisions.
-
-## Presentation
-
-The Session focuses on rendering existing Translations.
-
-## Read Only
-
-The Session cannot modify domain truth.
-
----
-
-# Capture Mode
-
-Capture Mode describes where source content comes from.
-
-Recommended values:
-
-* Imported File
-* Browser DOM
-* Browser Screenshot
-* Screen Region
-* Window Capture
-* Clipboard
-* Camera
-* Manual Text
-* Existing Project Content
-* External Connector
-* Custom
-
-Capture Mode is Session configuration.
-
-The actual capture implementation belongs to a Capture capability.
-
----
-
-# Content Source Reference
-
-External content sources should be represented by provider-neutral references.
-
-Recommended structure:
+Recommended interaction modes:
 
 ```text
-Content Source Reference
-├── Source Type
-├── Canonical Resource Identifier
-├── External Resource Version
-├── Access Context Reference
-├── Locator
-├── Last Observed At
-└── Fingerprint
+MANUAL
+ASSISTED
+AUTOMATIC
+REVIEW
+PRESENTATION
+READ_ONLY
 ```
 
-Sensitive credentials must not be embedded in this value.
+Mode affects user interaction orchestration.
+
+It MUST NOT redefine capability ownership.
+
+---
+
+# Capture Source Selection
+
+Session MAY select a source/capture mode.
+
+Examples:
+
+```text
+EXISTING_PROJECT_CONTENT
+BROWSER_DOM
+BROWSER_CAPTURE
+SCREEN_REGION
+WINDOW_CAPTURE
+IMPORTED_FILE
+CLIPBOARD
+MANUAL_TEXT
+CAMERA
+EXTERNAL_CONNECTOR
+```
+
+The Session stores intent/reference information.
+
+Actual capture execution belongs to Capture/Acquisition capability.
+
+---
+
+# External Source Reference
+
+External sources SHOULD use a provider-neutral reference.
+
+Recommended:
+
+```text
+ContentSourceReference
+├── sourceType
+├── canonicalResourceIdentifier
+├── externalVersion?
+├── locator?
+├── fingerprint?
+├── adapterReference?
+└── lastObservedAt?
+```
+
+Authentication secrets MUST NOT be embedded.
 
 ---
 
 # Browser Source
 
-For browser-based reading, Session may store:
+Session MAY persist:
 
-* Canonical page URL or resource identifier
-* Site adapter identifier
-* Chapter locator
-* DOM anchor
-* Content fingerprint
-* Scroll hint
-* Last detected Page identity
+* canonical URL/resource identity,
+* adapter identity,
+* Chapter locator,
+* DOM anchor,
+* content fingerprint,
+* stable resume hints.
 
-Browser DOM objects themselves are ephemeral and must not be persisted as canonical Session data.
+Browser DOM nodes, tab objects and browser-process handles are ephemeral.
 
 ---
 
 # Screen Capture Source
 
-For screen capture, Session may preserve:
+Session MAY store cross-restart capture intent such as:
 
-* Selected display or window reference
-* Capture region policy
-* Region normalized coordinates
-* Detection mode
-* Last successful content fingerprint
-* Device-specific resume hint
+* selected source type,
+* normalized capture region policy,
+* capture behavior.
 
-Operating-system handles are ephemeral and should not be treated as durable cross-device identity.
+Operating-system handles MUST remain device/runtime state.
 
 ---
 
-# Language Configuration
+# Language Selection
 
-Session selects the languages active for the current workflow.
+Session MAY express language intent for its workflow.
 
-Recommended structure:
+Recommended representation:
 
 ```text
-Session Language Configuration
-├── Configured Source Language
-├── Detected Source Language
-├── Confirmed Source Language
-├── Target Language
-├── Translation Language Pair
-├── OCR Language Profile
-└── Fallback Policy
+SessionLanguageSelection
+├── sourceLanguageOverride?
+├── targetLanguage?
+├── sourceLanguageConfirmation?
+└── languagePreferenceReferences?
 ```
 
-Language values must use the canonical Language model.
-
-Provider-specific language codes remain inside adapters.
+Session MUST use canonical Language values.
 
 ---
 
-# Source Language Resolution
+# Language Resolution Boundary
 
-Recommended Session-level resolution:
+Session MUST NOT define the universal language resolution algorithm.
 
-```text
-Operation Override
-        ↓
-TextBlock Confirmed Language
-        ↓
-Session Confirmed Language
-        ↓
-Project Configured Language
-        ↓
-Detected Language
-        ↓
-und
-```
+The Language domain / relevant consuming capability resolves:
 
-Session configuration should not overwrite confirmed TextBlock language truth.
+* declared Project language,
+* optional Book/Chapter language,
+* TextBlock language,
+* Session override,
+* operation override,
+* detection evidence.
+
+Session contributes explicit Session-scoped intent.
+
+It does not become the authority for all language truth.
 
 ---
 
 # Target Language
 
-A Session normally has one active target language.
+Session MAY select one active target Language for MVP.
 
-Possible future support:
+Changing target Language:
 
-* Several target languages
-* Parallel translations
-* Comparison mode
-* Original-only mode
+* affects future Translation selection/request,
+* does not mutate old Translation Revisions.
 
-Changing the Session target language does not mutate existing Translation Revisions.
-
-It changes which Translation is selected or requested next.
+Multi-target Sessions MAY be introduced later.
 
 ---
 
-# Translation Profile Selection
+# Profile Selection
 
-A Session should reference an exact Translation Profile Revision.
+After the revised Profile domain, Session SHOULD store **Profile selection intent**, not copied Profile configuration.
+
+Example:
 
 ```text
-Translation Profile ID
-+
-Translation Profile Revision ID
+SessionProfileSelections
+├── translation
+├── ocr
+├── presentation
+├── context
+├── validation
+└── routing
 ```
 
-The Profile may define:
+Each selection MAY be:
 
-* Translation style
-* Formality
-* Literalness
-* Localization policy
-* Provider routing preferences
-* Validation policy
-* Context policy
+```text
+EXACT_REVISION
+DEFAULT_SELECTION
+LATEST_APPROVED_COMPATIBLE
+```
 
-The Session must not copy mutable Profile data without revision identity.
+For reproducibility, every operation MUST resolve dynamic selections to exact immutable revisions before execution.
 
 ---
 
-# Presentation Profile Selection
+# Exact Revision Pinning
 
-A Session may reference an exact Presentation Profile Revision.
+For predictable Sessions, a selection MAY pin:
 
-It may define:
+```text
+profileId
+profileRevisionId
+```
 
-* Font preferences
-* Font size
-* Line spacing
-* Bubble fitting policy
-* Novel layout
-* Overlay opacity
-* Original-text visibility
-* Translation placement
-* Reading theme
+Pinning is useful for:
 
-Presentation Profile is separate from Translation Profile.
+* long reading sessions,
+* review,
+* experiments,
+* publication work,
+* offline processing.
 
 ---
 
-# OCR Profile Selection
+# Session vs Resolved Configuration
 
-A Session may select an OCR Profile Revision.
+Session stores selections and overrides.
 
-It may define:
+It does NOT itself own the final effective operation configuration.
 
-* Languages
-* Detection mode
-* Confidence thresholds
-* Layout assumptions
-* Comic or novel mode
-* Vertical-text support
-* Preprocessing policy
+At operation start:
 
-The Session does not store provider-specific OCR configuration as canonical domain data.
+```text
+Session Profile Selections
+        +
+Project / User Defaults
+        +
+Session Preferences
+        +
+Session Overrides
+        +
+Operation Overrides
+        +
+Mandatory Policy
+        +
+Capability Validation
+        |
+        v
+ResolvedProfileSnapshot(s)
+        |
+        v
+ResolvedConfigurationSnapshot
+```
+
+The operation consumes this immutable snapshot.
+
+This aligns Session with the revised `PROFILE.md`.
 
 ---
 
 # Session Preferences
 
-Session Preferences are temporary or Session-specific selections.
+Session Preferences are lightweight Session-scoped user choices.
 
 Examples:
 
-* Show original text
-* Show Translation
-* Show both
-* Auto translate
-* Auto advance
-* Pause on low confidence
-* Highlight terminology
-* Show character names
-* Show validation warnings
-* Prefer approved Translations
-* Use local processing only
+* show original,
+* show Translation,
+* auto-advance,
+* auto-request Translation,
+* pause on low confidence,
+* highlight terminology warnings,
+* prefer approved Translation.
 
-Session Preferences override broader defaults only for this Session.
+Preferences describe user experience and selection behavior.
 
 ---
 
-# Preference Resolution
+# Preference vs Profile
 
-Recommended hierarchy:
+Examples:
 
 ```text
-Operation Override
-        ↓
-Session Preference
-        ↓
-Book Preference
-        ↓
-Project Preference
-        ↓
-User Preference
-        ↓
-Application Default
+Session Preference:
+    show original = true
 ```
 
-The resolved value and its source should be inspectable.
+```text
+Presentation Profile:
+    typography/layout policy
+```
+
+```text
+Translation Profile:
+    natural Vietnamese
+```
+
+These MUST remain distinct.
+
+A Session Preference MAY affect which Profile or presentation mode is selected.
+
+It SHOULD NOT duplicate complete Profile configuration.
 
 ---
 
-# Temporary Override
+# Mandatory Policy
 
-A Temporary Override modifies behavior within the Session without immediately changing durable Project truth.
+Session Preferences and overrides MUST NOT bypass mandatory policy.
 
-Examples:
+Example:
 
-* Use a different target name for one character
-* Preserve one term
-* Force one source language
-* Select a different Translation Profile
-* Disable automatic OCR
-* Treat one TextBlock as narration
-* Pin a speaker candidate
-* Use an alternative font
+```text
+Session:
+    prefer cloud processing
+```
+
+```text
+Policy:
+    local only
+```
+
+Effective result:
+
+```text
+local only
+```
+
+or operation rejection.
+
+---
+
+# Session Override
+
+A `SessionOverride` represents temporary user intent that applies only within a bounded Session scope.
 
 Recommended structure:
 
 ```text
-Session Override
-├── Override ID
-├── Override Type
-├── Target Reference
-├── Value
-├── Scope
-├── Priority
-├── Created By
-├── Created At
-├── Expires At
-└── Promotion State
+SessionOverride
+├── overrideId
+├── sessionId
+├── overrideType
+├── targetReference?
+├── scope
+├── value
+├── priority?
+├── createdBy
+├── createdAt
+├── expiresAt?
+├── status
+└── promotedReference?
+```
+
+---
+
+# Override Is Intent
+
+Session Override MUST NOT directly become authoritative state in another domain.
+
+Examples:
+
+```text
+temporary term preference
+```
+
+does NOT equal:
+
+```text
+Glossary Entry mutation
+```
+
+```text
+temporary speaker choice
+```
+
+does NOT equal:
+
+```text
+Speaker Attribution mutation
+```
+
+```text
+temporary display font
+```
+
+does NOT equal:
+
+```text
+Presentation Profile mutation
 ```
 
 ---
 
 # Override Scope
 
-Possible override scopes:
+Possible scopes MAY include:
 
-* Entire Session
-* Book
-* Chapter
-* Page
-* TextBlock
-* Translation Operation
-* Character
-* Glossary Entry
-* Presentation Surface
+```text
+SESSION
+BOOK
+CHAPTER
+PAGE
+TEXT_BLOCK
+OPERATION
+PRESENTATION_SURFACE
+```
 
-More specific overrides should take precedence.
+Character/Glossary-specific overrides MAY include target references but MUST remain Session-owned temporary intent.
+
+Book/Page are optional scopes.
+
+---
+
+# Override Precedence
+
+More specific valid Session overrides MAY outrank broader Session intent.
+
+However:
+
+```text
+Mandatory Policy
+    >
+Session Override
+```
+
+and domain-confirmed truth MAY also outrank Session preference depending on the operation.
+
+Resolution rules belong to the relevant resolver.
+
+Session MUST NOT encode one universal precedence algorithm for every override type.
 
 ---
 
 # Override Lifetime
 
-An override may expire:
+Possible expiration:
 
-* At Session close
-* At Chapter change
-* At Page change
-* After one operation
-* At explicit time
-* When promoted to durable truth
-* When manually removed
+* end of Session,
+* Chapter transition,
+* Page transition,
+* one operation,
+* explicit timestamp,
+* manual removal,
+* explicit promotion.
 
-Expiry policy must be explicit.
+Expiration MUST be explicit.
 
 ---
 
 # Override Promotion
 
-A useful Session override may be promoted into another domain.
+Promotion is an application workflow.
 
 Examples:
 
 ```text
-Session term override
-→ Glossary Candidate or Glossary Entry Revision
+Session terminology override
+    ->
+GlossaryCandidate / GlossaryEntryRevision
 ```
 
 ```text
 Session speaker override
-→ Speaker Attribution Revision
+    ->
+SpeakerAttributionRevision
 ```
 
 ```text
-Session character-name override
-→ Character Revision Candidate
+Session Character-name suggestion
+    ->
+CharacterCandidate / CharacterRevision proposal
 ```
 
 ```text
-Session presentation override
-→ User or Project Profile update
+Session presentation preference
+    ->
+Profile/User Preference update
 ```
 
-Promotion requires an explicit application operation.
+Promotion MUST be explicit.
 
-The Session must not mutate external aggregates automatically.
+Session MUST NOT mutate external aggregates automatically.
 
 ---
 
 # Glossary Integration
 
-A Session may select:
+Session MAY contribute:
 
-* Project Glossary
-* Specific Glossary Revision
-* Glossary Snapshot
-* Session-only glossary overrides
-* Disabled glossary entries
-* Pinned entries
+* selected Glossary references,
+* disabled/pinned terminology,
+* temporary terminology overrides.
 
-Recommended context flow:
+Operation-time terminology resolution produces:
 
 ```text
-Project Glossary Revisions
-          +
-Session Overrides
-          +
-Operation Scope
-          ↓
-Resolved Glossary Snapshot
+GlossarySnapshot
 ```
 
-The Translation Revision references the exact resulting Glossary Snapshot.
+Translation references that exact immutable Snapshot.
 
-The Session itself should not become the historical source of terminology truth.
+The Session is NOT historical Glossary truth.
 
 ---
 
 # Character Context Integration
 
-A Session may preserve:
+Session MAY contribute temporary context such as:
 
-* Active cast
-* Confirmed speaker
-* Speaker candidates
-* Current listener
-* Pinned characters
-* Temporary character overrides
-* Spoiler boundary
-* Character context policy
+* confirmed speaker override,
+* listener selection,
+* pinned Characters,
+* scene cast,
+* spoiler boundary.
 
-These inputs contribute to a Character Context Snapshot.
+Character/context resolution produces:
 
-The Translation Revision references the exact snapshot used.
+```text
+CharacterContextSnapshot
+```
+
+Translation references the exact Snapshot.
+
+Session state itself MUST NOT become historical Character truth.
 
 ---
 
 # Context Snapshot Boundary
 
-Session context is mutable.
-
-Translation context must be immutable.
-
-Therefore:
+Critical rule:
 
 ```text
-Mutable Session State
-        │
-        ▼
-Context Resolution
-        │
-        ▼
-Immutable Context Snapshots
-        │
-        ▼
-Translation Revision
+Mutable Session
+    |
+    v
+Resolution
+    |
+    v
+Immutable Context Snapshot(s)
+    |
+    v
+Durable Output
 ```
 
-A Translation must never rely only on “current Session state” after execution.
+Any Session state that materially affects durable output MUST cross an immutable snapshot boundary.
 
 ---
 
 # Session Context Snapshot
 
-For audit or operation coordination, the application may create a Session Context Snapshot.
+A SessionContextSnapshot MAY be created for operation coordination or recovery.
 
-Recommended structure:
+Recommended:
 
 ```text
-Session Context Snapshot
-├── Snapshot ID
-├── Session ID
-├── Session Revision
-├── Content Location
-├── Language Configuration
-├── Profile Revision References
-├── Override References
-├── Glossary Snapshot Reference
-├── Character Context Snapshot Reference
-├── Presentation Context
-├── Created At
-└── Content Hash
+SessionContextSnapshot
+├── snapshotId
+├── sessionId
+├── sessionVersion
+├── contentLocation
+├── Session language intent
+├── Profile selection references
+├── Session override references
+├── presentation intent
+├── spoiler boundary
+├── createdAt
+└── contentHash
 ```
 
-This snapshot is distinct from the mutable Session aggregate.
+It is immutable.
+
+It does NOT replace:
+
+* GlossarySnapshot,
+* CharacterContextSnapshot,
+* ResolvedConfigurationSnapshot.
 
 ---
 
 # Operation Context
 
-Each processing operation should capture the relevant Session context at start.
+Operation context MAY include:
 
 ```text
-Operation Context
-├── Session ID
-├── Session Revision
-├── Session Context Snapshot ID
-├── User ID
-├── Content References
-├── Correlation ID
-└── Causation ID
+OperationContext
+├── sessionId?
+├── sessionContextSnapshotId?
+├── contentReferences
+├── resolvedConfigurationSnapshotId
+├── glossarySnapshotId?
+├── characterContextSnapshotId?
+├── correlationId
+└── causationId
 ```
 
-Later Session navigation must not change an already-started operation’s context.
+Later Session navigation MUST NOT alter this operation context.
+
+---
+
+# Session Reference Is Optional for Durable Artifacts
+
+A durable domain artifact MAY retain `sessionId` for provenance/correlation.
+
+But Session MUST NOT be required to reconstruct artifact meaning if all semantic inputs were captured into immutable snapshots.
+
+This allows Session expiry/deletion without corrupting domain history.
 
 ---
 
 # Operation References
 
-Session may track active or recent operation references:
+Session MAY keep active/recent operation IDs.
 
-* Capture Operation ID
-* OCR Operation ID
-* Translation Operation ID
-* Validation Operation ID
-* Rendering Operation ID
-* Import Operation ID
+Examples:
+
+* Capture,
+* OCR,
+* Translation,
+* Validation,
+* Presentation,
+* Import.
 
 These are coordination references.
 
-The authoritative operation lifecycle belongs to runtime or application workflow models.
+The operation lifecycle remains authoritative elsewhere.
 
 ---
 
-# Active Operation State
+# Operation Projection
 
-Session may show summarized operation states:
-
-* Queued
-* Running
-* Waiting
-* Completed
-* Failed
-* Cancelled
-
-This state should be projected from operation events.
-
-It should not duplicate the complete operation aggregate.
-
----
-
-# Cancellation
-
-Cancelling a Session operation and closing a Session are different actions.
+For UI convenience Session MAY expose:
 
 ```text
-Cancel Translation Operation
-≠
-Close Session
+QUEUED
+RUNNING
+WAITING
+COMPLETED
+FAILED
+CANCELLED
 ```
 
-Closing a Session may request cancellation of cancellable operations, but already completed domain artifacts remain preserved.
+This MUST be a projection of operation-owned state.
+
+Session MUST NOT maintain a competing authoritative operation state machine.
+
+---
+
+# Pause vs Cancellation
+
+```text
+Pause Session
+    !=
+Cancel Operation
+```
+
+Pause MAY request cancellation or suppression of future automatic operations.
+
+The final action depends on operation cancellation semantics.
+
+---
+
+# Review Session Boundary
+
+A Review Session owns:
+
+* selected review source/query,
+* review navigation,
+* current item,
+* filters,
+* deferred references,
+* completion position.
+
+It does NOT own the actual review decisions.
+
+Example:
+
+```text
+Session
+    currentItem: finding_44
+```
+
+Review domain:
+
+```text
+finding_44
+    decision: APPROVED
+```
 
 ---
 
 # Review Queue
 
-A Session may coordinate a review queue.
-
-Recommended structure:
+Recommended:
 
 ```text
-Session Review Queue
-├── Queue Type
-├── Query or Source Reference
-├── Ordered Item References
-├── Current Item
-├── Completed Count
-├── Deferred Items
-├── Filters
-└── Sort Policy
+SessionReviewQueue
+├── queueType
+├── sourceQueryOrReference
+├── currentItem
+├── filters
+├── sortPolicy
+├── deferredReferences
+└── progressProjection
 ```
 
-The queue may include:
+The queue SHOULD NOT necessarily copy every Review item into the Session.
 
-* Low-confidence OCR
-* Stale Translations
-* Terminology findings
-* Character conflicts
-* Speaker attribution candidates
-* Layout overflows
-* Import conflicts
-
-Review decisions belong to the affected domain.
+It MAY be query-backed.
 
 ---
 
 # Pending Decision
 
-Session may keep references to pending decisions.
+Pending decision references are workflow/navigation state.
 
 Examples:
 
-* Choose Translation alternative
-* Confirm OCR text
-* Confirm character identity
-* Resolve glossary conflict
-* Approve speaker
-* Fix layout overflow
+* OCR correction required,
+* Translation review,
+* glossary conflict,
+* Character candidate,
+* speaker attribution candidate,
+* Presentation overflow.
 
-Pending Decision is navigational workflow state.
-
-The underlying issue or candidate belongs to its responsible domain.
+The actual decision remains owned by its domain.
 
 ---
 
-# Presentation State
+# Presentation State Boundary
 
-Presentation State describes how content is currently shown.
+Session MAY preserve resume-worthy presentation intent such as:
 
-Recommended structure:
+* display mode,
+* source visibility,
+* Translation visibility,
+* theme,
+* user font scaling,
+* overlay enabled,
+* active surface.
+
+Detailed pixel layout belongs to Presentation runtime/output.
+
+---
+
+# Device-Independent Presentation State
+
+Persist centrally only when meaningfully portable.
+
+Example:
 
 ```text
-Presentation State
-├── Display Mode
-├── Active Surface
-├── Zoom
-├── Theme
-├── Original Visibility
-├── Translation Visibility
-├── Overlay Mode
-├── Font Scale
-├── Layout Mode
-├── Reading Direction
-└── Device View Hint
+displayMode: SIDE_BY_SIDE
 ```
 
-Only device-independent settings should normally be persisted centrally.
+may synchronize.
 
----
-
-# Display Modes
-
-Recommended display modes:
-
-* Original Only
-* Translation Only
-* Side by Side
-* Interleaved
-* Overlay
-* Replacement
-* Hover Translation
-* Focused Text
-* Review Comparison
-
-Display Mode does not alter Translation truth.
-
----
-
-# Overlay State
-
-For comic reading, overlay state may include:
-
-* Overlay enabled
-* Original hidden or visible
-* Bubble replacement mode
-* TextBlock selection
-* Opacity
-* Debug geometry visibility
-* Low-confidence indicator
-* Overflow indicator
-
-Precise pixel layout belongs to presentation runtime.
-
-The Session preserves only meaningful resume preferences.
-
----
-
-# Session Memory
-
-Session Memory is a bounded set of working context used to maintain continuity.
-
-It may include:
-
-* Recent TextBlocks
-* Recent Translations
-* Recent character mentions
-* Recent glossary terms
-* Dialogue window
-* Current scene summary
-* User-pinned context
-
-Session Memory must not be confused with:
-
-* Provider chat memory
-* Long-term Project memory
-* Canonical Book facts
-* Character truth
-* Glossary truth
-
----
-
-# Memory Entries
-
-Recommended structure:
+But:
 
 ```text
-Session Memory Entry
-├── Memory Entry ID
-├── Memory Type
-├── Source References
-├── Content or Summary Reference
-├── Scope
-├── Confidence
-├── Created At
-├── Expires At
-└── Inclusion Policy
+window width: 1374 px
 ```
 
-Possible types:
-
-* Recent Source Text
-* Recent Translation
-* Scene Summary
-* Character Mention
-* Terminology Mention
-* Dialogue Context
-* User Note
-* Processing Hint
+normally remains device-local.
 
 ---
 
-# Memory Window
+# Session Working Context
 
-Session Memory should be bounded by:
+A Session MAY maintain a bounded working-context projection.
 
-* Number of Pages
-* Number of TextBlocks
-* Number of tokens
-* Time
-* Chapter boundary
-* Scene boundary
-* User pinning
+Examples:
 
-Old entries may be evicted from active context while remaining available in durable Project data.
+* recent TextBlock references,
+* recent Translation references,
+* nearby Character references,
+* recent terminology references,
+* scene-summary reference,
+* user-pinned context.
+
+This provides continuity.
 
 ---
 
-# AI Conversation Boundary
+# Session Working Context Is Not Memory Truth
 
-An AI provider may expose a conversation or thread identifier.
+It MUST NOT be confused with:
 
-That identifier belongs to provider execution state.
+* Project long-term memory,
+* Character truth,
+* Glossary truth,
+* provider chat history,
+* permanent AI memory.
 
-It must not become Session identity.
+Recommended representation:
+
+```text
+SessionWorkingContextEntry
+├── entryId
+├── sourceReferences
+├── contextType
+├── summaryReference?
+├── scope
+├── createdAt
+├── expiresAt?
+└── inclusionPriority
+```
+
+Raw copied content SHOULD be minimized.
+
+---
+
+# Context Budget
+
+Working context SHOULD be bounded by:
+
+* content distance,
+* Chapter boundary,
+* time,
+* item count,
+* configured context budget,
+* explicit pinning.
+
+Eviction from Session working context MUST NOT delete canonical domain resources.
+
+---
+
+# Provider Conversation Boundary
+
+Provider conversation/thread IDs are runtime state.
 
 ```text
 CRAI Session ID
-≠
+    !=
 Provider Conversation ID
 ```
 
-The application may associate several provider conversations with one Session.
+One CRAI Session MAY use multiple providers and multiple provider conversations.
 
-A Session may switch providers without losing domain continuity.
+Changing provider MUST NOT change Session identity.
 
 ---
 
-# Resume State
+# Checkpoint
 
-Resume State contains the minimum durable information needed to continue the Session.
+Checkpoint is a durable resume record.
 
-Recommended structure:
+Recommended:
 
 ```text
-Resume State
-├── Session ID
-├── Last Committed Position
-├── Current Context
-├── Selected Profile Revisions
-├── Active Overrides
-├── Review Queue Position
-├── Presentation Preferences
-├── Last Activity At
-├── Last Device Reference
-└── Resume Token Version
+SessionCheckpoint
+├── checkpointId
+├── sessionId
+├── sessionVersion
+├── currentContext
+├── resumePosition
+├── profileSelections
+├── languageSelections
+├── activeOverrideReferences
+├── reviewNavigation
+├── presentationPreferences
+├── createdAt
+├── cause
+└── contentHash
 ```
-
-Resume State must not contain authentication secrets.
 
 ---
 
-# Resume Checkpoint
+# Checkpoint Causes
 
-A checkpoint may be created when:
+Typical causes:
 
-* Entering a new Page
-* Entering a new Chapter
-* Pausing
-* Closing
-* Losing connection
-* Switching devices
-* Completing a review decision
-* Applying a major override
-* Receiving a Translation result
+* meaningful navigation,
+* Chapter transition,
+* pause,
+* device handoff,
+* Session end,
+* significant configuration change,
+* explicit save.
 
-Checkpoints should be idempotent.
+Receiving every runtime result MUST NOT automatically require a checkpoint unless it affects resume state.
+
+---
+
+# Checkpoint Idempotency
+
+Equivalent checkpoint requests SHOULD be idempotent.
+
+The implementation MAY deduplicate checkpoints through content hash or operation identity.
 
 ---
 
 # Recovery
 
-Recovery restores a Session after:
+Recovery restores the latest safe committed working state after:
 
-* Application crash
-* Browser restart
-* Device restart
-* Network interruption
-* Worker failure
-* Client update
-* Temporary authentication expiry
+* application crash,
+* browser restart,
+* device restart,
+* connection interruption,
+* temporary authentication expiry.
 
-Recovery should restore the last committed domain-safe checkpoint.
-
-Uncommitted ephemeral UI actions may be lost.
+Uncommitted ephemeral UI state MAY be lost.
 
 ---
 
 # Recovery Conflict
 
-A recovery conflict may occur when:
+A recovery conflict MAY occur when:
 
-* Content changed since checkpoint
-* Referenced Page Revision was superseded
-* Profile Revision was archived
-* Session resumed on several devices
-* Project access changed
-* External source moved
-* Local capture source is unavailable
+* referenced content was superseded,
+* Profile Revision is unavailable,
+* Project access changed,
+* external source moved,
+* Session changed on another device.
 
-The Session should preserve the old reference and request a resolution strategy rather than silently switching context.
+Recovery MUST preserve the old reference and surface resolution.
+
+It MUST NOT silently redirect to semantically different content.
 
 ---
 
-# Multi-Device Session
+# Multi-Device
 
-A Session may be resumed on another device.
+Device-independent state MAY synchronize:
 
-Device-independent state may synchronize:
+* logical position,
+* Session selections,
+* target language,
+* Session overrides,
+* review position,
+* portable Presentation preferences.
 
-* Logical position
-* Profiles
-* Overrides
-* Review progress
-* Display mode
-* Target language
+Device-specific state MUST adapt.
 
-Device-specific state may require adaptation:
+Examples:
 
-* Window handle
-* Screen region
-* Browser tab
-* Font availability
-* Local file path
-* Display scale
-* GPU capability
+* browser window,
+* local file path,
+* capture handle,
+* display scale,
+* font availability,
+* GPU capability.
 
 ---
 
 # Device Context
 
-Recommended structure:
-
-```text
-Session Device Context
-├── Device ID
-├── Client Type
-├── Application Version
-├── Capability Profile
-├── Local Source References
-├── Last Active At
-└── Sync State
-```
-
-Device Context should be a separate record or value referenced by Session activity.
-
-The Session aggregate should not store sensitive device fingerprints unnecessarily.
-
----
-
-# Primary Client Lease
-
-To avoid conflicting updates, an Active Session may use a short-lived primary client lease.
-
-```text
-Session Lease
-├── Session ID
-├── Client ID
-├── Lease Version
-├── Acquired At
-├── Expires At
-└── Renewal Token Reference
-```
-
-The lease belongs to coordination infrastructure.
-
-It is not the same as Session ownership.
-
----
-
-# Concurrent Access
-
-Possible access modes:
-
-* One active editor
-* Several read-only viewers
-* Explicit handoff
-* Optimistic concurrent editing
-* Collaborative editing
-
-Recommended MVP:
-
-```text
-One primary active client
-+
-Optional read-only observers
-```
-
----
-
-# Concurrent Update Resolution
-
-Session updates should use optimistic concurrency.
-
-Possible inputs:
-
-* Session aggregate version
-* Expected Session Revision
-* Update sequence
-* Client lease
-* Idempotency key
-
-Conflicting updates may be resolved by field semantics.
-
-Examples:
-
-* Latest logical navigation may win
-* Review decisions must never be overwritten
-* Overrides require merge or conflict handling
-* Profile changes require explicit ordering
-
----
-
-# Device Handoff
-
-Handoff should:
-
-1. Commit current position
-2. Create a checkpoint
-3. Release the primary lease
-4. Transfer or reacquire active control
-5. Adapt device-specific settings
-6. Preserve logical context
-
-A handoff must not duplicate processing operations accidentally.
-
----
-
-# Session Fork
-
-A user may fork a Session to try another configuration.
+Device Context SHOULD remain a separate record/projection.
 
 Example:
 
 ```text
-Original Session:
-zh-Hans → vi
-Profile: Natural Vietnamese
-
-Forked Session:
-zh-Hans → vi
-Profile: Literal Comparison
+SessionDeviceContext
+├── sessionId
+├── deviceId
+├── clientType
+├── clientVersion
+├── capabilities
+├── localSourceReferences
+├── lastActiveAt
+└── syncState
 ```
 
-Forking creates a new Session ID.
-
-It may copy:
-
-* Content position
-* Context selections
-* Profile references
-* Overrides
-* Review queue
-
-It must preserve lineage to the source Session.
+Sensitive fingerprinting data SHOULD be avoided.
 
 ---
 
-# Session Clone and Fork
+# Lease
 
-Clone and Fork may have different semantics.
+A primary-client lease is coordination infrastructure.
 
-## Clone
+It is NOT Session ownership.
 
-Copies Session configuration for reuse without preserving workflow lineage.
-
-## Fork
-
-Creates a deliberate alternative continuation and records parent Session identity.
-
-The MVP may support only Fork.
-
----
-
-# Session Merge
-
-Merging Sessions should generally be avoided.
-
-Session state is interaction context, not canonical collaborative content.
-
-When two Sessions produce useful domain changes, those changes should merge in their owning aggregates.
-
-Possible mergeable Session elements:
-
-* Reading progress
-* Review queue completion
-* Promotable overrides
-* User notes
-
-The Session aggregate itself should normally remain separate.
-
----
-
-# Idempotency
-
-Session operations should support idempotency.
-
-Examples:
-
-* Create Session
-* Commit checkpoint
-* Pause
-* Resume
-* Close
-* Apply override
-* Remove override
-* Select Profile Revision
-* Update reading position
-* Fork Session
-
-Possible idempotency keys:
-
-* Client operation ID
-* Session ID
-* Expected version
-* Checkpoint hash
-* Override content hash
-
----
-
-# High-Frequency Updates
-
-High-frequency state such as scroll position should be debounced or compacted.
-
-Recommended strategy:
+Example:
 
 ```text
-Client Updates
-    │
-    ▼
-Local Ephemeral State
-    │
-    ├── debounce
-    ├── threshold crossing
-    ├── page transition
-    └── lifecycle checkpoint
-    ▼
-Durable Session Update
+SessionLease
+├── sessionId
+├── clientId
+├── leaseVersion
+├── acquiredAt
+└── expiresAt
 ```
 
-This prevents the Session event stream from becoming a raw interaction log.
-
----
-
-# Session Activity
-
-Session Activity may record meaningful actions:
-
-* Session opened
-* Chapter entered
-* Page entered
-* Translation requested
-* Review completed
-* Override applied
-* Session paused
-* Session resumed
-* Session closed
-
-Fine-grained telemetry should be stored separately from domain events.
-
----
-
-# Session Events and Telemetry
-
-Domain events communicate meaningful state transitions.
-
-Telemetry measures runtime and user interaction.
+MVP MAY support:
 
 ```text
-SessionPaused
+one active writer
++
+read-only observers
 ```
-
-is a domain event.
-
-```text
-MouseMoved
-```
-
-is telemetry or local UI state.
-
-These must not share the same persistence and retention assumptions.
 
 ---
 
-# Session Expiration Policy
+# Concurrency
 
-Expiration should consider:
+Session updates SHOULD use optimistic concurrency.
 
-* Session state
-* Ownership type
-* Last activity
-* Presence of unresolved review work
-* Active overrides
-* Anonymous status
-* Workspace policy
+Possible controls:
 
-Recommended behavior:
+* expected aggregate version,
+* expected checkpoint,
+* update sequence,
+* idempotency key,
+* optional client lease.
 
-* Active Sessions do not expire unexpectedly.
-* Paused anonymous Sessions may expire sooner.
-* Completed Sessions may archive rather than expire.
-* Referenced domain artifacts remain preserved.
+Different fields MAY require different conflict policy.
+
+---
+
+# Fork
+
+Fork creates a new Session identity for an alternative continuation.
+
+Example:
+
+```text
+Session A
+    Natural Translation
+
+        |
+        v fork
+
+Session B
+    Literal Translation
+```
+
+Fork MAY copy:
+
+* working location,
+* selections,
+* preferences,
+* overrides,
+* review navigation.
+
+It MUST preserve:
+
+```text
+parentSessionId
+```
+
+---
+
+# Merge
+
+Session merging SHOULD normally be avoided.
+
+Session is interaction context, not canonical collaborative content.
+
+Useful changes produced in different Sessions should be reconciled in their owning domains.
+
+---
+
+# Offline
+
+Offline Session MAY support:
+
+* local content,
+* local OCR,
+* local Translation,
+* cached Profiles,
+* cached immutable snapshots,
+* local checkpoints,
+* deferred synchronization.
+
+Offline domain changes and Session state synchronize separately.
+
+---
+
+# Offline Sync Boundary
+
+Synchronization MUST distinguish:
+
+```text
+Session working state
+```
+
+from:
+
+```text
+canonical domain changes
+```
+
+Example:
+
+```text
+Reading position
+    -> Session/Progress reconciliation
+
+Glossary Entry Revision
+    -> Glossary reconciliation
+
+Speaker Attribution
+    -> Character/Speaker reconciliation
+```
+
+Session MUST NOT become the generic conflict owner for every offline domain resource.
+
+---
+
+# Cache
+
+Session identity SHOULD rarely participate in reusable content cache identity.
+
+Cache correctness SHOULD instead depend on semantic inputs such as:
+
+* source revision,
+* exact Language values,
+* ResolvedConfigurationSnapshot,
+* GlossarySnapshot,
+* CharacterContextSnapshot,
+* pipeline versions.
+
+`sessionId` MAY still be used for:
+
+* correlation,
+* temporary in-flight deduplication,
+* access filtering,
+* projections.
+
+---
+
+# Durable Result Rule
+
+Critical rule:
+
+```text
+Any Session-only information that affects durable output
+must be captured into immutable reproducible input.
+```
+
+Once captured, the resulting domain artifact SHOULD remain valid even if the Session:
+
+* changes,
+* closes,
+* expires,
+* is archived,
+* is deleted.
 
 ---
 
 # Retention
 
-Retention policy may distinguish:
+Suggested retention categories:
 
-## Long-Lived
+Long-lived:
 
-* Session identity
-* Final status
-* Major checkpoints
-* Promoted decisions
-* Audit records
-* Fork lineage
+* Session identity,
+* final lifecycle/end reason,
+* major checkpoints,
+* fork lineage,
+* audit.
 
-## Medium-Lived
+Medium-lived:
 
-* Navigation history
-* Review queue state
-* Session Memory
-* Temporary overrides
+* bounded navigation,
+* temporary overrides,
+* review navigation,
+* working context.
 
-## Short-Lived
+Short-lived:
 
-* Device hints
-* Connection state
-* Operation projections
-* Hover and viewport details
-* Temporary capture configuration
+* device hints,
+* operation projections,
+* connection state,
+* local capture hints.
 
-Retention should be configurable.
+Retention policy SHOULD remain configurable.
 
 ---
 
 # Deletion
 
-Deleting a Session must not delete:
+Deleting a Session MUST NOT cascade into:
 
-* Projects
-* Books
-* Chapters
-* Pages
-* TextBlocks
-* OCR results
-* Translations
-* Glossary Entries
-* Characters
-* Review decisions
+* Project,
+* Book,
+* Chapter,
+* Page,
+* TextBlock,
+* Image,
+* Translation,
+* Glossary,
+* Character,
+* Review,
+* Presentation artifacts.
 
-Deletion may remove:
+Session deletion MAY remove:
 
-* Resume state
-* Session navigation history
-* Unpromoted overrides
-* Temporary memory
-* Device-specific hints
-
-Audit or legal policies may require tombstones.
+* resume state,
+* navigation,
+* unpromoted overrides,
+* Session working context,
+* device hints.
 
 ---
 
-# Session Tombstone
+# Tombstone
 
-A deleted Session may leave:
+When needed:
 
 ```text
-Session Tombstone
-├── Session ID
-├── Owner ID
-├── Deleted At
-├── Deletion Reason
-├── Final Status
-└── Retention Policy
+SessionTombstone
+├── sessionId
+├── ownerReference
+├── projectId?
+├── deletedAt
+├── endReason?
+└── retentionPolicy
 ```
 
-The tombstone should not contain unnecessary content details.
+Tombstone SHOULD minimize content details.
 
 ---
 
 # Authorization
 
-Every Session operation must revalidate access to referenced resources.
+Session references MUST NOT grant authority.
 
-A Session reference does not grant access.
+Access MUST be revalidated when:
 
-Example:
-
-```text
-Session references Project P
-```
-
-does not mean the user permanently retains access to Project P.
-
-Authorization is evaluated when resuming, navigating or performing operations.
+* resuming,
+* navigating,
+* starting operations,
+* promoting overrides,
+* opening referenced Project content.
 
 ---
 
 # Access Revocation
 
-When Project access is revoked:
+When Project access disappears:
 
-* Active processing should stop where required
-* Session should become inaccessible or restricted
-* Resume should fail with a clear reason
-* Credentials should not remain cached
-* Referenced domain artifacts follow Project policy
-* Session metadata retention follows security policy
+* Session use MUST fail appropriately,
+* automatic operation generation SHOULD stop,
+* credentials MUST NOT remain inside Session state,
+* referenced domain artifacts follow their own retention policy.
 
----
-
-# Shared Sessions
-
-Future collaborative support may allow:
-
-* Shared reading
-* Review handoff
-* Pair translation
-* Presentation mode
-* Observer access
-
-Shared Sessions require:
-
-* Participant roles
-* Presence state
-* Edit ownership
-* Conflict resolution
-* Access revocation
-* Spoiler visibility rules
-
-Shared collaboration may be deferred beyond MVP.
-
----
-
-# Participant
-
-Potential structure:
+The Session MAY be ended with:
 
 ```text
-Session Participant
-├── User ID
-├── Role
-├── Joined At
-├── Last Active At
-├── Access Scope
-└── Presence State
+endReason: ACCESS_REVOKED
 ```
-
-Participant presence is partly ephemeral.
-
-Durable participant membership should remain separate from live connection state.
 
 ---
 
-# Session Notes
+# Events
 
-A Session may contain temporary notes.
+Core Session events MAY include:
+
+```text
+SessionCreated
+SessionActivated
+SessionPaused
+SessionResumed
+SessionEnded
+SessionArchived
+
+SessionContextChanged
+SessionResumePositionChanged
+SessionCheckpointCreated
+SessionModeChanged
+SessionLanguageSelectionChanged
+SessionProfileSelectionChanged
+
+SessionOverrideAdded
+SessionOverrideChanged
+SessionOverrideRemoved
+SessionOverridePromoted
+
+SessionReviewNavigationChanged
+SessionForked
+SessionRecovered
+SessionRecoveryConflictDetected
+SessionDeviceHandoffCompleted
+```
+
+High-frequency UI interaction MUST NOT emit ordinary domain events.
+
+---
+
+# Events vs Telemetry
 
 Examples:
 
-* Check this name later
-* Speaker uncertain
-* OCR seems wrong
-* Use formal style for this scene
-* Chapter source is incomplete
-
-Notes may be:
-
-* Session-only
-* Attached to a domain object
-* Promoted to Project notes
-* Converted to review issues
-
-Session-only notes should not silently become canonical content annotations.
-
----
-
-# Bookmark Integration
-
-Bookmarks may originate inside a Session.
-
-A durable Bookmark should likely belong to a Library, Progress or Annotation domain.
-
-Session stores:
-
-* Current bookmark draft
-* Recent bookmark references
-* Navigation origin
-
-Closing the Session should not delete promoted Bookmarks.
-
----
-
-# Annotation Integration
-
-Annotations may include:
-
-* User comments
-* Corrections
-* Highlights
-* Questions
-* Translation notes
-
-Session coordinates their creation.
-
-The Annotation domain, when introduced, should own durable annotations.
-
----
-
-# Offline Session
-
-Offline mode may support:
-
-* Local content
-* Local OCR
-* Local Translation
-* Cached profiles
-* Cached glossaries
-* Deferred synchronization
-* Local checkpoints
-
-Offline Session state should record:
-
 ```text
-Sync Status
-├── Local Revision
-├── Server Revision
-├── Pending Operations
-├── Last Sync At
-└── Conflict State
+SessionPaused
 ```
 
----
+is domain state.
 
-# Offline Conflict
+```text
+mouseMoved
+scrollVelocityChanged
+frameRendered
+```
 
-Possible conflicts:
+are UI/runtime telemetry.
 
-* Same Session resumed online elsewhere
-* Override changed on two devices
-* Reading position diverged
-* Profile selection changed
-* Project content revision changed
-* Review item resolved remotely
-
-Conflict resolution should preserve both meaningful decisions when possible.
-
----
-
-# Synchronization
-
-Session synchronization should distinguish:
-
-* Append-only domain decisions
-* Mutable navigation state
-* Temporary preferences
-* Device-specific hints
-
-Suggested strategies:
-
-| State                | Synchronization Strategy      |
-| -------------------- | ----------------------------- |
-| Review decision      | Append and validate           |
-| Override             | Revisioned merge              |
-| Reading position     | Latest meaningful checkpoint  |
-| Navigation history   | Bounded union or device-local |
-| UI focus             | Do not synchronize            |
-| Profile selection    | Last explicit selection       |
-| Device source handle | Device-local                  |
-
----
-
-# Session and Cache
-
-Session identity should rarely be part of reusable content cache keys.
-
-Two Sessions may request the same Translation configuration.
-
-Cache correctness should depend on:
-
-* Source Revision
-* Language Pair
-* Translation Profile Revision
-* Glossary Snapshot
-* Character Context Snapshot
-* Relevant context hashes
-* Pipeline revisions
-
-Session ID may be used for:
-
-* Correlation
-* Access filtering
-* Temporary projections
-* In-flight deduplication
-
-It must not unnecessarily prevent cross-Session reuse of valid domain artifacts.
-
----
-
-# Session-Specific Results
-
-A result should remain Session-specific only when it depends on Session-only mutable information that was not promoted into a reproducible snapshot.
-
-Recommended rule:
-
-> Any Session context that affects durable output must be captured into an immutable operation or context snapshot.
-
-This allows the result to remain reproducible after the Session changes or expires.
+They MUST NOT share the same persistence assumptions.
 
 ---
 
 # Persistence
 
-Recommended persistence separation:
+Recommended canonical Session records:
 
 ```text
 Session
-Session Revision or State Snapshot
-Session Checkpoint
-Session Override
-Session Navigation Entry
-Session Review Queue
-Session Memory Entry
-Session Fork Lineage
-Session Tombstone
+SessionCheckpoint
+SessionOverride
+SessionNavigationEntry
+SessionReviewNavigation
+SessionForkLineage
+SessionTombstone
 ```
 
-Separate infrastructure persistence:
+Optional Session working-state records:
 
 ```text
-Session Lease
-Session Connection
-Session Device Presence
-Session Operation Projection
-Session Telemetry
-Local Ephemeral State
+SessionWorkingContextEntry
+SessionStateSnapshot
+SessionDeviceContext
+```
+
+Infrastructure/projections:
+
+```text
+SessionLease
+SessionConnection
+SessionDevicePresence
+SessionOperationProjection
+SessionTelemetry
+LocalEphemeralState
 ```
 
 ---
@@ -2310,645 +2090,355 @@ Local Ephemeral State
 
 ```text
 Session
-├── Session ID
-├── Owner ID
-├── Project ID
-├── Session Type
-├── Lifecycle State
-├── Current Context
-├── Reading Position
-├── Language Configuration
-├── Translation Profile Revision
-├── OCR Profile Revision
-├── Presentation Profile Revision
-├── Mode
-├── Active Override References
-├── Review Queue Reference
-├── Last Checkpoint
-├── Parent Session ID
-├── Aggregate Version
-├── Created At
-├── Last Active At
-├── Paused At
-├── Completed At
-└── Closed At
-```
-
----
-
-# Session Checkpoint Record
-
-```text
-Session Checkpoint
-├── Checkpoint ID
-├── Session ID
-├── Session Version
-├── Current Context
-├── Reading Position
-├── Profile References
-├── Override References
-├── Review Position
-├── Presentation State
-├── Created At
-├── Cause
-└── Content Hash
-```
-
----
-
-# Session Override Record
-
-```text
-Session Override
-├── Override ID
-├── Session ID
-├── Override Type
-├── Target Type
-├── Target ID
-├── Target Revision
-├── Value
-├── Scope
-├── Priority
-├── Status
-├── Created By
-├── Created At
-├── Expires At
-└── Promoted Reference
+├── sessionId
+├── ownerType
+├── ownerId?
+├── projectId
+├── sessionType
+├── lifecycleStatus
+├── endReason?
+├── currentContext
+├── resumePosition
+├── profileSelections
+├── languageSelections
+├── sessionPreferences
+├── mode
+├── activeOverrideReferences
+├── reviewNavigationReference?
+├── presentationPreferences
+├── latestCheckpointId?
+├── parentSessionId?
+├── createdAt
+├── updatedAt
+├── endedAt?
+└── version
 ```
 
 ---
 
 # Validation
 
-Session validation should verify:
+Session validation SHOULD verify:
 
-* Owner exists
-* Project access remains valid
-* Referenced content belongs to the expected scope
-* Referenced revisions exist
-* Language Pair is valid
-* Selected Profile Revisions are compatible
-* Reading Position can be resolved
-* Overrides have valid targets
-* Override scopes do not exceed Session scope
-* Lifecycle transitions are valid
-* Closed Sessions reject active mutations
-* Fork lineage is not circular
-* Checkpoint version is consistent
-* Spoiler boundary is compatible with current position
-
----
-
-# Invalid Reference Handling
-
-A referenced domain object may become unavailable or superseded.
-
-Possible resolution states:
-
-* Valid
-* Superseded but Resolvable
-* Missing
-* Access Denied
-* Archived
-* Incompatible
-* Requires Migration
-
-Session recovery should preserve the original reference and record the resolution outcome.
+* valid Session identity,
+* valid ownership,
+* valid Project scope,
+* compatible content references,
+* referenced Revisions exist,
+* selected Profile policies can be resolved,
+* language selections are valid,
+* Resume Position is resolvable,
+* override targets are valid,
+* override scope does not escape Session Project,
+* lifecycle transitions are valid,
+* Ended/Archived Sessions reject normal active mutations,
+* fork lineage is acyclic,
+* spoiler boundary is compatible with current location,
+* authorization is revalidated externally.
 
 ---
 
-# Lifecycle Transition Validation
+# Errors
 
-Examples:
-
-```text
-Created → Active
-```
-
-valid.
+Possible stable Session errors include:
 
 ```text
-Active → Paused
+SESSION_NOT_FOUND
+SESSION_ACCESS_DENIED
+SESSION_ENDED
+SESSION_ARCHIVED
+SESSION_VERSION_CONFLICT
+SESSION_CONTEXT_INVALID
+SESSION_POSITION_UNRESOLVABLE
+SESSION_PROFILE_SELECTION_INVALID
+SESSION_LANGUAGE_SELECTION_INVALID
+SESSION_OVERRIDE_INVALID
+SESSION_OVERRIDE_SCOPE_INVALID
+SESSION_CHECKPOINT_STALE
+SESSION_EXTERNAL_SOURCE_UNAVAILABLE
+SESSION_RECOVERY_CONFLICT
+SESSION_DEVICE_CONTEXT_INCOMPATIBLE
+SESSION_SPOILER_BOUNDARY_VIOLATION
+SESSION_OFFLINE_SYNC_CONFLICT
 ```
 
-valid.
-
-```text
-Paused → Active
-```
-
-valid.
-
-```text
-Closed → Active
-```
-
-normally invalid.
-
-A Closed Session may instead be:
-
-* Reopened by creating a new Session
-* Forked
-* Explicitly restored under a defined policy
-
----
-
-# Error Conditions
-
-Typical Session errors:
-
-* Session Not Found
-* Session Access Denied
-* Session Already Closed
-* Invalid Lifecycle Transition
-* Session Version Conflict
-* Primary Client Lease Conflict
-* Project Reference Invalid
-* Content Position Unresolvable
-* Profile Revision Missing
-* Language Pair Incompatible
-* Override Target Invalid
-* Override Scope Invalid
-* Checkpoint Stale
-* External Source Unavailable
-* Device Context Incompatible
-* Resume Conflict
-* Spoiler Boundary Violation
-* Offline Synchronization Conflict
-
-Errors should be structured and recoverable where possible.
-
----
-
-# Events
-
-Typical domain events include:
-
-* `SessionCreated`
-* `SessionActivated`
-* `SessionPaused`
-* `SessionResumed`
-* `SessionCompleted`
-* `SessionClosed`
-* `SessionAbandoned`
-* `SessionExpired`
-* `SessionArchived`
-* `SessionContextChanged`
-* `SessionPositionChanged`
-* `SessionCheckpointCreated`
-* `SessionModeChanged`
-* `SessionLanguageConfigurationChanged`
-* `SessionProfileChanged`
-* `SessionOverrideAdded`
-* `SessionOverrideChanged`
-* `SessionOverrideRemoved`
-* `SessionOverridePromoted`
-* `SessionReviewQueueChanged`
-* `SessionForked`
-* `SessionRecovered`
-* `SessionResumeConflictDetected`
-* `SessionDeviceHandoffCompleted`
-
-High-frequency UI interaction should not emit domain events.
-
----
-
-# Event Payload Example
-
-```text
-SessionCheckpointCreated
-├── Session ID
-├── Checkpoint ID
-├── Session Version
-├── Project ID
-├── Content Location Reference
-├── Position Type
-├── Cause
-├── Actor
-├── Occurred At
-├── Correlation ID
-└── Causation ID
-```
-
-Full source text, credentials and sensitive provider data should not be included.
-
----
-
-# Comic Reading Example
-
-```text
-Session Type:
-Live Translation
-
-Project:
-Comic A
-
-Current Context:
-Chapter 18, Page 12
-
-Capture Mode:
-Browser Screenshot
-
-Source Language:
-zh-Hans
-
-Target Language:
-vi
-
-Profiles:
-- OCR Comic Profile Revision 4
-- Natural Vietnamese Translation Profile Revision 7
-- Comic Overlay Presentation Profile Revision 3
-
-Mode:
-Automatic
-
-Current Position:
-Page 12, lower panel
-
-Session Preferences:
-- Show translated overlay
-- Hide original OCR text
-- Pause when OCR confidence < 0.65
-- Highlight glossary violations
-```
-
-When the user closes the application, CRAI stores a checkpoint.
-
-On resume, the system restores the logical Page and attempts to recover the browser source.
-
----
-
-# Novel Reading Example
-
-```text
-Session Type:
-Reading
-
-Project:
-Novel B
-
-Current Context:
-Book 1, Chapter 42
-
-Position:
-Paragraph 18, sentence offset 4
-
-Source Language:
-zh-Hans
-
-Target Language:
-vi
-
-Display:
-Interleaved original and translation
-
-Session Memory:
-Previous 12 paragraphs
-
-Character Context:
-Current scene cast
-
-Temporary Override:
-Use “sư tôn” for 师尊 in this chapter
-```
-
-The temporary term override contributes to a new immutable Glossary Snapshot for each affected Translation operation.
-
-It does not immediately update the Project Glossary.
-
----
-
-# Session Resume Example
-
-Initial state:
-
-```text
-Chapter 12
-Page 8
-Overlay enabled
-Translation Profile Revision 5
-```
-
-The application crashes after the user scrolls halfway into Page 9.
-
-Last committed checkpoint:
-
-```text
-Chapter 12
-Page 9
-Top panel
-```
-
-On recovery, CRAI resumes from the checkpoint rather than relying on the lost pixel scroll offset.
-
----
-
-# Profile Change Example
-
-The user changes:
-
-```text
-Translation Profile Revision 5
-→
-Translation Profile Revision 8
-```
-
-Consequences:
-
-* Existing Translation Revisions remain unchanged.
-* New Translation requests use Revision 8.
-* Existing results may still be displayed.
-* The Session may offer retranslation.
-* Cache lookup uses the new configuration identity.
-* Session records the explicit profile transition.
-
----
-
-# Temporary Glossary Override Example
-
-```text
-Source term:
-灵力
-
-Project Glossary:
-linh lực
-
-Session Override:
-linh khí
-
-Scope:
-Current Chapter
-```
-
-For operations in the current Chapter:
-
-```text
-Project Glossary Revision
-+
-Session Override
-→
-Glossary Snapshot GS-91
-```
-
-Translation Revision references `GS-91`.
-
-Closing the Session removes the unpromoted override but does not invalidate already-created Translation history.
-
----
-
-# Speaker Override Example
-
-```text
-Detected Speaker:
-Character A, confidence 0.58
-
-User Session Override:
-Speaker is Character B
-
-Scope:
-Current TextBlock
-```
-
-The operation uses Character B in its Character Context Snapshot.
-
-The user may later promote the override into a durable Speaker Attribution revision.
-
----
-
-# Multi-Device Example
-
-Desktop Session:
-
-```text
-Logical Position:
-Chapter 7, Page 21
-
-Device State:
-Browser source and overlay
-```
-
-Mobile resume:
-
-```text
-Logical Position:
-Chapter 7, Page 21
-
-Adapted Presentation:
-Translation-only vertical reading
-
-Unavailable State:
-Desktop browser window handle
-```
-
-The logical Session continues while device-specific capture state is reconfigured.
-
----
-
-# Offline Example
-
-A user reads imported pages offline.
-
-During the Session:
-
-* OCR runs locally
-* Translation runs locally
-* Several glossary overrides are added
-* Reading position advances
-* One character name correction is promoted locally
-
-When connectivity returns:
-
-* Session checkpoint synchronizes
-* Domain updates synchronize separately
-* Conflicts are resolved by owning aggregates
-* Device-only screen state is discarded
+Coordination errors such as lease conflicts MAY remain infrastructure errors where appropriate.
 
 ---
 
 # Architecture Invariants
 
-1. Session is a domain working-context Aggregate Root.
+1. Session is a resumable user working-context Aggregate Root.
+
 2. Session is not an authentication session.
+
 3. Session is not a provider conversation.
+
 4. Session is not a runtime job.
-5. Session is not a WebSocket or process lifetime.
-6. Session references durable domain objects but does not own them.
-7. Closing a Session does not delete created domain artifacts.
-8. Runtime worker failure does not invalidate Session identity.
-9. Session identity remains stable across pause and resume.
-10. Logical content position remains separate from visual viewport state.
-11. Durable Session state remains separate from ephemeral client state.
-12. Authentication credentials are never stored in Session.
-13. Provider secrets are never stored in Session.
-14. Provider-specific conversation IDs do not become Session identity.
-15. Source and target languages use canonical Language values.
-16. Selected Profiles reference exact revisions.
-17. Mutable Session state must not be used as unreproducible Translation context.
-18. Context affecting durable output is captured in immutable snapshots.
-19. Translation Revisions reference exact context snapshots.
-20. Later Session changes do not rewrite completed operation context.
-21. Session overrides are temporary until explicitly promoted.
-22. Session overrides cannot silently mutate external aggregates.
-23. Project Glossary truth remains separate from Session terminology overrides.
-24. Character truth remains separate from Session speaker or identity overrides.
-25. Review navigation state remains separate from review decisions.
-26. Presentation state does not modify Translation truth.
-27. High-frequency UI state is not canonical domain history.
-28. Session events represent meaningful transitions, not raw telemetry.
-29. Session references do not grant authorization.
-30. Access is revalidated when the Session is resumed or used.
-31. Device-specific handles are not durable cross-device identifiers.
-32. Multi-device continuation preserves logical context and adapts local state.
-33. Concurrent Session writes use explicit versioning or lease policy.
-34. Primary client lease is coordination infrastructure, not ownership.
-35. Session checkpoints are idempotent.
-36. Session forks receive new identities and preserve lineage.
-37. Sessions should not normally be merged.
-38. Session deletion does not cascade into Project content.
-39. Cache correctness does not depend on Session ID alone.
-40. Derived operation projections may be rebuilt from operation events.
-41. Expiration affects Session state, not referenced domain truth.
-42. Spoiler boundaries are respected during context construction.
-43. Session recovery preserves unresolved references rather than silently substituting them.
-44. Every significant lifecycle transition is auditable.
 
----
+5. Session references business resources but does not own them.
 
-# Open Decisions
+6. Session belongs to one Project in the MVP.
 
-The following decisions should remain open until implementation and prototype testing:
+7. Optional Book and Page hierarchy levels MUST NOT be required.
 
-* Whether Session is always persisted or may be local-only
-* Whether anonymous Sessions synchronize across devices
-* Whether one user may have several active Sessions per Project
-* Whether Session belongs strictly to one Project
-* Whether switching Project forks or mutates a Session
-* Whether Session revisions are fully immutable
-* Whether Session should use event sourcing
-* Which state changes produce durable revisions
-* How frequently reading position is checkpointed
-* Whether navigation history is server-side or device-local
-* How long completed Sessions are retained
-* Whether closed Sessions may be reopened
-* Whether reopening creates a new Session
-* Whether Session Fork is required in MVP
-* Whether collaborative Sessions are supported
-* Whether one or several clients may actively edit a Session
-* How primary client leases work offline
-* How concurrent position updates are resolved
-* Which device settings synchronize
-* How browser tab identity is recovered
-* How external URLs are canonicalized
-* How site adapters represent chapter positions
-* Whether screen capture regions synchronize
-* Whether local file paths are persisted
-* How unavailable external sources are reconciled
-* Whether Session stores a bounded memory window
-* Whether Session Memory is persisted
-* How scene boundaries are detected
-* How context-budget eviction works
-* Whether provider conversation state is reused within a Session
-* How provider switching affects context continuity
-* Which temporary override types are supported
-* Whether overrides may outlive a Session
-* Whether overrides can be promoted automatically
-* How temporary glossary overrides are compiled into snapshots
-* How Session character overrides interact with Speaker Attribution
-* Whether review queues store item lists or queries
-* How review queues react to newly created findings
-* Whether Session progress updates a separate Reading Progress domain
-* Whether Bookmarks and Annotations require separate domains
-* How offline Session conflicts are presented
-* Whether Session deletion leaves a tombstone
-* Whether Session analytics are opt-in
-* How spoiler boundaries follow reader progress
-* Whether Session-level privacy mode disables cloud synchronization
-* Whether active operations are cancelled automatically on pause
-* Which operations continue after Session close
-* How long operation projections remain attached to Session
-* Whether Session Type changes during its lifecycle
-* Whether Mixed Session Type is necessary
-* How Profile compatibility is validated
-* Whether Presentation Profile belongs in Session or client preferences
-* Whether zoom and font scale are centrally persisted
-* Whether target-language changes create a fork or mutate the Session
-* How multiple target languages are represented
-* Whether Session snapshots are content-addressed
-* How much Session context appears in audit events
+8. Session identity remains stable across pause/resume and runtime failures.
+
+9. Authentication credentials and provider secrets MUST NOT be stored in Session.
+
+10. Durable Session state remains separate from ephemeral client state.
+
+11. Logical content position remains separate from visual viewport state.
+
+12. Session owns current/resume position, not canonical long-term reading history.
+
+13. High-frequency UI state MUST NOT become canonical Session history.
+
+14. Session events MUST represent meaningful domain changes rather than raw telemetry.
+
+15. Profile selection intent MUST remain distinct from copied Profile configuration.
+
+16. Dynamic Profile selections MUST resolve to exact Revisions before execution.
+
+17. Session MUST NOT own ResolvedConfigurationSnapshot semantics.
+
+18. Session language intent MUST NOT replace Language-domain truth.
+
+19. Session MUST NOT define one universal Language resolution hierarchy.
+
+20. Session Preferences MUST remain distinct from Profile and mandatory Policy.
+
+21. Session Overrides are temporary intent.
+
+22. Session Overrides MUST NOT silently mutate external aggregates.
+
+23. Override promotion is explicit.
+
+24. Glossary truth remains outside Session.
+
+25. Character truth remains outside Session.
+
+26. Speaker override is not canonical Speaker Attribution until promoted.
+
+27. Review navigation remains separate from Review decision.
+
+28. Presentation preferences MUST NOT modify Translation truth.
+
+29. Session working context MUST NOT become canonical Project or Character memory.
+
+30. Provider conversation identity MUST NOT become Session identity.
+
+31. Any Session state affecting durable output MUST be captured into immutable reproducible snapshots.
+
+32. Later Session mutations MUST NOT alter already-started operation context.
+
+33. Durable artifacts MUST remain interpretable without mutable current Session state.
+
+34. Session MAY reference operations but MUST NOT duplicate their authoritative lifecycle.
+
+35. Pause and operation cancellation remain distinct concepts.
+
+36. Session closing/ending MUST NOT delete domain artifacts.
+
+37. Session deletion MUST NOT cascade into business content.
+
+38. Access MUST be revalidated; Session reference does not grant authorization.
+
+39. Device-specific handles are not durable cross-device identity.
+
+40. Primary-client lease is infrastructure, not Session ownership.
+
+41. Session checkpoints SHOULD be idempotent.
+
+42. Session fork creates a new identity and preserves lineage.
+
+43. Sessions SHOULD NOT normally merge.
+
+44. Session ID SHOULD NOT unnecessarily prevent reusable content-cache hits.
+
+45. Offline domain conflicts are resolved by their owning domains.
+
+46. Recovery MUST preserve unresolved references rather than silently substitute incompatible content.
+
+47. Spoiler boundaries MUST remain respected during context resolution.
+
+48. Significant Session lifecycle and configuration transitions SHOULD be auditable.
 
 ---
 
 # Recommended MVP Scope
 
-The first CRAI MVP should support:
+The first CRAI MVP SHOULD support:
 
-* Stable Session identity
-* User-owned and local anonymous Sessions
-* One Project per Session
-* Reading and Live Translation Session Types
-* Created, Active, Paused, Completed and Closed states
-* Current Book, Chapter and Page references
-* TextBlock position where available
-* Logical reading position
-* Periodic checkpoints
-* Pause and resume
-* Crash recovery
-* Source and target Language selection
-* Exact Translation Profile Revision
-* Exact OCR Profile Revision
-* Exact Presentation Profile Revision
-* Manual, Assisted and Automatic modes
-* Imported File, Browser and Screen Capture modes
-* Session Preferences
-* Session-level glossary overrides
-* Session-level speaker overrides
-* Explicit override promotion
-* Immutable operation-context snapshots
-* Review queue position
-* Basic presentation state
-* Bounded navigation history
-* One primary active client
-* Optimistic concurrency
-* Basic device handoff
-* Session fork
-* Session lifecycle events
-* Session audit
-* Selective retention
-* Session deletion without content cascade
+* stable Session identity,
+* one Project per Session,
+* user-owned Sessions,
+* optional anonymous local Sessions,
+* `READING`,
+* `LIVE_TRANSLATION`,
+* basic `REVIEW`,
+* lifecycle:
 
-The MVP may defer:
+  * `CREATED`,
+  * `ACTIVE`,
+  * `PAUSED`,
+  * `ENDED`,
+  * `ARCHIVED`,
+* `endReason`,
+* optional Book/Page context,
+* Chapter/TextBlock context,
+* logical Resume Position,
+* periodic checkpoints,
+* pause/resume,
+* crash recovery,
+* canonical source/target Language selections,
+* exact Profile Revision pinning,
+* Profile selection records,
+* Translation/OCR/Presentation/Context/Validation selections,
+* Manual/Assisted/Automatic mode,
+* Browser DOM,
+* Browser capture,
+* screen capture,
+* imported content,
+* Session Preferences,
+* temporary terminology override,
+* temporary speaker override,
+* explicit override promotion,
+* immutable operation snapshots,
+* Review navigation,
+* portable Presentation preferences,
+* bounded navigation history,
+* bounded working context,
+* one primary active writer,
+* optimistic concurrency,
+* basic device handoff,
+* Session fork,
+* lifecycle events,
+* audit,
+* selective retention,
+* deletion without content cascade.
 
-* Real-time collaborative Sessions
-* Multiple simultaneous editors
-* Full Session event sourcing
-* Cross-Project Sessions
-* Multi-target-language Sessions
-* Provider conversation persistence
-* Advanced Session Memory
-* Semantic scene summaries
-* Automatic override promotion
-* Complex offline conflict merging
-* Shared review queues
-* Live presence
-* Session chat
-* Synchronized mouse or viewport state
-* Full browser-tab restoration
-* Cross-device screen capture restoration
-* Automatic Session merging
-* Long-term analytics
-* Complex lease negotiation
-* Workspace-owned Sessions
-* Public shared Sessions
-* Full annotation ownership
-* Reading social features
-* Session templates
-* Advanced Session branching
-* Server-side storage of device-specific layout details
+MVP MAY defer:
+
+* collaborative Session,
+* multiple active writers,
+* cross-Project Session,
+* multi-target Translation,
+* persistent provider conversations,
+* advanced Session working memory,
+* automatic override promotion,
+* advanced offline merge,
+* shared review queues,
+* live presence,
+* Session chat,
+* synchronized viewport/mouse state,
+* full browser-tab restoration,
+* cross-device screen-capture restoration,
+* Session merge,
+* advanced analytics,
+* complex lease negotiation,
+* Workspace-owned Sessions,
+* public shared Sessions,
+* long-term Annotation ownership,
+* advanced branching.
+
+---
+
+# Open Decisions
+
+The following SHOULD remain open until prototype validation:
+
+* whether Session state is always server-persisted,
+* whether anonymous Sessions synchronize,
+* whether several active Sessions per Project are allowed,
+* whether Ended Session may resume directly or must Fork,
+* exact end-reason taxonomy,
+* Session revision persistence strategy,
+* event sourcing vs checkpoint model,
+* checkpoint frequency,
+* navigation-history persistence,
+* whether long-term ReadingProgress becomes a dedicated domain,
+* whether Review queue is query-backed or snapshot-backed,
+* whether bounded Session working context is persisted,
+* scene-summary generation,
+* Session context budget,
+* supported Session override types,
+* override precedence per target domain,
+* whether any override may outlive Session before promotion,
+* Profile-selection persistence model,
+* whether exact Revision pinning is default,
+* whether Presentation Profile selection belongs partly in user preferences,
+* portable vs device-specific Presentation state,
+* target-language change behavior,
+* multi-target future model,
+* basic offline support scope,
+* device-handoff synchronization,
+* whether SessionContextSnapshot is always persisted,
+* ResolvedConfigurationSnapshot retention,
+* Session fork requirements,
+* whether Session types can change,
+* whether `MIXED` is necessary,
+* tombstone policy,
+* Session analytics privacy policy.
+
+---
+
+# Ownership Summary
+
+```text
+Session owns
+    stable working-context identity
+    Project scope
+    lifecycle
+    current logical context
+    resume position
+    Profile selections
+    Language selections
+    Session Preferences
+    temporary override references
+    bounded navigation state
+    review navigation
+    portable presentation preferences
+    checkpoints
+    fork lineage
+
+Session contributes to
+    ResolvedConfigurationSnapshot
+    GlossarySnapshot
+    CharacterContextSnapshot
+    OperationContext
+
+Session references
+    Project
+    optional Book
+    Chapter
+    optional Page
+    optional TextBlock
+    Translation
+    Profiles
+    Review resources
+
+does not own
+    authentication
+    long-term reading truth
+    OCR execution
+    Translation execution
+    Review decisions
+    Glossary truth
+    Character truth
+    Profile definitions
+    provider runtime
+    Presentation artifacts
+    device leases
+```
+
+Session is therefore the durable-but-bounded **user working-context domain**, not a container for processing state or content truth.
 
 ---
 
 # Related Documents
+
+Domain:
 
 * `README.md`
 * `PROJECT.md`
@@ -2962,21 +2452,15 @@ The MVP may defer:
 * `GLOSSARY.md`
 * `CHARACTER.md`
 * `PROFILE.md`
+* `WORKSPACE.md`
+
+Architecture:
+
 * `docs/architecture/CAPABILITY_MAP.md`
+* `docs/architecture/OWNERSHIP_MAP.md`
 * `docs/architecture/DATA_FLOW.md`
 * `docs/architecture/STATE_MACHINE.md`
 * `docs/architecture/EVENT_BUS.md`
 * `docs/architecture/MODULE_DEPENDENCY.md`
-* `docs/architecture/ai/PIPELINE.md`
-* `docs/architecture/ai/CONTEXT.md`
-* `docs/architecture/ai/MEMORY.md`
-* `docs/architecture/ai/PROMPTS.md`
-* `docs/architecture/ai/REQUEST.md`
-* `docs/architecture/ai/RESPONSE.md`
-* `docs/architecture/ai/ROUTING.md`
-* `docs/architecture/ai/CACHE.md`
-* `docs/architecture/runtime/JOB.md`
-* `docs/architecture/runtime/QUEUE.md`
-* `docs/architecture/presentation/LAYOUT.md`
-* `docs/architecture/presentation/TYPOGRAPHY.md`
-* `docs/architecture/presentation/FONTS.md`
+
+Module contracts remain authoritative for runtime execution, reading-session behavior, capture, Translation, OCR, Presentation and review workflows.

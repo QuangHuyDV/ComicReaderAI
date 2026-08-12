@@ -1,7 +1,7 @@
 # Workspace Domain
 
 * **Document:** Domain / Workspace
-* **Version:** 1.0.0
+* **Version:** 2.0.0
 * **Status:** Draft
 * **Owner:** CRAI Architecture
 
@@ -9,400 +9,436 @@
 
 # Purpose
 
-The Workspace domain defines the highest-level ownership, collaboration and policy boundary inside CRAI.
+A `Workspace` is CRAI's highest-level tenant, administrative, collaboration and policy boundary.
 
-A Workspace groups users, Projects and shared resources under one administrative context.
+A Workspace groups:
 
-It may represent:
+* principals,
+* Projects,
+* shared domain resources,
+* administrative policies,
+* resource entitlements,
+* provider configuration references,
+* collaboration settings,
 
-* One individual user
-* One translation team
-* One publisher
-* One organization
-* One research group
-* One local CRAI installation
-* One temporary collaboration group
+under one stable ownership context.
 
-Workspace provides shared governance for:
+A Workspace may represent:
 
-* Membership
-* Roles
-* Permissions
-* Project ownership
-* Shared profiles
-* Shared glossaries
-* Shared terminology
-* Provider configuration references
-* Usage limits
-* Storage limits
-* Privacy policies
-* Data residency
-* Audit
-* Retention
-* Billing ownership
-* Collaboration defaults
+* one individual,
+* one translation team,
+* one publisher,
+* one organization,
+* one research group,
+* one local CRAI installation,
+* one temporary collaboration group.
 
-Workspace must remain independent from:
+Workspace answers:
 
-* Authentication provider implementation
-* Payment provider implementation
-* Cloud deployment topology
-* AI provider-specific organizations
-* Operating-system user accounts
-* Browser profiles
-* Runtime worker pools
+```text
+Who owns this CRAI environment?
+
+Who may participate?
+
+Which Projects belong here?
+
+Which shared resources are available?
+
+Which administrative constraints apply?
+
+Which tenant boundary protects this data?
+```
+
+Workspace does NOT answer the detailed semantic questions of Translation, Glossary, Character, OCR, Presentation or Session.
 
 ---
 
 # Domain Role
 
-Workspace is the top-level tenant and collaboration boundary.
+Conceptually:
 
 ```text
 Workspace
-├── Members
-├── Roles
-├── Policies
+├── Membership
+├── Authorization Scope
 ├── Projects
-├── Shared Resources
-├── Usage
-├── Quotas
-├── Audit
+├── Shared Resource Availability
+├── Administrative Defaults
+├── Mandatory Policies
+├── Entitlement References
+├── Provider Configuration References
+├── Integration References
+├── Usage / Billing Scope
+├── Audit Scope
+└── Tenant Isolation
+```
+
+Workspace is primarily a governance boundary.
+
+It MUST NOT become a super-aggregate containing all Workspace-owned data.
+
+---
+
+# Ownership Hierarchy
+
+Typical logical ownership:
+
+```text
+Workspace
+│
+├── Project
+│   ├── Book
+│   ├── Chapter
+│   ├── Page
+│   ├── Image
+│   ├── TextBlock
+│   ├── Translation
+│   ├── Character
+│   └── Project-scoped resources
+│
+├── Workspace-scoped Glossary resources
+├── Workspace-scoped Profiles
+├── Workspace-scoped policies
+├── Memberships
+├── Provider Configurations
 └── Integrations
 ```
 
-Typical ownership hierarchy:
+This hierarchy expresses tenant ownership.
 
-```text
-Workspace
-    │
-    ├── Project
-    │    ├── Book
-    │    ├── Chapter
-    │    ├── Page
-    │    ├── TextBlock
-    │    ├── Translation
-    │    ├── Character
-    │    └── Project Glossary
-    │
-    ├── Workspace Glossary
-    ├── Shared Profiles
-    ├── Members
-    └── Policies
-```
-
-Workspace governs access and defaults.
-
-Project remains the primary business boundary for one translation or reading collection.
+It does NOT imply one aggregate transaction boundary.
 
 ---
 
 # Workspace Is Not Project
 
-Workspace and Project serve different purposes.
-
 ```text
 Workspace
-    = ownership, collaboration and policy boundary
+    = tenant, administration, collaboration and policy boundary
 
 Project
     = content and translation business boundary
 ```
 
-A Workspace may own many Projects.
+A Workspace MAY own many Projects.
 
-A Project normally belongs to one Workspace.
+For CRAI MVP:
 
-Workspace-level configuration may provide defaults, but Project configuration may specialize those defaults where policy permits.
+```text
+Project
+    belongs to exactly one Workspace
+```
+
+Project transfer between Workspaces is a migration workflow.
+
+It MUST NOT be implemented as an ordinary `workspaceId` field update.
 
 ---
 
 # Workspace Is Not User
 
-A Workspace may contain:
+Workspace identity is separate from User identity.
 
-* One user
-* Several users
-* Service identities
-* External collaborators
-* Automated agents
+```text
+User
+    !=
+Workspace
+```
 
-The Workspace identity must remain stable independently from any individual member.
+A user MAY:
 
-Deleting or removing one member must not automatically delete the Workspace.
+* own a Workspace,
+* belong to several Workspaces,
+* leave a Workspace,
+* be removed from a Workspace.
+
+Workspace identity remains stable independently.
 
 ---
 
-# Workspace Is Not Authentication Organization
+# Workspace Is Not Authentication Tenant
 
-An external authentication system may expose:
+External identity providers may expose:
 
-* Organization
-* Tenant
-* Directory
-* Group
-* Team
+* organizations,
+* tenants,
+* directories,
+* teams,
+* groups.
 
-Those external identities may map to a CRAI Workspace, but they are not the canonical Workspace identity.
+These MAY map to a CRAI Workspace.
+
+They MUST NOT become canonical Workspace identity.
 
 ```text
 CRAI Workspace ID
-≠
-Authentication Provider Organization ID
+    !=
+Authentication Provider Tenant ID
 ```
 
-Workspace must remain portable across authentication providers.
+Workspace must remain portable across authentication systems.
 
 ---
 
 # Workspace Is Not Provider Account
 
-AI, OCR or storage providers may have their own account or organization identifiers.
+AI/OCR/storage providers may expose:
 
-These must remain infrastructure references.
+* accounts,
+* organizations,
+* projects,
+* subscriptions,
+* regions.
+
+These are external/infrastructure identities.
 
 ```text
 Workspace
-    │
-    └── Provider Configuration Reference
-             └── Provider Account / Organization
+    |
+    v
+ProviderConfiguration
+    |
+    v
+Provider Account / Organization
 ```
 
-A Workspace may use several providers.
+A Workspace MAY use several providers.
 
-One provider account may potentially serve several Workspaces under explicit isolation policy.
+One provider account MAY serve multiple Workspaces only under explicit isolation policy.
+
+---
+
+# Workspace Is Not Billing Account
+
+Billing-provider customer identity is not Workspace identity.
+
+```text
+Workspace ID
+    !=
+Billing Customer ID
+```
+
+Workspace MAY be the logical billing attribution boundary while billing infrastructure maintains external customer/subscription records.
 
 ---
 
 # Aggregate Boundary
 
-Workspace should be modeled as an Aggregate Root.
+Workspace SHOULD be an independently addressable Aggregate Root.
+
+Recommended core aggregate:
 
 ```text
-Workspace Aggregate
-├── Workspace
-├── Workspace Metadata
-├── Workspace Lifecycle
-├── Workspace Ownership
-├── Workspace Settings
-├── Policy References
-└── Aggregate Version
+Workspace
+├── workspaceId
+├── workspaceType
+├── displayName
+├── slug?
+├── ownerReference
+├── lifecycleStatus
+├── defaultLocale?
+├── defaultTimeZone?
+├── activePolicySetRevisionId?
+├── administrativeSettings
+├── createdAt
+├── updatedAt
+└── version
 ```
 
-High-cardinality or independently changing concepts should remain separate aggregates:
+---
 
-* Membership
-* Role
-* Invitation
-* Project
-* Subscription
-* Usage Ledger
-* API Credential
-* Audit Record
-* Shared Glossary
-* Shared Profile
-* Provider Configuration
+# Core Workspace Ownership
 
-This prevents the Workspace aggregate from becoming excessively large.
+The Workspace Aggregate owns:
+
+* stable Workspace identity,
+* Workspace metadata,
+* Workspace lifecycle,
+* owner reference,
+* administrative settings,
+* active policy-set reference,
+* aggregate version.
+
+It coordinates but SHOULD NOT directly contain high-cardinality collections.
+
+---
+
+# Separate Aggregates and Domains
+
+The following SHOULD remain separate:
+
+```text
+WorkspaceMembership
+WorkspaceInvitation
+Role
+RoleAssignment
+PolicySet
+Project
+Glossary
+Profile
+ProviderConfiguration
+IntegrationConfiguration
+Subscription
+Entitlement
+Quota
+UsageLedger
+AuditRecord
+LegalHold
+ServiceAccount
+```
+
+This prevents Workspace from becoming an unbounded aggregate.
 
 ---
 
 # Workspace Responsibilities
 
-The Workspace domain is responsible for:
+Workspace domain is responsible for:
 
-* Maintaining stable Workspace identity
-* Defining Workspace ownership
-* Defining membership boundaries
-* Referencing roles and permissions
-* Owning Projects
-* Managing Workspace lifecycle
-* Providing shared configuration defaults
-* Defining policy boundaries
-* Defining resource limits
-* Defining data visibility
-* Defining collaboration rules
-* Supporting invitations
-* Supporting member removal
-* Supporting ownership transfer
-* Supporting Workspace suspension and archival
-* Emitting Workspace-related events
-* Maintaining tenant isolation
-* Providing audit scope
+* stable tenant identity,
+* administrative ownership,
+* membership boundary,
+* Project ownership boundary,
+* tenant isolation scope,
+* Workspace lifecycle,
+* Workspace-scoped policy activation,
+* Workspace-scoped defaults,
+* availability of shared resources,
+* administrative governance,
+* billing attribution scope,
+* usage attribution scope,
+* audit scope,
+* collaboration boundary.
 
-The Workspace domain is not responsible for:
+---
 
-* Authenticating passwords
-* Issuing access tokens
-* Processing payments directly
-* Executing OCR or Translation
-* Managing provider API calls
-* Storing Project content directly
-* Performing permission checks inside every domain aggregate
-* Managing operating-system files
-* Maintaining live user presence
-* Implementing collaboration transport
+# Workspace Does Not Own Semantic Truth
+
+Workspace MUST NOT own:
+
+* Translation semantics,
+* OCR results,
+* TextBlock semantics,
+* Character truth,
+* Glossary Entry semantics,
+* Profile semantics,
+* Speaker Attribution,
+* Review decisions,
+* Presentation artifacts,
+* Session working state.
+
+Those remain owned by their respective domains.
+
+Workspace may govern whether and how those resources may be used.
 
 ---
 
 # Workspace Identity
 
-Each Workspace has a stable identifier.
+Every Workspace has a stable:
 
 ```text
-Workspace ID
+workspaceId
 ```
 
-Workspace identity persists through:
+Workspace identity survives:
 
-* Name changes
-* Ownership transfer
-* Member changes
-* Subscription changes
-* Provider changes
-* Project creation and deletion
-* Migration between deployment environments
-* Domain name changes
-* Authentication-provider changes
+* rename,
+* slug change,
+* ownership transfer,
+* membership changes,
+* policy changes,
+* subscription changes,
+* provider changes,
+* Project creation/deletion,
+* infrastructure migration.
 
-Workspace ID must never be derived only from:
+Workspace ID MUST NOT be derived solely from:
 
-* Workspace name
-* Owner email
-* Company domain
-* Provider organization ID
-* Billing customer ID
+* Workspace name,
+* owner email,
+* organization domain,
+* provider account ID,
+* billing customer ID,
+* storage path.
 
 ---
 
-# Workspace Record
+# Workspace Type
 
-Recommended conceptual structure:
+Recommended values:
 
 ```text
-Workspace
-├── Workspace ID
-├── Workspace Type
-├── Display Name
-├── Slug
-├── Owner Reference
-├── Lifecycle State
-├── Default Locale
-├── Default Time Zone
-├── Policy Set Reference
-├── Subscription Reference
-├── Created At
-├── Updated At
-└── Aggregate Version
+PERSONAL
+TEAM
+ORGANIZATION
+PUBLISHER
+LOCAL
+TEMPORARY
+CUSTOM
 ```
 
-Sensitive credentials must not be embedded in the Workspace aggregate.
+Workspace Type MAY affect initial defaults.
 
----
-
-# Workspace Types
-
-Recommended Workspace Types:
-
-* Personal
-* Team
-* Organization
-* Publisher
-* Local
-* Temporary
-* Educational
-* Custom
-
-Workspace Type may influence defaults.
-
-It must not hard-code authorization rules.
-
-Examples:
-
-## Personal
-
-Designed for one primary user.
-
-May still support invited collaborators later.
-
-## Team
-
-Designed for a small translation or reading group.
-
-## Organization
-
-Designed for centrally managed users, policies and Projects.
-
-## Publisher
-
-May require stricter terminology, review and release controls.
-
-## Local
-
-Represents an offline or self-hosted installation without cloud collaboration.
-
-## Temporary
-
-May have limited retention or expiration policies.
+It MUST NOT hard-code authorization semantics.
 
 ---
 
 # Personal Workspace
 
-Every registered user may receive one default Personal Workspace.
+A Personal Workspace represents a tenant primarily controlled by one user.
 
-A Personal Workspace:
+It MAY support:
 
-* Has one initial owner
-* May own private Projects
-* May support limited invitations
-* May use personal provider credentials
-* May later be upgraded to a Team Workspace
+* private Projects,
+* personal Profiles,
+* personal Glossaries,
+* local/provider configuration,
+* later collaboration.
 
-The user account and Personal Workspace remain different identities.
-
-A user may belong to several Workspaces.
+The user account and Personal Workspace remain separate identities.
 
 ---
 
 # Local Workspace
 
-A local-only installation may create a Workspace without a cloud account.
+A Local Workspace MAY exist without a cloud account.
 
 Possible characteristics:
 
-* Device-local identity
-* No remote members
-* No server-side billing
-* Local provider configuration
-* Local audit records
-* Optional later synchronization
+* locally generated Workspace ID,
+* device-local persistence,
+* no remote membership,
+* local provider configuration,
+* local policy,
+* optional later synchronization.
 
-Local Workspace IDs must remain globally unique enough to support later import or synchronization.
+Workspace identity SHOULD be sufficiently unique for future import/synchronization.
 
 ---
 
 # Workspace Metadata
 
-Workspace metadata may include:
+Metadata MAY include:
 
-* Display name
-* Description
-* Logo reference
-* Slug
-* Preferred locale
-* Time zone
-* Website reference
-* Contact metadata
-* Organization category
+```text
+displayName
+description
+logoReference
+slug
+preferredLocale
+timeZone
+websiteReference
+organizationCategory
+```
 
-Metadata changes normally do not invalidate Project business artifacts.
+Metadata changes normally MUST NOT invalidate Project business artifacts.
 
 ---
 
-# Workspace Slug
+# Slug
 
-Slug is a human-readable locator.
+Slug is a mutable human-readable locator.
 
 Example:
 
@@ -410,281 +446,193 @@ Example:
 moonlight-translations
 ```
 
-Slug must not be treated as stable identity.
+Slug MUST NOT be canonical identity.
 
-Slug may change.
-
-Historical links may require redirects.
-
-Uniqueness may be:
-
-* Global
-* Deployment-specific
-* Scoped by region
-
-Workspace ID remains canonical.
+Historical slug redirects MAY be supported.
 
 ---
 
 # Workspace Ownership
 
-Workspace ownership defines ultimate administrative authority.
+Workspace ownership represents ultimate administrative responsibility.
 
-Recommended model:
-
-```text
-Workspace Ownership
-├── Workspace ID
-├── Owner Principal ID
-├── Ownership Type
-├── Assigned At
-├── Assigned By
-└── Transfer State
-```
-
-Possible owner principals:
-
-* User
-* Organization identity
-* System identity
-* Legal entity reference
-
-Recommended MVP:
+Recommended:
 
 ```text
-One User Owner per Workspace
+WorkspaceOwnership
+├── workspaceId
+├── ownerPrincipalId
+├── assignedAt
+├── assignedBy
+└── transferState?
 ```
+
+MVP SHOULD support:
+
+```text
+one User owner
+```
+
+per active Workspace.
 
 ---
 
-# Owner Responsibilities
+# Ownership and Membership
 
-The Workspace Owner may normally:
+Owner identity and Membership SHOULD remain conceptually distinct.
 
-* Update Workspace metadata
-* Manage members
-* Assign administrative roles
-* Create and archive Projects
-* Manage policies
-* Manage shared provider configuration
-* View Workspace usage
-* Manage subscription
-* Export Workspace data
-* Transfer ownership
-* Delete or archive the Workspace
+An owner normally also has an active Membership.
 
-Exact permissions should be expressed through authorization policy rather than hard-coded owner checks everywhere.
+But:
+
+```text
+Ownership
+    = ultimate administrative responsibility
+
+Membership
+    = participation relationship
+```
+
+This prevents authorization rules from depending on special-case membership types.
 
 ---
 
 # Ownership Transfer
 
-Ownership transfer must be explicit and auditable.
+Ownership transfer MUST be:
 
-Recommended flow:
+* explicit,
+* validated,
+* auditable,
+* idempotent.
+
+Recommended workflow:
 
 ```text
-Requested
-→ Pending Acceptance
-→ Accepted
-→ Completed
+REQUESTED
+    |
+    v
+PENDING_ACCEPTANCE
+    |
+    v
+ACCEPTED
+    |
+    v
+COMPLETED
 ```
 
 Alternative outcomes:
 
 ```text
-Cancelled
-Expired
-Rejected
-Failed
+CANCELLED
+REJECTED
+EXPIRED
+FAILED
 ```
-
-Transfer should validate:
-
-* Current owner authority
-* Target member eligibility
-* Target account status
-* Subscription constraints
-* Legal or organizational policy
-* Required confirmations
 
 ---
 
 # Ownership Transfer Invariant
 
-A Workspace must not become ownerless during a transfer.
+A normal active Workspace MUST NOT become ownerless.
 
 Recommended sequence:
 
-1. Validate target
-2. Record pending transfer
-3. Obtain required acceptance
-4. Assign new owner
-5. Downgrade or retain previous owner role
-6. Emit transfer event
-7. Preserve audit history
+```text
+validate target
+    |
+create transfer
+    |
+obtain acceptance
+    |
+assign new owner
+    |
+adjust previous owner's roles
+    |
+emit event
+```
 
 ---
 
 # Membership
 
-Workspace Membership links a principal to a Workspace.
+`WorkspaceMembership` links a Principal to a Workspace.
 
-Membership should normally be a separate Aggregate Root.
+Recommended:
 
 ```text
-Workspace Membership
-├── Membership ID
-├── Workspace ID
-├── Principal ID
-├── Membership Type
-├── Status
-├── Role Assignments
-├── Joined At
-├── Last Updated At
-└── Version
+WorkspaceMembership
+├── membershipId
+├── workspaceId
+├── principalId
+├── principalType
+├── status
+├── joinedAt
+├── updatedAt
+└── version
 ```
 
-Possible principal types:
-
-* User
-* Service Account
-* External Collaborator
-* Automation Agent
-* Directory Group
-
-The MVP may support User principals only.
+Membership SHOULD be a separate Aggregate Root.
 
 ---
 
-# Membership Identity
+# Principal Types
 
-Membership has its own stable identity.
+Future principal types MAY include:
 
 ```text
-Membership ID
+USER
+SERVICE_ACCOUNT
+EXTERNAL_COLLABORATOR
+AUTOMATION_AGENT
+DIRECTORY_GROUP
 ```
 
-This allows CRAI to preserve:
+MVP SHOULD initially support:
 
-* Join history
-* Role history
-* Suspension history
-* Removal history
-* Re-invitation history
-
-A user removed and later re-added may receive:
-
-* A new Membership ID
-* Or a reactivated historical Membership
-
-The policy must be explicit.
+```text
+USER
+```
 
 ---
 
 # Membership Status
 
-Recommended statuses:
-
-* Invited
-* Pending
-* Active
-* Suspended
-* Removed
-* Expired
-* Rejected
-
-Membership Status is separate from User account status.
-
-An active user account may have a suspended Workspace Membership.
-
----
-
-# Membership Types
-
-Possible Membership Types:
-
-* Owner
-* Internal
-* External
-* Guest
-* Service
-* Automation
-* Directory Managed
-
-Ownership should preferably remain separate from Membership Type when a richer authorization model is used.
-
----
-
-# Member
-
-A Member is the effective view of:
+Recommended:
 
 ```text
-Principal
-+
-Active Workspace Membership
+INVITED
+PENDING
+ACTIVE
+SUSPENDED
+REMOVED
+EXPIRED
 ```
 
-Workspace does not own the User identity.
-
-It owns the relationship between that identity and the Workspace.
+Membership status is independent from User account status.
 
 ---
 
 # Invitation
 
-Workspace Invitation should be modeled separately from active Membership.
+Invitation is separate from Membership.
+
+Recommended:
 
 ```text
-Workspace Invitation
-├── Invitation ID
-├── Workspace ID
-├── Invitee Reference
-├── Intended Roles
-├── Intended Project Scope
-├── Invited By
-├── Created At
-├── Expires At
-├── Status
-└── Token Reference
+WorkspaceInvitation
+├── invitationId
+├── workspaceId
+├── inviteeReference
+├── intendedRoleReferences
+├── intendedProjectScope?
+├── invitedBy
+├── createdAt
+├── expiresAt
+└── status
 ```
 
-Invitation tokens belong to security infrastructure and should be stored securely.
-
----
-
-# Invitation Status
-
-Recommended states:
-
-```text
-Created
-→ Sent
-→ Accepted
-```
-
-Alternative terminal states:
-
-* Rejected
-* Revoked
-* Expired
-* Failed
-
-An accepted invitation creates or activates a Membership.
-
----
-
-# Invitee Reference
-
-An invitation may target:
-
-* Existing User ID
-* Email address hash or secure reference
-* Organization directory identity
-* Shareable invite link
-
-Plain sensitive invitation details should be minimized in events and logs.
+Secret invitation tokens belong to security infrastructure.
 
 ---
 
@@ -692,3014 +640,2172 @@ Plain sensitive invitation details should be minimized in events and logs.
 
 Role groups permission assignments.
 
-Recommended role examples:
-
-* Owner
-* Administrator
-* Project Manager
-* Translator
-* Reviewer
-* Terminologist
-* Character Editor
-* Reader
-* Guest
-* Billing Manager
-* Integration Manager
-
-Roles may be:
-
-* System-defined
-* Workspace-defined
-* Project-specific
-
----
-
-# Workspace Role and Project Role
-
-Workspace Role applies across Workspace-level capabilities.
-
-Project Role applies within one Project.
+Examples:
 
 ```text
-Workspace Administrator
+OWNER
+ADMINISTRATOR
+PROJECT_MANAGER
+TRANSLATOR
+REVIEWER
+TERMINOLOGIST
+CHARACTER_EDITOR
+READER
+GUEST
+BILLING_MANAGER
+INTEGRATION_MANAGER
 ```
 
-does not necessarily imply:
+Roles MAY be:
 
-```text
-Project Translator
-```
-
-though policy may grant such inheritance.
-
-Recommended permission resolution:
-
-```text
-Explicit Deny
-      ↓
-Project-Specific Grant
-      ↓
-Workspace Role Grant
-      ↓
-Inherited Default
-      ↓
-No Access
-```
-
-The final order depends on the authorization model, but must remain deterministic.
-
----
-
-# Role Assignment
-
-Recommended structure:
-
-```text
-Role Assignment
-├── Assignment ID
-├── Workspace ID
-├── Membership ID
-├── Role ID
-├── Scope
-├── Assigned By
-├── Assigned At
-├── Expires At
-└── Status
-```
-
-Scope may be:
-
-* Workspace
-* Project
-* Book
-* Capability
-* Resource group
-
-MVP should prioritize Workspace and Project scopes.
+* system-defined,
+* Workspace-defined,
+* Project-specific.
 
 ---
 
 # Permission
 
-Permission represents one authorized capability.
+Permission represents an authorized capability.
 
 Examples:
 
-* `workspace.view`
-* `workspace.manage`
-* `workspace.members.invite`
-* `workspace.members.remove`
-* `workspace.roles.assign`
-* `project.create`
-* `project.view`
-* `project.translate`
-* `project.review`
-* `glossary.manage`
-* `character.manage`
-* `provider.configure`
-* `usage.view`
-* `billing.manage`
-* `audit.view`
-* `workspace.export`
-* `workspace.delete`
+```text
+workspace.view
+workspace.manage
+workspace.members.invite
+workspace.members.remove
+workspace.roles.assign
 
-Permissions should be stable identifiers.
+project.create
+project.view
+project.translate
+project.review
 
-Display labels may be localized separately.
+glossary.manage
+character.manage
+profile.manage
+
+provider.configure
+usage.view
+billing.manage
+audit.view
+workspace.export
+workspace.delete
+```
+
+Permission identifiers SHOULD remain stable.
+
+Localized labels remain presentation concerns.
+
+---
+
+# Role Assignment
+
+Recommended:
+
+```text
+RoleAssignment
+├── assignmentId
+├── workspaceId
+├── membershipId
+├── roleId
+├── scope
+├── assignedBy
+├── assignedAt
+├── expiresAt?
+└── status
+```
+
+MVP SHOULD prioritize:
+
+```text
+WORKSPACE
+PROJECT
+```
+
+scopes.
+
+---
+
+# Workspace Role vs Project Role
+
+Workspace-level authority and Project-level authority are separate.
+
+Example:
+
+```text
+Workspace Billing Manager
+```
+
+does NOT automatically mean:
+
+```text
+Project Translator
+```
+
+unless explicit authorization policy says otherwise.
 
 ---
 
 # Authorization Boundary
 
-Workspace defines the tenant boundary used by authorization.
+Workspace defines tenant scope used by authorization.
 
-Every Workspace-owned resource should be attributable to exactly one Workspace, directly or transitively.
+Every Workspace-owned resource MUST be traceable to one Workspace either:
+
+* directly,
+* or through canonical ownership.
 
 Example:
 
 ```text
 Translation
-→ TextBlock
-→ Page
-→ Chapter
-→ Book
-→ Project
-→ Workspace
-```
-
-Authorization queries may use projections for efficiency, but canonical ownership must remain traceable.
-
----
-
-# Tenant Isolation
-
-Workspace is the primary tenant isolation boundary.
-
-Requirements:
-
-* Workspace data must not leak across tenants.
-* Cache entries must preserve tenant isolation where data is private.
-* Search indexes must be tenant-scoped.
-* Provider requests must not include another Workspace’s context.
-* Background jobs must carry Workspace identity.
-* Events must include safe Workspace routing metadata.
-* Object storage paths must be tenant-aware.
-* Logs must avoid exposing cross-tenant data.
-* Usage must be attributed to the correct Workspace.
-
----
-
-# Workspace Context
-
-Application operations should carry Workspace Context.
-
-Recommended structure:
-
-```text
-Workspace Context
-├── Workspace ID
-├── Principal ID
-├── Membership ID
-├── Effective Roles
-├── Effective Permissions
-├── Policy Set Revision
-├── Correlation ID
-└── Authentication Context Reference
-```
-
-Workspace Context is an application/security concept.
-
-It must not be persisted as canonical business truth inside every domain object.
-
----
-
-# Workspace and Project Ownership
-
-A Project normally belongs to one Workspace.
-
-```text
+    ->
+TextBlock
+    ->
+Chapter
+    ->
 Project
-├── Project ID
-└── Workspace ID
-```
-
-Project transfer between Workspaces should be an explicit migration operation.
-
-Changing `Workspace ID` directly is insufficient because related resources may include:
-
-* Project members
-* Shared glossary references
-* Shared profiles
-* Provider policies
-* Storage objects
-* Usage history
-* Audit history
-* Encryption keys
-* External integrations
-
----
-
-# Project Creation
-
-Workspace policy may control:
-
-* Who can create Projects
-* Maximum number of Projects
-* Allowed Project Types
-* Default visibility
-* Default languages
-* Default Profiles
-* Default Glossary sources
-* Default retention
-* Default provider routing
-* Default storage region
-
-Project creation should capture the Workspace policy revision or resulting settings where reproducibility matters.
-
----
-
-# Project Visibility
-
-Recommended Project visibility values:
-
-* Private
-* Workspace
-* Restricted
-* Shared Link
-* Public
-
-## Private
-
-Visible only to explicitly authorized members.
-
-## Workspace
-
-Visible to all Workspace members with appropriate general permissions.
-
-## Restricted
-
-Visible only to assigned Project members or roles.
-
-## Shared Link
-
-Accessible through a controlled share mechanism.
-
-## Public
-
-Publicly discoverable or readable, if supported.
-
-Visibility does not replace permission evaluation.
-
----
-
-# Project Transfer
-
-Project transfer may occur between Workspaces.
-
-Recommended lifecycle:
-
-```text
-Requested
-→ Validating
-→ Pending Acceptance
-→ Migrating
-→ Completed
-```
-
-Possible failures:
-
-* Unsupported shared resource dependency
-* Storage region conflict
-* Policy incompatibility
-* Subscription limit exceeded
-* Missing target permissions
-* Encryption incompatibility
-* Active processing conflict
-
----
-
-# Transfer Dependencies
-
-Project transfer should inspect:
-
-* Workspace Glossary references
-* Workspace Profile references
-* Character references
-* Shared attachments
-* Provider configuration dependencies
-* Access policies
-* Project memberships
-* Storage ownership
-* Usage attribution
-* Scheduled operations
-* External connector references
-
-Dependencies may need to be:
-
-* Copied
-* Rebound
-* Detached
-* Rejected
-* Manually resolved
-
----
-
-# Workspace Shared Resources
-
-A Workspace may own resources shared across Projects.
-
-Possible shared resources:
-
-* Glossaries
-* Translation Profiles
-* OCR Profiles
-* Presentation Profiles
-* Character templates
-* Prompt templates
-* Validation policies
-* Font policies
-* Provider routing policies
-* Import mappings
-* Export templates
-* Knowledge references
-
-Shared resources must use immutable revisions when consumed by durable outputs.
-
----
-
-# Shared Resource Ownership
-
-Recommended structure:
-
-```text
-Shared Resource
-├── Resource ID
-├── Workspace ID
-├── Resource Type
-├── Active Revision
-├── Visibility
-├── Review State
-├── Created By
-└── Created At
-```
-
-Specific resource domains remain responsible for their own semantic rules.
-
-Workspace only establishes ownership and availability.
-
----
-
-# Workspace Glossary
-
-Workspace Glossary provides terminology reusable across Projects.
-
-Recommended precedence:
-
-```text
-Operation Glossary Override
-        ↓
-Session Glossary Override
-        ↓
-Page / Chapter / Book Glossary
-        ↓
-Project Glossary
-        ↓
-Workspace Glossary
-        ↓
-User Glossary
-        ↓
-Global Glossary
-```
-
-More specific scope should normally take precedence.
-
-Translation still consumes an immutable Glossary Snapshot.
-
-It must not depend directly on mutable Workspace Glossary state.
-
----
-
-# Shared Profile
-
-Workspace may provide shared:
-
-* Translation Profiles
-* OCR Profiles
-* Presentation Profiles
-* Validation Profiles
-* Routing Profiles
-
-Projects may:
-
-* Reference exact shared revisions
-* Clone them into Project scope
-* Override allowed fields
-* Pin a revision
-* Follow the latest approved revision
-
-For reproducibility, operations must resolve an exact Profile Revision.
-
----
-
-# Inheritance Policy
-
-Workspace defaults may be inherited by Projects.
-
-Possible inheritance modes:
-
-* Fixed
-* Default
-* Overridable
-* Required
-* Prohibited
-* Revision Pinned
-* Track Latest Approved
-
-Example:
-
-```text
-Workspace Local-Only Policy:
-Required
-```
-
-Project cannot enable cloud providers.
-
-Example:
-
-```text
-Workspace Target Language:
-Default vi
-```
-
-Project may override it.
-
----
-
-# Configuration Resolution
-
-Recommended hierarchy:
-
-```text
-Operation Configuration
-        ↓
-Session Configuration
-        ↓
-Book or Chapter Configuration
-        ↓
-Project Configuration
-        ↓
-Workspace Configuration
-        ↓
-User Preference
-        ↓
-Application Default
-```
-
-Policy constraints are evaluated separately.
-
-A lower scope may override a default but cannot override a mandatory higher-level policy.
-
----
-
-# Default and Policy Separation
-
-Workspace Default and Workspace Policy are different.
-
-```text
-Default
-= value used when no narrower choice exists
-
-Policy
-= constraint on which values are allowed
-```
-
-Example:
-
-```text
-Default provider:
-Provider A
-```
-
-Project may select Provider B.
-
-But:
-
-```text
-Policy:
-Cloud providers forbidden
-```
-
-cannot be overridden by the Project.
-
----
-
-# Workspace Policy Set
-
-Workspace should reference a versioned Policy Set.
-
-```text
-Workspace Policy Set
-├── Policy Set ID
-├── Workspace ID
-├── Policy Revision ID
-├── Status
-├── Effective From
-├── Created By
-└── Approved By
-```
-
-Policy changes should create new immutable revisions.
-
----
-
-# Policy Categories
-
-Recommended categories:
-
-* Access
-* Collaboration
-* Privacy
-* Provider Usage
-* Data Residency
-* Retention
-* Export
-* Import
-* Content Safety
-* Cost Control
-* Storage
-* Processing
-* Audit
-* Sharing
-* Backup
-* Encryption
-* AI Training Consent
-* External Integration
-
----
-
-# Access Policy
-
-Access policy may define:
-
-* Allowed membership types
-* Guest access
-* Maximum invitation duration
-* Required account verification
-* Required multi-factor authentication
-* Project visibility defaults
-* Public sharing availability
-* Session timeout expectations
-* Service account usage
-
-Authentication enforcement belongs to security infrastructure.
-
-Workspace policy declares the requirement.
-
----
-
-# Privacy Policy
-
-Workspace privacy policy may define:
-
-* Local-only processing
-* Cloud processing allowance
-* Provider allowlist
-* Provider denylist
-* Content logging restrictions
-* Prompt retention restrictions
-* Analytics allowance
-* Telemetry allowance
-* Human review allowance
-* External sharing allowance
-* Data export requirements
-
----
-
-# Provider Policy
-
-Provider policy may define:
-
-* Allowed provider types
-* Allowed provider accounts
-* Allowed regions
-* Local-only requirements
-* Maximum cost tier
-* Sensitive-content restrictions
-* Prompt logging restrictions
-* Model allowlist
-* Model denylist
-* Fallback rules
-
-Provider-specific credentials remain outside the Workspace aggregate.
-
----
-
-# Data Residency
-
-Workspace may define required storage and processing regions.
-
-Recommended representation:
-
-```text
-Data Residency Policy
-├── Allowed Storage Regions
-├── Allowed Processing Regions
-├── Cross-Region Transfer Policy
-├── Backup Regions
-└── Effective Revision
-```
-
-Region identifiers should be canonical and provider-neutral.
-
----
-
-# Retention Policy
-
-Workspace retention policy may define duration for:
-
-* Projects
-* Source images
-* OCR raw results
-* Provider responses
-* Translation revisions
-* Session data
-* Audit logs
-* Temporary files
-* Deleted-resource tombstones
-* Recognition embeddings
-* Export packages
-* Backups
-
-Retention does not necessarily imply physical deletion immediately.
-
-Legal hold and audit requirements may override normal expiry.
-
----
-
-# Export Policy
-
-Export policy may define:
-
-* Who can export
-* Which formats are allowed
-* Whether raw source images may be exported
-* Whether provider metadata may be exported
-* Whether audit information must be included
-* Whether watermarking is required
-* Whether spoiler filtering is required
-* Whether approval is required
-* Maximum export size
-
----
-
-# Sharing Policy
-
-Sharing policy may control:
-
-* Public links
-* Link expiration
-* Password protection
-* Download permission
-* Copy permission
-* Comment permission
-* Anonymous access
-* Search-engine indexing
-* Project visibility
-* Shared Session access
-
-Sharing tokens belong to security infrastructure.
-
----
-
-# AI Training Consent
-
-Workspace policy should explicitly represent whether Workspace data may be used for:
-
-* Provider training
-* Internal model improvement
-* Embedding generation
-* Evaluation
-* Human review
-* Quality analysis
-
-Default should be conservative.
-
-Consent must not be inferred from general provider availability.
-
----
-
-# Content Classification
-
-Workspace may define content classification levels:
-
-* Public
-* Internal
-* Confidential
-* Restricted
-* Licensed
-* Personal
-* Unreleased
-
-Projects or individual resources may receive classifications.
-
-Policy may restrict:
-
-* Providers
-* Export
-* Sharing
-* Logging
-* Retention
-* Human review
-* External integrations
-
----
-
-# Workspace Settings
-
-Workspace Settings are mutable administrative preferences.
-
-Examples:
-
-* Default locale
-* Time zone
-* Default target language
-* Default Project visibility
-* Default Translation Profile
-* Default Presentation Profile
-* Notification preferences
-* Invitation settings
-* Review requirements
-* Naming conventions
-
-Settings should not be confused with mandatory policies.
-
----
-
-# Language Defaults
-
-Workspace may define default:
-
-* Source languages
-* Target languages
-* OCR languages
-* Transliteration policies
-* Interface locale
-
-Language values must use canonical Language Value Objects.
-
-Provider language codes remain inside provider adapters.
-
----
-
-# Workspace Locale
-
-Workspace Locale may affect:
-
-* Administrative interface
-* Notification templates
-* Date formatting
-* Number formatting
-* Default document language
-
-It must not automatically become:
-
-* Project source language
-* Translation target language
-* User interface locale for every member
-
-User preferences may override Workspace Locale where allowed.
-
----
-
-# Workspace Time Zone
-
-Workspace Time Zone supports:
-
-* Audit display
-* Scheduled processing
-* Retention deadlines
-* Billing periods
-* Notification windows
-* Reports
-
-Canonical timestamps should remain stored in UTC.
-
-Time zone should use an IANA identifier.
-
-Example:
-
-```text
-Asia/Bangkok
-```
-
----
-
-# Shared Provider Configuration
-
-Workspace may reference one or more provider configurations.
-
-Recommended conceptual structure:
-
-```text
-Provider Configuration
-├── Provider Configuration ID
-├── Workspace ID
-├── Provider Type
-├── Capability Types
-├── Credential Reference
-├── Region
-├── Policy Tags
-├── Status
-└── Version
-```
-
-Credentials must be stored in a secure secret store.
-
----
-
-# Provider Configuration Status
-
-Recommended states:
-
-* Draft
-* Validating
-* Active
-* Disabled
-* Invalid
-* Expired
-* Revoked
-* Archived
-
-Workspace policy determines which Projects may use each configuration.
-
----
-
-# Credential Boundary
-
-Workspace may own authorization to use a credential reference.
-
-Workspace must not contain:
-
-* Raw API key
-* OAuth refresh token
-* Password
-* Private key
-* Provider session cookie
-
-Recommended relationship:
-
-```text
+    ->
 Workspace
-    │
-    └── Provider Configuration
-             │
-             └── Secret Reference
-                      │
-                      └── Secure Secret Store
 ```
 
----
-
-# Personal and Shared Credentials
-
-Possible credential ownership:
-
-* User-owned
-* Workspace-owned
-* System-managed
-* Bring-your-own-key
-* Local-device-only
-
-Policy must define whether:
-
-* Other members may use the credential
-* Usage is visible to administrators
-* Costs are charged to Workspace
-* Credentials can be used outside selected Projects
+Optional Book/Page levels MUST NOT be required for ownership tracing.
 
 ---
 
-# Billing Boundary
+# Authorization Context
 
-Workspace is the recommended billing ownership boundary.
-
-Billing may cover:
-
-* Subscription
-* Seats
-* Storage
-* OCR usage
-* Translation tokens
-* Model execution
-* Export bandwidth
-* Retention tier
-* Collaboration features
-
-Billing provider entities remain infrastructure references.
-
----
-
-# Subscription
-
-Subscription should be a separate aggregate or billing-domain entity.
-
-Recommended structure:
+Application/security infrastructure MAY construct:
 
 ```text
-Workspace Subscription
-├── Subscription ID
-├── Workspace ID
-├── Plan Reference
-├── Status
-├── Billing Customer Reference
-├── Current Period
-├── Seat Limit
-├── Feature Entitlements
-└── Usage Policy Reference
+AuthorizationContext
+├── workspaceId
+├── principalId
+├── membershipId?
+├── effectiveRoleAssignments
+├── effectivePermissions
+├── policyRevisionId
+├── entitlementReferences
+├── authenticationContextReference
+└── correlationId
 ```
 
-The Workspace should not store payment card data.
+This is evaluated context.
 
----
-
-# Subscription Status
-
-Possible states:
-
-* Trial
-* Active
-* Past Due
-* Suspended
-* Cancelled
-* Expired
-* Free
-* Internal
-* Local License
-
-Subscription state may affect capabilities but should not corrupt existing domain data.
-
----
-
-# Entitlement
-
-Entitlement represents an available feature or limit.
-
-Examples:
-
-* Maximum Projects
-* Maximum members
-* Cloud Translation
-* Local model support
-* Character recognition
-* Collaboration
-* Export formats
-* Audit retention
-* Advanced glossary
-* Batch processing
-
-Entitlements should be evaluated separately from user permissions.
-
-```text
-Permission
-= user may perform action
-
-Entitlement
-= Workspace plan supports action
-```
-
-Both may be required.
-
----
-
-# Quota
-
-Quota defines a resource limit.
-
-Recommended quota categories:
-
-* Projects
-* Members
-* Storage bytes
-* Source images
-* OCR pages
-* Translation characters
-* Translation tokens
-* Provider cost
-* Concurrent jobs
-* Requests per time window
-* Export size
-* Audit retention
-* Recognition embeddings
-
----
-
-# Quota Definition
-
-Recommended structure:
-
-```text
-Workspace Quota
-├── Quota ID
-├── Workspace ID
-├── Resource Type
-├── Limit
-├── Period
-├── Enforcement Mode
-├── Warning Thresholds
-├── Effective From
-└── Source
-```
-
-Quota source may be:
-
-* Subscription
-* Administrator override
-* Trial
-* Promotion
-* Local configuration
-* System policy
-
----
-
-# Quota Enforcement
-
-Possible enforcement modes:
-
-* Informational
-* Warning
-* Soft Limit
-* Hard Limit
-* Approval Required
-* Throttled
-
-Examples:
-
-* Storage may use a hard limit.
-* Monthly Translation cost may require approval.
-* Concurrent processing may be throttled.
-* Project count may block new Project creation.
-
----
-
-# Usage
-
-Workspace usage should be recorded in a separate Usage domain or ledger.
-
-Examples:
-
-* OCR pages processed
-* Translation characters
-* Translation tokens
-* Storage consumed
-* Provider cost
-* Processing time
-* Exports
-* Active seats
-
-Workspace may expose usage summaries but should not own the entire event ledger inside its aggregate.
-
----
-
-# Usage Attribution
-
-Every billable or quota-relevant operation should include:
-
-* Workspace ID
-* Project ID where applicable
-* User or service principal
-* Capability
-* Provider
-* Model or engine
-* Quantity
-* Unit
-* Cost estimate
-* Final cost
-* Timestamp
-* Correlation ID
-
-Session ID may be included for correlation but is not the billing owner.
-
----
-
-# Usage Reservation
-
-Expensive operations may reserve quota before execution.
-
-```text
-Requested
-→ Reserved
-→ Consumed
-```
-
-Alternative outcomes:
-
-* Released
-* Expired
-* Adjusted
-* Rejected
-
-Reservation prevents concurrent operations from exceeding limits.
-
----
-
-# Cost Policy
-
-Workspace cost policy may define:
-
-* Daily limit
-* Monthly limit
-* Per-operation limit
-* Approval threshold
-* Provider-specific limits
-* User-specific limits
-* Project-specific budgets
-* Warning thresholds
-* Fallback to local model
-* Fallback to cheaper provider
-
-Cost policy should remain provider-neutral.
-
----
-
-# Project Budget
-
-A Workspace may assign budgets to Projects.
-
-```text
-Workspace Budget
-    │
-    ├── Project A Budget
-    ├── Project B Budget
-    └── Shared Reserve
-```
-
-Project budget usage remains attributed to the Workspace billing boundary.
-
----
-
-# Storage Ownership
-
-Workspace is the recommended logical owner of stored data.
-
-Physical storage may be distributed across:
-
-* Local disk
-* Object storage
-* Database
-* Search index
-* Vector store
-* Backup storage
-* Provider file service
-
-Every stored object should be traceable to a Workspace.
-
----
-
-# Storage Namespace
-
-Recommended logical path:
-
-```text
-workspace/{workspace-id}/project/{project-id}/...
-```
-
-Physical path should not be exposed as canonical business identity.
-
-Storage namespace must not depend only on mutable Workspace slug.
-
----
-
-# Storage Quota
-
-Storage usage may include:
-
-* Original files
-* Captured images
-* Processed images
-* OCR artifacts
-* Translation exports
-* Reference images
-* Cached models
-* Backups
-* Session recovery data
-
-Derived caches may have separate eviction policies.
-
----
-
-# Encryption
-
-Workspace security configuration may define:
-
-* Platform-managed encryption
-* Workspace-managed key
-* Customer-managed key
-* Local-only encryption
-* Key rotation policy
-
-Encryption keys belong to security infrastructure.
-
-Workspace references key policy and key identifiers, not raw key material.
-
----
-
-# Key Rotation
-
-Workspace key rotation must preserve access to historical encrypted artifacts.
-
-Possible flow:
-
-```text
-Active Key Version N
-→ New Key Version N+1
-→ New writes use N+1
-→ Historical objects migrate or retain key reference
-→ Old key retired after validation
-```
-
----
-
-# Shared Search
-
-Workspace-level search may discover:
-
-* Projects
-* Books
-* Characters
-* Glossary Entries
-* Translations
-* Review items
-* Shared Profiles
-
-Search results must respect:
-
-* Workspace membership
-* Project visibility
-* Resource permissions
-* Spoiler restrictions
-* Content classification
-
-Search indexes are derived projections.
-
----
-
-# Workspace Knowledge
-
-A Workspace may eventually contain reusable knowledge:
-
-* Shared terminology
-* Translation conventions
-* Character naming conventions
-* Style guides
-* Historical context
-* Publisher rules
-
-This knowledge should remain in explicit domains such as:
-
-* Glossary
-* Profile
-* Policy
-* Knowledge Base
-* Character Template
-
-Workspace itself should not become an unstructured knowledge dump.
-
----
-
-# Template
-
-Workspace may own templates for:
-
-* Project creation
-* Translation Profile
-* Glossary structure
-* Character metadata
-* Review workflow
-* Export layout
-* Policy configuration
-
-Templates should be versioned.
-
-Creating a Project from a template should record the template revision used.
-
----
-
-# Workspace Project Template
-
-Recommended structure:
-
-```text
-Project Template
-├── Template ID
-├── Workspace ID
-├── Template Revision
-├── Project Type
-├── Default Languages
-├── Default Profiles
-├── Default Policies
-├── Default Folder Structure
-├── Default Glossary References
-└── Review Requirements
-```
-
-A Project created from a template becomes independent unless configured to track selected shared revisions.
-
----
-
-# Review Governance
-
-Workspace may define review requirements.
-
-Examples:
-
-* Translation must be approved before publication
-* Locked terminology changes require Terminologist role
-* Character identity changes require Reviewer role
-* Project export requires Project Manager approval
-* Public sharing requires Administrator approval
-
-Governance policies should produce explicit workflow requirements.
-
----
-
-# Approval Policy
-
-Recommended structure:
-
-```text
-Approval Policy
-├── Resource Type
-├── Action
-├── Required Roles
-├── Required Approval Count
-├── Separation of Duties
-├── Scope
-└── Policy Revision
-```
-
-Example:
-
-```text
-Locked Workspace Glossary Entry modification:
-- One Terminologist approval
-- Editor cannot self-approve
-```
-
-Advanced multi-approval workflow may be deferred beyond MVP.
-
----
-
-# Separation of Duties
-
-Workspace policy may require different members for:
-
-* Creation
-* Review
-* Approval
-* Publication
-* Export
-* Billing changes
-* Provider credential updates
-
-This is especially relevant for publisher or organization Workspaces.
-
----
-
-# Collaboration Defaults
-
-Workspace may define defaults for:
-
-* Comment visibility
-* Review assignment
-* Notification behavior
-* Presence sharing
-* Change tracking
-* Mention rules
-* Guest permissions
-* Conflict handling
-
-Live collaboration execution belongs to collaboration infrastructure.
-
----
-
-# Notification Policy
-
-Workspace may configure notifications for:
-
-* Invitations
-* Role changes
-* Project creation
-* Quota warnings
-* Provider failures
-* Translation completion
-* Review assignment
-* Export completion
-* Security changes
-* Ownership transfer
-
-Notification delivery channels belong to infrastructure.
-
----
-
-# Service Accounts
-
-A Workspace may own service identities for automation.
-
-Potential use cases:
-
-* Automated imports
-* Scheduled batch Translation
-* CI pipelines
-* External integrations
-* Backup
-* Reporting
-
-Service Account should be a separate security principal.
-
----
-
-# Service Account Policy
-
-Service accounts should have:
-
-* Explicit roles
-* Limited scopes
-* Rotatable credentials
-* Expiration where possible
-* Audit attribution
-* No interactive owner capability by default
-
-A service account must not become Workspace owner in the MVP.
-
----
-
-# External Integration
-
-Workspace may configure integrations with:
-
-* Cloud storage
-* Browser extension
-* External libraries
-* Publishing systems
-* Translation management systems
-* Source repositories
-* Messaging tools
-* Identity providers
-
-Integration configuration should be a separate aggregate.
-
----
-
-# Integration Configuration
-
-Recommended structure:
-
-```text
-Integration Configuration
-├── Integration ID
-├── Workspace ID
-├── Integration Type
-├── Credential Reference
-├── Scope
-├── Status
-├── Policy Tags
-├── Created By
-└── Version
-```
-
-Integration credentials remain in secure infrastructure.
-
----
-
-# Integration Scope
-
-An integration may apply to:
-
-* Entire Workspace
-* Selected Projects
-* Selected Books
-* Selected capabilities
-* One user
-* One service account
-
-Least privilege should be the default.
-
----
-
-# Workspace Lifecycle
-
-Recommended lifecycle states:
-
-```text
-Provisioning
-→ Active
-→ Suspended
-→ Active
-→ Archived
-```
-
-Possible terminal or transitional states:
-
-* Pending Deletion
-* Deleted
-* Transfer Pending
-* Migration In Progress
-* Locked
-* Failed Provisioning
-
----
-
-# Provisioning State
-
-Provisioning may include:
-
-* Creating Workspace record
-* Assigning owner
-* Creating default roles
-* Creating Personal Project defaults
-* Creating policy set
-* Initializing storage namespace
-* Initializing subscription
-* Creating audit scope
-
-Provisioning should be idempotent.
-
----
-
-# Active State
-
-Active Workspace may:
-
-* Accept member activity
-* Create Projects
-* Execute processing
-* Use shared resources
-* Consume quota
-* Manage integrations
-
-All actions remain subject to permissions, entitlements and policies.
-
----
-
-# Suspended State
-
-Suspension may occur because of:
-
-* Administrative action
-* Security incident
-* Billing failure
-* Policy violation
-* Quota abuse
-* Legal requirement
-* Owner request
-
-Suspension may restrict:
-
-* New writes
-* Processing operations
-* Member invitations
-* Provider usage
-* Exports
-* Public sharing
-
-Read access may remain available depending on suspension reason.
-
----
-
-# Locked State
-
-Locked may represent a security-sensitive restriction.
-
-Examples:
-
-* Suspected compromise
-* Ownership dispute
-* Encryption issue
-* Legal hold
-* Migration conflict
-
-Locked is distinct from ordinary billing suspension.
-
----
-
-# Archived State
-
-Archived Workspace:
-
-* Preserves Projects and history
-* Disables ordinary active processing
-* Restricts membership changes
-* May permit export
-* May be restorable according to policy
-
-Archival is preferred over immediate deletion.
-
----
-
-# Pending Deletion
-
-Workspace deletion should use a delayed state.
-
-```text
-Active
-→ Pending Deletion
-→ Deleted
-```
-
-During the pending period:
-
-* New processing is blocked
-* Members are notified where required
-* Export may remain available
-* Legal holds are checked
-* Scheduled deletion may be cancelled
-
----
-
-# Workspace Deletion
-
-Deleting a Workspace is a high-impact operation.
-
-It may affect:
-
-* Projects
-* Source files
-* Translations
-* Glossaries
-* Characters
-* Sessions
-* Provider configurations
-* Integrations
-* Usage history
-* Audit records
-* Shared links
-* Backups
-
-Deletion must be policy-driven, auditable and preferably delayed.
-
----
-
-# Deletion Strategies
-
-Possible strategies:
-
-## Soft Delete
-
-Workspace becomes inaccessible but data remains during retention period.
-
-## Archive
-
-Workspace becomes read-only and retained indefinitely or long-term.
-
-## Scheduled Hard Delete
-
-Data is physically deleted after a defined period.
-
-## Anonymized Retention
-
-Selected billing or audit metadata remains without content.
-
-## Legal Hold
-
-Deletion is blocked until hold release.
-
----
-
-# Cascade Rules
-
-Workspace deletion may logically cascade to Workspace-owned resources.
-
-However, physical deletion may occur asynchronously and according to each resource’s retention policy.
-
-The domain must distinguish:
-
-```text
-Workspace inaccessible
-```
-
-from:
-
-```text
-All physical data permanently erased
-```
-
----
-
-# Legal Hold
-
-Legal Hold may block deletion or alteration of selected records.
-
-Recommended structure:
-
-```text
-Legal Hold
-├── Hold ID
-├── Workspace ID
-├── Scope
-├── Reason Reference
-├── Effective From
-├── Released At
-└── Authority
-```
-
-Legal Hold is likely a compliance-domain entity rather than part of the Workspace aggregate.
-
----
-
-# Workspace Restoration
-
-Restoration may be supported from:
-
-* Archived
-* Suspended
-* Pending Deletion
-
-Restoration must validate:
-
-* Subscription
-* Storage availability
-* Key availability
-* Member access
-* Policy compatibility
-* External integration validity
-
-Deleted data beyond retention cannot be guaranteed recoverable.
-
----
-
-# Workspace Merge
-
-Merging Workspaces is complex and should not be treated as a simple aggregate update.
-
-Potential conflicts:
-
-* Duplicate members
-* Role conflicts
-* Project slug conflicts
-* Shared glossary conflicts
-* Profile conflicts
-* Provider credentials
-* Billing ownership
-* Storage regions
-* Encryption keys
-* Policy incompatibilities
-* Audit histories
-
-Workspace Merge should be modeled as a migration workflow.
-
----
-
-# Workspace Split
-
-Workspace Split may move selected Projects and members into a new Workspace.
-
-The operation should explicitly define:
-
-* Projects to move
-* Shared resources to copy
-* Members to invite
-* Provider configurations to detach
-* Usage history boundaries
-* Billing start point
-* Storage migration
-* Encryption changes
-* Audit lineage
-
----
-
-# Workspace Migration
-
-Migration may move Workspace data between:
-
-* Cloud regions
-* Deployment environments
-* Self-hosted and cloud
-* Storage providers
-* Database clusters
-* Organization accounts
-
-Canonical Workspace identity should remain stable where possible.
-
-Infrastructure resource identifiers may change.
-
----
-
-# Importing a Workspace
-
-Workspace import may restore:
-
-* Metadata
-* Projects
-* Shared Profiles
-* Shared Glossaries
-* Membership mappings
-* Policy revisions
-* Character data
-* Translation history
-* Audit references
-
-Security-sensitive records such as credentials should normally require reconfiguration.
-
----
-
-# Exporting a Workspace
-
-Workspace export may support:
-
-* Full backup
-* Administrative archive
-* Project-only export
-* Shared-resource export
-* Audit export
-* Billing usage export
-* User data portability
-
-Workspace export must respect:
-
-* Content permissions
-* Encryption
-* Classification
-* Provider licensing
-* Legal hold
-* Spoiler policy
-* Export policy
-
----
-
-# Backup
-
-Backup is infrastructure behavior governed by Workspace policy.
-
-Workspace may define:
-
-* Backup enabled
-* Frequency
-* Retention
-* Region
-* Encryption requirement
-* Recovery point objective
-* Recovery time objective
-
-Backup identifiers and storage locations remain infrastructure details.
-
----
-
-# Audit Boundary
-
-Workspace is the primary audit scope.
-
-Audit records may cover:
-
-* Membership
-* Roles
-* Projects
-* Policies
-* Provider configuration
-* Billing
-* Quotas
-* Exports
-* Security
-* Deletion
-* Ownership transfer
-
-Audit should support filtering by:
-
-* Workspace
-* Project
-* Principal
-* Action
-* Resource
-* Time
-* Correlation ID
-
----
-
-# Audit Visibility
-
-Not every member may view all audit records.
-
-Possible audit permissions:
-
-* View own activity
-* View Project activity
-* View Workspace administrative activity
-* View security activity
-* View billing activity
-* Export audit logs
-
-Sensitive credential metadata should be masked.
-
----
-
-# Workspace Activity and Telemetry
-
-Workspace activity records meaningful administrative actions.
-
-Telemetry records operational measurements.
-
-Examples:
-
-```text
-WorkspaceMemberRemoved
-```
-
-is a domain event.
-
-```text
-Translation latency 930 ms
-```
-
-is telemetry.
-
-Usage records and telemetry should not be confused with domain audit events.
-
----
-
-# Event Boundary
-
-Workspace domain events should describe meaningful changes.
-
-They should not carry:
-
-* Raw credentials
-* Full Project content
-* Provider prompts
-* Private source text
-* Payment card data
-* Invitation secret tokens
-
----
-
-# Events
-
-Typical Workspace events include:
-
-* `WorkspaceProvisioned`
-* `WorkspaceCreated`
-* `WorkspaceActivated`
-* `WorkspaceUpdated`
-* `WorkspaceSuspended`
-* `WorkspaceResumed`
-* `WorkspaceLocked`
-* `WorkspaceArchived`
-* `WorkspaceDeletionRequested`
-* `WorkspaceDeletionCancelled`
-* `WorkspaceDeleted`
-* `WorkspaceOwnershipTransferRequested`
-* `WorkspaceOwnershipTransferred`
-* `WorkspaceMemberInvited`
-* `WorkspaceMemberJoined`
-* `WorkspaceMemberSuspended`
-* `WorkspaceMemberRemoved`
-* `WorkspaceRoleAssigned`
-* `WorkspaceRoleRevoked`
-* `WorkspacePolicyRevisionCreated`
-* `WorkspacePolicyActivated`
-* `WorkspaceQuotaChanged`
-* `WorkspaceQuotaThresholdReached`
-* `WorkspaceQuotaExceeded`
-* `WorkspaceSubscriptionChanged`
-* `WorkspaceProviderConfigurationAdded`
-* `WorkspaceProviderConfigurationDisabled`
-* `WorkspaceSharedResourcePublished`
-* `ProjectCreatedInWorkspace`
-* `ProjectTransferRequested`
-* `ProjectTransferred`
-* `WorkspaceExportRequested`
-* `WorkspaceExportCompleted`
-* `WorkspaceMigrationStarted`
-* `WorkspaceMigrationCompleted`
-
----
-
-# Event Payload Example
-
-```text
-WorkspaceMemberRemoved
-├── Workspace ID
-├── Membership ID
-├── Principal ID
-├── Removed By
-├── Reason Code
-├── Effective At
-├── Occurred At
-├── Correlation ID
-└── Causation ID
-```
-
-The event should not include unnecessary personal data.
-
----
-
-# Workspace Provisioning Example
-
-```text
-User creates an account
-        │
-        ▼
-Personal Workspace provisioned
-        │
-        ├── Owner Membership created
-        ├── Default roles created
-        ├── Default Policy Set created
-        ├── Default Profile references assigned
-        ├── Storage namespace initialized
-        └── WorkspaceCreated emitted
-```
-
-The user account and Personal Workspace remain separate objects.
-
----
-
-# Team Workspace Example
-
-```text
-Workspace:
-Moonlight Translation Team
-
-Members:
-- Sơn: Owner
-- Lan: Translator
-- Minh: Reviewer
-- An: Terminologist
-
-Projects:
-- Novel A
-- Comic B
-
-Shared Resources:
-- Chinese → Vietnamese Glossary
-- Natural Vietnamese Profile
-- Comic OCR Profile
-
-Policies:
-- Cloud processing allowed
-- Public sharing disabled
-- Locked terms require Terminologist approval
-```
-
----
-
-# Project Access Example
-
-Member:
-
-```text
-Lan
-```
-
-Workspace Role:
-
-```text
-Translator
-```
-
-Project-specific access:
-
-```text
-Novel A:
-Translator
-
-Comic B:
-No Access
-```
-
-Being a Workspace member does not automatically grant access to every restricted Project.
-
----
-
-# Shared Glossary Example
-
-Workspace Glossary contains:
-
-```text
-师尊 → sư tôn
-灵力 → linh lực
-```
-
-Project A overrides:
-
-```text
-师尊 → sư phụ
-```
-
-Resolution:
-
-```text
-Project Glossary
-        ↓
-Workspace Glossary
-```
-
-Translation uses an immutable snapshot containing the exact selected Entry Revisions.
-
----
-
-# Mandatory Privacy Policy Example
-
-Workspace Policy:
-
-```text
-Processing Mode:
-Local Only
-
-Cloud AI Providers:
-Forbidden
-```
-
-Project configuration attempts:
-
-```text
-Provider:
-Cloud Provider A
-```
-
-Result:
-
-```text
-Rejected by Workspace Policy
-```
-
-Project configuration cannot override a mandatory Workspace restriction.
-
----
-
-# Default Profile Example
-
-Workspace default:
-
-```text
-Translation Profile:
-Natural Vietnamese, Revision 7
-```
-
-Project A has no override:
-
-```text
-Resolved:
-Natural Vietnamese, Revision 7
-```
-
-Project B selects:
-
-```text
-Literal Comparison, Revision 3
-```
-
-If Workspace policy permits overrides, Project B uses its explicit choice.
-
----
-
-# Quota Example
-
-Workspace monthly Translation quota:
-
-```text
-10,000,000 source characters
-```
-
-Current usage:
-
-```text
-9,200,000
-```
-
-Thresholds:
-
-```text
-80% → warning
-95% → strong warning
-100% → hard block
-```
-
-Before a large batch job begins, the application reserves expected quota.
-
----
-
-# Provider Credential Example
-
-Workspace Administrator configures an API provider.
-
-Stored in Workspace domain:
-
-```text
-Provider Configuration ID
-Provider Type
-Capability
-Region
-Credential Reference
-Status
-```
-
-Stored in secure secret infrastructure:
-
-```text
-Raw API Key
-```
-
-Raw credentials never appear in ordinary Workspace events or exports.
-
----
-
-# Ownership Transfer Example
-
-```text
-Current Owner:
-Sơn
-
-Target Owner:
-Lan
-
-Flow:
-1. Sơn requests transfer
-2. Lan accepts
-3. System verifies Lan is an active member
-4. Owner role transfers
-5. Sơn becomes Administrator
-6. Audit event is emitted
-```
-
-The Workspace never enters an ownerless state.
-
----
-
-# Member Removal Example
-
-When a member is removed:
-
-* Active Workspace sessions are revoked or restricted.
-* New operations are denied.
-* Existing domain contributions remain attributed to the original principal.
-* Assigned review work may be reassigned.
-* Personal provider credentials are detached.
-* Shared domain artifacts remain owned by the Workspace.
-* Audit records remain preserved.
-
----
-
-# Project Transfer Example
-
-Project A moves from Workspace X to Workspace Y.
-
-Dependencies:
-
-```text
-Project Glossary:
-Owned by Project — move
-
-Workspace Glossary References:
-Owned by X — copy or detach
-
-Provider Configuration:
-Owned by X — reconfigure
-
-Project Members:
-Mapped to Y memberships
-
-Storage:
-Migrated to Y namespace
-```
-
-The transfer is a workflow, not a direct foreign-key update.
-
----
-
-# Workspace Suspension Example
-
-Reason:
-
-```text
-Billing Past Due
-```
-
-Possible enforcement:
-
-* Existing Projects remain readable.
-* New cloud Translation operations are blocked.
-* Local-only processing may continue.
-* Exports remain available for a limited period.
-* Administrators may update billing.
-* Data is not deleted.
-
-Suspension behavior depends on policy and reason.
-
----
-
-# Workspace Deletion Example
-
-```text
-Owner requests deletion
-        │
-        ▼
-Pending Deletion for 30 days
-        │
-        ├── processing blocked
-        ├── members notified
-        ├── exports allowed
-        ├── legal hold checked
-        └── cancellation allowed
-        │
-        ▼
-Deletion workflow
-        ├── revoke integrations
-        ├── delete or anonymize data
-        ├── retain required audit records
-        └── create Workspace tombstone
-```
-
----
-
-# Suggested Persistence
-
-Recommended canonical tables or collections:
-
-```text
-Workspace
-Workspace Setting
-Workspace Policy Set
-Workspace Policy Revision
-Workspace Ownership Transfer
-Workspace Membership
-Workspace Invitation
-Workspace Role
-Workspace Permission
-Workspace Role Assignment
-Workspace Quota
-Workspace Subscription Reference
-Workspace Shared Resource
-Workspace Tombstone
-```
-
-Separate supporting domains:
-
-```text
-Usage Ledger
-Billing Subscription
-Provider Configuration
-Secret Reference
-Audit Record
-Integration Configuration
-Service Account
-Legal Hold
-Export Job
-Migration Job
-```
-
----
-
-# Suggested Workspace Record
-
-```text
-Workspace
-├── id
-├── type
-├── display_name
-├── slug
-├── owner_principal_id
-├── lifecycle_state
-├── default_locale
-├── default_time_zone
-├── active_policy_revision_id
-├── subscription_id
-├── created_at
-├── updated_at
-└── version
-```
-
----
-
-# Suggested Membership Record
-
-```text
-WorkspaceMembership
-├── id
-├── workspace_id
-├── principal_type
-├── principal_id
-├── membership_status
-├── membership_type
-├── joined_at
-├── suspended_at
-├── removed_at
-├── created_at
-├── updated_at
-└── version
-```
-
----
-
-# Suggested Invitation Record
-
-```text
-WorkspaceInvitation
-├── id
-├── workspace_id
-├── invitee_reference
-├── intended_role_ids
-├── intended_project_ids
-├── invited_by
-├── status
-├── created_at
-├── expires_at
-├── accepted_at
-└── version
-```
-
----
-
-# Suggested Role Assignment Record
-
-```text
-WorkspaceRoleAssignment
-├── id
-├── workspace_id
-├── membership_id
-├── role_id
-├── scope_type
-├── scope_id
-├── assigned_by
-├── assigned_at
-├── expires_at
-├── status
-└── version
-```
-
----
-
-# Suggested Policy Revision Record
-
-```text
-WorkspacePolicyRevision
-├── id
-├── workspace_id
-├── parent_revision_id
-├── policy_document
-├── content_hash
-├── review_state
-├── effective_from
-├── created_by
-├── approved_by
-└── created_at
-```
-
----
-
-# Suggested Quota Record
-
-```text
-WorkspaceQuota
-├── id
-├── workspace_id
-├── resource_type
-├── limit_value
-├── unit
-├── period
-├── enforcement_mode
-├── warning_thresholds
-├── source
-├── effective_from
-└── version
-```
+It MUST NOT be copied into every business aggregate as canonical truth.
 
 ---
 
-# Authorization Evaluation
+# Authorization Decision
 
-A typical authorization decision may require:
+A typical decision may depend on:
 
 ```text
 Authenticated Principal
         +
-Active Workspace Membership
+Active Membership
         +
-Effective Role Assignments
+Role Assignments
         +
 Resource Scope
         +
 Workspace Policy
         +
-Subscription Entitlement
+Entitlements
         +
 Resource State
-        ↓
+        |
+        v
 Authorization Decision
 ```
 
-Permission alone may be insufficient when:
+Permission alone MAY be insufficient.
 
-* Workspace is suspended
-* Feature is not entitled
-* Quota is exhausted
-* Policy forbids the provider
-* Resource is archived
-* Content classification restricts access
+---
+
+# Authorization vs Policy vs Entitlement
+
+These concepts MUST remain distinct.
+
+```text
+Permission
+    = principal may perform an action
+
+Policy
+    = action is allowed under governance constraints
+
+Entitlement
+    = Workspace plan/deployment supports the capability
+```
+
+All three MAY need to succeed.
+
+Quota MAY additionally constrain execution.
+
+---
+
+# Tenant Isolation
+
+Workspace is CRAI's primary tenant-isolation boundary.
+
+Workspace-private data MUST NOT leak across Workspaces.
+
+Tenant isolation applies to:
+
+* databases,
+* object storage,
+* caches,
+* search indexes,
+* vector stores,
+* events,
+* background operations,
+* provider requests,
+* logs,
+* usage,
+* exports,
+* backups.
+
+---
+
+# Tenant Attribution
+
+Workspace-scoped operations SHOULD carry:
+
+```text
+workspaceId
+```
+
+and where relevant:
+
+```text
+projectId
+principalId
+sessionId
+correlationId
+```
+
+Session ID is correlation context.
+
+It is not tenant identity.
+
+---
+
+# Project Ownership
+
+For MVP:
+
+```text
+Project
+├── projectId
+└── workspaceId
+```
+
+Project MUST belong to one Workspace.
+
+Workspace does not directly contain Project content.
+
+---
+
+# Project Creation
+
+Workspace MAY govern:
+
+* who can create Projects,
+* Project-count limits,
+* permitted Project types,
+* default visibility,
+* default language intent,
+* default Profile selections,
+* default Glossary sources,
+* retention defaults,
+* provider restrictions,
+* storage constraints.
+
+Project creation SHOULD capture relevant immutable configuration references where later reproducibility requires them.
+
+---
+
+# Project Visibility
+
+Possible future values:
+
+```text
+PRIVATE
+WORKSPACE
+RESTRICTED
+SHARED_LINK
+PUBLIC
+```
+
+MVP SHOULD initially prioritize:
+
+```text
+PRIVATE
+WORKSPACE
+RESTRICTED
+```
+
+Visibility MUST NOT replace authorization.
+
+---
+
+# Project Transfer
+
+Project transfer between Workspaces is an explicit migration workflow.
+
+It may need to resolve:
+
+* Workspace Glossary dependencies,
+* Workspace Profile dependencies,
+* Character references,
+* memberships,
+* storage ownership,
+* encryption,
+* provider configuration,
+* policy compatibility,
+* scheduled operations,
+* audit lineage.
+
+Dependencies MAY be:
+
+```text
+COPIED
+REBOUND
+DETACHED
+REJECTED
+MANUALLY_RESOLVED
+```
+
+---
+
+# Shared Resources
+
+Workspace MAY make domain resources reusable across Projects.
+
+Examples:
+
+* Glossaries,
+* Profiles,
+* policy sets,
+* templates,
+* provider configurations,
+* integration configurations.
+
+Critical rule:
+
+```text
+Workspace scope
+    !=
+resource semantic ownership
+```
+
+---
+
+# Shared Resource Boundary
+
+Workspace determines:
+
+* tenant ownership,
+* availability,
+* visibility,
+* governance,
+* authorization scope.
+
+The owning domain determines:
+
+* semantic structure,
+* revision model,
+* validation,
+* lifecycle,
+* resolution semantics.
+
+Example:
+
+```text
+Workspace
+    makes Profile available
+
+Profile domain
+    owns Profile semantics
+```
+
+---
+
+# Workspace Glossary Boundary
+
+Workspace MAY own or expose Workspace-scoped Glossary resources.
+
+Workspace does NOT own:
+
+* Glossary Entry resolution semantics,
+* matching,
+* conflict handling,
+* immutable Glossary Snapshot construction.
+
+Those belong to Glossary/Application resolution.
+
+---
+
+# Glossary Consumption
+
+Conceptually:
+
+```text
+Workspace-scoped Glossary sources
+        +
+Project sources
+        +
+Session intent
+        +
+Operation intent
+        |
+        v
+Glossary Resolver
+        |
+        v
+GlossarySnapshot
+```
+
+Translation consumes the immutable Snapshot.
+
+It MUST NOT read mutable Workspace Glossary state directly during durable execution.
+
+---
+
+# Shared Profile Boundary
+
+Workspace MAY provide Workspace-scoped Profiles.
+
+Possible Profile kinds include:
+
+* Translation,
+* OCR,
+* Presentation,
+* Context,
+* Validation,
+* Routing.
+
+Workspace does NOT own Profile semantic rules.
+
+The Profile domain owns:
+
+* Profile identity,
+* revisions,
+* inheritance semantics,
+* compatibility,
+* resolved Profile snapshots.
+
+---
+
+# Workspace Profile Selection
+
+Workspace MAY define a default selection such as:
+
+```text
+WorkspaceProfileSelection
+├── profileKind
+├── selectionMode
+├── profileId?
+└── profileRevisionId?
+```
+
+Possible modes:
+
+```text
+EXACT_REVISION
+LATEST_APPROVED_COMPATIBLE
+DEFAULT
+```
+
+The Workspace selection is intent/default.
+
+Operations MUST resolve it to exact immutable revisions before execution.
+
+---
+
+# Workspace Defaults
+
+Workspace MAY provide administrative defaults.
+
+Examples:
+
+* default locale,
+* target Language preference,
+* Project visibility,
+* Profile selections,
+* provider preference,
+* retention preference,
+* collaboration defaults.
+
+A default means:
+
+```text
+Use this when a narrower explicit selection does not exist.
+```
+
+Defaults are not mandatory restrictions.
+
+---
+
+# Mandatory Policy
+
+Workspace Policy defines constraints.
+
+Examples:
+
+```text
+cloud processing forbidden
+
+allowed provider regions = VN, SG
+
+public sharing forbidden
+
+maximum provider cost tier = STANDARD
+
+human provider review forbidden
+```
+
+A mandatory policy cannot be overridden by:
+
+* Project,
+* Session,
+* Operation,
+* user preference.
+
+---
+
+# Default vs Policy
+
+Critical distinction:
+
+```text
+Default
+    = fallback selection
+
+Policy
+    = allowed/required constraint
+```
+
+Example:
+
+```text
+Workspace default:
+    target Language = Vietnamese
+```
+
+Project MAY choose another Language if allowed.
+
+But:
+
+```text
+Workspace policy:
+    cloud providers forbidden
+```
+
+Project cannot enable cloud processing.
+
+---
+
+# Configuration Resolution Boundary
+
+Workspace MUST NOT define one universal effective-configuration hierarchy for every CRAI domain.
+
+Instead:
+
+```text
+Workspace
+    contributes defaults
+    +
+Workspace
+    contributes mandatory constraints
+```
+
+Relevant capability resolvers then combine those inputs with:
+
+* Project selections,
+* Book/Chapter selections where applicable,
+* Session selections,
+* Operation overrides,
+* User preferences,
+* capability-specific rules.
+
+---
+
+# Resolved Configuration
+
+At operation start:
+
+```text
+Workspace Defaults
+        +
+Project Defaults / Selections
+        +
+Session Selections
+        +
+Operation Overrides
+        +
+User Preferences
+        +
+Mandatory Policies
+        +
+Capability Validation
+        |
+        v
+ResolvedConfigurationSnapshot
+```
+
+The exact resolution algorithm belongs to Profile/Application/Capability resolution.
+
+Workspace provides inputs and constraints.
+
+---
+
+# Reproducibility
+
+Critical rule:
+
+```text
+Mutable Workspace configuration
+    must not silently alter
+already-started durable operations.
+```
+
+Any Workspace state materially affecting durable output MUST be captured by immutable revision/snapshot reference.
+
+Examples:
+
+* Policy revision,
+* exact Profile Revision,
+* Glossary Snapshot,
+* Character Context Snapshot,
+* Resolved Configuration Snapshot.
+
+---
+
+# Policy Set
+
+Workspace SHOULD reference a versioned Policy Set.
+
+Recommended:
+
+```text
+WorkspacePolicySet
+├── policySetId
+├── workspaceId
+├── revisionId
+├── status
+├── effectiveFrom
+├── createdBy
+└── approvedBy?
+```
+
+Policy changes create immutable revisions.
+
+---
+
+# Policy Categories
+
+Potential categories:
+
+```text
+ACCESS
+COLLABORATION
+PRIVACY
+PROVIDER_USAGE
+DATA_RESIDENCY
+RETENTION
+EXPORT
+IMPORT
+CONTENT_CLASSIFICATION
+COST_CONTROL
+STORAGE
+PROCESSING
+AUDIT
+SHARING
+BACKUP
+ENCRYPTION
+AI_DATA_USAGE
+EXTERNAL_INTEGRATION
+```
+
+Not all categories are required for MVP.
 
 ---
 
 # Policy Evaluation
 
-Policy evaluation should produce explainable results.
+Policy evaluation SHOULD produce explainable results.
 
-Recommended result:
+Recommended:
 
 ```text
-Policy Decision
-├── Decision
-├── Policy Revision
-├── Matched Rules
-├── Denial Reasons
-├── Required Approvals
-├── Allowed Alternatives
-└── Evaluated At
+PolicyDecision
+├── decision
+├── policyRevisionId
+├── matchedRuleReferences
+├── denialReasons
+├── requiredApprovals
+├── allowedAlternatives
+└── evaluatedAt
 ```
 
 Possible decisions:
 
-* Allow
-* Deny
-* Allow with Warning
-* Require Approval
-* Require Local Processing
-* Require Redaction
-* Require Stronger Authentication
+```text
+ALLOW
+DENY
+ALLOW_WITH_WARNING
+REQUIRE_APPROVAL
+REQUIRE_LOCAL_PROCESSING
+REQUIRE_REDACTION
+REQUIRE_STRONGER_AUTHENTICATION
+```
 
 ---
 
-# Workspace Validation
+# Policy Change and Running Operations
 
-Workspace validation should verify:
+Policy revision changes MUST NOT silently rewrite historical operation inputs.
 
-* Workspace has a stable identity.
-* Workspace has an eligible owner.
-* Owner has an active Membership.
-* Slug format is valid.
-* Policy revision belongs to the Workspace.
-* Subscription reference is valid.
-* Workspace state allows the requested transition.
-* Role assignments reference active roles.
-* Membership scopes belong to the Workspace.
-* Quotas use recognized units.
-* Shared resources belong to the Workspace.
-* Project ownership is unambiguous.
-* Ownership transfer has a valid target.
-* Deletion is not blocked by legal hold.
-* Mandatory policies are not bypassed.
+For running/new operations, application policy MUST explicitly decide whether to:
+
+* allow existing operation to finish,
+* cancel it,
+* suspend it,
+* require re-evaluation.
+
+Historical artifacts remain linked to the policy/configuration snapshot used when created.
 
 ---
 
-# Error Conditions
+# Privacy Policy
 
-Typical Workspace errors:
+Workspace MAY govern:
 
-* Workspace Not Found
-* Workspace Access Denied
-* Workspace Suspended
-* Workspace Locked
-* Workspace Archived
-* Workspace Pending Deletion
-* Invalid Workspace State Transition
-* Workspace Version Conflict
-* Workspace Slug Conflict
-* Workspace Owner Missing
-* Owner Transfer Not Allowed
-* Target Owner Ineligible
-* Membership Not Found
-* Membership Inactive
-* Membership Limit Reached
-* Invitation Expired
-* Invitation Revoked
-* Role Assignment Invalid
-* Permission Denied
-* Policy Denied
-* Entitlement Missing
-* Quota Exceeded
-* Provider Forbidden
-* Data Residency Violation
-* Project Limit Reached
-* Project Transfer Conflict
-* Shared Resource Dependency Conflict
-* Export Forbidden
-* Legal Hold Active
-* Workspace Deletion Not Allowed
-
-Errors should expose safe, actionable reason codes.
+* local-only processing,
+* cloud processing allowance,
+* provider allow/deny rules,
+* provider retention,
+* content logging,
+* telemetry,
+* external sharing,
+* human review,
+* export.
 
 ---
 
-# Concurrency
+# AI Data Usage Policy
 
-Workspace administrative updates should use optimistic concurrency.
+Workspace SHOULD explicitly govern whether Workspace data may be used for:
 
-Possible checks:
+* provider training,
+* internal model improvement,
+* evaluation,
+* embedding generation,
+* human review,
+* quality analysis.
 
-* Workspace aggregate version
-* Expected active policy revision
-* Membership version
-* Role assignment version
-* Ownership transfer state
-* Subscription revision
-* Quota revision
-
-Sensitive operations may additionally require:
-
-* Recent authentication
-* Multi-factor verification
-* Approval
-* Distributed lock
-* Idempotency key
+Consent MUST NOT be inferred merely because a provider is configured.
 
 ---
 
-# Idempotency
+# Data Residency
 
-Idempotency should apply to:
+Workspace MAY require allowed:
 
-* Workspace provisioning
-* Workspace creation
-* Member invitation
-* Invitation acceptance
-* Role assignment
-* Project creation
-* Policy activation
-* Quota update
-* Ownership transfer request
-* Ownership transfer completion
-* Workspace suspension
-* Workspace deletion request
-* Export request
-* Migration request
+* storage regions,
+* processing regions,
+* backup regions,
+* cross-region transfer behavior.
 
-Possible idempotency inputs:
-
-* Client operation ID
-* Workspace ID
-* Principal ID
-* Target resource
-* Expected version
-* Request hash
+Region identifiers SHOULD remain provider-neutral.
 
 ---
 
-# Cache Isolation
+# Retention Policy
 
-Caches containing Workspace-private data must include Workspace scope.
+Workspace MAY define retention requirements for categories such as:
+
+* Session data,
+* source artifacts,
+* OCR intermediates,
+* provider responses,
+* Translation revisions,
+* temporary files,
+* audit records,
+* backups.
+
+Retention policy governs owning domains/infrastructure.
+
+Workspace itself MUST NOT implement every deletion lifecycle.
+
+---
+
+# Legal Hold
+
+Legal Hold MAY override normal retention/deletion.
+
+It SHOULD remain a separate compliance-domain entity.
+
+Workspace references applicable holds.
+
+---
+
+# Content Classification
+
+Workspace MAY define classification schemes such as:
+
+```text
+PUBLIC
+INTERNAL
+CONFIDENTIAL
+RESTRICTED
+LICENSED
+PERSONAL
+UNRELEASED
+```
+
+Classification MAY constrain:
+
+* provider use,
+* sharing,
+* export,
+* logging,
+* retention,
+* external integration.
+
+Classification semantics SHOULD remain policy-driven.
+
+---
+
+# Workspace Locale
+
+Workspace Locale is an administrative default.
+
+It MAY affect:
+
+* administrative UI,
+* notification templates,
+* formatting,
+* default document conventions.
+
+It MUST NOT automatically become:
+
+* Project source Language,
+* Translation target Language,
+* every member's UI locale.
+
+---
+
+# Language Defaults
+
+Workspace MAY provide Language-related defaults.
+
+All Language values MUST use canonical Language Value Objects.
+
+Workspace MUST NOT invent provider-specific language codes.
+
+Provider adapters own provider code mapping.
+
+---
+
+# Time Zone
+
+Workspace MAY define an administrative time zone.
+
+It may support:
+
+* scheduling,
+* reports,
+* audit display,
+* retention deadlines,
+* notification windows.
+
+Canonical timestamps SHOULD remain UTC.
+
+Time-zone identifiers SHOULD use IANA identifiers.
+
+---
+
+# Provider Configuration
+
+Workspace MAY own authorization to use provider configurations.
+
+Recommended separate aggregate:
+
+```text
+ProviderConfiguration
+├── providerConfigurationId
+├── workspaceId
+├── providerType
+├── capabilityTypes
+├── credentialReference
+├── region?
+├── policyTags
+├── status
+└── version
+```
+
+---
+
+# Credential Boundary
+
+Workspace domain MUST NOT store:
+
+* raw API keys,
+* OAuth refresh tokens,
+* passwords,
+* private keys,
+* provider cookies.
+
+Instead:
+
+```text
+ProviderConfiguration
+    |
+    v
+SecretReference
+    |
+    v
+Secure Secret Infrastructure
+```
+
+---
+
+# Credential Ownership
+
+Possible future models:
+
+```text
+USER_OWNED
+WORKSPACE_OWNED
+SYSTEM_MANAGED
+BRING_YOUR_OWN_KEY
+LOCAL_DEVICE_ONLY
+```
+
+Workspace Policy determines where such credentials may be used.
+
+---
+
+# Provider Routing
+
+Workspace MAY constrain provider routing.
+
+It MUST NOT execute provider routing itself.
+
+Provider/capability infrastructure owns:
+
+* provider selection execution,
+* failover,
+* retries,
+* provider API calls.
+
+Workspace contributes:
+
+* allowed providers,
+* forbidden providers,
+* regions,
+* cost limits,
+* privacy restrictions.
+
+---
+
+# Integration Configuration
+
+Workspace MAY own Integration Configuration records.
+
+Recommended:
+
+```text
+IntegrationConfiguration
+├── integrationId
+├── workspaceId
+├── integrationType
+├── credentialReference
+├── scope
+├── status
+├── policyTags
+└── version
+```
+
+Integration execution belongs to integration infrastructure.
+
+---
+
+# Service Accounts
+
+Service Accounts are security principals associated with a Workspace.
+
+They SHOULD remain separate from Workspace Aggregate.
+
+Service Accounts SHOULD have:
+
+* explicit roles,
+* limited scopes,
+* rotatable credentials,
+* expiration where possible,
+* audit attribution.
+
+MVP SHOULD NOT allow a Service Account to become Workspace owner.
+
+---
+
+# Subscription Boundary
+
+Subscription SHOULD remain a separate billing-domain aggregate.
+
+Workspace MAY reference:
+
+```text
+subscriptionId
+```
+
+but SHOULD NOT own billing-provider state.
+
+---
+
+# Entitlement
+
+Entitlement represents what the Workspace deployment/plan enables.
 
 Examples:
 
-* Character search
-* Glossary matching
-* Translation context retrieval
-* Project listing
-* Permission decisions
-* Policy decisions
-* Usage summaries
+* cloud Translation,
+* collaboration,
+* Character recognition,
+* advanced Glossary,
+* batch processing,
+* export formats,
+* maximum Project count.
 
-Reusable content caches may omit Workspace ID only when:
+Entitlement is distinct from Permission.
 
-* Inputs are fully content-addressed
-* Output contains no tenant-specific data
-* Access is checked independently
-* Cross-tenant reuse is explicitly safe
+---
+
+# Quota
+
+Quota constrains resource consumption.
+
+Possible categories:
+
+* Project count,
+* members,
+* storage,
+* OCR pages,
+* Translation characters,
+* Translation tokens,
+* provider cost,
+* concurrent operations,
+* exports.
+
+Quota SHOULD remain independently versioned.
+
+---
+
+# Usage
+
+Usage SHOULD be recorded in a dedicated ledger/domain.
+
+Workspace is the attribution boundary.
+
+Example usage record:
+
+```text
+UsageEntry
+├── workspaceId
+├── projectId?
+├── principalId?
+├── capability
+├── provider?
+├── model?
+├── quantity
+├── unit
+├── estimatedCost?
+├── finalCost?
+├── occurredAt
+└── correlationId
+```
+
+Session ID MAY be included for correlation.
+
+It is not the billing owner.
+
+---
+
+# Usage Reservation
+
+Expensive operations MAY reserve quota.
+
+```text
+REQUESTED
+    |
+    v
+RESERVED
+    |
+    v
+CONSUMED
+```
+
+Alternative outcomes:
+
+```text
+RELEASED
+EXPIRED
+ADJUSTED
+REJECTED
+```
+
+Reservation belongs to usage/quota infrastructure, not the Workspace aggregate.
+
+---
+
+# Storage Ownership
+
+Workspace is the logical tenant owner of stored private data.
+
+Physical storage MAY include:
+
+* local filesystem,
+* object storage,
+* relational database,
+* search index,
+* vector store,
+* backups,
+* provider file services.
+
+Stored objects MUST remain attributable to Workspace.
+
+---
+
+# Storage Namespace
+
+A logical namespace MAY resemble:
+
+```text
+workspace/{workspaceId}/project/{projectId}/...
+```
+
+Physical path is infrastructure.
+
+It MUST NOT become canonical domain identity.
+
+---
+
+# Encryption
+
+Workspace Policy MAY define encryption requirements.
+
+Examples:
+
+* platform-managed,
+* customer-managed,
+* local-only,
+* key rotation requirements.
+
+Raw encryption keys remain security infrastructure.
+
+Workspace stores only policy/reference information.
 
 ---
 
 # Search Isolation
 
-Search documents should carry:
+Workspace-private indexed resources MUST carry enough scope information to enforce tenant isolation.
 
-* Workspace ID
-* Project ID
-* Visibility
-* Classification
-* Permission scope
-* Spoiler scope where relevant
+Typical projection metadata:
 
-Search results must be filtered before being returned.
+```text
+workspaceId
+projectId?
+visibility
+classification
+permissionScope
+spoilerScope?
+```
 
----
+Search index is a projection.
 
-# Event Routing
-
-Workspace-scoped events should include Workspace ID for routing.
-
-Consumers must still verify access and resource scope.
-
-Events should not assume that possession of an event grants permission to read all referenced resources.
+It is not canonical authorization truth.
 
 ---
 
-# Observability
+# Cache Isolation
 
-Operational telemetry should include:
+Private cache entries MUST preserve tenant isolation.
 
-* Workspace ID or privacy-safe tenant key
-* Project ID where relevant
-* Capability
-* Operation type
-* Provider
-* Model
-* Usage quantity
-* Error category
-* Latency
+Workspace ID MAY be omitted from reusable content cache identity only when:
 
-Logs should avoid raw source content unless explicitly permitted.
-
----
-
-# Privacy
-
-Workspace data may include:
-
-* Copyrighted source images
-* Unreleased publications
-* Private translations
-* Personal reading history
-* Provider credentials
-* Billing metadata
-* Member identities
-* Character references
-* Custom glossaries
-* Sensitive annotations
-
-Requirements:
-
-* Strong tenant isolation
-* Least-privilege access
-* Explicit sharing
-* Secure credential storage
-* Configurable telemetry
-* Configurable provider retention
-* Data export capability
-* Deletion workflow
-* Audit of administrative access
-* No silent cross-Workspace learning
+* all semantic inputs are content-addressed,
+* output contains no Workspace-specific private data,
+* authorization is checked independently,
+* cross-tenant reuse is explicitly safe.
 
 ---
 
 # Cross-Workspace Learning
 
-CRAI must not automatically use private Workspace data to improve another Workspace.
+Private Workspace data MUST NOT automatically improve another Workspace.
 
-Potential reusable global knowledge must be:
+This includes:
 
-* Public
-* Explicitly contributed
-* Anonymized under policy
-* Licensed appropriately
-* Approved for sharing
+* terminology,
+* Character information,
+* corrections,
+* reading history,
+* Translation preferences,
+* private source content.
 
-Workspace terminology, corrections and character data remain private by default.
+Reusable cross-Workspace knowledge requires explicit policy and provenance.
+
+---
+
+# Workspace Knowledge Boundary
+
+Workspace MUST NOT become an unstructured knowledge store.
+
+Reusable knowledge belongs in explicit domains such as:
+
+* Glossary,
+* Profile,
+* Character,
+* Policy,
+* Knowledge Base,
+* Templates.
+
+Workspace governs ownership and availability.
+
+---
+
+# Template Boundary
+
+Workspace MAY expose versioned templates.
+
+Examples:
+
+* Project templates,
+* Profile templates,
+* Glossary templates,
+* review workflow templates,
+* export templates.
+
+Creating a Project from a template SHOULD record the exact template revision used.
+
+After creation, resulting Project configuration becomes independent unless explicit tracking semantics exist.
+
+---
+
+# Review Governance
+
+Workspace Policy MAY require:
+
+* Translation approval,
+* terminology approval,
+* Character identity approval,
+* export approval,
+* publication approval.
+
+Workspace defines governance requirements.
+
+The Review domain owns review artifacts and decisions.
+
+---
+
+# Approval Boundary
+
+Workspace MAY define approval requirements.
+
+Example:
+
+```text
+ApprovalRequirement
+├── resourceType
+├── action
+├── requiredRoleReferences
+├── requiredApprovalCount
+├── separationOfDuties
+├── scope
+└── policyRevisionId
+```
+
+Actual Review/Approval execution belongs to workflow/review capability.
+
+---
+
+# Collaboration Boundary
+
+Workspace MAY define collaboration defaults.
+
+Examples:
+
+* guest access,
+* comment visibility,
+* review assignment defaults,
+* mention behavior,
+* notification preferences.
+
+Live presence, messaging and transport remain infrastructure/application concerns.
+
+---
+
+# Workspace Lifecycle
+
+Recommended core lifecycle:
+
+```text
+PROVISIONING
+    |
+    v
+ACTIVE
+    |
+    +--> SUSPENDED
+    |       |
+    |       v
+    |     ACTIVE
+    |
+    +--> ARCHIVED
+    |
+    +--> PENDING_DELETION
+             |
+             v
+          DELETED
+```
+
+Security-sensitive restrictions MAY use a separate:
+
+```text
+LOCKED
+```
+
+state or restriction flag.
+
+---
+
+# Provisioning
+
+Provisioning MAY initialize:
+
+* Workspace record,
+* owner Membership,
+* default roles,
+* initial Policy Set,
+* administrative defaults,
+* storage namespace,
+* subscription reference,
+* audit scope.
+
+Provisioning MUST be idempotent.
+
+---
+
+# Active
+
+Active Workspace permits ordinary operation subject to:
+
+* authorization,
+* policy,
+* entitlement,
+* quota,
+* resource state.
+
+---
+
+# Suspended
+
+Suspension MAY result from:
+
+* administrative action,
+* billing failure,
+* security issue,
+* policy violation,
+* legal requirement.
+
+Suspension SHOULD preserve existing business data.
+
+Permitted read/export behavior depends on suspension reason and policy.
+
+---
+
+# Locked
+
+Locked indicates a stronger security/compliance restriction.
+
+Possible reasons:
+
+* suspected compromise,
+* ownership dispute,
+* encryption issue,
+* legal restriction,
+* migration conflict.
+
+Locked MUST NOT be treated as ordinary billing suspension.
+
+---
+
+# Archived
+
+Archived Workspace:
+
+* preserves data/history,
+* disables ordinary active processing,
+* restricts administrative mutation,
+* MAY permit export,
+* MAY be restorable.
+
+Archive is distinct from deletion.
+
+---
+
+# Pending Deletion
+
+Deletion SHOULD normally be delayed.
+
+```text
+ACTIVE / ARCHIVED
+        |
+        v
+PENDING_DELETION
+        |
+        v
+DELETED
+```
+
+During the pending period:
+
+* new processing is blocked,
+* legal hold is checked,
+* export MAY remain available,
+* deletion MAY be cancelled according to policy.
+
+---
+
+# Deleted
+
+Deleted means Workspace is no longer available for ordinary use.
+
+It does NOT necessarily mean every physical byte has already been erased.
+
+Physical deletion follows:
+
+* resource retention,
+* legal hold,
+* audit requirements,
+* backup retention,
+* infrastructure cleanup.
+
+---
+
+# Deletion Cascade
+
+Workspace deletion MAY logically make Workspace-owned resources inaccessible.
+
+But:
+
+```text
+Workspace unavailable
+    !=
+all physical data immediately erased
+```
+
+Each owning domain/infrastructure component remains responsible for its physical retention/deletion semantics.
+
+---
+
+# Workspace Restoration
+
+Restoration MAY be supported from:
+
+```text
+SUSPENDED
+ARCHIVED
+PENDING_DELETION
+```
+
+Restoration SHOULD validate:
+
+* authorization,
+* subscription/entitlement,
+* storage availability,
+* encryption keys,
+* policy compatibility,
+* integration validity.
+
+---
+
+# Workspace Merge and Split
+
+Merge and Split MUST be modeled as migration workflows.
+
+They MUST NOT be ordinary Workspace aggregate mutations.
+
+Potential conflicts include:
+
+* members,
+* roles,
+* Projects,
+* Glossaries,
+* Profiles,
+* policies,
+* credentials,
+* storage,
+* encryption,
+* billing,
+* audit lineage.
+
+---
+
+# Migration
+
+Workspace migration MAY move data between:
+
+* deployment environments,
+* cloud regions,
+* self-hosted/cloud,
+* storage systems.
+
+Canonical Workspace identity SHOULD remain stable where possible.
+
+Infrastructure identities MAY change.
+
+---
+
+# Import and Export
+
+Workspace import/export are application workflows.
+
+They MAY include:
+
+* Projects,
+* shared Profile revisions,
+* Glossary revisions,
+* policy revisions,
+* Character data,
+* Translation history,
+* administrative metadata.
+
+Credentials SHOULD normally require reconfiguration.
+
+Import/export MUST respect:
+
+* permissions,
+* classification,
+* encryption,
+* policy,
+* legal hold,
+* licensing,
+* spoiler restrictions.
+
+---
+
+# Audit Boundary
+
+Workspace is CRAI's primary administrative audit scope.
+
+Audit MAY cover:
+
+* membership,
+* roles,
+* ownership,
+* Projects,
+* policies,
+* provider configuration,
+* integrations,
+* billing administration,
+* quota changes,
+* export,
+* deletion,
+* security changes.
+
+Audit records SHOULD remain a separate append-oriented domain/infrastructure concern.
+
+---
+
+# Audit vs Usage vs Telemetry
+
+These MUST remain distinct.
+
+```text
+Audit
+    = who changed administrative/business state
+
+Usage
+    = what resource was consumed
+
+Telemetry
+    = how the system behaved operationally
+```
+
+Example:
+
+```text
+WorkspaceMemberRemoved
+```
+
+is audit/domain history.
+
+```text
+Translation characters = 42,000
+```
+
+is usage.
+
+```text
+Translation latency = 930 ms
+```
+
+is telemetry.
+
+---
+
+# Events
+
+Core Workspace events MAY include:
+
+```text
+WorkspaceCreated
+WorkspaceActivated
+WorkspaceUpdated
+
+WorkspaceSuspended
+WorkspaceResumed
+WorkspaceLocked
+WorkspaceArchived
+
+WorkspaceDeletionRequested
+WorkspaceDeletionCancelled
+WorkspaceDeleted
+
+WorkspaceOwnershipTransferRequested
+WorkspaceOwnershipTransferred
+
+WorkspaceMemberInvited
+WorkspaceMemberJoined
+WorkspaceMemberSuspended
+WorkspaceMemberRemoved
+
+WorkspaceRoleAssigned
+WorkspaceRoleRevoked
+
+WorkspacePolicyRevisionActivated
+
+WorkspaceSharedResourceMadeAvailable
+WorkspaceSharedResourceWithdrawn
+
+ProjectCreatedInWorkspace
+ProjectTransferRequested
+ProjectTransferred
+```
+
+Billing, quota, integration and provider configuration domains SHOULD emit their own events where they own the state transition.
+
+---
+
+# Event Payload
+
+Workspace events SHOULD contain identifiers and safe administrative metadata.
+
+They MUST NOT include:
+
+* raw credentials,
+* invitation secrets,
+* full source content,
+* provider prompts,
+* payment card information,
+* unnecessary personal data.
+
+---
+
+# Event Routing
+
+Workspace-scoped events SHOULD include:
+
+```text
+workspaceId
+```
+
+for routing/isolation.
+
+Possession of an event MUST NOT imply authorization to read referenced resources.
+
+---
+
+# Concurrency
+
+Workspace administrative updates SHOULD use optimistic concurrency.
+
+Typical controls:
+
+* expected Workspace version,
+* expected active Policy Revision,
+* Membership version,
+* RoleAssignment version,
+* ownership-transfer state,
+* idempotency key.
+
+Sensitive workflows MAY require stronger coordination.
+
+---
+
+# Idempotency
+
+Idempotency SHOULD apply to:
+
+* Workspace provisioning,
+* invitation creation/acceptance,
+* ownership transfer,
+* Project creation,
+* policy activation,
+* suspension,
+* deletion request,
+* migration request,
+* export request.
+
+---
+
+# Validation
+
+Workspace validation SHOULD verify:
+
+* stable Workspace identity,
+* valid lifecycle transition,
+* eligible owner for normal active states,
+* active owner Membership where required,
+* valid policy revision ownership,
+* Project ownership is unambiguous,
+* shared-resource references belong to or are accessible by Workspace,
+* Membership scope belongs to Workspace,
+* Role assignments are valid,
+* mandatory policy cannot be bypassed,
+* deletion is not blocked by applicable hold,
+* cross-Workspace references satisfy explicit sharing/migration rules.
+
+Semantic validation of Profile, Glossary, Character, Translation and other resources belongs to their owning domains.
+
+---
+
+# Error Codes
+
+Recommended stable codes:
+
+```text
+WORKSPACE_NOT_FOUND
+WORKSPACE_ACCESS_DENIED
+WORKSPACE_SUSPENDED
+WORKSPACE_LOCKED
+WORKSPACE_ARCHIVED
+WORKSPACE_PENDING_DELETION
+
+WORKSPACE_STATE_TRANSITION_INVALID
+WORKSPACE_VERSION_CONFLICT
+WORKSPACE_SLUG_CONFLICT
+
+WORKSPACE_OWNER_MISSING
+WORKSPACE_OWNER_TRANSFER_NOT_ALLOWED
+WORKSPACE_TARGET_OWNER_INELIGIBLE
+
+WORKSPACE_MEMBERSHIP_NOT_FOUND
+WORKSPACE_MEMBERSHIP_INACTIVE
+WORKSPACE_MEMBERSHIP_LIMIT_REACHED
+
+WORKSPACE_INVITATION_EXPIRED
+WORKSPACE_INVITATION_REVOKED
+
+WORKSPACE_ROLE_ASSIGNMENT_INVALID
+WORKSPACE_PERMISSION_DENIED
+WORKSPACE_POLICY_DENIED
+WORKSPACE_ENTITLEMENT_MISSING
+WORKSPACE_QUOTA_EXCEEDED
+
+WORKSPACE_PROVIDER_FORBIDDEN
+WORKSPACE_DATA_RESIDENCY_VIOLATION
+
+WORKSPACE_PROJECT_LIMIT_REACHED
+WORKSPACE_PROJECT_TRANSFER_CONFLICT
+
+WORKSPACE_SHARED_RESOURCE_CONFLICT
+WORKSPACE_EXPORT_FORBIDDEN
+WORKSPACE_LEGAL_HOLD_ACTIVE
+WORKSPACE_DELETION_NOT_ALLOWED
+```
+
+Subsystem-specific errors SHOULD remain owned by their subsystem.
 
 ---
 
 # Architecture Invariants
 
-1. Workspace is the highest-level tenant and collaboration boundary.
-2. Workspace is an Aggregate Root with stable identity.
-3. Workspace ID is independent of Workspace name and slug.
+1. Workspace is CRAI's highest-level tenant and administrative boundary.
+
+2. Workspace is a stable Aggregate Root.
+
+3. Workspace ID is independent from name, slug, owner, provider and billing identity.
+
 4. Workspace is separate from User identity.
+
 5. Workspace is separate from Project.
-6. Workspace is separate from authentication-provider organizations.
-7. Workspace is separate from AI provider accounts.
-8. A Project normally belongs to exactly one Workspace.
-9. Project transfer is an explicit migration workflow.
-10. Workspace governs ownership and policy, not Project content semantics.
-11. Workspace must have an eligible owner in normal active states.
-12. Ownership transfer must not leave the Workspace ownerless.
-13. Membership is separate from User identity.
-14. Invitation is separate from active Membership.
-15. Role is separate from Permission.
-16. Workspace Role and Project Role are separate scopes.
-17. Workspace membership does not automatically grant access to every restricted Project.
-18. Authorization requires active Membership and applicable permission.
-19. Entitlement is separate from Permission.
-20. Quota is separate from Entitlement.
-21. Usage is recorded outside the Workspace aggregate.
-22. Workspace is the primary billing attribution boundary.
-23. Workspace is the primary tenant-isolation boundary.
-24. Every Workspace-owned resource must be traceable to one Workspace.
-25. Workspace-private data must not leak across tenant boundaries.
-26. Workspace Shared Resources use exact revisions when consumed by durable outputs.
-27. Translation never depends directly on mutable Workspace Glossary state.
-28. Translation consumes immutable resolved snapshots.
-29. Workspace defaults are separate from mandatory Workspace policies.
-30. Narrower configuration may override defaults but not mandatory policies.
-31. Policies are versioned and auditable.
-32. Provider-specific credentials remain outside the Workspace aggregate.
-33. Raw secrets never appear in Workspace events.
-34. Billing-provider entities do not become canonical Workspace identity.
-35. Storage objects remain attributable to Workspace.
-36. Storage paths do not depend solely on mutable Workspace slug.
-37. Workspace suspension does not corrupt or delete existing Project data.
-38. Workspace deletion is explicit, delayed where possible and auditable.
-39. Physical deletion may follow resource-specific retention policies.
-40. Workspace archival is distinct from deletion.
-41. Legal hold may block deletion.
-42. Workspace Merge and Split are migration workflows, not ordinary aggregate edits.
-43. Search and cache projections preserve Workspace isolation.
-44. Service accounts use explicit, limited roles.
-45. Workspace policy controls whether cloud providers may receive content.
-46. AI training consent is explicit and separate from provider configuration.
-47. Cross-Workspace learning is disabled by default.
-48. Significant administrative actions are auditable.
-49. High-cardinality memberships and usage records remain outside the core Workspace aggregate.
-50. Authorization decisions must be explainable through roles, policies and entitlements.
 
----
+6. Workspace is separate from authentication-provider tenant identity.
 
-# Open Decisions
+7. Workspace is separate from provider account identity.
 
-The following decisions should remain open until implementation and prototype testing:
+8. Workspace is separate from billing-provider customer identity.
 
-* Whether every user automatically receives a Personal Workspace
-* Whether a Personal Workspace may have collaborators
-* Whether Local Workspace is a separate type
-* Whether Workspace Slugs are globally unique
-* Whether Workspace metadata uses immutable revisions
-* Whether Workspace is event-sourced
-* Whether Workspace Ownership is part of the aggregate or a separate entity
-* Whether one Workspace may have several co-owners
-* Whether owner transfer requires acceptance
-* Whether owner transfer requires multi-factor authentication
-* Whether former owners remain Administrators
-* Whether removed members can be reactivated
-* Whether reactivation reuses the same Membership ID
-* Whether invitations may target emails not yet registered
-* Whether shareable invitation links are allowed
-* Whether guest memberships expire automatically
-* Whether Workspace roles are customizable in MVP
-* Whether permission denies are supported
-* Whether role inheritance is supported
-* Whether Project permissions inherit from Workspace roles
-* Whether all Workspace members can discover all Projects
-* Whether Project visibility includes Public in MVP
-* Whether Project transfer is supported in MVP
-* Whether Workspace transfer across deployment environments preserves identity
-* Whether Shared Glossary is supported in MVP
-* Whether Shared Character catalogs are required
-* Whether Workspace Profiles track latest approved revisions automatically
-* Whether Projects may pin Shared Resource revisions
-* Whether Projects may clone Shared Resources
-* Whether Workspace policy uses a generic rule engine
-* Which policies are hard constraints
-* Whether policy changes apply retroactively
-* Whether existing Sessions are stopped after policy changes
-* Whether existing Translations become noncompliant after provider-policy changes
-* How data residency is enforced
-* Whether customer-managed encryption keys are supported
-* Whether Workspace uses one storage namespace or per-Project namespaces
-* How storage is calculated for deduplicated artifacts
-* Whether cached models count against Workspace storage
-* Whether anonymous Local Workspaces have quotas
-* Whether usage is real-time or eventually consistent
-* How quota reservation works
-* Whether quota overage is supported
-* Whether budget approval workflows are required
-* Whether billing is per Workspace or organization account
-* Whether one subscription may cover several Workspaces
-* Whether users may bring personal provider credentials into Team Workspaces
-* Whether administrators can inspect personal credential usage
-* Whether provider credentials may be Project-scoped
-* Whether Workspace-level provider credentials are required
-* Whether Workspace deletion supports a recovery period
-* How long deletion tombstones are retained
-* Which audit records survive deletion
-* Whether legal hold is supported in MVP
-* Whether Workspace export includes provider responses
-* Whether Workspace export includes audit history
-* Whether Workspace import recreates memberships
-* Whether credentials are excluded from all exports
-* Whether Workspace Merge is ever supported
-* Whether Workspace Split copies shared glossaries
-* Whether member activities remain attributed after account deletion
-* Whether service accounts are supported in MVP
-* Whether external identity-directory synchronization is required
-* Whether shared Sessions are Workspace resources
-* Whether public sharing is allowed
-* Whether audit logs are immutable
-* Whether audit viewing requires a dedicated role
-* Whether Workspace analytics are enabled by default
-* Whether AI training consent is configurable per Project
-* Whether Workspace content classification is required
-* Whether classification can be overridden at resource level
-* Whether policy evaluation results are persisted
-* Whether configuration resolution produces immutable snapshots
-* How Workspace state affects local-only processing
-* Which operations remain available during billing suspension
-* Whether archived Workspaces are billable
-* Whether Project count includes archived Projects
-* Whether Workspace quota is shared across all Projects
-* Whether project-specific budgets are required
-* How multi-region backup interacts with residency policy
-* Whether Local Workspace can later convert into Team Workspace
-* How Workspace identity is synchronized between local and cloud installations
+9. A Project belongs to exactly one Workspace in MVP.
+
+10. Project transfer is an explicit migration workflow.
+
+11. Workspace governs Project ownership but does not own Project content semantics.
+
+12. Workspace MUST NOT become a super-aggregate containing all tenant resources.
+
+13. High-cardinality independently changing records remain separate aggregates.
+
+14. Normal active Workspace state requires an eligible owner.
+
+15. Ownership transfer MUST NOT leave an active Workspace ownerless.
+
+16. Membership is separate from User identity.
+
+17. Invitation is separate from active Membership.
+
+18. Ownership is distinct from ordinary Membership role semantics.
+
+19. Role is separate from Permission.
+
+20. Workspace Role and Project Role are separate scopes.
+
+21. Workspace membership does not automatically grant access to every Project.
+
+22. Authorization must remain tenant-scoped.
+
+23. Permission is separate from Policy.
+
+24. Permission is separate from Entitlement.
+
+25. Entitlement is separate from Quota.
+
+26. Usage is recorded outside the core Workspace aggregate.
+
+27. Workspace is the logical billing/usage attribution boundary unless a future billing model explicitly defines otherwise.
+
+28. Workspace is the primary tenant-isolation boundary.
+
+29. Every private Workspace-owned resource must be traceable to exactly one Workspace.
+
+30. Workspace-private data MUST NOT leak across tenant boundaries.
+
+31. Workspace scope/availability does not replace resource-domain semantic ownership.
+
+32. Workspace-scoped Glossary resources remain governed by Glossary-domain semantics.
+
+33. Workspace-scoped Profiles remain governed by Profile-domain semantics.
+
+34. Workspace MUST NOT define the universal Glossary precedence algorithm.
+
+35. Workspace MUST NOT define one universal effective-configuration hierarchy for every capability.
+
+36. Workspace contributes defaults and mandatory constraints to configuration resolution.
+
+37. Defaults are separate from mandatory policies.
+
+38. Narrower configuration MAY override defaults where permitted.
+
+39. Narrower configuration MUST NOT override mandatory Workspace policy.
+
+40. Workspace policy revisions are immutable and auditable.
+
+41. Mutable Workspace configuration MUST NOT silently alter already-started durable operations.
+
+42. Workspace inputs affecting durable output MUST cross an immutable snapshot/revision boundary.
+
+43. Translation MUST NOT depend directly on mutable Workspace Glossary state.
+
+44. Translation MUST consume immutable resolved inputs.
+
+45. Dynamic Profile selections MUST resolve to exact immutable Revisions before execution.
+
+46. Language values MUST use canonical Language Value Objects.
+
+47. Provider-specific Language codes remain inside provider adapters.
+
+48. Provider-specific credentials remain outside Workspace aggregate.
+
+49. Raw secrets MUST NOT appear in Workspace events.
+
+50. Workspace MAY authorize provider configuration use without owning provider execution.
+
+51. Workspace policy governs whether external providers may receive content.
+
+52. AI data-use consent is explicit and separate from provider availability.
+
+53. Workspace suspension MUST NOT corrupt existing Project data.
+
+54. Workspace archive is distinct from deletion.
+
+55. Workspace deletion SHOULD be explicit, delayed where possible and auditable.
+
+56. Physical deletion follows resource-specific retention/compliance semantics.
+
+57. Legal Hold MAY block deletion.
+
+58. Workspace Merge and Split are migration workflows.
+
+59. Search projections MUST preserve tenant isolation.
+
+60. Private caches MUST preserve tenant isolation.
+
+61. Cross-Workspace cache reuse requires explicit semantic and privacy safety.
+
+62. Cross-Workspace learning is disabled by default.
+
+63. Workspace itself MUST NOT become an unstructured knowledge dump.
+
+64. Review governance remains separate from Review decision ownership.
+
+65. Collaboration policy remains separate from collaboration transport/runtime.
+
+66. Service Accounts are separate security principals.
+
+67. Service Accounts SHOULD use least privilege.
+
+68. Significant Workspace administrative actions are auditable.
+
+69. Audit, Usage and Telemetry remain distinct.
+
+70. Workspace events MUST NOT carry raw sensitive content unnecessarily.
+
+71. Workspace ID in an event is routing context, not authorization proof.
+
+72. Workspace operations SHOULD use optimistic concurrency.
+
+73. Provisioning and consequential administrative workflows SHOULD be idempotent.
+
+74. Authorization decisions SHOULD be explainable.
+
+75. Session ID MAY correlate Workspace operations but MUST NOT become tenant identity.
 
 ---
 
 # Recommended MVP Scope
 
-The first CRAI MVP should support:
+CRAI MVP SHOULD support:
 
-* Stable Workspace identity
-* Personal Workspace
-* Team Workspace
-* One owner per Workspace
-* Active, Suspended, Archived and Pending Deletion states
-* Workspace display name
-* Workspace slug
-* Default locale
-* Default time zone
-* Workspace Membership
-* User members
-* Member invitation
-* Active, Suspended and Removed Membership states
-* System-defined roles
-* Owner role
-* Administrator role
-* Translator role
-* Reviewer role
-* Reader role
-* Workspace-level permissions
-* Project-specific membership or roles
-* One Workspace per Project
-* Private and Workspace Project visibility
-* Basic Workspace Settings
-* Default source and target languages
-* Default Profile references
-* Basic Workspace Policy Set
-* Local-only processing policy
-* Cloud-provider allow or deny policy
-* Public-sharing policy
-* Basic retention policy
-* Workspace shared Translation Profiles
-* Workspace shared OCR Profiles
-* Workspace shared Presentation Profiles
-* Optional Workspace Glossary
-* Exact shared-resource revisions
-* Workspace provider configuration references
-* Secure credential references
-* Basic Workspace quotas
-* Project count quota
-* Member count quota
-* Storage quota
-* Translation usage quota
-* Basic usage summaries
-* Workspace audit events
-* Ownership transfer
-* Workspace suspension
-* Workspace archival
-* Delayed deletion request
-* Tenant-scoped search and cache
-* Workspace export without raw credentials
+* stable Workspace ID,
+* one Personal Workspace per registered user or equivalent default tenant,
+* one owner,
+* User principals,
+* active Membership,
+* basic invitations,
+* fixed system roles,
+* Workspace and Project permission scopes,
+* one Workspace per Project,
+* `PERSONAL`,
+* `TEAM`,
+* optional `LOCAL`,
+* lifecycle:
 
-The MVP may defer:
+  * `PROVISIONING`,
+  * `ACTIVE`,
+  * `SUSPENDED`,
+  * `ARCHIVED`,
+  * `PENDING_DELETION`,
+  * `DELETED`,
+* tenant isolation,
+* basic Workspace metadata,
+* locale,
+* time zone,
+* Project creation,
+* Project visibility:
 
-* Custom roles
-* Explicit permission-deny rules
-* Directory-managed memberships
-* Organization identity-provider synchronization
-* Service accounts
-* Automation agents
-* Co-owners
-* Multi-step administrative approvals
-* Advanced separation of duties
-* Shared public Workspaces
-* Workspace Merge
-* Workspace Split
-* Automated Project transfer
-* Cross-region migration
-* Customer-managed encryption keys
-* Legal hold
-* Advanced content classification
-* Multiple subscriptions per Workspace
-* One subscription covering several Workspaces
-* Complex project budgets
-* Real-time quota reservation
-* Quota overage billing
-* Workspace-level Character catalogs
-* Shared AI memory
-* Shared browser connectors
-* Provider credential delegation
-* Personal credentials inside Team Workspaces
-* Advanced data residency
-* Workspace backup administration
-* Immutable audit export
-* Public Project discovery
-* Guest link collaboration
-* Real-time Workspace presence
-* Advanced Workspace templates
-* Cross-Workspace shared resources
-* Federated Workspaces
-* Automatic policy migration
-* Full compliance reporting
-* AI-training contribution workflows
+  * `PRIVATE`,
+  * `WORKSPACE`,
+  * `RESTRICTED`,
+* Workspace-scoped Profile availability,
+* Workspace-scoped Glossary availability,
+* exact shared-resource revision references,
+* Workspace defaults,
+* mandatory local/cloud processing policy,
+* provider allow/deny policy,
+* provider configuration references,
+* secure credential references,
+* basic entitlement checks,
+* basic quota checks,
+* Workspace usage attribution,
+* storage attribution,
+* search/cache tenant isolation,
+* immutable Policy revisions,
+* audit of administrative changes,
+* explicit AI data-use policy,
+* archive,
+* delayed deletion,
+* optimistic concurrency,
+* idempotent provisioning.
+
+MVP SHOULD defer:
+
+* co-owners,
+* custom Workspace roles,
+* complex deny inheritance,
+* Directory Groups,
+* Service Account administration UI,
+* public Projects,
+* Workspace Merge,
+* Workspace Split,
+* automated Project transfer,
+* customer-managed encryption keys,
+* advanced legal hold,
+* multi-Workspace billing subscriptions,
+* advanced quota reservation,
+* approval chains,
+* separation-of-duties workflow,
+* advanced Workspace templates,
+* Workspace-wide Knowledge Base,
+* cross-Workspace sharing,
+* cross-Workspace learning,
+* advanced migration,
+* Workspace-level collaboration presence,
+* complex external integrations,
+* automated policy migration,
+* generic policy-rule engine.
+
+---
+
+# Open Decisions
+
+The following SHOULD remain open until implementation/prototype validation:
+
+* whether every registered user automatically receives a Personal Workspace,
+* whether Personal Workspace supports collaborators,
+* whether `LOCAL` is a distinct Workspace Type,
+* whether Workspace slug is globally unique,
+* whether owner transfer requires acceptance,
+* whether owner transfer requires stronger authentication,
+* whether removed Membership may be reactivated,
+* whether reactivation preserves Membership ID,
+* whether invitations may target unregistered email addresses,
+* whether guest Membership expires automatically,
+* whether Workspace roles become customizable,
+* whether explicit permission deny is supported,
+* exact Workspace-to-Project role inheritance,
+* whether all members can discover Workspace-visible Projects,
+* whether public Projects are ever supported,
+* Project transfer support and migration semantics,
+* whether Workspace Glossary is required in MVP,
+* whether Workspace Character templates/catalogs are needed,
+* whether Workspace Profile defaults use exact revisions or dynamic approved selection,
+* whether Projects may clone Workspace Profiles,
+* whether Projects may clone Workspace Glossaries,
+* which Workspace policies are hard constraints,
+* policy-change behavior for running operations,
+* compliance state of historical outputs after policy changes,
+* data-residency enforcement architecture,
+* Workspace storage accounting,
+* deduplicated-artifact accounting,
+* quota consistency model,
+* quota reservation requirements,
+* budget approval requirements,
+* billing ownership beyond MVP,
+* personal provider credentials inside Team Workspaces,
+* Project-scoped provider credentials,
+* deletion recovery period,
+* tombstone retention,
+* audit retention after Workspace deletion,
+* legal-hold support,
+* Workspace export contents,
+* Workspace import membership behavior,
+* offline Local Workspace synchronization,
+* Local-to-cloud Workspace identity migration,
+* device-only credential migration,
+* shared Session access,
+* collaboration infrastructure,
+* notification infrastructure,
+* Workspace template domain,
+* Workspace Knowledge Base domain,
+* policy engine architecture,
+* approval workflow architecture.
+
+---
+
+# Ownership Summary
+
+```text
+Workspace owns
+    stable tenant identity
+    administrative metadata
+    lifecycle
+    owner reference
+    administrative settings
+    active policy reference
+    tenant boundary
+
+Workspace governs
+    Membership boundary
+    Project ownership
+    authorization scope
+    shared-resource availability
+    defaults
+    mandatory policies
+    provider availability
+    privacy
+    data residency
+    retention requirements
+    usage attribution
+    billing attribution
+    audit scope
+    collaboration rules
+
+Workspace references
+    Projects
+    Memberships
+    Roles
+    Policy Sets
+    Profiles
+    Glossaries
+    Provider Configurations
+    Integrations
+    Subscription
+    Entitlements
+    Quotas
+    Legal Holds
+
+Workspace contributes to
+    AuthorizationContext
+    PolicyDecision
+    ResolvedConfigurationSnapshot
+    GlossarySnapshot resolution
+    Profile resolution
+    operation routing constraints
+
+Workspace does not own
+    User identity
+    authentication
+    Project content semantics
+    Translation truth
+    OCR truth
+    Glossary semantics
+    Character truth
+    Profile semantics
+    Session working state
+    Review decisions
+    provider execution
+    raw credentials
+    billing-provider state
+    Usage Ledger
+    Audit Ledger
+    telemetry
+```
+
+Workspace is therefore CRAI's durable **tenant, governance and collaboration boundary**, not the semantic owner of every resource that exists inside that tenant.
 
 ---
 
 # Related Documents
 
+Domain:
+
 * `README.md`
-* `USER.md`
 * `PROJECT.md`
 * `BOOK.md`
 * `CHAPTER.md`
@@ -3710,24 +2816,16 @@ The MVP may defer:
 * `LANGUAGE.md`
 * `GLOSSARY.md`
 * `CHARACTER.md`
-* `SESSION.md`
 * `PROFILE.md`
+* `SESSION.md`
+
+Architecture:
+
 * `docs/architecture/CAPABILITY_MAP.md`
+* `docs/architecture/OWNERSHIP_MAP.md`
 * `docs/architecture/DATA_FLOW.md`
 * `docs/architecture/STATE_MACHINE.md`
 * `docs/architecture/EVENT_BUS.md`
 * `docs/architecture/MODULE_DEPENDENCY.md`
-* `docs/architecture/security/AUTHENTICATION.md`
-* `docs/architecture/security/AUTHORIZATION.md`
-* `docs/architecture/security/TENANT_ISOLATION.md`
-* `docs/architecture/security/SECRETS.md`
-* `docs/architecture/runtime/JOB.md`
-* `docs/architecture/runtime/QUEUE.md`
-* `docs/architecture/runtime/STORAGE.md`
-* `docs/architecture/runtime/CACHE.md`
-* `docs/architecture/integration/PROVIDER.md`
-* `docs/architecture/integration/CONNECTOR.md`
-* `docs/architecture/operations/AUDIT.md`
-* `docs/architecture/operations/USAGE.md`
-* `docs/architecture/operations/QUOTA.md`
-* `docs/architecture/operations/BILLING.md`
+
+Infrastructure and module contracts remain authoritative for authentication, authorization execution, provider execution, billing integration, storage, secrets, audit persistence, telemetry and collaboration transport.

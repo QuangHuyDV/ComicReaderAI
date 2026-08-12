@@ -1,641 +1,869 @@
-# runtime/RETRY_POLICY.md
-
 # Runtime Retry Policy
 
-> Project: CRAI  
-> Version: 1.0  
-> Status: Architecture Draft
+* **Document:** Runtime Architecture / Retry Policy
+* **Version:** 2.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-Tài liệu này định nghĩa cách CRAI Runtime đánh giá và tạo một `Attempt` mới cho cùng một `WorkItem` khi physical execution trước đó không còn phù hợp hoặc không hoàn thành thành công.
+This document defines how CRAI Runtime decides whether a failed or interrupted physical execution may create another `Attempt` for the same logical `WorkItem`.
 
-Retry không tạo lại logical work.
+Retry preserves logical work identity.
+
+Canonical rule:
 
 ```text
 Same WorkItemId
-    +
++
 New AttemptId
 ```
 
-Retry tồn tại để phục hồi transient execution failure mà không:
+Retry exists to recover from transient execution failure without:
 
-- tạo duplicate logical work;
-- vượt retry budget;
-- revive stale revision;
-- revive canceled scope;
-- gây retry storm;
-- overload provider;
-- phá authority model;
-- bypass Scheduler;
-- ghi đè accepted outcome cũ hoặc mới hơn.
+* recreating logical work;
+* reviving stale execution;
+* reviving canceled execution;
+* exceeding retry budgets;
+* creating retry storms;
+* bypassing Scheduler;
+* bypassing execution authority;
+* hiding Fallback selection inside Runtime Retry;
+* duplicating unsafe side effects.
 
 ---
 
-## 2. Architectural Position
+# 2. Architectural Position
 
 ```text
-Attempt ends
-    ↓
-Runtime Control validates outcome
-    ↓
-Retry Policy evaluates
-    ↓
-Retry Strategy selected
-    ↓
-New AttemptId created
-    ↓
-Scheduler admission
-    ↓
+Attempt Ends
+    |
+    v
+Runtime Control
+    validates relevance / authority
+    |
+    v
+Retry Policy
+    evaluates retry eligibility
+    |
+    +--> DO_NOT_RETRY
+    |
+    +--> RETRY_NOW
+    |
+    +--> RETRY_LATER
+    |
+    +--> RECOVERY_ESCALATION_REQUIRED
+    |
+    v
+New AttemptId
+    |
+    v
+Scheduler Admission
+    |
+    v
 Worker Execution
 ```
 
-Retry Policy không:
+Retry Policy does NOT:
 
-- tạo BusinessExecutionPlan;
-- tạo WorkItem mới khi logical work không đổi;
-- chọn provider implementation;
-- lookup cache trực tiếp;
-- thực thi Attempt;
-- commit Artifact;
-- commit UI;
-- sở hữu WorkItem terminal outcome;
-- bypass Runtime Control hoặc Scheduler.
+* create BusinessExecutionPlan;
+* create another WorkItem when logical work is unchanged;
+* choose Provider/Model/RoutePlan;
+* execute Attempt;
+* perform cache lookup directly;
+* commit Runtime Artifact;
+* commit Business result;
+* commit Presentation/UI state;
+* own WorkItem terminal outcome;
+* bypass Runtime Control;
+* bypass Scheduler.
 
 ---
 
-## 3. Core Principle
+# 3. Core Principle
 
-Retry là **physical attempt replacement**, không phải logical work recreation.
+Retry is:
 
 ```text
-WorkItem
-    ├── Attempt 1
-    ├── Attempt 2
-    └── Attempt 3
+physical execution replacement
 ```
 
-WorkItem giữ nguyên identity.
+not:
 
-Mỗi Attempt có identity và lifecycle độc lập.
+```text
+logical work recreation
+```
+
+Example:
+
+```text
+WorkItem W1
+    |
+    +--> Attempt A1
+    +--> Attempt A2
+    +--> Attempt A3
+```
+
+`WorkItemId` remains stable.
+
+Every Attempt has independent identity and lifecycle.
 
 ---
 
-## 4. Retry Ownership
-
-Retry ownership được tách rõ:
+# 4. Retry Ownership
 
 ```text
 Runtime Control
-    → validates relevance and authority
+    -> determines current relevance
+       and execution authority
 
 Retry Policy
-    → decides retry eligibility and strategy
-
-Provider Selection Policy
-    → proposes provider candidate
-
-Provider Manager
-    → reports availability and capability
+    -> determines whether another Attempt
+       is allowed and when
 
 Scheduler
-    → decides admission
+    -> determines admission
 
-Worker
-    → executes new Attempt
+Worker / Execution Adapter
+    -> executes Attempt
 ```
 
-Worker và Provider Adapter không tự retry.
+Optional recovery escalation:
+
+```text
+Retry Policy
+    -> may report that ordinary Retry
+       is no longer appropriate
+
+Routing / Recovery Architecture
+    -> MAY choose another execution binding
+
+Pipeline Runtime
+    -> MAY create another Attempt
+```
 
 ---
 
-## 5. Retry Vocabulary
+# 5. Retry Vocabulary
 
-### 5.1 Retry Evaluation
+## Retry Evaluation
 
-Quá trình đánh giá một outcome có đủ điều kiện tạo Attempt mới hay không.
+Evaluation of whether another Attempt may be created.
 
-### 5.2 Retry Strategy
+## Retry Timing
 
-Cách Retry được thực hiện:
+How a permitted retry is scheduled:
 
 ```text
 IMMEDIATE
 DELAYED
 RETRY_AFTER
-PROVIDER_FALLBACK
-WAIT_FOR_RESOURCE
 ```
 
-### 5.3 Retry Budget
+## Retry Budget
 
-Giới hạn số lần và chi phí Retry.
+Bounded limits controlling retry count/cost/concurrency.
 
-### 5.4 Attempt Lineage
+## Attempt Lineage
 
-Chuỗi Attempt thuộc cùng một WorkItem.
+All Attempts belonging to one WorkItem.
 
-### 5.5 Delayed Retry
+## Recovery Escalation
 
-Retry được lên lịch sau một khoảng delay cancelable.
+Signal that normal same-binding Retry should stop and another recovery mechanism MAY be considered.
 
-### 5.6 Manual Re-execution
+This is NOT itself Fallback selection.
 
-Request mới từ người dùng hoặc Application. Đây không mặc định là automatic retry.
+## Manual Re-execution
 
----
+A new Application/user request.
 
-## 6. Retry Trigger
-
-Retry evaluation có thể bắt đầu khi:
-
-- Attempt failed;
-- provider timeout;
-- provider switch được yêu cầu;
-- worker execution bị gián đoạn;
-- temporary resource không sẵn sàng;
-- provider degraded;
-- recoverable process restart;
-- controlled execution abandonment;
-- explicit runtime recovery action.
-
-Không phải mọi trigger đều là technical failure.
+It is not automatically an automatic Retry.
 
 ---
 
-## 7. Retry Eligibility
+# 6. Retry Trigger
 
-Retry chỉ được phép khi tất cả điều kiện sau thỏa mãn:
+Retry evaluation MAY start after:
 
-- WorkItem vẫn tồn tại;
-- WorkItem chưa có accepted terminal outcome;
-- session còn active;
-- revision còn authority;
-- BusinessExecutionPlan còn hiệu lực;
-- cancellation chưa revoke scope;
-- retry budget còn;
-- deadline chưa hết;
-- configuration version còn hợp lệ;
-- required input ArtifactRef còn hợp lệ;
-- error hoặc trigger được policy cho phép;
-- runtime chưa stopping;
-- privacy mode cho phép execution path;
-- provider/resource capacity có thể được đáp ứng;
-- Attempt lineage chưa bị supersede bởi accepted outcome khác.
+* transient Attempt failure;
+* normalized timeout;
+* worker interruption;
+* temporary execution resource failure;
+* recoverable process restart;
+* controlled Attempt abandonment;
+* normalized transient runtime error;
+* explicit Runtime recovery request.
+
+Not every trigger is necessarily an error.
 
 ---
 
-## 8. Retry Decision
+# 7. Retry Eligibility
 
-Retry Policy tạo một trong các decision:
+Retry is allowed only when all required conditions remain satisfied.
+
+Recommended checks:
+
+* WorkItem still exists;
+* WorkItem has no accepted terminal outcome;
+* ExecutionScope remains eligible;
+* ExecutionRevision retains execution authority;
+* cancellation has not revoked the relevant scope;
+* retry budget remains;
+* deadline remains useful;
+* Runtime configuration permits retry;
+* input ArtifactRefs remain valid;
+* normalized failure is retryable;
+* Runtime is not stopping;
+* execution binding remains retry-compatible;
+* actual resource/capacity state can support another Attempt;
+* no newer accepted Attempt outcome supersedes the retry candidate.
+
+---
+
+# 8. Eligibility Boundary
+
+Retry Policy SHOULD consume already-resolved inputs such as:
+
+```text
+ExecutionEligibility
+ExecutionBindingViability
+ResolvedPolicyConstraints
+ResourceAvailabilityProjection
+```
+
+It SHOULD NOT independently interpret:
+
+* Workspace privacy policy;
+* Provider policy;
+* AI routing;
+* Plugin trust;
+* model compatibility;
+* Business semantics.
+
+---
+
+# 9. Retry Decisions
+
+Recommended canonical decisions:
 
 ```text
 RETRY_NOW
 RETRY_LATER
-RETRY_WITH_FALLBACK
-WAIT_FOR_RESOURCE
 DO_NOT_RETRY
 RETRY_EXHAUSTED
+RECOVERY_ESCALATION_REQUIRED
 ```
-
-Decision phải có reason code.
 
 ---
 
-## 9. Retry Reason Codes
+# 10. Why Fallback Is Not a Retry Decision
 
-Ví dụ:
+Do NOT define:
+
+```text
+RETRY_WITH_FALLBACK
+```
+
+as a Runtime Retry decision.
+
+Correct boundary:
+
+```text
+Retry Policy
+    says ordinary Retry should stop
+
+Recovery / Routing
+    decides whether another binding exists
+
+Pipeline Runtime
+    executes another Attempt if appropriate
+```
+
+---
+
+# 11. Retry Reason Codes
+
+Possible:
 
 ```text
 TRANSIENT_NETWORK_FAILURE
-PROVIDER_TIMEOUT
-PROVIDER_RATE_LIMITED
+EXECUTION_TIMEOUT
+RATE_LIMITED
 WORKER_INTERRUPTED
 TEMPORARY_RESOURCE_UNAVAILABLE
-PROVIDER_SWITCH_REQUESTED
-PROVIDER_UNHEALTHY
+PROCESS_RECOVERABLE
+ATTEMPT_ABANDONED
 RETRY_BUDGET_EXHAUSTED
-REVISION_NOT_CURRENT
-SESSION_INACTIVE
+EXECUTION_REVISION_NOT_ELIGIBLE
+EXECUTION_SCOPE_INACTIVE
 CANCELLATION_REQUESTED
 DEADLINE_EXCEEDED
 NON_RETRYABLE_ERROR
 RUNTIME_STOPPING
-PRIVACY_POLICY_BLOCKED
-DEPENDENCY_INVALID
+EXECUTION_BINDING_UNAVAILABLE
+DEPENDENCY_INVALIDATED
+IDEMPOTENCY_UNSAFE
+RECOVERY_ESCALATION_REQUIRED
 ```
+
+Reason codes are diagnostic/policy signals.
 
 ---
 
-## 10. Attempt Lineage
+# 12. Attempt Lineage
 
-Mỗi WorkItem có một lineage:
+Each WorkItem has one Attempt lineage.
+
+Example:
 
 ```text
 WorkItemId = W1
 
-AttemptId = A1
-AttemptId = A2
-AttemptId = A3
+Attempt A1
+Attempt A2
+Attempt A3
 ```
 
 Rules:
 
-1. WorkItemId không đổi.
-2. AttemptId luôn mới.
-3. AttemptNumber tăng đơn điệu.
-4. Attempt cũ là terminal.
-5. Attempt cũ không resume.
-6. Late Completion phải qua authority validation.
-7. Chỉ một WorkItem terminal outcome được chấp nhận.
-8. Attempt lineage phải observable.
+1. WorkItemId remains unchanged.
+
+2. Every Retry creates a new AttemptId.
+
+3. AttemptNumber increases monotonically within lineage.
+
+4. Previous Attempt remains terminal.
+
+5. Previous Attempt is never resumed.
+
+6. Late Completion always passes authority validation.
+
+7. At most one logical WorkItem outcome is accepted.
+
+8. Attempt lineage is observable.
 
 ---
 
-## 11. Retry Flow
+# 13. Retry Flow
 
 ```text
-Attempt outcome reported
-        ↓
-Runtime Control validates identity
-        ↓
-Check session and revision authority
-        ↓
-Check accepted terminal outcome
-        ↓
-Retry Policy evaluates
-        ↓
-Check budget and deadline
-        ↓
-Re-evaluate Artifact reuse
-        ↓
-Select retry strategy
-        ↓
-Create new AttemptId
-        ↓
-Scheduler admission
+Attempt Outcome Reported
+        |
+        v
+Runtime Control Validates:
+    identity
+    ExecutionScope
+    ExecutionRevision
+    cancellation
+    accepted outcome
+        |
+        v
+Retry Policy Evaluates
+        |
+        v
+Budget / Deadline / Error / Binding Check
+        |
+        +--> DO_NOT_RETRY
+        |
+        +--> RECOVERY_ESCALATION_REQUIRED
+        |
+        +--> RETRY_NOW / RETRY_LATER
+                    |
+                    v
+             New AttemptId
+                    |
+                    v
+             Scheduler Admission
 ```
 
 ---
 
-## 12. Retry Classes
+# 14. Retry Timing Classes
 
-Automatic Retry Policy sử dụng:
+Automatic Retry timing SHOULD use:
 
 ```text
 NONE
 IMMEDIATE
 DELAYED
-PROVIDER_FALLBACK
-RESOURCE_WAIT
+RETRY_AFTER
 ```
 
-`AFTER_USER_ACTION` không phải automatic retry class.
+Do not include:
 
-User action tạo manual re-execution hoặc business request mới.
+```text
+PROVIDER_FALLBACK
+```
 
----
-
-## 13. Immediate Retry
-
-Immediate retry chỉ dùng khi:
-
-- failure có khả năng biến mất ngay;
-- retry không làm tăng resource pressure;
-- provider chưa degraded;
-- side effect không bị duplicate;
-- budget cho phép;
-- chỉ một immediate retry trong cùng lineage branch;
-- current revision vẫn có user value.
-
-Không nên immediate retry khi:
-
-- memory allocation đang fail do pressure;
-- provider rate-limit vẫn còn;
-- network outage chưa thay đổi;
-- input deterministic invalid;
-- configuration sai;
-- credential invalid.
+as a Retry timing class.
 
 ---
 
-## 14. Delayed Retry
+# 15. Immediate Retry
 
-Delayed retry dùng cho:
+Immediate Retry SHOULD be limited to failures likely to disappear immediately.
 
-- temporary network issue;
-- provider overload;
-- transient timeout;
-- provider recovery;
-- bounded resource wait.
+Use only when:
 
-Delay phải:
+* failure is transient;
+* retry does not worsen pressure;
+* idempotency is safe;
+* budget remains;
+* deadline remains useful;
+* ExecutionRevision still has value;
+* binding is still viable.
 
-- cancelable;
-- gắn CancellationContextRef;
-- bounded;
-- observable;
-- check authority lại khi timer hết;
-- không giữ resource lớn trong thời gian chờ.
+Avoid immediate Retry when:
+
+* memory pressure is persistent;
+* rate limit still active;
+* network outage is ongoing;
+* configuration is invalid;
+* credentials are invalid;
+* deterministic input is invalid.
 
 ---
 
-## 15. Exponential Backoff
+# 16. Delayed Retry
 
-Repeated transient retry có thể dùng exponential backoff:
+Delayed Retry is appropriate for:
+
+* temporary network issue;
+* temporary runtime overload;
+* transient timeout;
+* bounded recovery delay;
+* temporary resource unavailability.
+
+Delay MUST be:
+
+* cancelable;
+* tied to CancellationContextRef;
+* bounded;
+* observable;
+* authority-checked again before new Attempt creation;
+* resource-light while waiting.
+
+---
+
+# 17. Exponential Backoff
+
+Possible:
 
 ```text
 baseDelay × growthFactor^attemptIndex
 ```
 
-Backoff phải:
+Backoff MUST:
 
-- có upper bound;
-- phù hợp interactive latency;
-- cancelable;
-- không áp dụng mù quáng cho current user-visible work;
-- không kéo dài vượt deadline.
-
----
-
-## 16. Jitter
-
-Jitter giúp tránh synchronized retry.
-
-Jitter phải:
-
-- bounded;
-- deterministic trong test;
-- không làm vượt deadline;
-- không che mất `Retry-After`;
-- có thể tắt trong MVP single-instance nếu chưa cần.
+* have an upper bound;
+* respect useful latency;
+* remain cancelable;
+* not exceed deadline;
+* avoid long invisible delay for interactive work.
 
 ---
 
-## 17. Retry-After
+# 18. Jitter
 
-Nếu provider cung cấp `Retry-After`:
+Jitter MAY be applied to delayed Retry.
 
-- Runtime nên tôn trọng nếu còn business value;
-- authority phải được kiểm tra trước khi chờ;
-- deadline phải được so sánh;
-- provider capacity vẫn được tính đúng;
-- cancellation phải hủy delayed retry;
-- fallback có thể được ưu tiên nếu policy cho phép.
+It MUST be:
+
+* bounded;
+* deterministic in tests;
+* deadline-aware;
+* subordinate to normalized Retry-After.
+
+MVP MAY disable jitter in simple single-instance deployments.
 
 ---
 
-## 18. Retry Budget
+# 19. Retry-After
 
-Budget có thể tồn tại theo:
+If an execution adapter returns normalized:
+
+```text
+RetryAfter
+```
+
+Retry Policy MAY honor it when:
+
+* WorkItem remains useful;
+* authority remains valid;
+* deadline permits;
+* budget permits;
+* cancellation remains inactive.
+
+Provider-specific headers remain hidden behind adapters.
+
+---
+
+# 20. Retry Budget
+
+Retry budgets SHOULD remain bounded.
+
+Possible scopes:
 
 ```text
 WORK_ITEM
-REVISION
-SESSION
-PROVIDER
+EXECUTION_REVISION
+EXECUTION_SCOPE
+EXECUTION_BINDING
 GLOBAL_RUNTIME
 ```
 
-Retry chỉ được tạo khi tất cả budget liên quan còn.
-
 ---
 
-## 19. Attempt Count Budget
+# 21. WorkItem Budget
 
-Giới hạn số Attempt trên một WorkItem.
-
-Ví dụ conceptual:
+Example:
 
 ```text
 maxAttemptsPerWorkItem
 ```
 
-Giá trị cụ thể nằm trong `RUNTIME_CONFIG.md`.
-
-Không hard-code theo OCR, Layout hoặc Translation tại tài liệu này.
+This is the primary logical Retry bound.
 
 ---
 
-## 20. Concurrent Retry Budget
+# 22. ExecutionRevision Budget
 
-Ngoài max attempt count, Runtime cần giới hạn số retry đang chờ hoặc đang chạy:
+Limits retry amplification across many WorkItems inside one ExecutionRevision.
+
+---
+
+# 23. ExecutionScope Budget
+
+Limits retry amplification across one Runtime execution scope.
+
+This replaces the ambiguous Session-level Runtime budget.
+
+---
+
+# 24. Execution Binding Budget
+
+A retry budget MAY apply to one executable binding/deployment/runtime endpoint.
+
+This is an operational bound.
+
+It does not own Provider Management policy.
+
+---
+
+# 25. Global Runtime Budget
+
+Global Retry concurrency/count must remain bounded to avoid Runtime self-overload.
+
+---
+
+# 26. Concurrent Retry Budget
+
+Possible:
 
 ```text
 maxConcurrentRetries
 maxDelayedRetries
-maxProviderRetries
-maxSessionRetries
+maxExecutionScopeRetries
+maxBindingRetries
 ```
 
-Điều này ngăn nhiều WorkItem cùng retry làm overload Runtime.
+These values belong to Runtime configuration.
 
 ---
 
-## 21. Retry Cost Budget
+# 27. Retry Cost Budget
 
-Retry có thể tiêu thụ:
+Retry may consume:
 
-- provider cost;
-- network quota;
-- GPU time;
-- CPU time;
-- memory;
-- user-visible latency.
+* provider/network cost;
+* CPU/GPU time;
+* memory;
+* user-visible latency;
+* execution capacity.
 
-Policy có thể từ chối Retry khi expected recovery value thấp hơn cost.
+Policy MAY reject Retry when expected recovery value is too low relative to bounded cost.
+
+Exact cost model MAY be deferred.
 
 ---
 
-## 22. Deadline Boundary
+# 28. Deadline Boundary
 
-Retry không được tạo khi:
+Retry MUST NOT be created when:
 
 ```text
-current time + expected retry delay + expected execution time
-    >
-useful result deadline
+now
++
+expected delay
++
+expected execution duration
+>
+useful deadline
 ```
 
-Exact estimation là implementation concern, nhưng architecture phải hỗ trợ deadline-aware decision.
+Exact estimation is implementation-specific.
+
+Architecture only requires deadline-aware Retry.
 
 ---
 
-## 23. Revision Validation
+# 29. ExecutionRevision Validation
 
-Trước khi tạo Attempt mới:
+Before another Attempt is created:
 
-- revision phải còn current hoặc explicitly eligible;
-- revision không bị superseded;
-- revision authority không bị revoke;
-- target presentation vẫn còn phù hợp.
+* ExecutionRevision must remain eligible;
+* authority must not be revoked;
+* WorkItem must remain current/relevant;
+* accepted terminal outcome must still be absent.
 
-Nếu không:
+Retry Policy MUST NOT inspect Presentation target semantics directly.
+
+---
+
+# 30. ExecutionScope Validation
+
+Retry is denied when:
+
+* ExecutionScope is inactive;
+* ExecutionScope is stopping;
+* parent cancellation is active;
+* current execution intent no longer applies.
+
+Business Session semantics remain external.
+
+---
+
+# 31. Cancellation Boundary
+
+Cancellation invalidates:
+
+* pending Retry evaluation;
+* delayed Retry timer;
+* pending Retry Attempt before admission;
+* resource-wait timer owned by Retry;
+* recovery escalation that still depends on revoked execution.
+
+Canceled work MUST NOT be revived.
+
+---
+
+# 32. Retry and Stale Completion
+
+Late Completion is rejected because authority is absent.
+
+Example:
 
 ```text
-DO_NOT_RETRY
-```
-
----
-
-## 24. Session Validation
-
-Retry bị từ chối khi:
-
-- session inactive;
-- session stopping;
-- session canceled;
-- session configuration không còn tương thích;
-- user intent đã đổi.
-
----
-
-## 25. Cancellation Boundary
-
-Cancellation hủy:
-
-- pending retry evaluation;
-- delayed retry timer;
-- queued retry Attempt;
-- resource-wait retry;
-- provider fallback pending.
-
-Cancellation không được để retry hồi sinh WorkItem.
-
----
-
-## 26. Retry and Stale Result
-
-Late Completion bị reject vì mất authority, không chỉ vì Attempt mới hơn tồn tại.
-
-```text
-Attempt 1 completes late
-        ↓
+Attempt A1 finishes late
+        |
+        v
 Runtime Control validates
-        ↓
-Authority missing
-        ↓
-Rejected
+        |
+        v
+REJECT_STALE
 ```
 
-Attempt 2 không tự động có commit authority chỉ vì mới hơn.
+A newer Attempt does not automatically gain authority merely because it is newer.
 
 ---
 
-## 27. Cache and Artifact Re-evaluation
+# 33. Pre-Retry Execution Reuse Check
 
-Retry Policy không lookup cache trực tiếp.
-
-Luồng:
+Before creating another Attempt, Runtime MAY ask:
 
 ```text
-Retry candidate
-        ↓
-Runtime Control / Cache Policy
-        ↓
-Artifact Store lookup
-        ↓
-Accepted reusable Artifact exists?
+Is another accepted compatible result
+already available?
 ```
 
-Nếu có Artifact hợp lệ:
+This is NOT Retry Policy-owned cache lookup.
 
-- không cần tạo Attempt mới;
-- WorkItem có thể được hoàn thành bằng accepted Artifact flow.
-
----
-
-## 28. Provider Fallback
-
-Retry Policy chỉ quyết định:
+Correct flow:
 
 ```text
-fallback allowed?
+Retry Candidate
+        |
+        v
+Runtime Control
+        |
+        v
+Cache / Reuse Policy
+        |
+        v
+Reusable Accepted Result?
 ```
 
-Provider Selection Policy quyết định candidate.
+If yes:
 
-Provider Manager cung cấp:
-
-- availability;
-- capability;
-- health;
-- concurrency;
-- privacy eligibility.
-
-Runtime Control tạo Attempt mới với provider reference mới.
+```text
+no Retry Attempt required
+```
 
 ---
 
-## 29. Provider Fallback Rules
+# 34. Cache Boundary
 
-Fallback chỉ hợp lệ khi:
+Retry Policy MUST NOT:
 
-- business semantics tương thích;
-- output contract tương thích;
-- privacy mode cho phép;
-- provider capability phù hợp;
-- configuration cho phép;
-- cost policy cho phép;
-- deadline còn đủ;
-- provider health hợp lệ.
+* query Runtime Artifact Store directly;
+* define semantic compatibility;
+* promote cached result;
+* accept cached Business result.
+
+Those belong to Cache/Runtime/owning capability contracts.
 
 ---
 
-## 30. Provider Adapter Boundary
+# 35. Recovery Escalation
 
-Provider Adapter không:
+Retry Policy MAY determine:
 
-- tự retry;
-- tự fallback;
-- tự tăng AttemptId;
-- tự quyết định budget;
-- tự commit result.
+```text
+ordinary Retry is not appropriate
+```
 
-Adapter chỉ thực thi một Attempt được cấp.
+and emit:
 
----
+```text
+RECOVERY_ESCALATION_REQUIRED
+```
 
-## 31. Resource Boundary
+Possible causes:
 
-Attempt cũ phải release resource khi có thể.
-
-Tuy nhiên, physical cleanup có thể chưa hoàn tất với non-cancelable provider.
-
-Retry eligibility và physical cleanup completeness là hai khái niệm khác nhau.
-
-Attempt mới chỉ được admit khi:
-
-- resource budget thực tế đủ;
-- provider capacity thực tế đủ;
-- shared resource không bị unsafe reuse.
+* repeated binding failure;
+* binding unavailable;
+* retry budget for current binding exhausted;
+* persistent rate limiting;
+* runtime execution environment degraded.
 
 ---
 
-## 32. Abandoned Attempt
+# 36. Fallback Boundary
 
-Attempt bị `ABANDONED` có thể vẫn giữ physical resource.
+After escalation:
 
-Retry chỉ được tạo khi policy xác nhận:
+```text
+Recovery / Routing Architecture
+        |
+        v
+chooses whether another execution binding exists
+```
 
-- new Attempt không vi phạm capacity;
-- provider slot thực tế còn;
-- duplicate side effect được kiểm soát;
-- late result từ abandoned Attempt sẽ bị reject.
+If a new binding is selected:
+
+```text
+Pipeline Runtime
+    MAY create another Attempt
+```
+
+Retry Policy does not choose the Provider/Model/RoutePlan.
 
 ---
 
-## 33. Idempotency
+# 37. Same WorkItem with New Binding
 
-Retry chỉ an toàn khi execution side effect:
+If logical work and business inputs remain unchanged:
 
-- idempotent;
-- deduplicated;
-- hoặc được bảo vệ bằng request identity.
+```text
+same WorkItemId
+new AttemptId
+new ExecutionBindingReference
+```
 
-Provider request có thể cần:
+MAY be valid.
+
+But the new binding decision is external to Retry Policy.
+
+---
+
+# 38. Replan Boundary
+
+If recovery changes business semantics or required output:
+
+```text
+Business Orchestrator
+    creates another BusinessExecutionPlan
+```
+
+Potentially:
+
+```text
+new ExecutionRevision
+```
+
+This is not Retry.
+
+---
+
+# 39. Execution Adapter Boundary
+
+Execution Adapter / Provider Adapter MUST NOT:
+
+* perform hidden orchestration Retry;
+* select Fallback;
+* increment AttemptId;
+* own Retry budget;
+* decide terminal WorkItem outcome.
+
+Adapter executes one Attempt.
+
+---
+
+# 40. Low-Level Transport Retry
+
+A bounded low-level transport retry MAY exist only when:
+
+* explicitly part of adapter contract;
+* invisible to WorkItem semantics;
+* does not duplicate non-idempotent side effects;
+* does not violate Attempt deadline;
+* does not hide meaningful cost/latency.
+
+Architecture SHOULD minimize hidden transport Retry.
+
+---
+
+# 41. Resource Boundary
+
+Physical cleanup completeness and Retry eligibility are distinct.
+
+An old Attempt may still be draining.
+
+Another Attempt may be created only if:
+
+* real capacity remains;
+* shared resources can be used safely;
+* duplicate side effects are controlled.
+
+---
+
+# 42. Abandoned Attempt
+
+An `ABANDONED` Attempt may still hold:
+
+* provider capacity;
+* process capacity;
+* network connection;
+* billing exposure;
+* native/GPU resources.
+
+Retry Policy MUST use truthful capacity projection.
+
+---
+
+# 43. Idempotency
+
+Retry is safe only when side effects are:
+
+* idempotent;
+* deduplicated;
+* or protected with a stable idempotency mechanism.
+
+Possible execution identity:
 
 ```text
 WorkItemId
@@ -643,466 +871,706 @@ AttemptId
 IdempotencyKey
 ```
 
-Exact mechanism thuộc provider architecture.
+Exact provider mechanism belongs outside Runtime Retry Policy.
 
 ---
 
-## 34. Retry Storm Prevention
+# 44. Retry Storm Prevention
 
-Sử dụng:
+Use bounded controls such as:
 
-- bounded attempt count;
-- concurrent retry budget;
-- exponential backoff;
-- jitter;
-- provider degradation state;
-- global runtime budget;
-- circuit-breaker-like admission policy nếu cần;
-- cancellation;
-- current-revision priority;
-- delayed retry deduplication.
-
----
-
-## 35. Retry Deduplication
-
-Trong cùng WorkItem:
-
-- không tạo nhiều pending Retry cho cùng failed Attempt;
-- một retry evaluation chỉ được accept một lần;
-- delayed timer phải có unique identity;
-- duplicate retry signal phải bị ignore.
+* max Attempt count;
+* global concurrent Retry budget;
+* per-ExecutionScope budget;
+* per-binding budget;
+* exponential backoff;
+* jitter;
+* cancellation;
+* delayed Retry deduplication;
+* Scheduler admission;
+* resource pressure.
 
 ---
 
-## 36. Manual Re-execution
+# 45. Retry Deduplication
 
-Manual re-execution là Application request mới.
+For one failed Attempt:
 
-Nó có thể:
-
-- giữ cùng WorkItem nếu chỉ thay Attempt execution detail;
-- tạo BusinessExecutionPlan mới nếu business intent đổi;
-- tạo Revision mới nếu source/configuration thay đổi.
-
-Không nên tự động gọi mọi manual action là retry.
+* only one Retry evaluation may be accepted;
+* only one Retry timer should exist;
+* duplicate signals are ignored;
+* duplicate new Attempt creation is forbidden.
 
 ---
 
-## 37. Provider Switch
+# 46. Retry Evaluation Identity
 
-Provider switch có thể là:
-
-### Attempt Replacement
-
-Nếu logical work và business input không đổi:
+Recommended:
 
 ```text
-same WorkItemId
-new AttemptId
-new ProviderRef
+RetryEvaluation
+├── retryEvaluationId
+├── workItemId
+├── previousAttemptId
+├── executionRevisionId
+├── reasonCode
+├── decision
+├── retryTiming?
+├── budgetSnapshotReference?
+├── evaluatedAt
+└── correlationId?
 ```
 
-### Business Replan
+---
 
-Nếu output semantics hoặc profile thay đổi:
+# 47. Delayed Retry Resource
+
+A delayed Retry timer is a Runtime resource.
+
+It MUST:
+
+* be cancelable;
+* be disposed after firing/cancellation;
+* not hold large Artifacts;
+* revalidate authority before creating new Attempt.
+
+---
+
+# 48. Manual Re-execution
+
+Manual re-execution begins from Application/user intent.
+
+It may result in:
+
+```text
+same WorkItem
+```
+
+only when owning orchestration/runtime logic confirms logical work is unchanged.
+
+It may instead require:
 
 ```text
 new BusinessExecutionPlan
-possibly new Revision
+new ExecutionRevision
+new WorkItem
 ```
 
----
+depending on business intent.
 
-## 38. Retry During Shutdown
-
-Khi shutdown bắt đầu:
-
-- không tạo Retry mới;
-- delayed retry bị cancel;
-- pending resource wait bị cancel;
-- retry timer bị dispose;
-- queued retry Attempt bị remove;
-- running Attempt theo Cancellation Policy.
-
-Không retry nào sống qua Runtime shutdown.
+Retry Policy does not make this business decision.
 
 ---
 
-## 39. Retry Events
+# 49. Provider / Model Switch
 
-Conceptual events:
+A manual or automatic binding switch is NOT itself Retry Policy logic.
+
+Correct:
 
 ```text
-RETRY_EVALUATED
-RETRY_APPROVED
-RETRY_SKIPPED
-RETRY_DELAYED
-RETRY_ADMITTED
-RETRY_EXHAUSTED
-RETRY_CANCELED
-RETRY_DUPLICATE_REJECTED
-PROVIDER_FALLBACK_ALLOWED
-PROVIDER_FALLBACK_SELECTED
-```
+Application / Recovery / Routing
+    decides new binding
 
-Tên cuối phải tuân theo Event Standard.
+Runtime Control
+    determines whether logical WorkItem remains same
+
+Pipeline Runtime
+    creates new Attempt if appropriate
+
+Scheduler
+    decides admission
+```
 
 ---
 
-## 40. Event Payload
+# 50. Retry During Shutdown
 
-Retry event có thể chứa:
+When Runtime shutdown begins:
+
+* no new Retry evaluation should produce new Attempt;
+* delayed timers are canceled;
+* pending Retry admission is canceled/rejected;
+* queued Retry Attempts are removed through normal cancellation/drain;
+* running Attempts follow Cancellation Policy.
+
+No Retry survives Runtime shutdown.
+
+---
+
+# 51. Retry Events
+
+Recommended:
 
 ```text
-EventId
-OccurredAt
-SessionId
-RevisionId
-WorkItemId
-PreviousAttemptId
-NewAttemptId
-AttemptNumber
-RetryDecision
-RetryStrategy
-ReasonCode
-Delay
-ProviderRef
-BudgetSnapshotRef
+RetryEvaluated
+RetryApproved
+RetrySkipped
+RetryDelayed
+RetryAttemptCreated
+RetryAdmissionRequested
+RetryExhausted
+RetryCancelled
+RetryDuplicateRejected
+RecoveryEscalationRequested
 ```
 
-Không chứa:
+Do NOT emit:
 
-- source text;
-- translated text;
-- screenshot;
-- prompt;
-- secret;
-- raw provider payload.
+```text
+ProviderFallbackSelected
+```
 
----
-
-## 41. Metrics
-
-Theo dõi:
-
-- retry evaluation count;
-- retry approved count;
-- retry skipped count;
-- retry exhausted count;
-- retry canceled count;
-- retry success ratio;
-- attempt count per WorkItem;
-- retry latency;
-- recovery latency;
-- delayed retry count;
-- provider fallback count;
-- global concurrent retry count;
-- retry budget exhaustion;
-- retry storm prevention activation;
-- abandoned-attempt overlap count.
+as a Retry-owned event.
 
 ---
 
-## 42. Performance Accounting
+# 52. Event Payload
 
-Phân biệt:
+Recommended:
+
+```text
+eventId
+occurredAt
+executionScopeId
+executionRevisionId
+workItemId
+previousAttemptId
+newAttemptId?
+attemptNumber?
+retryDecision
+retryTiming?
+reasonCode
+delay?
+executionBindingReference?
+budgetSnapshotReference?
+```
+
+No raw user/provider content.
+
+---
+
+# 53. Metrics
+
+Recommended:
+
+```text
+retry evaluation count
+retry approved count
+retry skipped count
+retry exhausted count
+retry cancelled count
+retry success ratio
+attempt count per WorkItem
+retry delay
+retry queue wait
+retry execution latency
+recovery latency
+delayed retry count
+global concurrent retry count
+retry budget exhaustion
+retry deduplication count
+retry storm prevention activation
+abandoned-overlap count
+recovery escalation count
+```
+
+Fallback count belongs to recovery/routing observability.
+
+---
+
+# 54. Performance Accounting
+
+Keep separate:
 
 ```text
 Initial Attempt Latency
 Retry Delay
 Retry Queue Wait
 Retry Execution Latency
-Recovery Latency
+Recovery Escalation Latency
 Total Useful Result Latency
 ```
 
-Retry không được che queue wait hoặc provider wait trong một metric duy nhất.
+Do not collapse these into one opaque retry metric.
 
 ---
 
-## 43. Failure Classification Boundary
+# 55. Failure Classification Boundary
 
-Retry Policy nhận normalized `RuntimeError` hoặc recovery trigger.
+Retry Policy consumes normalized:
 
-Retry Policy không tự parse raw provider error.
+```text
+RuntimeError
+```
 
-Error classification thuộc `ERROR_MODEL.md`.
+or normalized recovery trigger.
+
+Retry Policy MUST NOT parse raw provider SDK errors.
+
+Error normalization belongs to `ERROR_MODEL.md` and execution adapters.
 
 ---
 
-## 44. MVP Retry Policy
+# 56. Retry Error Categories
 
-### 44.1 Required Strategies
+Retry Policy SHOULD distinguish at least:
+
+```text
+RETRYABLE_TRANSIENT
+NON_RETRYABLE
+RETRY_EXHAUSTED
+AUTHORITY_INVALID
+CANCELLED
+DEADLINE_EXPIRED
+RESOURCE_UNAVAILABLE
+BINDING_UNAVAILABLE
+RECOVERY_ESCALATION_REQUIRED
+```
+
+Exact error taxonomy belongs to `ERROR_MODEL.md`.
+
+---
+
+# 57. MVP Retry Policy
+
+MVP SHOULD support:
 
 ```text
 NONE
 IMMEDIATE
 DELAYED
+RETRY_AFTER
+```
+
+MVP SHOULD NOT define:
+
+```text
 PROVIDER_FALLBACK
 ```
 
-### 44.2 Required Rules
+as a Retry Strategy.
+
+---
+
+# 58. MVP Rules
 
 1. Same WorkItemId.
+
 2. New AttemptId.
-3. Runtime Control owns evaluation.
-4. Retry Policy owns eligibility and strategy.
+
+3. Runtime Control owns relevance/authority validation.
+
+4. Retry Policy owns Retry eligibility and timing.
+
 5. Scheduler owns admission.
-6. Worker and Provider Adapter never retry themselves.
-7. Revision must remain current.
-8. Session must remain active.
-9. Cancellation invalidates retry.
-10. Budget must remain.
-11. Cache/Artifact reuse is re-evaluated.
-12. Delayed retry is cancelable.
-13. Shutdown cancels all pending retry.
-14. Provider fallback must respect privacy and capability.
-15. Retry never restores authority automatically.
+
+6. Worker/Adapter never perform orchestration-level Retry.
+
+7. ExecutionRevision must remain eligible.
+
+8. ExecutionScope must remain eligible.
+
+9. Cancellation invalidates Retry.
+
+10. Retry budget is bounded.
+
+11. Delayed Retry is cancelable.
+
+12. Shutdown cancels all pending Retry.
+
+13. Cache/reuse may be re-evaluated outside Retry Policy.
+
+14. Fallback selection remains outside Retry Policy.
+
+15. Retry never restores execution authority.
+
+16. Actual physical capacity must be truthful.
+
+17. Abandoned Attempts may overlap only when resource/side-effect policy permits.
 
 ---
 
-## 45. MVP Budget Guidance
+# 59. MVP Budget Guidance
 
-Exact values nằm trong `RUNTIME_CONFIG.md`.
+Exact values belong to `RUNTIME_CONFIG.md`.
 
-Conceptual defaults:
+Conceptually:
 
 ```text
-interactive immediate retry: at most 1
-interactive total attempts: small bounded number
-background retry: larger delay, still bounded
-global concurrent retry: very small
-provider retry: limited by provider health
+interactive immediate Retry:
+    at most one or very small number
+
+total Attempts per WorkItem:
+    small bounded number
+
+background Retry:
+    larger delay but still bounded
+
+global concurrent Retry:
+    very small
+
+ExecutionScope Retry:
+    bounded
 ```
 
-Không hard-code theo OCR, Layout, Translation hoặc Presentation.
+No hard-coded OCR/Translation-specific retry counts.
 
 ---
 
-## 46. Example: Transient Provider Timeout
+# 60. Example — Transient Timeout
 
 ```text
-Attempt 1 times out
-        ↓
-Runtime Control validates relevance
-        ↓
+Attempt A1 times out
+        |
+        v
+Runtime Control confirms WorkItem still relevant
+        |
+        v
 Retry Policy selects DELAYED
-        ↓
-Delay timer created
-        ↓
-Authority checked again
-        ↓
-Attempt 2 created
-        ↓
+        |
+        v
+Cancelable timer
+        |
+        v
+Authority revalidated
+        |
+        v
+Attempt A2 created
+        |
+        v
 Scheduler admission
 ```
 
 ---
 
-## 47. Example: Provider Fallback
+# 61. Example — Binding Failure Escalation
 
 ```text
-Attempt 1 on Provider A fails
-        ↓
-Fallback allowed
-        ↓
-Provider Selection chooses Provider B
-        ↓
-Attempt 2 created
-        ↓
+Attempt A1 fails
+        |
+        v
+Ordinary Retry no longer useful
+        |
+        v
+RECOVERY_ESCALATION_REQUIRED
+        |
+        v
+Routing / Recovery evaluates alternatives
+        |
+        v
+new execution binding selected
+        |
+        v
+Attempt A2 created
+        |
+        v
 Scheduler admission
 ```
 
-WorkItemId giữ nguyên.
+Retry Policy did not select the alternative binding.
 
 ---
 
-## 48. Example: Revision Becomes Stale
+# 62. Example — ExecutionRevision Superseded
 
 ```text
-Attempt 1 fails
-        ↓
-Newer revision becomes current
-        ↓
-Retry evaluation runs
-        ↓
-Revision authority missing
-        ↓
+Attempt A1 fails
+        |
+        v
+ExecutionRevision becomes superseded
+        |
+        v
+Retry evaluation
+        |
+        v
+authority invalid
+        |
+        v
 DO_NOT_RETRY
 ```
 
 ---
 
-## 49. Example: Cache Satisfies Retry
+# 63. Example — Reuse Satisfies Work
 
 ```text
-Attempt 1 fails
-        ↓
-Retry candidate created
-        ↓
-Artifact Store re-evaluated
-        ↓
-Reusable accepted Artifact found
-        ↓
-No new Attempt required
+Attempt A1 fails
+        |
+        v
+Retry candidate
+        |
+        v
+Runtime Control asks Cache / Reuse Policy
+        |
+        v
+compatible accepted result found
+        |
+        v
+no new Attempt needed
+```
+
+Retry Policy did not perform the cache lookup.
+
+---
+
+# 64. Example — Abandoned Physical Execution
+
+```text
+Attempt A1 logically abandoned
+physical operation still running
+        |
+        v
+Retry evaluation
+        |
+        v
+real resource/capacity checked
+        |
+        +--> enough capacity
+        |       -> another Attempt MAY proceed
+        |
+        +--> insufficient capacity
+                -> RETRY_LATER or DO_NOT_RETRY
 ```
 
 ---
 
-## 50. Example: Abandoned Provider Request
+# 65. Architecture Invariants
+
+1. Retry preserves WorkItemId.
+
+2. Retry creates a new AttemptId.
+
+3. Previous Attempt is never resumed.
+
+4. Runtime Control owns execution relevance/authority.
+
+5. Retry Policy owns Retry eligibility/timing, not business routing.
+
+6. Scheduler does not create Retry.
+
+7. Worker does not create Retry.
+
+8. Provider Adapter does not create orchestration Retry.
+
+9. Retry does not bypass Scheduler.
+
+10. Retry does not bypass cancellation.
+
+11. Retry does not bypass authority validation.
+
+12. Retry does not create new business work.
+
+13. Retry does not commit Runtime Artifact, Business result or UI state.
+
+14. Retry does not revive superseded ExecutionRevision.
+
+15. Retry does not revive canceled ExecutionScope.
+
+16. Retry budget is always bounded.
+
+17. Delayed Retry is always cancelable.
+
+18. Retry timers are Runtime resources.
+
+19. Fallback is not a Runtime Retry strategy.
+
+20. Retry Policy does not select Provider/Model/RoutePlan.
+
+21. Recovery escalation and Fallback selection are distinct.
+
+22. Cache lookup is outside Retry Policy.
+
+23. Retry may be skipped if reusable accepted result already satisfies work.
+
+24. Abandoned Attempt may still hold resources.
+
+25. Retry does not assume physical cleanup completed.
+
+26. Manual re-execution is not automatically Retry.
+
+27. Shutdown removes all pending Retry.
+
+28. Retry events contain no user content.
+
+29. ExecutionScope/ExecutionRevision terminology is canonical.
+
+30. Retry Policy does not interpret canonical Privacy/Provider/AI routing policy.
+
+31. Retry uses normalized errors rather than raw provider errors.
+
+32. Hidden adapter Retry must remain bounded and semantically invisible if allowed.
+
+---
+
+# 66. Recommended MVP
+
+CRAI MVP SHOULD support:
+
+* same WorkItem / new Attempt identity;
+* immediate Retry;
+* delayed Retry;
+* Retry-After;
+* bounded WorkItem budget;
+* bounded ExecutionRevision budget;
+* bounded ExecutionScope budget;
+* bounded global Retry budget;
+* cancelable Retry timer;
+* Retry deduplication;
+* authority revalidation before Attempt creation;
+* Scheduler admission;
+* abandoned-capacity awareness;
+* idempotency safeguards;
+* recovery escalation signal;
+* content-free Retry telemetry.
+
+MVP MAY defer:
+
+* adaptive backoff;
+* persistent Retry across application restart;
+* complex monetary cost budget;
+* circuit breaker;
+* distributed Retry coordination;
+* automated recovery escalation scoring.
+
+---
+
+# 67. Open Decisions
+
+The following remain open:
+
+* exact RetryEvaluation schema;
+* max Attempts per WorkItem;
+* ExecutionRevision budget;
+* ExecutionScope budget;
+* global concurrent Retry budget;
+* Retry delay defaults;
+* jitter defaults;
+* Retry-After maximum;
+* cost budget;
+* retry success attribution;
+* idempotency-key format;
+* low-level adapter Retry allowance;
+* recovery escalation contract;
+* reusing newer RuntimeConfigurationSnapshot on Retry;
+* persistent Retry policy;
+* abandoned-attempt accounting.
+
+---
+
+# 68. Testing Requirements
+
+Tests SHOULD include:
+
+* immediate Retry;
+* delayed Retry;
+* Retry-After;
+* deterministic jitter;
+* WorkItem budget exhausted;
+* ExecutionRevision budget exhausted;
+* ExecutionScope budget exhausted;
+* global budget exhausted;
+* ExecutionScope inactive;
+* ExecutionRevision superseded;
+* cancellation before delayed timer;
+* cancellation after timer before admission;
+* duplicate Retry signal;
+* recovery escalation;
+* Retry Policy does not select Fallback;
+* reusable accepted result avoids Retry;
+* abandoned physical operation retains capacity;
+* shutdown cancels pending Retry;
+* same WorkItemId / new AttemptId;
+* late previous Attempt Completion;
+* resource delay;
+* manual re-execution boundary;
+* raw provider error not parsed by Retry Policy.
+
+---
+
+# 69. Related Documents
+
+Runtime:
+
+* `PIPELINE_RUNTIME.md`
+* `RUNTIME_COMPONENTS.md`
+* `SCHEDULER.md`
+* `WORK_QUEUE.md`
+* `CANCELLATION.md`
+* `ERROR_MODEL.md`
+* `CACHE_POLICY.md`
+* `MEMORY_MODEL.md`
+* `RESOURCE_LIFECYCLE.md`
+* `PERFORMANCE_MODEL.md`
+* `RUNTIME_CONFIG.md`
+* `RUNTIME_OBSERVABILITY.md`
+
+External:
+
+* `../ai/RETRY.md`
+* `../ai/FALLBACK.md`
+* `../ai/ROUTING.md`
+* `../../02-modules/provider-management/`
+
+---
+
+# 70. Completion Criteria
+
+`RETRY_POLICY.md` is synchronized when:
+
+* Retry remains same WorkItem + new Attempt;
+* ExecutionScope/ExecutionRevision terminology is used;
+* authority remains Runtime Control-owned;
+* Retry Policy owns Retry eligibility/timing only;
+* Scheduler owns admission;
+* Retry Policy does not select provider/model;
+* PROVIDER_FALLBACK is removed as Retry Strategy;
+* recovery escalation is separated from Fallback;
+* cache lookup remains external;
+* automatic Retry and manual re-execution remain distinct;
+* budgets are bounded at Runtime scopes;
+* abandoned Attempt resource accounting remains truthful;
+* Retry events/metrics no longer claim ownership of Fallback.
+
+---
+
+# 71. Summary
+
+CRAI Runtime Retry follows:
 
 ```text
-Attempt 1 abandoned but provider still running
-        ↓
-Retry Policy considers fallback
-        ↓
-Provider capacity checked
-        ↓
-Capacity unavailable
-        ↓
-WAIT_FOR_RESOURCE or DO_NOT_RETRY
+Attempt Ends
+    |
+    v
+Runtime Control
+    validates relevance / authority
+    |
+    v
+Retry Policy
+    decides whether another Attempt is allowed
+    |
+    +--> DO_NOT_RETRY
+    |
+    +--> RECOVERY_ESCALATION_REQUIRED
+    |
+    +--> RETRY_NOW / RETRY_LATER
+                    |
+                    v
+              New AttemptId
+                    |
+                    v
+             Scheduler Admission
+                    |
+                    v
+               Execution
 ```
 
----
-
-## 51. Architecture Invariants
-
-1. Retry không thay đổi WorkItemId.
-2. Retry luôn tạo AttemptId mới.
-3. Attempt cũ không resume.
-4. Runtime Control sở hữu retry authority.
-5. Retry Policy không sở hữu provider selection.
-6. Scheduler không tạo Retry.
-7. Worker không tự retry.
-8. Provider Adapter không tự retry.
-9. Retry không bypass Scheduler.
-10. Retry không bypass cancellation.
-11. Retry không bypass authority validation.
-12. Retry không tạo business work mới.
-13. Retry không tự commit Artifact hoặc UI.
-14. Retry không revive stale revision.
-15. Retry không revive canceled scope.
-16. Retry budget luôn bounded.
-17. Delayed retry luôn cancelable.
-18. Retry timer là runtime resource phải cleanup.
-19. Provider fallback tạo Attempt mới.
-20. Cache lookup không thuộc Retry Policy.
-21. Abandoned Attempt có thể vẫn giữ resource.
-22. Retry không giả định physical cleanup đã hoàn tất.
-23. Manual re-execution không mặc định là automatic retry.
-24. Shutdown hủy toàn bộ pending retry.
-25. Retry events không chứa user content.
-
----
-
-## 52. Testing Requirements
-
-Test phải bao phủ:
-
-- immediate retry;
-- delayed retry;
-- retry-after;
-- jitter deterministic;
-- budget exhausted;
-- global retry budget;
-- session inactive;
-- revision stale;
-- cancellation trước timer;
-- cancellation sau timer nhưng trước admission;
-- duplicate retry signal;
-- provider fallback;
-- privacy-blocked fallback;
-- cache satisfies retry;
-- abandoned provider holds capacity;
-- shutdown cancels retry;
-- same WorkItemId/new AttemptId;
-- late previous Attempt completion;
-- resource wait;
-- manual re-execution boundary.
-
----
-
-## 53. Open Questions
-
-- Budget cụ thể theo WorkType là bao nhiêu?
-- Có cần circuit breaker riêng không?
-- Khi nào provider fallback tốt hơn delayed retry?
-- Có cần adaptive backoff theo observed latency không?
-- Abandoned provider request được accounting vào retry budget thế nào?
-- Manual retry UI tạo Attempt mới hay business replan?
-- Retry cost budget có cần theo tiền thật không?
-- Idempotency key chuẩn hóa ở đâu?
-- Có cần persistent retry sau application restart không? MVP: không.
-
----
-
-## 54. Related Documents
-
-| Document | Relationship |
-|---|---|
-| `PIPELINE_RUNTIME.md` | WorkItem, Attempt và authority |
-| `RUNTIME_COMPONENTS.md` | Retry Coordinator ownership |
-| `SCHEDULER.md` | Admission |
-| `WORK_QUEUE.md` | Queued retry Attempt |
-| `CANCELLATION.md` | Retry invalidation |
-| `ERROR_MODEL.md` | RuntimeError và retry classification |
-| `CACHE_POLICY.md` | Artifact reuse |
-| `MEMORY_MODEL.md` | Artifact and resource state |
-| `RESOURCE_LIFECYCLE.md` | Attempt cleanup |
-| `PERFORMANCE_MODEL.md` | Recovery latency |
-| `RUNTIME_CONFIG.md` | Budget, delay và attempts |
-| `RUNTIME_OBSERVABILITY.md` | Retry metrics and traces |
-
----
-
-## 55. Completion Criteria
-
-`RETRY_POLICY.md` được xem là đồng bộ khi:
-
-- retry được mô tả là Attempt replacement;
-- same WorkItemId/new AttemptId được chốt;
-- authority vẫn thuộc Runtime Control;
-- Retry Policy không chọn provider implementation;
-- Scheduler chỉ làm admission;
-- cache lookup tách khỏi Retry Policy;
-- automatic retry và manual re-execution được phân biệt;
-- retry budget có WorkItem, Revision, Session, Provider và Global scope;
-- concurrent retry budget được mô tả;
-- abandoned Attempt và resource capacity được xử lý đúng;
-- event, metric và MVP policy thống nhất;
-- không hard-code OCR/Translation/Layout attempt count.
-
----
-
-## 56. Summary
-
-Retry trong CRAI quản lý Attempt lineage:
+The central boundary is:
 
 ```text
-WorkItem
-    ↓
-Attempt 1
-    ↓
-Retry Evaluation
-    ↓
-Attempt 2
-    ↓
-Scheduler Admission
-    ↓
-Execution
-```
+Retry repeats execution.
 
-Ranh giới cốt lõi:
+Fallback changes execution route.
 
-```text
-Retry keeps logical work unchanged.
-
-Retry creates a new physical Attempt.
-
-Runtime Control decides authority.
-
-Scheduler decides admission.
-
-Workers only execute.
+Those are not the same decision.
 ```

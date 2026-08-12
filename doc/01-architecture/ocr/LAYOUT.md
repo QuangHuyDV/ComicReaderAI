@@ -1,7 +1,7 @@
 # Layout Analysis
 
 > **Status:** Draft
-> **Version:** 1.1
+> **Version:** 1.2.0
 > **Layer:** OCR Architecture
 > **Depends On:** Detection, Recognition, Text Direction
 > **Next Layer:** OCR Postprocessing, Reading Order
@@ -61,7 +61,7 @@ Layout Analysis không chịu trách nhiệm:
 * semantic text reconstruction
 * Rendering
 * Runtime scheduling
-* Runtime retry
+* Runtime same-work retry
 * Event Bus behavior
 * global cache lifecycle
 
@@ -1003,7 +1003,7 @@ changed scope
     → recompute affected hierarchy
 ```
 
-Execution scheduling thuộc Runtime.
+Layout sở hữu incremental recomputation semantics. Runtime sở hữu scheduling, execution authority và execution mechanics của recomputation work.
 
 ---
 
@@ -1020,7 +1020,7 @@ Layout Result có thể không còn compatible khi:
 
 Layout chỉ định nghĩa semantic compatibility.
 
-Cache lifecycle thuộc Runtime.
+Cache lifecycle thuộc Runtime Cache Policy.
 
 ---
 
@@ -1044,20 +1044,33 @@ Diagnostics không được tự mutate input.
 
 Layout không sở hữu:
 
+* ExecutionScope hoặc ExecutionRevision
+* WorkItem hoặc Attempt lifecycle
 * queue
 * execution state
-* retry attempt
+* Runtime Retry Policy hoặc retry budget
 * cancellation authority
 * Scheduler behavior
-* stale authority
+* execution authority
+* stale-result rejection
+* Runtime Artifact publication
 
-Runtime sở hữu execution.
+Runtime sở hữu execution mechanics và execution authority trên.
 
-Layout chỉ tạo semantic result hoặc semantic failure information.
+Layout chỉ tạo:
+
+* semantic Layout Result candidate
+* Layout-specific semantic failure information
+* semantic compatibility information
+* execution hoặc resource hints khi contract cho phép
+
+Khi Layout execution hoàn thành, Runtime Control quyết định completion còn execution authority hay phải bị reject vì stale hoặc cancelled trước Runtime publication.
+
+Layout không quyết định downstream Business continuation.
 
 ---
 
-# 53. Retry Integration
+# 53. Retry and Recovery Integration
 
 Layout có thể cung cấp:
 
@@ -1065,10 +1078,28 @@ Layout có thể cung cấp:
 * invalid hierarchy
 * ambiguous grouping
 * insufficient evidence
+* Retry hint
+* Recovery recommendation
 
-Những thông tin này có thể hỗ trợ Runtime/Quality decision.
+Những thông tin này có thể được Quality hoặc authoritative policy owner sử dụng làm evidence.
 
-Layout không tự schedule retry.
+Layout không tự schedule Retry và không tự chọn alternative execution.
+
+Ownership:
+
+```text
+Same-work Retry
+    → Runtime Retry Policy
+
+Alternative execution / Fallback
+    → AI Routing / Recovery
+
+Downstream Business continuation
+    → Business Pipeline Orchestration
+
+Scheduling
+    → Runtime Scheduler
+```
 
 ---
 
@@ -1083,7 +1114,7 @@ Ví dụ:
 * Layout Profile changed
 * Strategy Version changed
 
-Global cache storage/retention/eviction thuộc Runtime.
+Global cache storage, retention và eviction thuộc Runtime Cache Policy.
 
 ---
 
@@ -1114,7 +1145,9 @@ Layout-specific semantic errors có thể gồm:
 * ParentChildCycle
 * StrategyUnavailable
 
-Các lỗi này phải map vào Runtime Error Model khi crossing execution boundary.
+Layout sở hữu semantic meaning của các Layout-specific errors.
+
+Các lỗi này phải map vào Runtime Error Model khi crossing Runtime execution boundary; Runtime không redefine Layout semantics.
 
 ---
 
@@ -1131,7 +1164,7 @@ Useful measurements có thể gồm:
 * layout duration
 * strategy identity
 
-Telemetry transport thuộc Runtime/Infrastructure.
+Runtime Observability sở hữu execution correlation; telemetry transport và lifecycle thuộc Infrastructure.
 
 ---
 
@@ -1171,13 +1204,25 @@ Layout Analysis phải luôn đảm bảo:
 
 16. Layout không sở hữu Runtime scheduling.
 
-17. Layout không sở hữu Runtime retry.
+17. Layout không sở hữu Runtime Retry Policy hoặc Retry budget.
 
 18. Layout không sở hữu cancellation authority.
 
-19. Layout không sở hữu global cache lifecycle.
+19. Layout không sở hữu Runtime execution authority hoặc stale-result decision.
 
-20. Reading Order phải có thể sử dụng Layout Result mà không cần suy luận lại toàn bộ spatial structure.
+20. Layout không sở hữu Runtime Artifact publication.
+
+21. Layout không sở hữu downstream Business continuation.
+
+22. Layout không sở hữu global cache lifecycle.
+
+23. Layout semantic compatibility không bị Runtime Cache Policy redefine.
+
+24. Layout không tự chọn Provider hoặc Fallback.
+
+25. Reading Order phải có thể sử dụng Layout Result mà không cần suy luận lại toàn bộ spatial structure.
+
+26. Incremental recomputation phải giữ stable identity và structure cho unchanged compatible scopes khi có thể.
 
 ---
 
@@ -1228,25 +1273,31 @@ Không cần ngay:
 
 # 60. Ownership References
 
-| Concern                    | Owner               |
-| -------------------------- | ------------------- |
-| Region                     | `DETECTION.md`      |
-| Region Geometry            | `DETECTION.md`      |
-| Recognition Text Model     | `RECOGNITION.md`    |
-| Writing Direction          | `TEXT_DIRECTION.md` |
-| Panel                      | `LAYOUT.md`         |
-| Container                  | `LAYOUT.md`         |
-| Block                      | `LAYOUT.md`         |
-| Layout Tree                | `LAYOUT.md`         |
-| Spatial Relationship Graph | `LAYOUT.md`         |
-| OCR Document               | `POSTPROCESS.md`    |
-| Reading Order              | `READING_ORDER.md`  |
-| Retry                      | Runtime             |
-| Cancellation               | Runtime             |
-| Scheduling                 | Runtime             |
-| Cache Lifecycle            | Runtime             |
-| Event Transport            | Event Bus           |
-| Telemetry Transport        | Infrastructure      |
+| Concern | Owner |
+| --- | --- |
+| Region | `DETECTION.md` |
+| Region Geometry | `DETECTION.md` |
+| Recognition Text Model | `RECOGNITION.md` |
+| Writing Direction | `TEXT_DIRECTION.md` |
+| Panel | `LAYOUT.md` |
+| Container | `LAYOUT.md` |
+| Block | `LAYOUT.md` |
+| Layout Tree | `LAYOUT.md` |
+| Spatial Relationship Graph | `LAYOUT.md` |
+| Layout semantic compatibility | `LAYOUT.md` |
+| OCR Document | `POSTPROCESS.md` |
+| Reading Order | `READING_ORDER.md` |
+| Same-work Retry | Runtime Retry Policy |
+| Alternative execution / Fallback | AI Routing / Recovery |
+| Cancellation Authority | Runtime Control / Cancellation |
+| Scheduling | Runtime Scheduler |
+| Execution Authority / stale-result rejection | Runtime Control |
+| Runtime Artifact publication | Runtime Artifact boundary |
+| Business continuation | Business Pipeline Orchestration |
+| Cache Lifecycle | Runtime Cache Policy |
+| Event Transport | Event Bus |
+| Execution Error Normalization | Runtime Error Model |
+| Telemetry Transport | Infrastructure |
 
 ---
 
@@ -1308,5 +1359,5 @@ Reading Order owns precedence.
 
 Recognition owns text.
 
-Runtime owns execution.
+Runtime owns execution mechanics and execution authority.
 ```

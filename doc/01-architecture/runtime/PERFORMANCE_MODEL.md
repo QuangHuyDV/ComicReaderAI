@@ -1,336 +1,260 @@
-# runtime/PERFORMANCE_MODEL.md
-
 # Runtime Performance Model
 
-> Project: CRAI  
-> Version: 1.0  
-> Status: Architecture Draft
+* **Document:** Runtime Architecture / Performance Model
+* **Version:** 2.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-Tài liệu này định nghĩa cách CRAI Runtime đánh giá, ngân sách hóa, bảo vệ, đo lường và cải thiện hiệu năng theo trải nghiệm đọc thực tế.
+This document defines how CRAI measures, budgets, protects and improves Runtime performance around useful current reading output.
 
-CRAI là interactive reading assistant.
+CRAI is an interactive reading assistant.
 
-Hiệu năng không được đánh giá chỉ bằng:
+Performance MUST NOT be evaluated only by:
 
-- raw throughput;
-- số WorkItem hoàn thành;
-- CPU utilization;
-- provider median latency;
-- tốc độ của một Business Module riêng lẻ.
+* raw throughput;
+* number of completed WorkItems;
+* CPU utilization;
+* provider median latency;
+* isolated Business Module speed.
 
-Câu hỏi chính là:
+The primary question is:
 
-> CRAI có thể trình bày kết quả hữu ích, đúng authority và còn liên quan tới nội dung người dùng đang đọc nhanh và ổn định đến mức nào?
-
----
-
-## 2. Scope
-
-Tài liệu này bao phủ:
-
-- useful-result latency;
-- time to first useful result;
-- interaction latency;
-- observation latency;
-- queue wait;
-- WorkItem và Attempt latency;
-- authority-validation latency;
-- ownership-transfer latency;
-- Artifact publication latency;
-- UI commit latency;
-- freshness;
-- useful-work ratio;
-- resource pressure;
-- cache reuse value;
-- Resource Lease performance;
-- logical/physical disposal performance;
-- provider performance;
-- overload;
-- graceful degradation;
-- benchmark;
-- regression;
-- MVP targets.
-
-Không định nghĩa:
-
-- provider pricing cuối cùng;
-- exact hardware requirements;
-- exact retry rules;
-- exact error taxonomy;
-- persistent schema;
-- implementation language/framework;
-- Business Module algorithm chi tiết.
+```text
+How quickly and predictably can CRAI deliver
+a useful result that is still current,
+execution-authorized,
+business-valid where required,
+and consumable by the user?
+```
 
 ---
 
-## 3. Performance Philosophy
+# 2. Scope
 
-CRAI tuân theo:
+This document covers:
+
+* Useful Result Latency;
+* Time to First Useful Result;
+* interaction responsiveness;
+* observation latency;
+* planning latency;
+* WorkItem/Attempt latency;
+* Scheduler admission;
+* Queue wait;
+* execution-authority validation;
+* Runtime Artifact ownership transfer/publication;
+* Business acceptance latency;
+* Presentation commit latency;
+* freshness;
+* useful-work ratio;
+* wasted work;
+* Retry/recovery cost;
+* cancellation efficiency;
+* Resource Lease performance;
+* resource lifecycle performance;
+* cache/reuse value;
+* provider/runtime execution performance;
+* overload;
+* graceful degradation;
+* cold start;
+* endurance;
+* benchmarks;
+* regression policy.
+
+This document does NOT define:
+
+* Business semantics;
+* Provider selection;
+* Fallback policy;
+* exact Retry rules;
+* quality thresholds;
+* exact degradation policy;
+* exact Scheduler algorithm;
+* exact hardware requirements;
+* provider pricing;
+* implementation framework.
+
+---
+
+# 3. Performance Philosophy
+
+CRAI prioritizes:
 
 ```text
 Correct Current Result
-    ↓
-Responsive UI
-    ↓
+        |
+        v
+Responsive Control / UI
+        |
+        v
 Low Useful-Result Latency
-    ↓
+        |
+        v
+Predictable Tail Latency
+        |
+        v
 Stable Resource Usage
-    ↓
+        |
+        v
 Predictable Recovery
-    ↓
-Provider Cost Efficiency
-    ↓
-Maximum Throughput
+        |
+        v
+Execution Cost Efficiency
+        |
+        v
+Maximum Raw Throughput
 ```
 
-Nguyên tắc cốt lõi:
+Core rule:
 
 ```text
-Optimize for current useful output,
+Optimize useful current output,
 not maximum executed work.
 ```
 
-Một hệ thống xử lý nhiều obsolete WorkItem không được coi là performant.
+---
+
+# 4. Performance Is Not Authority
+
+Performance optimization MUST NOT:
+
+* bypass execution-authority validation;
+* bypass Business result validation;
+* bypass ownership transfer;
+* bypass cancellation;
+* bypass Privacy/Policy;
+* bypass Artifact integrity;
+* bypass Presentation target validation.
+
+A faster invalid result is not a performance success.
 
 ---
 
-## 4. Primary Performance Outcome
+# 5. Primary Performance Outcome
 
-Metric chính:
-
-```text
-Useful Result Latency
-```
-
-Được đo từ khi content hiện tại đủ ổn định để xử lý đến khi result hợp lệ cho current Revision được commit cho người dùng.
+The primary end-to-end metric is:
 
 ```text
-Stable Content
-    ↓
-Revision Created
-    ↓
-Required WorkItems Completed
-    ↓
-Candidate Artifact Validated
-    ↓
-Artifact Published
-    ↓
-Presentation Committed
+UsefulResultLatency
 ```
 
-Không tính là useful result nếu:
+Conceptually:
 
-- Revision đã obsolete;
-- authority validation fail;
-- Artifact không được publish;
-- UI commit bị reject;
-- user đã chuyển khỏi content;
-- result quá thiếu để hỗ trợ đọc.
+```text
+Current Source Becomes Processable
+        |
+        v
+Business Intent / Plan Resolved
+        |
+        v
+ExecutionRevision Created
+        |
+        v
+Required Runtime Work
+        |
+        v
+Execution Result Accepted
+        |
+        v
+Runtime Artifact Published
+        |
+        v
+Business Result Accepted
+        |
+        v
+Presentation Ready
+        |
+        v
+Visible Useful Result
+```
+
+Not every workflow requires every stage.
 
 ---
 
-## 5. Performance Dimensions
+# 6. Useful Result
+
+A result counts as useful only when all applicable conditions hold:
+
+* still relevant to current business/user intent;
+* execution authority accepted;
+* required Runtime Artifact publication succeeded;
+* required Business owner accepted semantics;
+* required Presentation commit succeeded;
+* result remains relevant when shown;
+* output satisfies minimum usefulness contract.
+
+---
+
+# 7. Non-Useful Fast Results
+
+The following do NOT count as useful success:
+
+* stale Completion;
+* rejected Runtime Artifact candidate;
+* superseded ExecutionRevision result;
+* Business-rejected output;
+* Presentation commit rejected;
+* result never consumed;
+* output arriving after user moved away;
+* output too incomplete to satisfy its declared partial/full result contract.
+
+---
+
+# 8. Performance Dimensions
+
+Recommended:
 
 ```text
 Performance
 ├── Responsiveness
 ├── Useful Latency
 ├── Freshness
-├── Predictability
-├── Stability
-├── Resource Efficiency
+├── Tail Predictability
+├── Resource Stability
+├── Execution Efficiency
 ├── Recovery
 ├── Cost Efficiency
 └── Quality Preservation
 ```
 
-### Responsiveness
+---
 
-Runtime phản hồi user/control command nhanh đến đâu.
+# 9. Responsiveness
 
-### Useful Latency
+Measures how quickly CRAI reacts to:
 
-Bao lâu để tạo output thực sự có ích.
+* user interaction;
+* cancellation;
+* ExecutionRevision replacement;
+* Runtime control operations;
+* Presentation acknowledgment.
 
-### Freshness
-
-Output còn đại diện cho current content hay không.
-
-### Predictability
-
-P50/P95/P99 có ổn định không.
-
-### Stability
-
-Runtime có giữ bounded resource trong long session không.
-
-### Resource Efficiency
-
-CPU, GPU, memory, provider, queue, lease và Artifact được dùng hiệu quả không.
-
-### Recovery
-
-Runtime phục hồi khỏi overload/failure/cancellation nhanh đến đâu.
+Responsiveness is distinct from full useful-result completion.
 
 ---
 
-## 6. Latency Categories
+# 10. Useful Latency
 
-### Interaction Latency
-
-User command → immediate UI acknowledgment.
-
-### Observation Latency
-
-Frame/source update → stable-content decision.
-
-### Planning Latency
-
-Business request → BusinessExecutionPlan.
-
-### Work Creation Latency
-
-Plan accepted → WorkItem ready.
-
-### Admission Latency
-
-WorkItem ready → Scheduler decision.
-
-### Queue Wait
-
-Admitted → dispatched.
-
-### Attempt Execution Latency
-
-Attempt start → Completion reported.
-
-### Authority Validation Latency
-
-Completion received → accepted/rejected.
-
-### Ownership Transfer Latency
-
-Candidate accepted → Artifact Store ownership acquired.
-
-### Publication Latency
-
-Ownership accepted → Artifact publicly available.
-
-### Commit Latency
-
-Presentation ready → UI visible.
-
-### Useful Result Latency
-
-Stable current content → valid current visible result.
-
-### Recovery Latency
-
-Failure/cancellation/pressure → normal useful processing restored.
+Measures the time to produce a result that actually contributes to current user-visible value.
 
 ---
 
-## 7. End-to-End Latency Model
+# 11. Freshness
 
-Conceptual formula:
-
-```text
-T_useful =
-    T_observation
-  + T_revision
-  + T_planning
-  + T_work_creation
-  + T_reuse_lookup
-  + T_admission
-  + T_queue
-  + T_attempt_execution
-  + T_authority_validation
-  + T_ownership_transfer
-  + T_publication
-  + T_presentation
-  + T_ui_dispatch
-  + T_commit
-```
-
-Không phải mọi execution đều có mọi thành phần.
-
-Một reusable Artifact có thể loại bỏ:
-
-- Attempt creation;
-- queue wait;
-- provider execution;
-- parts of presentation work.
+Measures whether produced/visible output still corresponds to current execution/business intent.
 
 ---
 
-## 8. Critical Path
+# 12. Tail Predictability
 
-Critical path là chuỗi tối thiểu tạo current useful output.
+P50 alone is insufficient.
 
-```text
-Stable Content
-    ↓
-Revision
-    ↓
-Required WorkItems
-    ↓
-Accepted Artifacts
-    ↓
-Presentation
-    ↓
-UI Commit
-```
-
-Business Module internals như OCR, segmentation hoặc provider call không được hard-code thành Runtime critical-path vocabulary.
-
----
-
-## 9. Critical-Path Protection
-
-Runtime phải:
-
-- ưu tiên current Revision;
-- loại obsolete queued work;
-- revoke authority sớm;
-- giữ control-path capacity;
-- giới hạn provider concurrency;
-- giới hạn resource usage;
-- tránh UI blocking;
-- dùng bounded queue;
-- giảm background/speculative work dưới pressure;
-- ưu tiên reusable accepted Artifact.
-
----
-
-## 10. Timing Targets
-
-Provisional MVP targets:
-
-| Operation | Initial target |
-|---|---:|
-| Immediate UI acknowledgment | under 100 ms |
-| Runtime control command handling | under 50 ms typical |
-| Observation lightweight decision | under 50 ms |
-| Current WorkItem admission | under 50 ms |
-| Authority validation | under 20 ms typical |
-| Candidate publication | under 50 ms typical |
-| UI commit after ready | under 100 ms |
-| Cancellation authority propagation | under 100 ms |
-| Obsolete queued-work removal | under 100 ms |
-| Cached/reused presentation | under 200 ms |
-| Current useful result | preferably under 2 seconds |
-
-Các số này là hypothesis ban đầu, không phải product guarantee.
-
----
-
-## 11. Percentile Evaluation
-
-Metric quan trọng phải đo:
+Important paths SHOULD measure:
 
 ```text
 P50
@@ -339,26 +263,366 @@ P95
 P99
 ```
 
-Average không đủ.
-
-Tail latency cần được phân tích theo cause:
-
-- provider;
-- queue;
-- resource pressure;
-- cold start;
-- retry;
-- lock/contention;
-- lease wait;
-- UI dispatch;
-- publication delay;
-- cleanup pressure.
+where sample volume permits.
 
 ---
 
-## 12. WorkItem Timing Model
+# 13. Resource Stability
 
-Conceptual timestamps:
+Long-running CRAI operation should not progressively accumulate:
+
+* memory;
+* Runtime Artifacts;
+* active Leases;
+* Queue depth;
+* draining resources;
+* threads/contexts;
+* provider requests;
+* native/GPU resources.
+
+---
+
+# 14. Latency Categories
+
+Recommended:
+
+```text
+InteractionLatency
+ObservationLatency
+PlanningLatency
+ExecutionRevisionCreationLatency
+WorkMaterializationLatency
+AdmissionLatency
+QueueWaitLatency
+ExecutionStartLatency
+AttemptExecutionLatency
+ProviderExecutionLatency
+CompletionDispatchLatency
+AuthorityValidationLatency
+OwnershipTransferLatency
+ArtifactPublicationLatency
+BusinessAcceptanceLatency
+PresentationPreparationLatency
+UiDispatchLatency
+PresentationCommitLatency
+UsefulResultLatency
+RecoveryLatency
+CleanupLatency
+```
+
+---
+
+# 15. Interaction Latency
+
+```text
+User Action
+    ->
+Immediate UI/Application acknowledgment
+```
+
+This SHOULD remain very small regardless of slow provider/background execution.
+
+---
+
+# 16. Observation Latency
+
+For capture/observation use cases:
+
+```text
+Source update
+    ->
+stable/processable source determination
+```
+
+Observation semantics remain owned by Capture/Observation architecture.
+
+---
+
+# 17. Planning Latency
+
+```text
+Validated Business Intent
+    ->
+BusinessExecutionPlan
+```
+
+This belongs to Business Pipeline Orchestration.
+
+---
+
+# 18. ExecutionRevision Creation Latency
+
+```text
+Accepted BusinessExecutionPlan
+    ->
+ExecutionRevision available
+```
+
+This is Runtime execution setup latency.
+
+---
+
+# 19. Work Materialization Latency
+
+```text
+Declared Business Stage runtime-ready
+    ->
+WorkItem / Attempt candidate available
+```
+
+---
+
+# 20. Admission Latency
+
+```text
+Eligible candidate
+    ->
+Scheduler decision
+```
+
+---
+
+# 21. Queue Wait
+
+```text
+ADMIT
+    ->
+dispatch
+```
+
+Queue wait MUST remain distinct from execution latency.
+
+---
+
+# 22. Attempt Execution Latency
+
+```text
+Attempt started
+    ->
+Completion reported
+```
+
+May include provider/native execution where applicable.
+
+---
+
+# 23. Authority Validation Latency
+
+```text
+Completion received
+    ->
+Runtime authority ACCEPT / REJECT
+```
+
+This SHOULD remain fast and control-path safe.
+
+---
+
+# 24. Ownership Transfer Latency
+
+```text
+Accepted candidate
+    ->
+Runtime Artifact Store owns candidate
+```
+
+---
+
+# 25. Artifact Publication Latency
+
+```text
+ownership transfer accepted
+    ->
+RuntimeArtifactRef publicly available
+```
+
+---
+
+# 26. Business Acceptance Latency
+
+Where required:
+
+```text
+Accepted Runtime execution result
+    ->
+Owning Business Module accepts/rejects semantics
+```
+
+This MUST remain separate from Runtime authority validation.
+
+---
+
+# 27. Presentation Commit Latency
+
+```text
+Presentation commit-ready
+    ->
+visible Presentation state
+```
+
+Presentation target validation belongs to Presentation/Application.
+
+---
+
+# 28. Useful Result Latency
+
+Conceptual:
+
+```text
+T_useful =
+    T_observation?
+  + T_planning
+  + T_execution_revision
+  + T_materialization
+  + T_reuse_lookup?
+  + T_admission
+  + T_queue
+  + T_attempt
+  + T_authority_validation
+  + T_ownership_transfer
+  + T_artifact_publication
+  + T_business_acceptance?
+  + T_presentation
+  + T_ui_dispatch
+  + T_presentation_commit
+```
+
+Not every request uses every term.
+
+---
+
+# 29. Critical Path
+
+Critical path is:
+
+```text
+the minimum dependency chain
+required to create the current useful result
+```
+
+Runtime critical-path vocabulary SHOULD remain generic:
+
+```text
+Business Plan
+    |
+    v
+ExecutionRevision
+    |
+    v
+Required WorkItems
+    |
+    v
+Accepted Runtime Results
+    |
+    v
+Business-Accepted Result
+    |
+    v
+Presentation
+```
+
+Do not hard-code OCR/Layout/provider-call internals into generic Runtime performance architecture.
+
+---
+
+# 30. Critical-Path Protection
+
+Runtime SHOULD:
+
+* preserve control capacity;
+* prefer current eligible execution over obsolete execution;
+* remove obsolete queued work quickly;
+* revoke obsolete authority early;
+* use bounded queues;
+* use bounded concurrency;
+* avoid UI/control blocking;
+* limit provider/runtime saturation;
+* reduce non-critical work under pressure;
+* reuse compatible accepted results where valid.
+
+---
+
+# 31. Freshness Is Not Absolute Priority
+
+Critical-path protection does NOT imply:
+
+```text
+current execution
+    always outranks everything
+```
+
+Control operations such as:
+
+* cancellation;
+* shutdown;
+* containment;
+* critical lifecycle work
+
+may outrank ordinary current Business work.
+
+---
+
+# 32. Provisional MVP Targets
+
+Initial hypotheses MAY include:
+
+| Operation                          |                                    Initial target |
+| ---------------------------------- | ------------------------------------------------: |
+| Immediate UI acknowledgment        |                                          < 100 ms |
+| Runtime Control command handling   |                                   < 50 ms typical |
+| Lightweight observation decision   |                                           < 50 ms |
+| Scheduler decision                 |                                           < 50 ms |
+| Authority validation               |                                   < 20 ms typical |
+| Runtime Artifact publication       |                                   < 50 ms typical |
+| Presentation commit after ready    |                                          < 100 ms |
+| Cancellation authority propagation |                                          < 100 ms |
+| Obsolete queued-work removal       |                                          < 100 ms |
+| Warm reusable result path          |                          < 200 ms where realistic |
+| Current useful result              | preferably around/below 2 s for interactive cases |
+
+These are prototype hypotheses.
+
+They are NOT product guarantees.
+
+---
+
+# 33. Target Review Rule
+
+Targets MUST be revised using benchmark evidence.
+
+A target SHOULD NOT become a correctness invariant.
+
+---
+
+# 34. Percentile Analysis
+
+Important latency metrics SHOULD analyze:
+
+```text
+P50
+P90
+P95
+P99
+```
+
+Tail causes MAY include:
+
+* provider execution;
+* Queue wait;
+* Resource Lease contention;
+* cold start;
+* Retry;
+* Runtime control contention;
+* UI dispatch;
+* Artifact publication;
+* Business validation;
+* cleanup/resource pressure.
+
+---
+
+# 35. WorkItem Timing Model
+
+Possible timestamps:
 
 ```text
 CreatedAt
@@ -367,239 +631,310 @@ AdmittedAt
 QueuedAt
 DispatchedAt
 AttemptStartedAt
-ProviderRequestedAt
-ProviderCompletedAt
+ExternalExecutionStartedAt?
+ExternalExecutionCompletedAt?
 CompletionReportedAt
 AuthorityValidatedAt
 OwnershipTransferredAt
-PublishedAt
-CommitRequestedAt
-CommittedAt
-CanceledAt
-LogicalDisposedAt
-PhysicalDisposedAt
+ArtifactPublishedAt
+BusinessAcceptedAt?
+PresentationReadyAt?
+CommitRequestedAt?
+PresentationCommittedAt?
+CancellationRequestedAt?
+LogicalDisposedAt?
+PhysicalDisposedAt?
 ```
 
-Không phải WorkItem nào cũng cần mọi timestamp.
+Not every WorkItem needs every timestamp.
 
 ---
 
-## 13. Attempt Timing
+# 36. Attempt Timing Breakdown
 
-Mỗi Attempt phải tách:
+Attempt performance SHOULD distinguish:
 
 ```text
 Queue Wait
 Resource Wait
 Lease Wait
 Execution Time
-Provider Wait
+Provider / Native Wait
 Normalization Time
 Completion Dispatch
 Authority Validation
-Cleanup Time
+Attempt Cleanup
 ```
-
-Điều này tránh nhầm execution chậm với admission hoặc resource wait.
 
 ---
 
-## 14. Useful Work Model
+# 37. Work Outcome Funnel
 
-Phân biệt:
+Performance SHOULD distinguish:
 
 ```text
+Materialized Work
 Executed Work
-Completed Work
-Accepted Work
-Published Work
-Committed Work
+Physically Completed Work
+Execution-Accepted Work
+Published Runtime Work
+Business-Accepted Work
+Presented Work
 Useful Work
 ```
 
-### Executed Work
+---
 
-Attempt đã chạy.
+# 38. Materialized Work
 
-### Completed Work
+Logical Runtime work was created.
 
-Worker đã báo Completion.
-
-### Accepted Work
-
-Runtime Control chấp nhận outcome.
-
-### Published Work
-
-Artifact đã publish.
-
-### Committed Work
-
-Presentation đã commit.
-
-### Useful Work
-
-Current user thực sự hưởng lợi.
+This may still never execute.
 
 ---
 
-## 15. Useful Work Ratio
+# 39. Executed Work
+
+At least one physical Attempt started.
+
+---
+
+# 40. Physically Completed Work
+
+Attempt produced a physical terminal outcome.
+
+---
+
+# 41. Execution-Accepted Work
+
+Runtime Control accepted the Completion under current execution authority.
+
+---
+
+# 42. Published Runtime Work
+
+A Runtime Artifact/result became available through the Runtime publication boundary.
+
+---
+
+# 43. Business-Accepted Work
+
+The owning Business Module accepted the result semantics where such acceptance is required.
+
+---
+
+# 44. Presented Work
+
+Presentation/Application committed a result into current visible state.
+
+---
+
+# 45. Useful Work
+
+The current user/use case actually benefits from the result.
+
+---
+
+# 46. Funnel Ratios
+
+Useful ratios MAY include:
 
 ```text
-Useful Work Ratio =
-Useful Current Work
-/
-Total Executed Work
+Executed / Materialized
+PhysicalCompleted / Executed
+ExecutionAccepted / PhysicalCompleted
+Published / ExecutionAccepted
+BusinessAccepted / Published
+Presented / BusinessAccepted
+Useful / Presented
 ```
 
-Ngoài ra đo:
+Not all pipelines require every denominator.
+
+---
+
+# 47. Useful Work Ratio
+
+Recommended:
 
 ```text
-Accepted / Completed
-Published / Accepted
-Committed / Published
-Useful / Committed
+UsefulWorkRatio =
+    Useful Current Execution Cost
+    /
+    Total Executed Cost
 ```
 
-Các ratio này giúp tìm đúng điểm waste.
+Prefer cost/time-weighted ratios over simple WorkItem counts where feasible.
 
 ---
 
-## 16. Wasted Work
+# 48. Wasted Work
 
-Bao gồm:
+Wasted execution MAY include:
 
-- stale Attempt;
-- canceled work hoàn thành muộn;
-- duplicate provider request;
-- duplicate computation;
-- Artifact accepted nhưng không dùng;
-- Artifact publish nhưng không commit;
-- presentation commit bị reject;
-- speculative work evicted trước use;
-- resource held sau authority loss.
+* stale Attempt execution;
+* canceled work finishing late;
+* duplicate provider request;
+* duplicate computation;
+* Runtime Artifact published but never Business-accepted;
+* Business result accepted but never presented;
+* Presentation commit rejected;
+* speculative result evicted before use;
+* physical resource retained long after authority loss;
+* Retry superseded before value;
+* duplicate execution caused by poor coalescing.
 
-Wasted work phải bounded và observable.
-
----
-
-## 17. Freshness
-
-Metric:
-
-- current Revision commit ratio;
-- stale Completion ratio;
-- stale Artifact rejection;
-- average obsolete execution duration;
-- cancellation propagation delay;
-- revision churn;
-- displayed Revision lag;
-- latest stable content lag.
-
-Một stale result nhanh vẫn là kết quả kém.
+Wasted work SHOULD be bounded and observable.
 
 ---
 
-## 18. Authority Performance
+# 49. Freshness Metrics
 
-Đo:
-
-- authority-validation latency;
-- duplicate Completion rejection latency;
-- stale rejection latency;
-- cancellation authority propagation;
-- commit revalidation latency;
-- authority conflict count;
-- rejected late result count.
-
-Authority validation phải nhanh và không block control path.
-
----
-
-## 19. Publication Performance
-
-Đo riêng:
+Recommended:
 
 ```text
-Candidate Created
-    ↓
-Validation
-    ↓
-Ownership Transfer
-    ↓
-Publication
+CurrentExecutionRevisionUsefulRatio
+StaleCompletionRatio
+AuthorityRejectionRatio
+AverageObsoleteExecutionDuration
+CancellationPropagationLatency
+ExecutionRevisionChurn
+VisibleExecutionRevisionLag
+StableSourceToCurrentRevisionLag
 ```
 
-Metrics:
-
-- candidate validation time;
-- ownership-transfer latency;
-- publication latency;
-- publication failure count;
-- duplicate publication rejection;
-- candidate cleanup after rejection.
-
 ---
 
-## 20. Resource Lease Performance
+# 50. Stale Is Not Physical Failure
 
-Metrics:
-
-- Lease acquisition delay;
-- Lease hold time;
-- Lease contention;
-- denied Lease count;
-- disposal blocked by Lease;
-- leaked Lease count;
-- Lease lifetime by resource type.
-
-Lease không được chờ vô hạn.
-
----
-
-## 21. Resource Lifecycle Performance
-
-Đo:
+Performance diagnostics SHOULD distinguish:
 
 ```text
-Logical Disposal
-    ↓
+Attempt completed quickly
+but
+Completion rejected stale
+```
+
+from genuine execution failure.
+
+---
+
+# 51. Authority Performance
+
+Measure:
+
+```text
+AuthorityValidationLatency
+DuplicateCompletionRejectionLatency
+StaleRejectionLatency
+CancellationAuthorityPropagationLatency
+AuthorityConflictCount
+LateResultRejectionCount
+```
+
+Presentation target validation is measured separately.
+
+---
+
+# 52. Runtime Artifact Publication Performance
+
+Measure:
+
+```text
+CandidatePreparationLatency
+OwnershipTransferLatency
+ArtifactPublicationLatency
+PublicationFailureCount
+DuplicatePublicationRejectionCount
+RejectedCandidateCleanupLatency
+```
+
+---
+
+# 53. Business Acceptance Performance
+
+Where applicable, measure:
+
+```text
+BusinessAcceptanceLatency
+BusinessResultRejectionCount
+BusinessRecoveryRequestCount
+```
+
+Performance Model does not define why a Business Module rejects a result.
+
+---
+
+# 54. Resource Lease Performance
+
+Measure:
+
+* acquisition delay;
+* hold duration;
+* contention;
+* denied lease count;
+* disposal blocked by lease;
+* leaked lease count;
+* lease lifetime by resource class.
+
+Lease acquisition MUST remain bounded/cancelable where applicable.
+
+---
+
+# 55. Resource Lifecycle Performance
+
+Measure:
+
+```text
+LogicalDisposal
+    |
+    v
 Draining
-    ↓
-Physical Disposal
+    |
+    v
+PhysicalDisposal
 ```
 
 Metrics:
 
-- logical-disposal latency;
-- draining duration;
-- physical-disposal latency;
-- cleanup retry count;
-- disposal failure;
-- resource leak;
-- native/GPU cleanup latency;
-- resource still held after authority loss.
+```text
+LogicalDisposalLatency
+DrainingDuration
+PhysicalDisposalLatency
+CleanupRetryCount
+CleanupFailureCount
+ResourceLeakCount
+NativeCleanupLatency
+GpuCleanupLatency
+ResourceHeldAfterAuthorityLoss
+```
 
 ---
 
-## 22. Resource Pressure
+# 56. Unified Resource Pressure
 
-Unified pressure model:
+Recommended categories:
 
 ```text
-Resource Pressure
+ResourcePressure
 ├── CPU
-├── Memory
+├── ManagedMemory
+├── NativeMemory
 ├── GPU
-├── Provider
+├── ExecutionBinding
 ├── Queue
 ├── Lease
-├── Artifact
-├── Native Handle
-└── UI
+├── RuntimeArtifact
+├── NativeHandle
+├── TemporaryStorage
+└── UI/Dispatcher
 ```
 
-Levels:
+---
+
+# 57. Pressure Levels
+
+Recommended:
 
 ```text
 NORMAL
@@ -608,67 +943,96 @@ HIGH
 CRITICAL
 ```
 
-Pressure signal phải dẫn tới Scheduler/Runtime Control action, không tự thay đổi business state.
+Performance Model measures pressure.
+
+It does not itself mutate Business state.
 
 ---
 
-## 23. Queue Performance
+# 58. Pressure Response Ownership
 
-Đo:
+```text
+Resource Manager
+    measures resource state
 
-- depth theo logical queue class;
-- queue wait theo WorkType;
-- admission latency;
-- replace count;
-- obsolete removal;
-- hard/soft limit duration;
-- current-revision queue ratio;
-- control queue delay;
-- background starvation có chủ đích;
-- dispatch failure.
+Scheduler
+    reduces admission
 
-Không dùng Stage làm dimension bắt buộc.
+Runtime Control
+    cancels/supersedes execution
 
----
+Cache Policy
+    releases retention
 
-## 24. Scheduler Performance
+Provider Runtime
+    adjusts/unloads runtime resources
 
-Đo:
-
-- decision latency;
-- admit/defer/reject/replace count;
-- decision reason;
-- fairness delay;
-- current-revision admission ratio;
-- resource-pressure decisions;
-- preemption recommendation delay;
-- control capacity availability.
+Business/Application owner
+    approves semantic/quality degradation where required
+```
 
 ---
 
-## 25. Capture and Observation Performance
+# 59. Queue Performance
 
-Đo:
+Measure:
 
-- frame acquisition latency;
-- callback delay;
-- replacement count;
-- dropped observation;
-- stability detection latency;
-- source fingerprint cost;
-- capture CPU/GPU;
-- revision churn;
-- no-change suppression.
+```text
+depth by queue class
+queue wait by WorkType/execution class
+dispatch latency
+replace count
+obsolete removal count
+saturation duration
+current-execution ratio
+control delay
+dispatch failure
+```
 
-Mục tiêu không phải xử lý mọi frame.
+Queue does not own admission latency itself; Scheduler decision is measured separately.
 
 ---
 
-## 26. Business Module Performance
+# 60. Scheduler Performance
 
-Mỗi Business Module tự khai báo metrics semantic của mình.
+Measure:
 
-Runtime chỉ yêu cầu common dimensions:
+```text
+decision latency
+ADMIT / DEFER / REJECT / REPLACE count
+decision reason
+fairness delay
+current-eligible admission ratio
+resource-pressure decision count
+preemption recommendation latency
+control-capacity availability
+```
+
+---
+
+# 61. Capture / Observation Performance
+
+CRAI-specific metrics MAY include:
+
+* frame acquisition latency;
+* callback delay;
+* latest-value replacement count;
+* dropped observation;
+* stability decision latency;
+* source fingerprint cost;
+* capture CPU/GPU;
+* ExecutionRevision churn caused by observation;
+* no-change suppression ratio.
+
+Goal is not processing every frame.
+
+---
+
+# 62. Business Module Performance
+
+Every Business Module owns its semantic metrics.
+
+Runtime MAY provide common dimensions such as:
 
 ```text
 OwnerModule
@@ -677,207 +1041,292 @@ Operation
 InputSizeClass
 OutputSizeClass
 ExecutionClass
-ProviderProfile
+ExecutionBindingClass
 ```
 
-Module-specific example có thể gồm Recognition, Translation hoặc Presentation, nhưng không trở thành Runtime stage taxonomy.
+Runtime MUST NOT force every module into one stage taxonomy.
 
 ---
 
-## 27. Provider Performance
+# 63. Provider Runtime Performance
 
-Đo theo:
+Performance MAY observe resolved runtime execution dimensions such as:
 
 ```text
-Provider
-ProviderProfile
-Model
+ProviderRuntime
+ExecutionBinding
+ModelDeployment?
 Operation
 ExecutionClass
-Region
-Version
+Region?
+ImplementationVersion
 ```
 
-Metrics:
-
-- request latency;
-- provider queue;
-- timeout;
-- failure;
-- rate limit;
-- cold start;
-- payload size;
-- cost estimate;
-- cancellation support;
-- abandoned request duration;
-- stale completion ratio;
-- fallback recovery.
+Use only dimensions available without exposing sensitive/high-cardinality data.
 
 ---
 
-## 28. Cache and Reuse Performance
+# 64. Provider Runtime Metrics
 
-Không chỉ đo hit/miss.
+Possible:
 
-Đo:
+* execution latency;
+* remote queue latency;
+* timeout;
+* failure;
+* rate-limit pressure;
+* cold-start latency;
+* payload-size class;
+* estimated execution cost;
+* cancellation support;
+* abandoned physical duration;
+* stale Completion ratio.
 
-- useful hit ratio;
-- validation reject;
-- compatibility miss;
-- integrity failure;
-- promotion cost;
-- retention cost;
-- eviction cost;
-- saved useful latency;
-- saved provider cost;
-- in-flight coalescing;
-- durable lookup latency;
-- privacy partition miss.
+Fallback-selection metrics remain owned by Routing/Recovery observability.
 
-Conceptual value:
+---
+
+# 65. Recovery Performance
+
+Performance Model MAY measure:
 
 ```text
-Reuse Value =
-Avoided Useful Cost
--
-Lookup Cost
--
-Validation Cost
--
-Retention Cost
--
-Eviction Cost
+RecoveryEscalationLatency
+NewBindingReadyLatency
+UsefulResultRecoveryLatency
+```
+
+without deciding which Fallback route should be selected.
+
+---
+
+# 66. Cache / Reuse Performance
+
+Measure more than hit rate:
+
+```text
+UsefulHitRatio
+CompatibilityRejectCount
+PolicyPartitionMiss
+IntegrityFailure
+PromotionCost
+RetentionCost
+EvictionCost
+SavedUsefulLatency
+SavedExecutionCost
+InFlightCoalescingCount
+DurableLookupLatency
 ```
 
 ---
 
-## 29. Retry Performance
+# 67. Reuse Value
 
-Đo:
+Conceptual:
 
-- first Attempt latency;
-- retry delay;
-- retry queue wait;
-- retry execution;
-- recovery latency;
-- duplicate provider cost;
-- retry budget exhaustion;
-- concurrent retry pressure;
-- retry canceled by newer authority;
-- cache satisfying retry.
+```text
+ReuseValue =
+    AvoidedUsefulExecutionCost
+  - LookupCost
+  - CompatibilityValidationCost
+  - RetentionCost
+  - EvictionCost
+```
 
 ---
 
-## 30. Cancellation Performance
+# 68. Retry Performance
 
-Đo:
+Measure:
 
-- authority revoke latency;
-- queued removal;
-- Worker acknowledgment;
-- provider abort;
-- grace period;
-- abandoned count;
-- post-cancel execution time;
-- resource drain duration;
-- late Completion reject cost.
+```text
+FirstAttemptLatency
+RetryDelay
+RetryAdmissionLatency
+RetryQueueWait
+RetryExecutionLatency
+RetryRecoveryLatency
+RetryBudgetExhaustion
+ConcurrentRetryPressure
+RetryCancelledByAuthorityChange
+ReuseAvoidedRetryCount
+```
 
----
-
-## 31. UI Performance
-
-Đo:
-
-- UI command acknowledgment;
-- dispatcher delay;
-- long task;
-- presentation replacement;
-- frame stutter;
-- layout thrashing;
-- repeated loading duration;
-- atomic commit latency;
-- commit revalidation.
-
-Heavy processing không chạy trên UI Context.
+Do not count Fallback selection as Runtime Retry performance.
 
 ---
 
-## 32. Cold Start
+# 69. Cancellation Performance
 
-Đo riêng:
+Measure:
 
-- application startup;
-- Runtime Control initialization;
-- Capture initialization;
-- Provider Manager initialization;
-- local model load;
-- first Artifact Store use;
-- first useful result.
-
-Không trộn cold start với steady state.
-
----
-
-## 33. Long-Session Stability
-
-Test dài phải xác nhận:
-
-- memory bounded;
-- Artifact count bounded;
-- Lease count bounded;
-- queue bounded;
-- thread/context count bounded;
-- provider health ổn định;
-- UI responsiveness không giảm;
-- draining resource không tích tụ;
-- cleanup vẫn hoạt động;
-- diagnostics bounded;
-- useful latency không trôi dần.
+```text
+AuthorityRevocationLatency
+QueuedRemovalLatency
+WorkerAcknowledgmentLatency
+PhysicalAbortLatency
+GraceDuration
+AbandonedAttemptCount
+PostCancellationExecutionTime
+ResourceDrainDuration
+LateCompletionRejectionCost
+```
 
 ---
 
-## 34. Overload Definition
+# 70. UI / Presentation Performance
 
-Runtime overloaded khi incoming/generated work vượt khả năng tạo current useful result trong budget.
+Measure:
 
-Symptoms:
+* UI command acknowledgment;
+* dispatcher delay;
+* long UI task count;
+* Presentation preparation latency;
+* target validation latency;
+* visible replacement latency;
+* frame stutter;
+* layout thrashing;
+* repeated-loading duration.
 
-- queue growth;
-- rising stale ratio;
-- rising useful latency;
-- memory/GPU growth;
-- Lease contention;
-- provider saturation;
-- draining accumulation;
-- UI commit delay;
-- cancellation after expensive execution;
-- current-revision starvation.
-
----
-
-## 35. Overload Response Order
-
-1. reject stale result;
-2. remove obsolete queued work;
-3. revoke obsolete authority;
-4. cancel obsolete running work;
-5. stop speculative work;
-6. stop background work;
-7. reduce capture/observation rate;
-8. reduce batch size;
-9. reduce concurrency;
-10. evict low-value retention;
-11. unload idle resource;
-12. reduce quality only when explicitly permitted;
-13. delay/reject noncritical work.
-
-Current Revision và control path được bảo vệ.
+Heavy processing remains outside UI Context.
 
 ---
 
-## 36. Graceful Degradation
+# 71. Cold Start
 
-Levels:
+Cold start SHOULD measure separately:
+
+```text
+ProcessStartLatency
+ConfigurationReadyLatency
+RuntimeCoreReadyLatency
+ProviderRuntimeInitializationLatency
+PluginActivationLatency?
+LocalModelLoadLatency?
+ApplicationReadyLatency
+FirstUsefulResultLatency
+```
+
+Do not mix cold-start and steady-state distributions.
+
+---
+
+# 72. Provider Management Boundary
+
+Do NOT measure:
+
+```text
+Provider Manager initialization
+```
+
+as a Runtime execution startup primitive.
+
+Use:
+
+```text
+Provider Runtime Gateway / execution-binding initialization
+```
+
+where applicable.
+
+---
+
+# 73. Long-Running Stability
+
+Endurance tests SHOULD verify:
+
+* bounded managed/native/GPU memory;
+* bounded Runtime Artifact count;
+* bounded Lease count;
+* bounded Queue depth;
+* bounded thread/context count;
+* bounded provider/runtime in-flight count;
+* stable UI responsiveness;
+* no accumulation of draining resources;
+* cleanup continues to make progress;
+* diagnostics remain bounded;
+* Useful Result Latency does not drift materially.
+
+---
+
+# 74. Overload Definition
+
+Runtime is overloaded when generated/admitted execution exceeds the system's ability to produce current useful output within acceptable resource/latency budgets.
+
+Symptoms MAY include:
+
+* rising Queue wait;
+* increasing stale ratio;
+* rising Useful Result Latency;
+* growing memory/GPU pressure;
+* Lease contention;
+* provider/runtime saturation;
+* draining accumulation;
+* UI dispatch delays;
+* cancellation occurring only after expensive execution;
+* current useful work starvation.
+
+---
+
+# 75. Overload Response Principles
+
+Performance Model does not directly execute response actions.
+
+It defines goals:
+
+1. preserve correctness;
+
+2. preserve control path;
+
+3. eliminate obsolete work early;
+
+4. reduce non-critical admission;
+
+5. reduce wasted execution;
+
+6. free eligible low-value retention/resources;
+
+7. preserve useful current work;
+
+8. allow owner-approved quality degradation only when explicit.
+
+---
+
+# 76. Example Ownership of Overload Actions
+
+```text
+Stale/obsolete execution
+    -> Runtime Control / Cancellation
+
+Queue pressure
+    -> Scheduler
+
+Cache retention
+    -> Cache Policy
+
+Provider/model residency
+    -> Provider Runtime
+
+Capture pacing
+    -> Capture owner
+
+Input quality/resolution
+    -> Business/Capability policy
+
+Context-size reduction
+    -> Translation/AI owner
+
+UI simplification
+    -> Presentation owner
+```
+
+Performance Model measures outcomes.
+
+---
+
+# 77. Graceful Degradation
+
+Runtime MAY expose operational degradation levels such as:
 
 ```text
 FULL
@@ -886,676 +1335,862 @@ MINIMAL
 CONTROL_ONLY
 ```
 
-Degradation có thể thay:
-
-- capture rate;
-- input resolution;
-- context size;
-- number of visible regions;
-- provider mode;
-- background work;
-- model residency.
-
-Mọi degradation phải:
-
-- preserve correctness;
-- observable;
-- reversible;
-- configuration-controlled;
-- không bypass privacy.
+but exact semantic behavior belongs to owning components/policies.
 
 ---
 
-## 37. Quality and Performance
+# 78. Degradation Invariants
 
-Optimization phải đo cả quality.
+Any degradation MUST:
 
-Ví dụ:
+* preserve Runtime correctness;
+* preserve Privacy/Security constraints;
+* remain observable;
+* be reversible where practical;
+* stay within configured/owner-approved bounds;
+* not silently change Business semantics.
+
+---
+
+# 79. Quality vs Performance
+
+Performance changes MAY affect semantic quality.
+
+Example:
 
 ```text
 Lower input resolution
-    → lower latency
-    → possible recognition loss
+    ->
+lower execution cost
+    ->
+possible Recognition degradation
 ```
+
+or:
 
 ```text
-Smaller context
-    → lower provider cost
-    → possible consistency loss
+Smaller AI context
+    ->
+lower cost/latency
+    ->
+possible consistency loss
 ```
 
-Không chấp nhận performance gain nếu quality xuống dưới product threshold.
+The owning Business/AI capability determines whether degradation is permitted.
+
+Performance Model only measures tradeoffs.
 
 ---
 
-## 38. Performance Events
+# 80. Performance Events
 
-Conceptual events:
+Possible normalized events:
 
 ```text
-PERFORMANCE_PRESSURE_CHANGED
-PERFORMANCE_BUDGET_EXCEEDED
-WORKTYPE_SLOW
-PROVIDER_SLOW
-QUEUE_SATURATED
-STALE_RATIO_HIGH
-DEGRADATION_ENTERED
-DEGRADATION_EXITED
-MODEL_COLD_START
-RECOVERY_COMPLETED
-AUTHORITY_VALIDATION_SLOW
-PUBLICATION_SLOW
-LEASE_CONTENTION_HIGH
-RESOURCE_DRAIN_SLOW
+PerformancePressureChanged
+PerformanceBudgetExceeded
+WorkTypeSlow
+ExecutionBindingSlow
+QueueSaturated
+StaleRatioHigh
+DegradationEntered
+DegradationExited
+RuntimeColdStartDetected
+RecoveryCompleted
+AuthorityValidationSlow
+ArtifactPublicationSlow
+LeaseContentionHigh
+ResourceDrainSlow
+UsefulLatencyExceeded
 ```
 
-Tên cuối theo Event Standard.
+Final names follow Event Standard.
 
 ---
 
-## 39. Core Metrics
+# 81. Core Metrics
 
-### End-to-End
+## End-to-End
 
-- useful-result latency;
-- time to first useful result;
-- current-revision commit latency;
-- current-revision useful success ratio.
+```text
+UsefulResultLatency
+TimeToFirstUsefulResult
+CurrentExecutionUsefulSuccessRatio
+CurrentExecutionVisibleLatency
+```
 
-### Runtime
+## Runtime
 
-- WorkItem creation latency;
-- admission latency;
-- queue wait;
-- Attempt execution;
-- authority validation;
-- ownership transfer;
-- publication;
-- commit.
+```text
+WorkMaterializationLatency
+SchedulerDecisionLatency
+QueueWait
+AttemptExecutionLatency
+AuthorityValidationLatency
+OwnershipTransferLatency
+ArtifactPublicationLatency
+BusinessAcceptanceLatency?
+```
 
-### Resources
+## Resources
 
-- CPU;
-- memory;
-- GPU;
-- network;
-- provider in-flight;
-- Artifact bytes;
-- Lease count;
-- draining resource;
-- native handle;
-- Worker utilization.
+```text
+CPU
+ManagedMemory
+NativeMemory
+GPU
+Network
+ProviderRuntimeInFlight
+RuntimeArtifactBytes
+LeaseCount
+DrainingResourceCount
+NativeHandleCount
+WorkerUtilization
+```
 
-### User Experience
+## User Experience
 
-- UI dispatch;
-- UI long task;
-- presentation replacement;
-- loading duration;
-- stale-content visibility.
+```text
+UIAckLatency
+UIDispatchLatency
+UILongTask
+PresentationReplacementLatency
+LoadingDuration
+StaleContentVisibility
+```
 
 ---
 
-## 40. Metric Dimensions
+# 82. Metric Dimensions
 
-Preferred low-cardinality dimensions:
+Prefer bounded low-cardinality dimensions:
 
 ```text
 OwnerModule
 WorkType
 Operation
-Provider
-ProviderProfile
 ExecutionClass
+ExecutionBindingClass
 CacheStatus
-TerminalOutcome
+PhysicalOutcome
+AuthorityOutcome
 CancellationReason
 DeviceProfile
-RevisionState
+ExecutionRevisionState
 PressureLevel
 ```
 
-Raw SessionId/RevisionId/WorkItemId/AttemptId dùng trong trace/log, không dùng bừa trong aggregate metric.
+Avoid raw IDs in aggregate metrics.
 
 ---
 
-## 41. Tracing
+# 83. Trace Correlation
 
-Một Revision trace nên nối:
+Use trace/log correlation for:
 
 ```text
-Observation
-    ↓
-Revision Creation
-    ↓
+ExecutionScopeId
+ExecutionRevisionId
+WorkItemId
+AttemptId
+```
+
+These should generally not become metric labels.
+
+---
+
+# 84. End-to-End Trace
+
+A representative trace MAY be:
+
+```text
+Observation / User Intent
+        |
+        v
 Business Plan
-    ↓
+        |
+        v
+ExecutionRevision
+        |
+        v
 Reuse Evaluation
-    ↓
+        |
+        v
 WorkItem
-    ↓
+        |
+        v
 Attempt
-    ↓
+        |
+        v
 Completion
-    ↓
-Authority Validation
-    ↓
-Ownership Transfer
-    ↓
-Artifact Publication
-    ↓
+        |
+        v
+Runtime Authority Validation
+        |
+        v
+Runtime Artifact Publication
+        |
+        v
+Business Acceptance
+        |
+        v
 Presentation Commit
 ```
 
-Span nên có:
+---
 
-- queue wait;
-- Lease wait;
-- execution;
-- provider;
-- cache/reuse;
-- cancellation;
-- disposition;
-- publication;
-- freshness.
+# 85. Trace Spans
+
+Useful spans MAY include:
+
+* observation;
+* planning;
+* materialization;
+* cache/reuse;
+* Scheduler;
+* Queue;
+* Lease wait;
+* Attempt execution;
+* provider/native execution;
+* cancellation;
+* authority validation;
+* ownership transfer;
+* publication;
+* Business acceptance;
+* Presentation;
+* resource disposal.
 
 ---
 
-## 42. Benchmark Classes
+# 86. Benchmark Classes
 
-### Microbenchmark
+Recommended:
 
-Một operation nhỏ.
-
-### WorkType Benchmark
-
-Một WorkType với realistic input.
-
-### Authority Benchmark
-
-Validation throughput và latency.
-
-### Publication Benchmark
-
-Candidate → accepted publication.
-
-### Lease Benchmark
-
-Acquire/release/contention.
-
-### Resource Lifecycle Benchmark
-
-Logical disposal → physical disposal.
-
-### End-to-End Benchmark
-
-Stable content → visible useful result.
-
-### Stress Benchmark
-
-Overload behavior.
-
-### Endurance Benchmark
-
-Long-session stability.
-
-### Provider Benchmark
-
-Latency, variability, cost và cancellation.
+```text
+Microbenchmark
+WorkType Benchmark
+Authority Benchmark
+Publication Benchmark
+Lease Benchmark
+Resource Lifecycle Benchmark
+Scheduler/Queue Benchmark
+End-to-End Benchmark
+Stress Benchmark
+Endurance Benchmark
+Provider Runtime Benchmark
+Cold-Start Benchmark
+```
 
 ---
 
-## 43. Benchmark Inputs
+# 87. Benchmark Inputs
 
-Representative set nên có:
+Representative CRAI benchmark corpus MAY include:
 
-- simple comic page;
-- dense page;
-- Chinese vertical text;
-- Chinese horizontal text;
-- stylized font;
-- low contrast;
-- high resolution;
-- rapid scroll;
-- repeated content;
-- partial viewport change;
-- large document section;
-- provider delay;
-- resource pressure.
-
----
-
-## 44. Controlled Testing
-
-Control:
-
-- source input;
-- observation timing;
-- Revision creation;
-- provider delay;
-- completion order;
-- cache state;
-- queue state;
-- concurrency;
-- cancellation timing;
-- UI dispatch;
-- resource pressure;
-- retry;
-- cleanup delay.
-
-Dùng fake provider/worker/clock khi có thể.
+* simple comic page;
+* dense comic page;
+* Chinese vertical text;
+* Chinese horizontal text;
+* stylized text;
+* low contrast;
+* high-resolution image;
+* rapid scroll;
+* repeated source;
+* partial viewport change;
+* large document section;
+* delayed remote provider;
+* local model cold start;
+* memory/GPU pressure.
 
 ---
 
-## 45. Regression Policy
+# 88. Controlled Testing
 
-Regression nếu materially worsen:
+Tests SHOULD control where possible:
 
-- useful latency;
-- tail latency;
-- stale ratio;
-- authority validation;
-- publication latency;
-- queue wait;
-- CPU/memory/GPU;
-- Lease contention;
-- provider count/cost;
-- UI responsiveness;
-- long-session stability;
-- cleanup latency.
+* source input;
+* source-change timing;
+* ExecutionRevision creation timing;
+* provider/runtime delay;
+* Completion order;
+* Cache state;
+* Queue state;
+* concurrency;
+* cancellation timing;
+* UI dispatch;
+* resource pressure;
+* Retry;
+* cleanup delay;
+* Business acceptance delay.
 
-Threshold đặt sau khi có baseline.
+Use deterministic Clock/fake adapters/providers where practical.
 
 ---
 
-## 46. Optimization Workflow
+# 89. Regression Policy
+
+A performance regression exists when a change materially worsens one or more protected dimensions such as:
+
+* Useful Result Latency;
+* tail latency;
+* stale ratio;
+* authority-validation latency;
+* Artifact publication latency;
+* Business acceptance latency;
+* Queue wait;
+* CPU/memory/GPU use;
+* Lease contention;
+* provider execution count/cost;
+* UI responsiveness;
+* endurance stability;
+* cleanup/drain latency.
+
+Thresholds require measured baselines.
+
+---
+
+# 90. Optimization Workflow
 
 ```text
 Measure
-    ↓
-Identify Critical Bottleneck
-    ↓
+    |
+    v
+Find Critical Bottleneck
+    |
+    v
 Form Hypothesis
-    ↓
+    |
+    v
 Change One Variable
-    ↓
+    |
+    v
 Benchmark
-    ↓
-Compare Quality + Resource Cost
-    ↓
-Keep or Revert
+    |
+    v
+Compare:
+    Useful Latency
+    Resource Cost
+    Quality
+    Correctness
+    |
+    v
+Keep / Revert
 ```
 
-Không thêm complexity vì suy đoán.
+---
+
+# 91. Premature Optimization Policy
+
+MVP SHOULD avoid without evidence:
+
+* complex custom Scheduler;
+* custom allocator;
+* aggressive pooling;
+* unnecessary multi-process execution;
+* distributed Cache;
+* speculative execution;
+* provider racing;
+* fine-grained recomputation graph;
+* adaptive routing without baseline;
+* hardware-specific low-level tuning.
 
 ---
 
-## 47. Premature Optimization Policy
+# 92. MVP Performance Strategy
 
-MVP tránh:
-
-- custom scheduler phức tạp;
-- custom allocator;
-- aggressive pooling;
-- multi-process pipeline không cần thiết;
-- distributed cache;
-- speculative execution;
-- aggressive parallel provider calls;
-- fine-grained recomputation graph;
-- adaptive routing chưa có baseline;
-- NUMA-specific optimization.
-
----
-
-## 48. MVP Performance Policy
+Recommended:
 
 ```text
-Current Revision First
+Protect Control Path
++
+Prefer Current Eligible Work
 +
 Low Bounded Concurrency
 +
-Latest-Value Observation
+Latest-Value Observation Where Declared
 +
-Memory Artifact Reuse
+Compatible Result Reuse
 +
-Bounded Provider Requests
+Bounded Provider Runtime Execution
 +
-Atomic Publication
+Atomic Runtime Artifact Publication
 +
-Atomic UI Commit
-```
-
-Primary goals:
-
-1. UI không freeze.
-2. Capture không chờ domain work.
-3. Obsolete queued work removed nhanh.
-4. Late results không commit.
-5. Compatible Artifact được reuse.
-6. Memory và resource stabilizes.
-7. Provider concurrency bounded.
-8. Performance telemetry chỉ ra latency nằm ở đâu.
-9. Authority và publication overhead nhỏ.
-10. Cleanup không tích tụ.
-
----
-
-## 49. MVP Priority Order
-
-```text
-Runtime Control
-    ↓
-Cancellation / Revision Replacement
-    ↓
-Current Required Work
-    ↓
-Authority Validation
-    ↓
-Publication
-    ↓
-Current Presentation Commit
-    ↓
-Cache Maintenance
-    ↓
-Diagnostics
-    ↓
-Speculative Work
+Atomic Presentation Replacement
 ```
 
 ---
 
-## 50. MVP Concurrency
+# 93. MVP Primary Goals
 
-Không hard-code theo OCR/Layout architecture.
+1. UI remains responsive.
 
-Conceptual initial limits:
+2. Runtime Control remains responsive.
 
-| Workload class | Initial concurrency |
-|---|---:|
-| Capture source | 1 |
-| Observation serial context | 1 |
-| CPU-heavy WorkType | 1 |
-| Provider profile | 1 |
-| GPU/native serial provider | 1 |
-| Presentation commit | 1 |
-| Maintenance | 1 low-priority |
+3. Capture/Observation does not wait synchronously for downstream execution.
 
-Exact value thuộc `RUNTIME_CONFIG.md`.
+4. Obsolete queued work is removed quickly.
+
+5. Late results cannot become useful output.
+
+6. Compatible accepted results are reused.
+
+7. Memory/native/GPU resource use stabilizes.
+
+8. Provider execution stays bounded.
+
+9. Performance telemetry reveals where latency occurs.
+
+10. Authority/publication overhead stays small.
+
+11. Resource draining does not accumulate.
+
+12. Business acceptance cost is observable where relevant.
 
 ---
 
-## 51. MVP Performance Dashboard
+# 94. Protection Classes
 
-Nên hiển thị:
+Instead of one total priority ordering, Performance Model defines protected classes:
 
 ```text
-Current Revision
-Current Runtime State
+CONTROL PATH
+CURRENT USEFUL EXECUTION
+RUNTIME ACCEPTANCE / PUBLICATION
+PRESENTATION DELIVERY
+BACKGROUND / MAINTENANCE
+SPECULATIVE WORK
+```
+
+Scheduler defines actual admission ordering.
+
+---
+
+# 95. Control Path
+
+Includes:
+
+* cancellation;
+* Runtime shutdown;
+* ExecutionRevision replacement;
+* Completion processing;
+* fatal containment;
+* critical lifecycle operations.
+
+This path MUST retain capacity under load.
+
+---
+
+# 96. Current Useful Execution
+
+Represents currently relevant execution expected to contribute to useful user-visible output.
+
+It is strongly protected from obsolete/background work.
+
+It is not an absolute global priority over Control.
+
+---
+
+# 97. MVP Concurrency Guidance
+
+Initial conservative limits MAY resemble:
+
+| Runtime execution class    | Initial conceptual concurrency |
+| -------------------------- | -----------------------------: |
+| Capture source             |                              1 |
+| Observation serial context |                              1 |
+| CPU-heavy execution        |                              1 |
+| Remote/provider binding    |                              1 |
+| GPU/native serial          |                              1 |
+| Presentation commit        |                              1 |
+| Maintenance                |                 1 low-priority |
+
+Exact values belong to `RUNTIME_CONFIG.md`.
+
+---
+
+# 98. Performance Diagnostics View
+
+Development diagnostics SHOULD expose at least:
+
+```text
+Current ExecutionScope
+Current ExecutionRevision
 Useful Result Latency
 WorkItem Timing
 Attempt Timing
-Queue Depth
-Provider In-Flight
+Queue Depth / Wait
+Provider Runtime In-Flight
 Reuse Status
 Authority Validation
-Publication Delay
+Runtime Artifact Publication
+Business Acceptance?
 CPU / Memory / GPU
 Lease Count
-Draining Resource
+Draining Resources
 Stale Completion
 Cancellation
 ```
 
-Có thể chỉ là development diagnostics.
-
 ---
 
-## 52. Example: Normal Execution
+# 99. Example — Normal Execution
 
 ```text
-Stable content
-    ↓  observation
-Revision created
-    ↓  planning/admission
-Attempt executed
-    ↓  Completion
-Authority validated
-    ↓  ownership transfer
-Artifact published
-    ↓  presentation commit
+Stable Current Source
+        |
+        v
+Business Plan
+        |
+        v
+ExecutionRevision
+        |
+        v
+Attempt Executed
+        |
+        v
+Completion
+        |
+        v
+Runtime Authority Accepted
+        |
+        v
+Runtime Artifact Published
+        |
+        v
+Business Result Accepted
+        |
+        v
+Presentation Committed
 ```
 
-Useful latency tính toàn bộ chuỗi.
+Useful latency spans the applicable full chain.
 
 ---
 
-## 53. Example: Reuse Hit
+# 100. Example — Reuse Hit
 
 ```text
 ReuseQuery
-    ↓
-Compatible Artifact found
-    ↓
-Authority validated
-    ↓
-Presentation reused/built
-    ↓
-UI committed
+        |
+        v
+Compatible Accepted Result Found
+        |
+        v
+Runtime Relevance Validated
+        |
+        v
+Owning Contract Accepts Reuse
+        |
+        v
+Presentation / Downstream Use
 ```
 
-Không tạo new Attempt nếu không cần.
+No new Attempt is created when execution is unnecessary.
 
 ---
 
-## 54. Example: Rapid Scrolling
+# 101. Example — Rapid Scrolling
 
 ```text
-Revision A running
-    ↓
-Revision B current
-    ↓
+ExecutionRevision A running
+        |
+        v
+ExecutionRevision B becomes current
+        |
+        v
 A authority revoked
-    ↓
+        |
+        v
 A queued work removed
-    ↓
-B admitted
-    ↓
+        |
+        v
+B receives admission preference
+        |
+        v
 A late Completion rejected
 ```
 
-Success nghĩa là queue không tăng và B bắt đầu nhanh.
+Success means:
+
+* Queue does not accumulate obsolete work;
+* B begins quickly;
+* control/UI remain responsive.
 
 ---
 
-## 55. Example: Slow Provider
+# 102. Example — Slow Provider Runtime
 
 ```text
-Provider latency increases
-    ↓
-Provider pressure rises
-    ↓
-Admission reduced
-    ↓
-Background work stopped
-    ↓
-Current work preserved
+ExecutionBinding latency rises
+        |
+        v
+Runtime pressure projection rises
+        |
+        v
+Scheduler reduces admission
+        |
+        v
+Background work decreases
+        |
+        v
+Current useful work remains protected
 ```
 
-UI và control path vẫn responsive.
+Routing/Recovery MAY independently choose another binding.
+
+Performance Model does not.
 
 ---
 
-## 56. Example: Resource Pressure
+# 103. Example — Resource Pressure
 
 ```text
 Pressure = HIGH
-    ↓
-Scheduler reduces admission
-    ↓
-Low-value retention evicted
-    ↓
-Obsolete Revision drained
-    ↓
-Idle provider resource unloaded
-    ↓
-Current useful work preserved
+        |
+        +--> Scheduler reduces admission
+        |
+        +--> Cache Policy releases low-value retention
+        |
+        +--> Runtime Control drains obsolete execution
+        |
+        +--> Provider Runtime unloads eligible idle resources
+        |
+        v
+Useful current work remains protected
 ```
 
 ---
 
-## 57. Architecture Invariants
+# 104. Architecture Invariants
 
-1. UI responsiveness ưu tiên hơn raw throughput.
-2. Current useful work ưu tiên obsolete work.
-3. Stale Completion không tính useful throughput.
-4. Queue và concurrency bounded.
-5. Control path luôn có capacity.
-6. Capture không queue mọi frame.
-7. Provider requests bounded.
-8. Performance optimization không bypass authority.
-9. Performance optimization không bypass ownership.
-10. Performance optimization không bypass compatibility.
-11. Cache optional cho correctness.
-12. Memory/resource growth bounded.
-13. Tail latency được đo.
-14. Queue wait và execution tách riêng.
-15. Authority-validation latency measurable.
-16. Publication latency measurable.
-17. Ownership-transfer latency measurable.
-18. Lease wait bounded và measurable.
-19. Logical disposal measurable.
-20. Physical disposal measurable.
-21. Draining resource observable.
-22. Useful work excludes rejected publication.
-23. Useful work excludes stale commit.
-24. Quality degradation explicit.
-25. Overload được phản ứng trước process instability.
-26. Background work không block critical path.
-27. Resource pressure không tự thay business semantics.
-28. Provider median không đủ để chọn provider.
-29. Long-session stability là performance requirement.
-30. Metrics không chứa user content.
+1. UI responsiveness is more important than raw throughput.
 
----
+2. Current useful work is preferred over obsolete work.
 
-## 58. Testing Requirements
+3. Current execution preference is not absolute over Control.
 
-Test:
+4. Stale Completion does not count as useful throughput.
 
-- normal current result;
-- reuse hit;
-- rapid scrolling;
-- slow provider;
-- provider timeout;
-- repeated cancellation;
-- high WorkItem count;
-- high-resolution source;
-- CPU saturation;
-- GPU contention;
-- memory pressure;
-- Lease contention;
-- publication delay;
-- authority validation under duplicate Completion;
-- UI dispatch delay;
-- long session;
-- cache eviction during active Lease;
-- cold start;
-- warm steady state;
-- shutdown during slow work;
-- cleanup delay;
-- abandoned provider request;
-- degradation transitions.
+5. Queue and concurrency remain bounded.
 
----
+6. Control path retains capacity.
 
-## 59. Open Questions
+7. Capture/Observation does not queue unbounded source updates.
 
-- Minimum supported hardware?
-- Acceptable useful-result latency?
-- Capture rate?
-- Stability delay?
-- Main Recognition/Translation providers?
-- Local vs remote execution?
-- Partial result cần trong MVP không?
-- Cache budget?
-- Provider timeout?
-- Adaptive routing?
-- Performance/power mode?
-- Side panel và overlay có budget khác nhau không?
-- Lease timeout policy?
-- Publication target?
-- Long-session benchmark duration?
+8. Provider/runtime requests remain bounded.
 
----
+9. Performance optimization does not bypass execution authority.
 
-## 60. Related Documents
+10. Performance optimization does not bypass ownership transfer.
 
-| Document | Relationship |
-|---|---|
-| `PIPELINE_RUNTIME.md` | WorkItem, Attempt, authority, publication |
-| `SCHEDULER.md` | Admission and pressure response |
-| `WORK_QUEUE.md` | Queue timing |
-| `CANCELLATION.md` | Cancellation efficiency |
-| `RETRY_POLICY.md` | Recovery latency |
-| `ERROR_MODEL.md` | Failure performance |
-| `CACHE_POLICY.md` | Reuse value |
-| `MEMORY_MODEL.md` | Resource pressure and budgets |
-| `RESOURCE_LIFECYCLE.md` | Ownership, Lease and disposal |
-| `THREADING_MODEL.md` | Context utilization |
-| `RUNTIME_CONFIG.md` | Performance limits |
-| `RUNTIME_OBSERVABILITY.md` | Metrics, logs and traces |
-| `BOOT_SEQUENCE.md` | Cold start and shutdown |
-| `BUSINESS_PIPELINE_ORCHESTRATION.md` | Critical business work |
+11. Performance optimization does not bypass Business compatibility/acceptance.
+
+12. Performance optimization does not bypass Privacy/Security.
+
+13. Cache is optional for correctness.
+
+14. Resource growth is bounded.
+
+15. Tail latency is measured.
+
+16. Queue wait and execution latency are separate.
+
+17. Authority-validation latency is measurable.
+
+18. Runtime Artifact publication latency is measurable.
+
+19. Business acceptance latency is measurable where relevant.
+
+20. Ownership-transfer latency is measurable.
+
+21. Lease wait is bounded/observable.
+
+22. Logical disposal is measurable.
+
+23. Physical disposal is measurable.
+
+24. Draining resources are observable.
+
+25. Useful work excludes authority-rejected output.
+
+26. Useful work excludes Business-rejected output.
+
+27. Useful work excludes rejected visible commit.
+
+28. Quality degradation is explicit and owner-approved.
+
+29. Overload response begins before process instability.
+
+30. Background work does not block critical path.
+
+31. Resource pressure does not independently change Business semantics.
+
+32. Provider median latency alone is insufficient for routing decisions.
+
+33. Long-running stability is a performance requirement.
+
+34. Aggregate metrics avoid raw execution IDs.
+
+35. Performance telemetry contains no user content by default.
+
+36. ExecutionScope/ExecutionRevision terminology is canonical.
+
+37. Provider Management is not the owner of provider-runtime execution performance.
+
+38. Fallback is not Runtime Retry performance.
+
+39. Performance Model measures decisions; it does not become Scheduler/Recovery policy.
+
+40. Runtime Artifact publication and Business acceptance remain separate performance boundaries.
 
 ---
 
-## 61. Completion Criteria
+# 105. Recommended MVP
 
-`PERFORMANCE_MODEL.md` được xem là đồng bộ khi:
+CRAI MVP SHOULD support:
 
-- Stage-centric vocabulary được thay bằng WorkItem/Attempt/Artifact;
-- useful-result latency là metric chính;
-- authority, ownership transfer và publication có metric riêng;
-- Lease và Resource Lifecycle performance được đo;
-- useful work phân tách executed/accepted/published/committed;
-- Resource Pressure unified;
-- cache đo reuse value, không chỉ hit rate;
-- benchmarks có authority/publication/lease/lifecycle;
-- MVP concurrency không hard-code OCR/Layout;
-- events, metrics, invariants và tests khớp Runtime v2.
+* Useful Result Latency;
+* Time to First Useful Result;
+* current ExecutionRevision freshness metrics;
+* WorkItem/Attempt timing;
+* Scheduler/Queue timing;
+* execution-authority timing;
+* Runtime Artifact ownership/publication timing;
+* Business acceptance timing where applicable;
+* Presentation latency;
+* Retry/cancellation timing;
+* cache reuse value;
+* provider-runtime latency;
+* managed/native/GPU resource metrics;
+* Lease metrics;
+* draining-resource metrics;
+* cold-start measurement;
+* endurance testing;
+* P50/P95/P99 where sample count permits;
+* content-safe traces.
+
+MVP MAY defer:
+
+* automated performance tuning;
+* adaptive concurrency;
+* predictive cost models;
+* advanced power-mode tuning;
+* automated quality degradation;
+* distributed performance analysis;
+* sophisticated multi-device hardware profiles.
 
 ---
 
-## 62. Summary
+# 106. Open Decisions
 
-CRAI đánh giá hiệu năng bằng output hiện tại có ích:
+The following remain open:
+
+* acceptable Useful Result Latency by use case;
+* Time to First Useful Result target;
+* minimum hardware profile;
+* Capture frequency;
+* observation stability delay;
+* provider/runtime mix;
+* local vs remote execution strategy;
+* partial result MVP inclusion;
+* cache memory budget;
+* provider timeout;
+* adaptive routing;
+* performance/power profiles;
+* overlay vs side-panel presentation budgets;
+* Lease timeout policy;
+* Runtime Artifact publication target;
+* Business acceptance budget;
+* endurance benchmark duration;
+* representative benchmark corpus size.
+
+---
+
+# 107. Related Documents
+
+Runtime:
+
+* `PIPELINE_RUNTIME.md`
+* `BUSINESS_PIPELINE_ORCHESTRATION.md`
+* `RUNTIME_COMPONENTS.md`
+* `SCHEDULER.md`
+* `WORK_QUEUE.md`
+* `CANCELLATION.md`
+* `RETRY_POLICY.md`
+* `CACHE_POLICY.md`
+* `MEMORY_MODEL.md`
+* `RESOURCE_LIFECYCLE.md`
+* `THREADING_MODEL.md`
+* `ERROR_MODEL.md`
+* `RUNTIME_CONFIG.md`
+* `RUNTIME_OBSERVABILITY.md`
+* `BOOT_SEQUENCE.md`
+* `PROCESS_TOPOLOGY.md`
+
+External:
+
+* `../ai/ROUTING.md`
+* `../ai/FALLBACK.md`
+* `../../02-modules/provider-management/`
+* `../../02-modules/presentation/`
+
+---
+
+# 108. Completion Criteria
+
+`PERFORMANCE_MODEL.md` is synchronized when:
+
+* Useful Result Latency remains the primary end-to-end metric;
+* ExecutionScope/ExecutionRevision terminology is canonical;
+* Runtime authority acceptance and Business acceptance are separate;
+* Runtime Artifact publication and Presentation commit remain separate;
+* generic `commit` terminology is avoided;
+* Work outcome funnel distinguishes physical, execution, business and user-visible value;
+* stale/wasted work remains measurable;
+* Scheduler/Queue/Retry/Cancellation ownership remains external;
+* Fallback is not treated as Retry performance;
+* Provider Runtime replaces Provider Manager in Runtime metrics;
+* overload response ownership is explicit;
+* degradation does not silently change Business semantics;
+* Cache is measured by useful value, not raw hit rate;
+* Lease/resource lifecycle performance remains first-class;
+* long-running stability remains a performance requirement;
+* metrics/traces remain privacy-safe.
+
+---
+
+# 109. Summary
+
+CRAI Performance Model follows:
 
 ```text
-Stable Current Content
-    ↓
-Bounded Runtime Work
-    ↓
-Accepted Candidate
-    ↓
-Published Artifact
-    ↓
+Current Intent / Source
+        |
+        v
+Bounded Planning + Runtime Work
+        |
+        v
+Execution-Accepted Result
+        |
+        v
+Published Runtime Artifact
+        |
+        v
+Business-Accepted Result
+        |
+        v
 Current Visible Result
 ```
 
-Các ưu tiên chính:
+The central principle is:
 
 ```text
-Responsiveness
-+
-Freshness
-+
-Useful-Result Latency
-+
-Bounded Resource Usage
-+
-Predictable Recovery
-+
-Quality Preservation
-```
+Fast execution is not enough.
 
-Runtime không được coi là nhanh nếu chỉ hoàn thành nhiều work không còn authority hoặc không bao giờ được người dùng nhìn thấy.
+Useful performance means:
+the right result,
+still current,
+accepted by the right owner,
+delivered quickly,
+without destabilizing the Runtime.
+```

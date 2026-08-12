@@ -1,1256 +1,1914 @@
-# runtime/RESOURCE_LIFECYCLE.md
-
 # Runtime Resource Lifecycle
 
-> Project: CRAI  
-> Version: 1.0  
-> Status: Architecture Draft
+* **Document:** Runtime Architecture / Resource Lifecycle
+* **Version:** 2.0.0
+* **Status:** Draft
+* **Owner:** CRAI Architecture
 
 ---
 
-## 1. Purpose
+# 1. Purpose
 
-Tài liệu này định nghĩa cách CRAI Runtime tạo, đăng ký, chuyển giao, publish, retain, lease, release, drain và dispose runtime resource.
+This document defines the canonical lifecycle semantics for CRAI Runtime resources.
 
-Tài liệu này là nguồn chuẩn cho các khái niệm:
+It defines:
+
+```text
+Creation
+Registration
+Ownership
+Visibility
+Retention
+Lease
+Use
+Logical Disposal
+Draining
+Physical Disposal
+```
+
+The central resource-lifecycle concepts are:
 
 ```text
 Ownership
 Retention
 Lease
-Logical Disposal
-Physical Disposal
+Execution Relevance
+Physical Use
+Disposal
 ```
 
-Resource lifecycle phải bảo đảm:
+The lifecycle MUST ensure that:
 
-- mọi resource có owner rõ ràng;
-- sharing không làm mất ownership boundary;
-- retention khác ownership;
-- authority khác ownership;
-- active lease chặn physical disposal;
-- canceled hoặc stale resource không được revive;
-- cleanup failure không khôi phục authority;
-- resource lifetime luôn bounded và observable.
+* every significant resource has explicit ownership;
+* sharing does not erase ownership boundaries;
+* retention remains distinct from ownership;
+* Runtime execution authority remains distinct from resource ownership;
+* active leases protect physical use;
+* physical child operations remain truthfully accounted;
+* canceled/stale execution cannot revive disposed resources;
+* cleanup failure does not restore execution authority;
+* resource lifetime remains bounded and observable.
 
 ---
 
-## 2. Core Model
+# 2. Core Model
 
-CRAI dùng mô hình:
+Conceptually:
 
 ```text
 Create
-    ↓
-Register (optional)
-    ↓
-Ownership Transfer (optional)
-    ↓
-Publish (optional)
-    ↓
-Retain / Acquire Lease (optional)
-    ↓
+    |
+    v
+Register
+    |
+    v
+Transfer Ownership? / Publish?
+    |
+    v
+Retain / Acquire Lease
+    |
+    v
 Use
-    ↓
+    |
+    v
 Release Lease / Retention
-    ↓
+    |
+    v
 Logical Disposal
-    ↓
+    |
+    v
 Draining
-    ↓
+    |
+    v
 Physical Disposal
 ```
 
-Không phải resource nào cũng đi qua mọi bước.
+Not every resource passes through every phase.
 
-Temporary buffer có thể chỉ:
+Example:
 
 ```text
+Attempt-local buffer
+
 Create
-    ↓
+    |
+    v
 Use
-    ↓
+    |
+    v
 Physical Disposal
 ```
 
-Shared Artifact thường đi qua toàn bộ lifecycle.
+A published shared Runtime Artifact normally uses more of the lifecycle.
 
 ---
 
-## 3. Architectural Position
+# 3. Architectural Position
 
 ```text
 Runtime Control
-    → owns execution authority
+    -> owns execution authority
 
-Artifact Store
-    → owns accepted Artifact payload
+Execution State Store
+    -> owns ExecutionScope / ExecutionRevision metadata
+
+Runtime Artifact Store
+    -> owns published Runtime Artifact lifecycle
 
 Cache Policy
-    → owns reuse/retention policy
+    -> owns cache-retention/reuse mechanics
 
 Resource Manager
-    → coordinates physical lifecycle
+    -> coordinates physical resource accounting/disposal
 
-Worker Execution
-    → owns Attempt-local resource
+Worker / Attempt
+    -> owns Attempt-local resources
 
-Provider Manager
-    → owns provider-lifetime resource
+Provider Runtime Gateway / Adapter
+    -> owns provider-runtime resources
+
+Presentation / Application
+    -> owns Presentation/UI resources
 
 Storage
-    → owns durable persistence mechanics
+    -> owns durable persistence mechanics
 ```
 
-Không component nào được chiếm ownership ngoài boundary của mình.
+No component may silently acquire responsibilities outside its ownership boundary.
 
 ---
 
-## 4. Core Principles
+# 4. Core Principles
 
-1. Mỗi resource có một payload owner tại một thời điểm.
-2. Một resource có thể có nhiều retention owner.
-3. Lease không cấp payload ownership.
-4. Publication không tự chuyển ownership.
-5. Authority không đồng nghĩa ownership.
-6. Retention không đồng nghĩa ownership.
-7. Logical disposal luôn xảy ra trước physical disposal.
-8. Physical disposal chỉ xảy ra khi không còn owner, retention hoặc lease.
-9. Worker không dispose shared resource.
-10. Cache promotion không copy payload mặc định.
-11. Resource đã physical disposal không được resurrect.
-12. Draining resource phải observable.
-13. Cleanup failure không restore authority.
-14. Native/GPU resource cần explicit lifecycle.
-15. Resource lifecycle không phụ thuộc GC timing.
+1. Every significant physical payload/resource has one logical lifecycle owner at a time.
 
----
+2. A resource MAY have multiple retention reasons.
 
-## 5. Resource Categories
+3. Lease does not transfer ownership.
 
-Resource được phân loại theo lifetime và sharing semantics.
+4. Publication does not automatically transfer ownership.
 
-### 5.1 Runtime-Global
+5. Execution authority is not ownership.
 
-Ví dụ:
+6. Retention is not ownership.
 
-- worker pool;
-- provider client;
-- configuration registry;
-- shared model;
-- Event Bus infrastructure.
+7. Visibility is not ownership.
 
-### 5.2 Session-Scoped
+8. Logical disposal precedes physical disposal.
 
-Ví dụ:
+9. Physical disposal requires ownership/retention/lease/physical-use eligibility.
 
-- session runtime metadata;
-- source observation state;
-- session presentation reference;
-- session provider preference.
+10. Worker does not dispose shared Runtime Artifacts.
 
-### 5.3 Revision-Scoped
+11. Cache promotion does not change payload owner.
 
-Ví dụ:
+12. Cache promotion does not copy payload by default.
 
-- Revision metadata;
-- Revision retention;
-- accepted ArtifactRef;
-- Revision resource accounting.
+13. A physically disposed resource cannot be resurrected.
 
-### 5.4 Attempt-Local
+14. Draining resources remain observable/accounted.
 
-Ví dụ:
+15. Cleanup failure does not restore execution authority.
 
-- temporary buffer;
-- provider request body;
-- intermediate tensor;
-- temporary file;
-- child process handle.
+16. Native/GPU/OS resources require explicit lifecycle.
 
-### 5.5 Shared
+17. Runtime lifecycle correctness does not depend on GC timing.
 
-Ví dụ:
-
-- accepted Artifact;
-- shared model;
-- reusable provider client;
-- UI presentation Artifact.
-
-### 5.6 External
-
-Ví dụ:
-
-- HTTP request;
-- GPU context;
-- capture surface;
-- native handle;
-- child process;
-- memory mapping.
+18. Runtime Artifact publication does not imply Business acceptance.
 
 ---
 
-## 6. Resource State Machine
+# 5. Resource Dimensions
 
-Canonical lifecycle state:
+CRAI SHOULD model resource lifecycle using independent dimensions rather than one overloaded state machine.
+
+Recommended dimensions:
 
 ```text
-CREATED
-  ↓
+Registration State
+Ownership State
+Visibility State
+Retention State
+Lease State
+Usage State
+Disposal State
+Integrity State
+```
+
+These dimensions interact but are not the same thing.
+
+---
+
+# 6. Why Lifecycle Dimensions Are Separate
+
+Example:
+
+```text
+Resource registered
+    but still private
+
+Resource published
+    while Artifact Store owns payload
+
+Resource logically disposed
+    but still physically used by active lease
+
+Resource no longer execution-current
+    but still cache-retained
+```
+
+A single linear lifecycle state cannot represent all combinations cleanly.
+
+---
+
+# 7. Resource Categories
+
+## 7.1 Runtime-Global Resource
+
+Examples:
+
+```text
+worker pool
+provider runtime client
+configuration snapshot registry
+shared model
+Event Bus infrastructure
+bounded buffer pool
+```
+
+---
+
+## 7.2 ExecutionScope-Scoped Resource
+
+Examples:
+
+```text
+ExecutionScope runtime metadata
+scope cancellation context
+scope runtime Artifact retention
+scope resource accounting
+```
+
+Business ReadingSession state remains outside Runtime lifecycle ownership.
+
+---
+
+## 7.3 ExecutionRevision-Scoped Resource
+
+Examples:
+
+```text
+ExecutionRevision metadata
+BusinessExecutionPlan reference
+WorkItem references
+accepted RuntimeArtifactRefs
+ExecutionRevision resource accounting
+drain state
+```
+
+---
+
+## 7.4 Attempt-Local Resource
+
+Examples:
+
+```text
+temporary buffer
+provider request body
+intermediate tensor
+temporary file
+child process handle
+request/response buffer
+```
+
+---
+
+## 7.5 Shared Runtime Resource
+
+Examples:
+
+```text
+published Runtime Artifact
+shared local model
+provider runtime client
+Presentation resource
+shared native/GPU backing
+```
+
+---
+
+## 7.6 External / Native Resource
+
+Examples:
+
+```text
+HTTP request
+GPU context
+capture surface
+native handle
+child process
+memory mapping
+IPC object
+graphics surface
+```
+
+---
+
+# 8. Registration State
+
+Possible:
+
+```text
+UNREGISTERED
 REGISTERED
-  ↓
-PUBLISHED
-  ↓
-ACTIVE
-  ↓
-LOGICALLY_DISPOSED
-  ↓
-DRAINING
-  ↓
-PHYSICALLY_DISPOSED
+DEREGISTERED
 ```
 
-Optional states:
+Registration provides lifecycle tracking.
+
+It does NOT imply:
 
 ```text
-TRANSFER_PENDING
-INVALID
-DISPOSAL_FAILED
+published
+shared
+accepted
+retained
 ```
-
-Không phải resource nào cũng đi qua `REGISTERED` hoặc `PUBLISHED`.
 
 ---
 
-## 7. Ownership State
+# 9. Ownership State
 
-Payload ownership có thể chuyển:
+Recommended:
 
 ```text
 CREATOR_OWNED
-    ↓
 TRANSFER_PENDING
-    ↓
-RUNTIME_COMPONENT_OWNED
-    ↓
-NO_OWNER
-    ↓
+COMPONENT_OWNED
+NO_LOGICAL_OWNER
 PHYSICALLY_DISPOSED
 ```
 
-Ownership transfer phải atomic hoặc có rollback rõ ràng.
+Ownership transfer MUST be:
+
+```text
+atomic
+or
+rollback-safe
+```
 
 ---
 
-## 8. Visibility State
+# 10. Visibility State
 
-Visibility tách khỏi ownership.
+Recommended:
 
 ```text
 PRIVATE
-    ↓
 PUBLISHED
-    ↓
 WITHDRAWN
 ```
 
-Ví dụ:
+Visibility remains separate from ownership.
 
-- Attempt-local buffer luôn private.
-- Candidate Artifact private cho đến khi validation.
-- Accepted Artifact được publish bởi Artifact Store.
-- Logical disposal có thể withdraw Artifact khỏi new lookup.
+Examples:
+
+```text
+Attempt-local buffer
+    PRIVATE
+
+Artifact candidate
+    PRIVATE
+
+Published Runtime Artifact
+    PUBLISHED
+
+Logically disposed Artifact
+    WITHDRAWN from new lookup
+```
 
 ---
 
-## 9. Candidate Resource
+# 11. Disposal State
 
-Worker output ban đầu là candidate:
+Recommended canonical disposal state:
+
+```text
+ACTIVE
+    |
+    v
+LOGICAL_DISPOSAL_REQUESTED
+    |
+    v
+LOGICALLY_DISPOSED
+    |
+    v
+DRAINING
+    |
+    +--> DISPOSAL_FAILED
+    |
+    v
+PHYSICALLY_DISPOSED
+```
+
+Not all resources require `DRAINING`.
+
+---
+
+# 12. Integrity State
+
+Possible:
+
+```text
+VALID
+INVALID
+CORRUPT
+UNKNOWN
+```
+
+Integrity is not lifecycle ownership.
+
+Invalid resource may remain physically alive until disposal is safe.
+
+---
+
+# 13. Candidate Resource
+
+A producer may first create a private candidate:
 
 ```text
 Temporary Output
-    ↓
+        |
+        v
 Candidate Resource
-    ↓
-Validation
-    ↓
-Accepted Resource
 ```
 
-Candidate Resource:
+A candidate:
 
-- chưa reusable;
-- chưa có commit authority;
-- chưa được cache;
-- vẫn thuộc producer hoặc transfer-pending owner;
-- phải cleanup nếu validation fail.
-
----
-
-## 10. Publication Boundary
-
-Publication nghĩa là resource được component khác nhìn thấy qua contract.
-
-Publication không có nghĩa:
-
-- ownership transfer;
-- cache promotion;
-- authority grant;
-- durable persistence.
-
-Các hành vi đó phải diễn ra riêng.
+* remains producer-owned or transfer-pending;
+* is not available through normal shared lookup;
+* is not cache-retained;
+* has no accepted Runtime publication status;
+* must be cleaned up if validation/publication fails.
 
 ---
 
-## 11. Ownership vs Authority
+# 14. Candidate Resource vs Business Result
+
+Candidate resource status says nothing about Business semantics.
+
+Example:
 
 ```text
-Artifact Store
-    → owns payload
+Candidate Runtime Artifact
+    !=
+accepted Translation result
+```
+
+The owning Business Module decides semantic acceptance separately.
+
+---
+
+# 15. Publication
+
+Publication means:
+
+```text
+resource becomes observable
+through an approved Runtime contract
+```
+
+Publication does NOT automatically mean:
+
+* ownership transfer;
+* Business acceptance;
+* cache promotion;
+* durable persistence;
+* Domain commit;
+* Presentation commit.
+
+---
+
+# 16. Runtime Artifact Publication
+
+Recommended:
+
+```text
+Producer Candidate
+        |
+        v
+Artifact Candidate Registration
+        |
+        v
+Runtime Authority Validation
+        |
+        v
+Ownership Transfer
+        |
+        v
+Runtime Artifact Publication
+        |
+        v
+RuntimeArtifactRef
+```
+
+Implementation MAY combine transfer/publication atomically.
+
+Externally visible state MUST remain consistent.
+
+---
+
+# 17. Runtime Artifact vs Business Acceptance
+
+Critical distinction:
+
+```text
+Runtime Artifact published
+    = execution payload safely available
+```
+
+```text
+Business Result accepted
+    = owning Business Module accepts semantics
+```
+
+These MUST remain separate.
+
+---
+
+# 18. Ownership vs Execution Authority
+
+```text
+Runtime Artifact Store
+    owns Artifact lifecycle
 
 Runtime Control
-    → owns authority
+    owns execution authority
 ```
 
-Artifact có thể tồn tại về vật lý nhưng không còn authority.
-
-Ví dụ stale Artifact:
-
-- payload vẫn tồn tại;
-- owner vẫn là Artifact Store;
-- commit authority đã mất;
-- cache promotion bị từ chối theo policy.
+A resource may still physically exist after execution authority is gone.
 
 ---
 
-## 12. Ownership vs Retention
+# 19. Authority Loss
+
+When execution loses authority:
+
+* new accepted execution use may be denied;
+* queued/running execution may be canceled/drained;
+* relevant ExecutionRevision retention may be released;
+* cache/Presentation retention may remain;
+* existing valid leases may remain;
+* physical disposal is re-evaluated.
+
+Authority loss alone MUST NOT force immediate physical disposal.
+
+---
+
+# 20. Ownership vs Retention
+
+Example:
 
 ```text
-Artifact Store
-    → payload owner
+Runtime Artifact Store
+    = lifecycle owner
 
-Revision
-Cache
-UI
-Diagnostics
-    → retention owners
+ExecutionRevision retention
+ExecutionScope retention
+Cache retention
+Presentation retention
+Diagnostic retention
+    = retention reasons
 ```
 
-Retention owner chỉ ngăn disposal.
+Retention prevents disposal.
 
-Retention owner không được mutate hoặc dispose payload trực tiếp.
+Retention does not permit arbitrary mutation/disposal.
 
 ---
 
-## 13. Resource Lease
+# 21. Retention Model
 
-`ResourceLease` là quyền sử dụng tạm thời, không phải ownership.
+Recommended:
+
+```text
+RetentionRecord
+├── retentionId
+├── resourceId
+├── retentionKind
+├── ownerReference
+├── createdAt
+├── expiresAt?
+└── metadata
+```
+
+Possible retention kinds:
+
+```text
+EXECUTION_REVISION
+EXECUTION_SCOPE
+CACHE
+PRESENTATION
+DIAGNOSTIC
+APPLICATION
+EXTERNAL
+```
+
+---
+
+# 22. Retention Release
+
+Removing one retention reason:
+
+```text
+does not
+```
+
+imply resource disposal if another reason remains.
+
+---
+
+# 23. Resource Lease
+
+`ResourceLease` represents temporary protected use.
+
+Lease does NOT transfer ownership.
 
 Possible lease types:
 
 ```text
-ArtifactLease
+RuntimeArtifactLease
 GpuResourceLease
 NativeHandleLease
 ProviderResourceLease
 CaptureSurfaceLease
+GraphicsResourceLease
 ```
-
-Lease phải:
-
-- scoped;
-- có identity;
-- có owner;
-- có acquisition time;
-- releasable;
-- observable;
-- bounded hoặc leak-detectable.
 
 ---
 
-## 14. Lease Timeline
+# 24. Lease Requirements
+
+Lease SHOULD include:
+
+```text
+LeaseId
+ResourceId
+LeaseOwner
+AcquiredAt
+ExpectedLifetime?
+CancellationReference?
+AffinityMetadata?
+```
+
+Lease MUST be:
+
+* releasable;
+* observable;
+* bounded or leak-detectable;
+* invalid after release.
+
+---
+
+# 25. Lease Timeline
 
 ```text
 Acquire Lease
-    ↓
+        |
+        v
 Use Resource
-    ↓
+        |
+        v
 Release Lease
-    ↓
+        |
+        v
 Disposal Eligibility Re-evaluated
 ```
 
-Lease expiration không tự dispose resource.
+Lease release does not itself dispose resource.
 
 ---
 
-## 15. Retention Timeline
+# 26. New Lease During Disposal
+
+Once logical disposal begins:
 
 ```text
-Revision Retention
-    ↓
-Cache Retention Added
-    ↓
-Revision Retention Removed
-    ↓
-UI Retention Removed
-    ↓
-Cache Retention Removed
-    ↓
-No Retention
-    ↓
-Physical Disposal Eligible
+new lease
 ```
 
-Lease và retention là hai hệ thống độc lập.
+SHOULD normally be rejected.
+
+Existing valid leases remain protected.
+
+Exceptions MUST be explicit and bounded.
 
 ---
 
-## 16. Creation
+# 27. Creation
 
-Creator sở hữu resource ngay khi creation thành công.
+Creator owns the resource immediately after successful creation.
 
-Creator phải:
+Creator MUST know:
 
-- register cleanup path;
-- biết resource type;
-- biết expected lifetime;
-- biết transfer target nếu có;
-- xử lý failure giữa create và register.
-
----
-
-## 17. Registration
-
-Large hoặc shared resource nên được register trước khi share.
-
-Registration gán:
-
-- ResourceId;
-- type;
-- owner;
-- retention metadata;
-- size/cost estimate;
-- backing resource;
-- integrity state;
-- lifecycle state.
+* resource class;
+* initial owner;
+* cleanup path;
+* expected lifetime;
+* size/cost estimate where relevant;
+* transfer target if applicable;
+* failure behavior before registration.
 
 ---
 
-## 18. Ownership Transfer
+# 28. Registration
 
-Ví dụ accepted Artifact:
+Large/shared resources SHOULD normally register before sharing.
 
-```text
-Worker owns candidate output
-        ↓
-Artifact Store registers transfer
-        ↓
-Runtime Control validates authority
-        ↓
-Artifact Store accepts ownership
-        ↓
-Worker releases creator ownership
-```
-
-Nếu transfer fail:
-
-- creator vẫn owner;
-- candidate phải cleanup;
-- không được xuất hiện half-published.
-
----
-
-## 19. Shared Resource
-
-Shared resource luôn có:
-
-- one payload owner;
-- zero hoặc nhiều retention owner;
-- zero hoặc nhiều active lease;
-- immutable shared state khi là Artifact;
-- explicit disposal coordinator.
-
-Shared Business Module Artifact không hard-code OCR/Layout-specific lifecycle.
-
----
-
-## 20. Attempt-Local Resource
-
-Attempt-local resource:
-
-- do Worker hoặc Provider Adapter sở hữu;
-- không publish mặc định;
-- không có shared retention;
-- release khi Attempt terminal;
-- có thể drain nếu provider không cancel được;
-- không được giữ bởi Event Bus.
-
----
-
-## 21. Artifact Lifecycle
-
-```text
-Candidate Created
-    ↓
-Registered
-    ↓
-Validated
-    ↓
-Ownership Transferred to Artifact Store
-    ↓
-Published
-    ↓
-Retained / Leased
-    ↓
-Logical Disposal
-    ↓
-Physical Disposal
-```
-
-Artifact đã publish là immutable.
-
----
-
-## 22. Cache Promotion
-
-Cache promotion thêm retention owner:
-
-```text
-Accepted Artifact
-    ↓
-Cache Policy approves
-    ↓
-Cache Retention Added
-    ↓
-Payload unchanged
-```
-
-Cache không trở thành payload owner.
-
----
-
-## 23. Cache Eviction
-
-Cache eviction:
-
-```text
-Remove Cache Retention
-    ↓
-Re-evaluate Disposal Eligibility
-```
-
-Nếu Revision, UI hoặc Lease còn, payload vẫn sống.
-
----
-
-## 24. Revision Lifecycle Interaction
-
-Khi Revision bị superseded:
-
-```text
-Authority Revoked
-    ↓
-Queued Work Removed
-    ↓
-Running Attempts Draining
-    ↓
-Revision Retention Released
-    ↓
-Artifact Disposal Re-evaluated
-```
-
-Revision metadata và Artifact payload có lifecycle riêng.
-
----
-
-## 25. Session Shutdown
-
-```text
-Runtime Control revokes Session authority
-        ↓
-Child cancellation propagated
-        ↓
-Queued Work removed
-        ↓
-Running Attempts drain
-        ↓
-UI retention released
-        ↓
-Session retention released
-        ↓
-Physical disposal when eligible
-```
-
----
-
-## 26. Application Shutdown
-
-```text
-Stop new admission
-        ↓
-Revoke application authority
-        ↓
-Cancel sessions
-        ↓
-Drain queue and workers
-        ↓
-Release leases
-        ↓
-Release retention owners
-        ↓
-Dispose providers and runtime components
-        ↓
-Flush bounded diagnostics
-```
-
-Chi tiết order phải thống nhất với `BOOT_SEQUENCE.md`.
-
----
-
-## 27. Provider Resource Lifecycle
-
-Provider Manager sở hữu provider-lifetime resource.
-
-```text
-CREATED
-  ↓
-INITIALIZING
-  ↓
-READY
-  ↔
-IDLE
-  ↓
-DRAINING
-  ↓
-UNLOADING
-  ↓
-DISPOSED
-```
-
-Per-request resource vẫn thuộc Attempt/Adapter.
-
----
-
-## 28. Local Model Lifecycle
-
-```text
-UNLOADED
-  ↓
-LOADING
-  ↓
-READY
-  ↔
-IDLE
-  ↓
-UNLOADING
-  ↓
-DISPOSED
-```
-
-Model load/unload phải xét:
-
-- active lease;
-- provider request;
-- GPU memory;
-- resource pressure;
-- shutdown state.
-
----
-
-## 29. Worker Boundary
-
-Worker lifecycle chi tiết thuộc `THREADING_MODEL.md`.
-
-Tại tài liệu này chỉ chốt:
-
-```text
-Worker owns Attempt-local resource.
-Worker may hold Lease.
-Worker never disposes shared Artifact.
-Worker releases all local ownership on terminal completion.
-```
-
----
-
-## 30. Native Resource Lifecycle
-
-Native/GPU/OS resource:
-
-- cần explicit owner;
-- có creation failure path;
-- có thread/process affinity khi cần;
-- không phụ thuộc GC finalizer;
-- có disposal timeout;
-- leak phải observable;
-- có fallback khi disposal fail.
-
----
-
-## 31. Resource Dependency Graph
-
-```text
-Session
-    │
-    ▼
-Revision
-    │
-    ├── Shared Artifact
-    ├── Presentation Retention
-    └── WorkItem
-           │
-           ▼
-        Attempt
-           ├── Temporary Buffer
-           ├── Provider Request
-           ├── GPU Lease
-           └── Artifact Lease
-```
-
-Disposal phải tôn trọng graph nhưng không hard-code pipeline stage order.
-
----
-
-## 32. Disposal Eligibility
-
-Resource chỉ eligible khi:
-
-```text
-No Runtime Authority Requirement
-No Payload Owner Requirement
-No Retention Owner
-No Active Lease
-No UI Use
-No Provider Use
-No Required Diagnostics Retention
-```
-
-Sau đó mới được physical disposal.
-
----
-
-## 33. Logical Disposal
-
-Logical disposal:
-
-- withdraw khỏi new lookup;
-- deny new lease;
-- release retention khi policy cho phép;
-- mark draining;
-- không cho new publication;
-- không cho resurrection.
-
-Resource có thể vẫn tồn tại vật lý.
-
----
-
-## 34. Draining
-
-Draining nghĩa là:
-
-- authority hoặc retention chính đã mất;
-- physical use vẫn còn;
-- cleanup đang diễn ra;
-- resource vẫn accounting;
-- no new work may acquire it unless explicit exception.
-
-Draining resource phải có timeout hoặc leak detection.
-
----
-
-## 35. Physical Disposal
-
-Physical disposal do Artifact Store hoặc Resource Manager điều phối.
-
-Physical disposal phải:
-
-- idempotent khi khả thi;
-- không chạy khi lease còn;
-- tôn trọng thread/process affinity;
-- report success/failure;
-- remove backing resource;
-- mark state terminal.
-
----
-
-## 36. Disposal Order
-
-Không hard-code Recognition → Translation → Presentation.
-
-Generic order:
-
-```text
-Stop New Use
-    ↓
-Release Attempt-Local Resource
-    ↓
-Release UI/Cache/Revision Retention
-    ↓
-Release Leases
-    ↓
-Dispose Shared Artifact Backing
-    ↓
-Dispose Revision/Session Metadata
-    ↓
-Dispose Runtime-Global Resource
-```
-
-Dependency-specific cleanup theo Resource Graph.
-
----
-
-## 37. Resource Resurrection
-
-Sau `PHYSICALLY_DISPOSED`:
-
-```text
-ResourceId cannot become active again.
-```
-
-Reuse cần create/register resource mới.
-
-Resurrection attempt là invariant violation.
-
----
-
-## 38. Resource Version
-
-Identity, version và compatibility tách biệt:
-
-```text
-ResourceId
-ResourceVersion
-CompatibilityMetadata
-```
-
-Version thay đổi không tự đổi identity semantics.
-
-Business Module định nghĩa compatibility.
-
----
-
-## 39. Cleanup Failure
-
-Cleanup failure tạo normalized `RuntimeError`.
-
-```text
-Primary Outcome
-    +
-Cleanup Error
-```
-
-Rules:
-
-- không restore authority;
-- không restore ownership;
-- không revive resource;
-- retry cleanup chỉ theo safe policy;
-- diagnostics phải giữ primary và cleanup error;
-- repeated failure có thể degrade Resource Manager/Provider.
-
----
-
-## 40. Cleanup Retry Boundary
-
-Cleanup retry khác WorkItem retry.
-
-Cleanup retry:
-
-- không tạo business WorkItem;
-- không thay Attempt lineage;
-- không grant authority;
-- chỉ cố hoàn tất physical cleanup;
-- phải bounded;
-- có backoff nếu cần.
-
----
-
-## 41. Lifecycle Events
-
-Conceptual events:
-
-```text
-RESOURCE_CREATED
-RESOURCE_REGISTERED
-RESOURCE_TRANSFER_STARTED
-RESOURCE_TRANSFER_COMPLETED
-RESOURCE_PUBLISHED
-RETENTION_ADDED
-RETENTION_REMOVED
-LEASE_ACQUIRED
-LEASE_RELEASED
-RESOURCE_LOGICALLY_DISPOSED
-RESOURCE_DRAINING
-RESOURCE_PHYSICALLY_DISPOSED
-RESOURCE_DISPOSAL_FAILED
-RESOURCE_LEAK_DETECTED
-```
-
-Tên cuối tuân theo Event Standard.
-
----
-
-## 42. Event Payload
+Registration MAY assign:
 
 ```text
 ResourceId
 ResourceType
 Owner
-PreviousOwner
-RetentionClass
-LeaseId
-Scope
-SessionId
-RevisionId
-WorkItemId
-AttemptId
-OccurredAt
-ReasonCode
-```
-
-Không chứa payload.
-
----
-
-## 43. Metrics
-
-Theo dõi:
-
-- active resource count;
-- resource count by type;
-- ownership transfer count;
-- retention owner count;
-- active lease count;
-- lease lifetime;
-- logical disposal count;
-- physical disposal count;
-- draining resource count;
-- disposal latency;
-- disposal blocked by lease;
-- cleanup retry count;
-- cleanup failure count;
-- leaked resource count;
-- native handle count;
-- GPU resource count;
-- provider resource count.
-
----
-
-## 44. Leak Detection
-
-Leak indicators:
-
-- lease vượt expected lifetime;
-- resource draining quá lâu;
-- owner đã dispose nhưng payload còn;
-- provider request không release;
-- native handle tăng liên tục;
-- GPU allocation không giảm;
-- Session close nhưng retention còn;
-- UI giữ old Revision vô hạn.
-
----
-
-## 45. Privacy
-
-Resource lifecycle telemetry không chứa raw content.
-
-Sensitive resource:
-
-- release sớm;
-- clear buffer khi policy yêu cầu;
-- không persist ngoài Storage policy;
-- không giữ trong debug retention mặc định;
-- không xuất hiện trong event payload.
-
----
-
-## 46. Failure Isolation
-
-Nếu disposal một resource fail:
-
-- resource khác vẫn cleanup;
-- ownership graph không corrupt;
-- no new authority;
-- no new lease;
-- failed resource giữ trạng thái observable;
-- Runtime có thể continue nếu safety còn giữ được.
-
----
-
-## 47. MVP Policy
-
-MVP yêu cầu:
-
-- one payload owner;
-- explicit retention owner;
-- Artifact Store ownership;
-- Worker Attempt-local ownership;
-- Resource Lease;
-- logical/physical disposal split;
-- draining state;
-- bounded cleanup retry;
-- no resurrection;
-- no complex general-purpose graph engine;
-- process-local lifecycle registry;
-- explicit native/GPU cleanup khi có.
-
----
-
-## 48. Example: Artifact Publication
-
-```text
-Worker creates candidate
-        ↓
-Artifact Store registers
-        ↓
-Runtime Control validates
-        ↓
-Ownership transfer completes
-        ↓
-Artifact published
-        ↓
-Worker releases local ownership
+SizeEstimate
+BackingResourceRef
+IntegrityState
+CreatedAt
+DisposalCoordinator
 ```
 
 ---
 
-## 49. Example: Cache Promotion
+# 29. Ownership Transfer
+
+Example:
 
 ```text
-Accepted Artifact
-        ↓
-Cache Policy approves
-        ↓
-Cache retention added
-        ↓
-Payload owner remains Artifact Store
+Worker owns candidate
+        |
+        v
+Transfer Prepared
+        |
+        v
+Runtime Authority Validation
+        |
+        v
+Runtime Artifact Store accepts lifecycle ownership
+        |
+        v
+Publication becomes visible
+        |
+        v
+Worker releases creator ownership
 ```
 
 ---
 
-## 50. Example: Revision Cancellation
+# 30. Transfer Failure
+
+If transfer fails:
+
+* producer remains owner;
+* candidate remains private;
+* candidate cleanup is required;
+* no half-published resource exists;
+* another component MUST NOT assume ownership.
+
+---
+
+# 31. Shared Resource
+
+Shared resource has:
 
 ```text
-Revision authority revoked
-        ↓
-No new lease
-        ↓
-Running Attempt drains
-        ↓
-Revision retention removed
-        ↓
-Last lease released
-        ↓
-Artifact physically disposed
+one lifecycle owner
+zero..N retention records
+zero..N active leases
+explicit physical-disposal coordinator
 ```
 
+Immutable Runtime Artifact additionally has immutable payload semantics.
+
 ---
 
-## 51. Example: Disposal Blocked by Lease
+# 32. Attempt-Local Resource
+
+Attempt-local resource:
+
+* belongs to Worker/Execution Adapter;
+* is private by default;
+* has no shared retention by default;
+* is released during Attempt cleanup;
+* may remain draining if physical child operation cannot stop;
+* MUST NOT be retained by Event Bus.
+
+---
+
+# 33. Runtime Artifact Lifecycle
+
+Conceptually:
 
 ```text
-Logical disposal requested
-        ↓
-Active Artifact Lease exists
-        ↓
-Resource enters DRAINING
-        ↓
-Lease released
-        ↓
-Physical disposal proceeds
-```
-
----
-
-## 52. Example: Provider Request Abandoned
-
-```text
-Authority revoked
-        ↓
-Abort unsupported
-        ↓
-Attempt becomes abandoned
-        ↓
-Provider request remains physical
-        ↓
-Provider resource stays accounted
-        ↓
-Late completion arrives
-        ↓
-Result rejected and resource disposed
-```
-
----
-
-## 53. Example: Cleanup Failure
-
-```text
-Physical disposal invoked
-        ↓
-Native API fails
-        ↓
-RESOURCE_DISPOSAL_FAILED
-        ↓
-Resource remains non-active and draining
-        ↓
-Bounded cleanup retry
-```
-
----
-
-## 54. Architecture Invariants
-
-1. Mỗi payload có một owner.
-2. Retention owner có thể nhiều.
-3. Lease không cấp ownership.
-4. Publication không cấp ownership.
-5. Authority khác ownership.
-6. Ownership khác retention.
-7. Logical disposal trước physical disposal.
-8. Resource đang lease không physical dispose.
-9. Cache promotion không đổi payload owner.
-10. Cache promotion không copy payload mặc định.
-11. Worker chỉ dispose Attempt-local resource.
-12. Worker không dispose shared Artifact.
-13. Artifact Store sở hữu accepted Artifact payload.
-14. Runtime Control sở hữu authority.
-15. Draining resource observable.
-16. Resource đã dispose không resurrect.
-17. Ownership transfer atomic hoặc rollback-safe.
-18. Candidate không reusable trước acceptance.
-19. Cleanup failure không restore authority.
-20. Cleanup failure không restore ownership.
-21. Native/GPU resource có explicit lifecycle.
-22. Resource event không chứa payload.
-23. Retention release không phá active lease.
-24. Session shutdown revoke authority trước disposal.
-25. Application shutdown dừng admission trước cleanup.
-26. Physical disposal do coordinator thực hiện.
-27. Resource accounting bounded.
-28. Lease lifetime leak-detectable.
-29. Storage không quản lý runtime lease.
-30. Artifact Store không thay Storage.
-
----
-
-## 55. Testing Requirements
-
-Test phải bao phủ:
-
-- create/register/publish;
-- ownership transfer success;
-- ownership transfer rollback;
-- double publish;
-- duplicate registration;
-- lease acquire/release;
-- dispose with active lease;
-- late lease release;
-- cache promotion;
-- cache eviction;
-- Revision drain;
-- Session shutdown;
-- Application shutdown;
-- provider unload;
-- native disposal failure;
-- GPU cleanup;
-- abandoned provider request;
-- double dispose;
-- resurrection prevention;
-- cleanup retry;
-- leak detection;
-- event privacy;
-- shared Artifact reuse.
-
----
-
-## 56. Open Questions
-
-- Resource Manager có standalone component trong MVP không?
-- Ownership registry dùng reference count, owner set hay lease table?
-- Lease timeout là hard hay diagnostic-only?
-- Native disposal retry bao nhiêu lần?
-- Provider resource isolation bằng process hay thread?
-- GPU resource có cần dedicated manager không?
-- UI retention boundary cụ thể nằm ở Presentation hay Runtime?
-- Durable Artifact materialization có lifecycle adapter riêng không?
-- Cleanup task chạy trên execution context nào?
-- Leak threshold theo resource type là bao nhiêu?
-
----
-
-## 57. Related Documents
-
-| Document | Relationship |
-|---|---|
-| `MEMORY_MODEL.md` | Memory/resource ownership and budgets |
-| `CACHE_POLICY.md` | Retention promotion and eviction |
-| `PIPELINE_RUNTIME.md` | Revision, WorkItem, Attempt and authority |
-| `RUNTIME_COMPONENTS.md` | Artifact Store and Resource Manager |
-| `CANCELLATION.md` | Authority revocation and drain |
-| `RETRY_POLICY.md` | Attempt-local cleanup |
-| `THREADING_MODEL.md` | Affinity and execution context |
-| `ERROR_MODEL.md` | Cleanup RuntimeError |
-| `RUNTIME_CONFIG.md` | Cleanup timeout and limits |
-| `RUNTIME_OBSERVABILITY.md` | Lifecycle metrics and events |
-| `BOOT_SEQUENCE.md` | Startup/shutdown ordering |
-| `../../modules/storage/README.md` | Durable persistence boundary |
-
----
-
-## 58. Completion Criteria
-
-`RESOURCE_LIFECYCLE.md` được xem là đồng bộ khi:
-
-- ownership là khái niệm trung tâm;
-- payload ownership tách retention ownership;
-- Resource Lease tổng quát;
-- candidate/published/accepted resource tách rõ;
-- authority tách ownership;
-- logical/physical disposal tách rõ;
-- draining state được định nghĩa;
-- cache promotion không chuyển payload owner;
-- disposal eligibility rõ;
-- no resurrection invariant tồn tại;
-- events, metrics, testing và MVP policy đầy đủ;
-- không hard-code OCR/Layout/Translation disposal order.
-
----
-
-## 59. Summary
-
-CRAI Runtime Resource Lifecycle dùng mô hình:
-
-```text
-Create
-    ↓
-Own
-    ↓
-Transfer / Publish
-    ↓
-Retain / Lease
-    ↓
-Use
-    ↓
-Release
-    ↓
+Candidate Created
+        |
+        v
+Registered
+        |
+        v
+Runtime Authority Validated
+        |
+        v
+Ownership Transferred
+        |
+        v
+Published
+        |
+        v
+Retained / Leased
+        |
+        v
 Logical Disposal
-    ↓
+        |
+        v
 Drain
-    ↓
+        |
+        v
 Physical Disposal
 ```
 
-Ranh giới cốt lõi:
+Published Runtime Artifact is immutable.
+
+---
+
+# 34. Cache Promotion
+
+Default cache promotion flow:
 
 ```text
-Ownership controls responsibility.
+Runtime Artifact published
+        |
+        v
+Business Result accepted
+        |
+        v
+Owner declares cache eligibility
+        |
+        v
+Cache Policy permits retention
+        |
+        v
+Cache retention added
+```
 
-Retention controls lifetime.
+Payload owner remains Runtime Artifact Store.
 
-Lease protects active use.
+---
 
-Authority controls whether a result may matter.
+# 35. Cache Eviction
 
-Disposal occurs only when all four allow it.
+```text
+Cache retention removed
+        |
+        v
+Disposal eligibility re-evaluated
+```
+
+If another retention/lease remains:
+
+```text
+payload remains alive
+```
+
+---
+
+# 36. ExecutionRevision Lifecycle Interaction
+
+When an ExecutionRevision is superseded/cancelled:
+
+```text
+Execution Authority Revoked
+        |
+        v
+No New Relevant Work
+        |
+        v
+Queued Work Removed
+        |
+        v
+Running Attempts Drain / Cancel
+        |
+        v
+ExecutionRevision Retention Released
+        |
+        v
+Resource Disposal Eligibility Re-evaluated
+```
+
+ExecutionRevision metadata and physical Artifact payloads have independent lifecycle.
+
+---
+
+# 37. ExecutionScope Shutdown
+
+Recommended:
+
+```text
+Runtime Control revokes ExecutionScope authority
+        |
+        v
+Child cancellation propagated
+        |
+        v
+Queued Work removed
+        |
+        v
+Running Attempts drain
+        |
+        v
+ExecutionScope runtime retention released
+        |
+        v
+Presentation retention handled by Presentation owner
+        |
+        v
+Physical disposal when eligible
+```
+
+ReadingSession business lifecycle remains separately owned.
+
+---
+
+# 38. Application Shutdown
+
+Recommended:
+
+```text
+Stop New Admission
+        |
+        v
+Revoke Application Execution Authority
+        |
+        v
+Cancel ExecutionScopes
+        |
+        v
+Drain Queues / Workers
+        |
+        v
+Release Attempt Resources
+        |
+        v
+Release Leases / Runtime Retention
+        |
+        v
+Stop Provider / Plugin Runtime
+        |
+        v
+Dispose Runtime Resources
+        |
+        v
+Flush Bounded Diagnostics
+```
+
+Exact ordering follows `BOOT_SEQUENCE.md`.
+
+---
+
+# 39. Provider Runtime Resource Lifecycle
+
+Provider Runtime Gateway / Adapter owns provider-runtime instances/resources.
+
+Possible conceptual lifecycle:
+
+```text
+CREATED
+    |
+    v
+INITIALIZING
+    |
+    v
+READY
+    |
+    +--> IDLE
+    |
+    v
+DRAINING
+    |
+    v
+UNLOADING
+    |
+    v
+DISPOSED
+```
+
+Provider Management does NOT own these physical runtime resources.
+
+---
+
+# 40. Local Model Lifecycle
+
+Possible:
+
+```text
+UNLOADED
+    |
+    v
+LOADING
+    |
+    v
+READY
+    |
+    +--> IDLE
+    |
+    v
+DRAINING
+    |
+    v
+UNLOADING
+    |
+    v
+DISPOSED
+```
+
+Unload must account for:
+
+* active provider operations;
+* active lease;
+* GPU/native memory;
+* shutdown;
+* Runtime resource pressure.
+
+---
+
+# 41. Worker Boundary
+
+Worker:
+
+```text
+owns Attempt-local resources
+may acquire leases
+releases Attempt-local ownership
+reports cleanup outcome
+```
+
+Worker MUST NOT independently dispose shared Runtime Artifact backing.
+
+---
+
+# 42. Native / GPU / OS Resource Lifecycle
+
+Native/external resources require:
+
+* explicit owner;
+* creation-failure path;
+* affinity rules where relevant;
+* explicit release/disposal;
+* disposal timeout;
+* leak observability;
+* bounded cleanup retry;
+* containment strategy when cleanup fails.
+
+GC/finalizers are not sufficient guarantees.
+
+---
+
+# 43. Resource Dependency Graph
+
+Conceptually:
+
+```text
+ExecutionScope
+    |
+    v
+ExecutionRevision
+    |
+    +--> Runtime Artifact Retention
+    |
+    +--> Presentation Retention Reference
+    |
+    +--> WorkItem
+            |
+            v
+          Attempt
+            |
+            +--> Temporary Buffer
+            +--> Provider Child Operation
+            +--> GPU Lease
+            +--> RuntimeArtifactLease
+```
+
+Resource dependency graph is about lifecycle dependencies.
+
+It MUST NOT encode Business pipeline stage order.
+
+---
+
+# 44. Disposal Eligibility
+
+Physical disposal SHOULD require:
+
+```text
+No Lifecycle Ownership Need
+No Retention
+No Active Lease
+No Active Physical Use
+No Required Presentation Retention
+No Required Diagnostic Retention
+Physical Cleanup Safe
+```
+
+---
+
+# 45. Authority and Disposal Eligibility
+
+Do NOT model:
+
+```text
+No Runtime Authority
+```
+
+as equivalent to:
+
+```text
+Disposable
+```
+
+Instead:
+
+```text
+Execution authority loss
+    may trigger logical disposal/release
+
+Physical disposal
+    depends on ownership/retention/lease/use
+```
+
+---
+
+# 46. Logical Disposal
+
+Logical disposal means the resource should no longer participate in new normal Runtime use.
+
+Typical actions:
+
+* withdraw from new lookup;
+* deny new lease;
+* release eligible retention;
+* reject new publication/use;
+* mark pending cleanup/drain;
+* prevent resurrection.
+
+Resource MAY still physically exist.
+
+---
+
+# 47. Draining
+
+`DRAINING` means:
+
+```text
+resource is no longer accepting normal new use
+but physical use/cleanup remains
+```
+
+Possible causes:
+
+* active lease;
+* non-cancelable provider request;
+* native operation;
+* UI/graphics release pending;
+* asynchronous cleanup;
+* process termination pending.
+
+Draining MUST remain observable.
+
+---
+
+# 48. Draining Timeout
+
+Draining resource SHOULD have:
+
+```text
+expected lifetime
+or
+timeout/leak threshold
+```
+
+Timeout does not necessarily justify unsafe forced disposal.
+
+It triggers diagnostics/containment policy.
+
+---
+
+# 49. Physical Disposal
+
+Physical disposal MUST:
+
+* respect active leases;
+* respect physical child use;
+* respect affinity requirements;
+* be idempotent where practical;
+* report success/failure;
+* release backing resource;
+* transition to terminal disposed state.
+
+---
+
+# 50. Disposal Coordinator
+
+Physical disposal may be coordinated by:
+
+```text
+Runtime Artifact Store
+Resource Manager
+Provider Runtime Gateway / Adapter
+Presentation/Application
+```
+
+depending on resource ownership.
+
+There is no universal disposal owner for every resource type.
+
+---
+
+# 51. Generic Disposal Order
+
+Recommended conceptual order:
+
+```text
+Stop New Use
+        |
+        v
+Revoke/Withdraw Runtime Eligibility
+        |
+        v
+Release Attempt-Local Resources
+        |
+        v
+Release Retention Owners
+        |
+        v
+Drain Physical Operations
+        |
+        v
+Release Leases
+        |
+        v
+Dispose Shared Physical Backing
+        |
+        v
+Dispose ExecutionRevision / ExecutionScope Metadata
+        |
+        v
+Dispose Runtime-Global Resources
+```
+
+Actual ordering follows the resource dependency graph.
+
+---
+
+# 52. Resource Resurrection
+
+After:
+
+```text
+PHYSICALLY_DISPOSED
+```
+
+the same ResourceId MUST NOT become active again.
+
+Reuse requires:
+
+```text
+new resource
++
+new lifecycle registration
+```
+
+Resurrection is an invariant violation.
+
+---
+
+# 53. Resource Identity
+
+Recommended:
+
+```text
+ResourceId
+ResourceType
+ResourceVersion?
+CompatibilityMetadata?
+```
+
+Identity/version/semantic compatibility are separate concerns.
+
+Business Module defines semantic compatibility where relevant.
+
+---
+
+# 54. Cleanup Failure
+
+Cleanup failure creates a normalized Runtime cleanup error.
+
+Recommended model:
+
+```text
+Primary Execution Outcome
+        +
+Cleanup Outcome
+```
+
+Cleanup failure MUST NOT:
+
+* restore execution authority;
+* restore ownership already released;
+* revive resource;
+* create false successful disposal.
+
+---
+
+# 55. Disposal Failure State
+
+If physical cleanup fails:
+
+```text
+DRAINING
+    |
+    v
+DISPOSAL_FAILED
+```
+
+The resource remains:
+
+* non-active;
+* non-reusable;
+* observable;
+* physically accounted.
+
+---
+
+# 56. Cleanup Retry
+
+Cleanup retry is distinct from WorkItem Retry.
+
+Cleanup retry:
+
+* creates no Business WorkItem;
+* does not change WorkItem/Attempt lineage;
+* grants no execution authority;
+* only retries physical cleanup;
+* remains bounded;
+* may use backoff;
+* respects physical safety/affinity.
+
+---
+
+# 57. Cleanup Retry Ownership
+
+Cleanup retry belongs to the physical lifecycle owner/coordinator.
+
+Examples:
+
+```text
+Resource Manager
+Runtime Artifact Store
+Provider Runtime Gateway
+Presentation resource owner
+```
+
+not Runtime Retry Policy.
+
+---
+
+# 58. Cleanup Escalation
+
+Repeated cleanup failure MAY trigger:
+
+* leak classification;
+* provider/plugin degradation;
+* isolated process termination;
+* Runtime degraded state;
+* shutdown containment.
+
+Exact escalation belongs to Error/Runtime policy.
+
+---
+
+# 59. Lifecycle Events
+
+Possible normalized events:
+
+```text
+ResourceCreated
+ResourceRegistered
+ResourceOwnershipTransferStarted
+ResourceOwnershipTransferCompleted
+ResourcePublished
+RetentionAdded
+RetentionRemoved
+LeaseAcquired
+LeaseReleased
+ResourceLogicalDisposalStarted
+ResourceDraining
+ResourcePhysicalDisposalCompleted
+ResourceDisposalFailed
+ResourceLeakDetected
+```
+
+---
+
+# 60. Event Payload
+
+Recommended:
+
+```text
+ResourceId
+ResourceType
+Owner
+PreviousOwner?
+RetentionKind?
+LeaseId?
+ScopeType?
+ExecutionScopeId?
+ExecutionRevisionId?
+WorkItemId?
+AttemptId?
+OccurredAt
+ReasonCode?
+```
+
+Payload content itself MUST NOT be embedded.
+
+---
+
+# 61. Metrics
+
+Recommended:
+
+```text
+active resource count
+resource count by class
+ownership-transfer count
+retention count
+active lease count
+lease lifetime
+logical-disposal count
+draining-resource count
+physical-disposal count
+disposal latency
+disposal blocked-by-lease
+cleanup retry count
+cleanup failure count
+resource leak count
+native handle count
+GPU resource count
+provider-runtime resource count
+```
+
+---
+
+# 62. Leak Detection
+
+Possible indicators:
+
+```text
+lease exceeds expected lifetime
+resource drains too long
+resource owner released but physical backing remains
+provider child operation never releases
+native handle count monotonically grows
+GPU usage does not fall after expected cleanup
+ExecutionScope closes but runtime retention remains
+Presentation keeps obsolete resource indefinitely
+```
+
+---
+
+# 63. Privacy
+
+Resource lifecycle telemetry MUST NOT contain raw user content.
+
+Sensitive resources SHOULD:
+
+* exist only as long as necessary;
+* be cleared when policy requires;
+* avoid implicit durable persistence;
+* avoid debug retention by default;
+* never appear directly in lifecycle events.
+
+---
+
+# 64. Failure Isolation
+
+If one resource disposal fails:
+
+* unrelated resources continue cleanup;
+* ownership registry remains valid;
+* no new authority is granted;
+* no new normal lease is issued;
+* failed resource remains accounted/observable;
+* Runtime MAY continue if invariants remain safe.
+
+---
+
+# 65. Process Restart
+
+Persisted metadata from a prior process MUST NOT imply a physical resource still exists.
+
+After restart:
+
+```text
+old Runtime physical resource
+    !=
+current live resource
+```
+
+Any restored durable representation must create/materialize a new Runtime resource identity/lifecycle where appropriate.
+
+---
+
+# 66. Plugin Resource Boundary
+
+Plugin-provided runtime resources follow the same lifecycle rules.
+
+Plugin lifecycle shutdown MUST:
+
+* stop new capability work;
+* drain/cancel active operations;
+* release leases;
+* dispose plugin-owned physical resources;
+* then unload plugin runtime.
+
+Plugin identity does not bypass Resource Lifecycle.
+
+---
+
+# 67. Resource Lifecycle and Cancellation
+
+Cancellation:
+
+```text
+revokes execution authority
+```
+
+Resource Lifecycle:
+
+```text
+drains and disposes physical resources safely
+```
+
+Cancellation MUST NOT imply immediate physical disposal.
+
+---
+
+# 68. Resource Lifecycle and Retry
+
+WorkItem Retry:
+
+```text
+creates new Attempt
+```
+
+Cleanup Retry:
+
+```text
+retries physical cleanup
+```
+
+These MUST remain separate.
+
+---
+
+# 69. Resource Lifecycle and Cache
+
+Cache:
+
+```text
+adds/removes retention
+```
+
+Resource Lifecycle:
+
+```text
+decides physical disposal eligibility
+```
+
+Cache eviction never directly destroys leased/owned payload.
+
+---
+
+# 70. Resource Lifecycle and Presentation
+
+Presentation MAY retain visible resources.
+
+Presentation retention is one retention reason.
+
+Runtime Resource Lifecycle respects it but does not own Presentation semantics.
+
+---
+
+# 71. Resource Lifecycle and Storage
+
+Runtime resource:
+
+```text
+execution-time physical resource
+```
+
+Durable Storage:
+
+```text
+persistent representation
+```
+
+Persisting an Artifact does not mean keeping its original Runtime backing alive.
+
+Materializing from Storage creates another Runtime resource lifecycle.
+
+---
+
+# 72. Architecture Invariants
+
+1. Every significant physical resource has one lifecycle owner.
+
+2. Multiple retention reasons MAY exist.
+
+3. Lease does not transfer ownership.
+
+4. Publication does not automatically transfer ownership.
+
+5. Visibility is distinct from ownership.
+
+6. Execution authority is distinct from ownership.
+
+7. Retention is distinct from ownership.
+
+8. Logical disposal precedes physical disposal.
+
+9. Authority loss alone does not make a resource physically disposable.
+
+10. Physical disposal waits for ownership/retention/lease/use eligibility.
+
+11. Cache promotion does not change Runtime Artifact payload owner.
+
+12. Cache promotion does not copy payload by default.
+
+13. Worker disposes Attempt-local resources only.
+
+14. Worker does not independently dispose shared Runtime Artifact.
+
+15. Runtime Artifact Store owns published Runtime Artifact lifecycle.
+
+16. Runtime Control owns execution authority.
+
+17. Business Module owns Business result semantics.
+
+18. Runtime Artifact publication does not imply Business acceptance.
+
+19. Resource in DRAINING remains observable.
+
+20. Physically disposed ResourceId cannot be resurrected.
+
+21. Ownership transfer is atomic or rollback-safe.
+
+22. Candidate resource is not normal shared/reusable state before publication/acceptance.
+
+23. Cleanup failure does not restore execution authority.
+
+24. Cleanup failure does not revive resource.
+
+25. Native/GPU resources use explicit lifecycle.
+
+26. Resource events contain no payload content.
+
+27. Retention release never breaks active valid lease.
+
+28. ExecutionScope shutdown revokes execution authority before physical cleanup.
+
+29. Application shutdown stops admission before destructive cleanup.
+
+30. Physical disposal is coordinated by the owning resource boundary.
+
+31. Resource accounting remains bounded/observable.
+
+32. Lease lifetime is bounded or leak-detectable.
+
+33. Storage does not manage Runtime leases.
+
+34. Runtime Artifact Store does not replace Storage.
+
+35. Provider Management does not own provider physical runtime resources.
+
+36. Provider Runtime Gateway / Adapter owns provider-runtime lifecycle.
+
+37. ExecutionScope/ExecutionRevision terminology is canonical.
+
+38. Resource state dimensions SHOULD remain orthogonal.
+
+39. Cleanup Retry and WorkItem Retry remain separate.
+
+40. Materialization from durable Storage creates a new Runtime lifecycle.
+
+---
+
+# 73. Recommended MVP
+
+CRAI MVP SHOULD support:
+
+* explicit lifecycle owner;
+* explicit retention records;
+* ResourceLease;
+* process-local lifecycle registry;
+* Runtime Artifact Store ownership;
+* Worker Attempt-local ownership;
+* ExecutionScope/ExecutionRevision retention;
+* ownership transfer;
+* publication boundary;
+* logical/physical disposal split;
+* draining state;
+* bounded cleanup retry;
+* no resurrection;
+* explicit native/GPU cleanup;
+* provider runtime lifecycle;
+* Presentation retention;
+* content-free lifecycle events;
+* leak detection.
+
+MVP SHOULD avoid:
+
+* general-purpose distributed resource graph engine;
+* automatic hard disposal while leased;
+* implicit resurrection;
+* GC-only cleanup of native/GPU resources.
+
+---
+
+# 74. Testing Requirements
+
+Tests SHOULD include:
+
+* create/register;
+* ownership transfer success;
+* ownership transfer rollback;
+* publish without transfer;
+* double publication;
+* duplicate registration;
+* lease acquire/release;
+* disposal with active lease;
+* late lease release;
+* cache promotion;
+* cache eviction;
+* Business acceptance after Artifact publication;
+* ExecutionRevision drain;
+* ExecutionScope shutdown;
+* Application shutdown;
+* provider runtime unload;
+* local model unload with active lease;
+* native disposal failure;
+* GPU cleanup;
+* abandoned provider request;
+* double physical disposal;
+* resurrection attempt;
+* cleanup retry;
+* leak detection;
+* event privacy;
+* shared Runtime Artifact reuse;
+* durable Storage materialization;
+* process restart;
+* plugin runtime disposal.
+
+---
+
+# 75. Open Decisions
+
+The following remain open:
+
+* exact Resource lifecycle registry implementation;
+* ResourceLease representation;
+* ownership registry representation;
+* retention-record representation;
+* ownership-transfer protocol;
+* Artifact publication atomicity model;
+* disposal coordinator API;
+* logical disposal API;
+* native cleanup retry limit;
+* lease timeout policy;
+* provider runtime isolation;
+* GPU resource manager necessity;
+* Presentation retention API;
+* durable materialization adapter;
+* cleanup execution context;
+* leak thresholds by resource class;
+* draining timeout semantics.
+
+---
+
+# 76. Related Documents
+
+Runtime:
+
+* `MEMORY_MODEL.md`
+* `CACHE_POLICY.md`
+* `PIPELINE_RUNTIME.md`
+* `RUNTIME_COMPONENTS.md`
+* `CANCELLATION.md`
+* `RETRY_POLICY.md`
+* `THREADING_MODEL.md`
+* `ERROR_MODEL.md`
+* `RUNTIME_CONFIG.md`
+* `RUNTIME_OBSERVABILITY.md`
+* `BOOT_SEQUENCE.md`
+* `PROCESS_TOPOLOGY.md`
+
+External:
+
+* `../plugin/PLUGIN_LIFECYCLE.md`
+* `../../02-modules/provider-management/`
+* `../../02-modules/presentation/`
+* `../../02-modules/storage/`
+
+---
+
+# 77. Completion Criteria
+
+`RESOURCE_LIFECYCLE.md` is synchronized when:
+
+* ownership remains the central responsibility model;
+* ownership/retention/lease/visibility/authority are distinct;
+* Resource lifecycle uses orthogonal state dimensions;
+* ExecutionScope/ExecutionRevision terminology is used;
+* Provider Runtime ownership replaces Provider Manager physical ownership;
+* candidate/publication/Business acceptance boundaries remain distinct;
+* Runtime Artifact ownership remains distinct from Business semantics;
+* logical/physical disposal remain distinct;
+* authority loss does not directly imply physical disposal;
+* draining remains explicit;
+* cache promotion only adds retention;
+* physical disposal eligibility is explicit;
+* no-resurrection invariant remains;
+* cleanup Retry remains separate from WorkItem Retry;
+* events/metrics/tests remain content-safe;
+* no Business pipeline-specific disposal order is hard-coded.
+
+---
+
+# 78. Summary
+
+CRAI Runtime Resource Lifecycle follows:
+
+```text
+Create
+    |
+    v
+Own
+    |
+    v
+Register
+    |
+    v
+Transfer / Publish
+    |
+    v
+Retain / Lease
+    |
+    v
+Use
+    |
+    v
+Release
+    |
+    v
+Logical Disposal
+    |
+    v
+Drain
+    |
+    v
+Physical Disposal
+```
+
+The central ownership model is:
+
+```text
+Ownership
+    defines responsibility.
+
+Retention
+    extends availability.
+
+Lease
+    protects active physical use.
+
+Execution Authority
+    determines whether execution may still matter.
+
+Visibility
+    determines whether resource may be discovered.
+
+Physical Use
+    determines whether backing may still be in use.
+
+Disposal
+    occurs only when lifecycle dependencies allow it.
 ```

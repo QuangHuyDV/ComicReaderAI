@@ -1,7 +1,7 @@
 # Language Domain
 
 * **Document:** Domain / Language
-* **Version:** 1.0.0
+* **Version:** 2.0.0
 * **Status:** Draft
 * **Owner:** CRAI Architecture
 
@@ -9,58 +9,71 @@
 
 # Purpose
 
-The Language domain defines how CRAI identifies, validates and transports language-related information across OCR, text extraction, translation, presentation and rendering workflows.
+The `Language` domain defines the canonical language concepts used across CRAI.
 
-Language information influences:
+It provides a consistent representation for:
 
-* OCR provider selection
-* Text normalization
-* Translation routing
-* Glossary lookup
-* Prompt construction
-* Script handling
-* Writing direction
-* Font selection
-* Line breaking
-* User preferences
-* Validation
-* Cache compatibility
+* source language,
+* target language,
+* script,
+* regional variation,
+* mixed-language content,
+* language ranges,
+* language pairs,
+* language resolution,
+* language detection results,
+* writing-system metadata,
+* provider-language interoperability.
 
-Language must be represented consistently across the system.
+Language information may influence:
 
-Provider-specific language identifiers must never become canonical domain values.
+* OCR configuration,
+* recognition,
+* text normalization,
+* Translation,
+* Glossary matching,
+* context construction,
+* Presentation,
+* typography,
+* line breaking,
+* cache compatibility,
+* validation.
+
+Language MUST remain provider-independent.
+
+Provider-specific language identifiers MUST NOT become canonical domain values.
 
 ---
 
 # Domain Role
 
-Language is a shared domain concept used by multiple aggregates and modules.
+Language is a shared domain concept.
+
+It is normally represented through immutable Value Objects and scoped metadata rather than as one independently owned aggregate.
+
+Conceptually:
 
 ```text
-Project
-   │
-   ├── Source Language
-   ├── Target Languages
-   │
-   ▼
-Book / Chapter Overrides
-   │
-   ▼
-Page Language Detection
-   │
-   ▼
-Text Block Language
-   │
-   ▼
-Translation Language Pair
-   │
-   ▼
-Presentation and Rendering
+Project language intent
+          |
+          v
+Optional content overrides
+          |
+          v
+Detection / confirmation
+          |
+          v
+Effective Language Resolution
+          |
+          +--> OCR / Recognition
+          +--> Translation
+          +--> Glossary
+          +--> Presentation
 ```
 
-Language is normally represented as an immutable Value Object.
+Different consumers MAY resolve language differently.
 
-It is not an independently owned aggregate.
+There is no single global mutable "current language" for all CRAI operations.
 
 ---
 
@@ -68,68 +81,64 @@ It is not an independently owned aggregate.
 
 The Language domain is responsible for:
 
-* Representing canonical language identity
-* Representing script and regional variants
-* Validating language tags
-* Supporting mixed-language content
-* Describing writing characteristics
-* Supporting language detection results
-* Mapping provider-specific codes
-* Supporting translation compatibility
-* Supporting locale-sensitive formatting
-* Supporting font and layout selection
-* Participating in cache and revision identity
+* canonical language identity,
+* script representation,
+* regional variation,
+* variant representation,
+* language-tag validation,
+* language equality,
+* language compatibility,
+* language ranges,
+* language pairs,
+* language-analysis metadata,
+* mixed-language representation,
+* language-resolution semantics,
+* language-detection result representation,
+* confirmation/override semantics,
+* writing-system defaults,
+* provider-code normalization boundaries.
 
-The Language domain is not responsible for:
+The Language domain is NOT responsible for:
 
-* Detecting language from raw text
-* Translating content
-* Selecting AI providers
-* Loading fonts
-* Rendering glyphs
-* Constructing prompts
-* Managing user interface localization
-* Managing dictionaries or glossary entries
-
-Those responsibilities belong to Detection, Translation, Provider, Presentation, Rendering, Localization and Glossary components.
+* performing language detection,
+* executing OCR,
+* executing Translation,
+* selecting providers,
+* rendering glyphs,
+* loading fonts,
+* UI localization resources,
+* Glossary content,
+* linguistic segmentation execution.
 
 ---
 
 # Core Concepts
 
-The domain separates the following concepts:
+CRAI MUST distinguish:
 
 ```text
 Language
-├── Language Code
-├── Script
-├── Region
-├── Variant
-├── Writing Direction
-└── Confidence
+Script
+Region
+Variant
+Language Range
+Language Pair
+Language Analysis
+Language Detection Result
+Language Resolution
+Writing Direction
+Text Orientation
+Reading Direction
+Locale
 ```
 
-These concepts must not be treated as interchangeable.
-
-For example:
-
-```text
-zh-Hans-CN
-```
-
-contains:
-
-* Language: Chinese
-* Script: Simplified Han
-* Region: China
-
-It does not merely mean “Simplified Chinese” as one indivisible string.
+These concepts are related but MUST NOT be treated as interchangeable.
 
 ---
 
-# Canonical Language Tag
+# Canonical Language
 
-CRAI should use BCP 47-compatible language tags as its canonical external representation.
+CRAI SHOULD use BCP 47-compatible language tags as the canonical persisted and exchanged representation of a language.
 
 Examples:
 
@@ -146,179 +155,161 @@ ja
 ko
 ```
 
-Canonical tags should follow this structure:
+Canonical shape:
 
 ```text
 language[-Script][-REGION][-variant]
 ```
 
-Examples:
-
-| Tag          | Meaning                                     |
-| ------------ | ------------------------------------------- |
-| `vi`         | Vietnamese                                  |
-| `en`         | English                                     |
-| `en-US`      | English used in the United States           |
-| `zh-Hans`    | Chinese written with Simplified Han script  |
-| `zh-Hant`    | Chinese written with Traditional Han script |
-| `zh-Hant-TW` | Traditional Chinese associated with Taiwan  |
-| `ja`         | Japanese                                    |
-| `ko`         | Korean                                      |
-
-CRAI should store the canonical normalized form rather than user-entered casing.
-
----
-
-# Language Value Object
-
-Recommended representation:
-
-```text
-Language
-├── Tag
-├── Base Language
-├── Script
-├── Region
-├── Variants
-├── Writing System
-└── Metadata
-```
-
-Typical fields:
-
-* Canonical Tag
-* ISO Language Code
-* Script Code
-* Region Code
-* Variants
-* Display Name
-* Native Name
-* Default Writing Direction
-* Default Text Orientation
-* Normalization Profile
-* Status
-
-The canonical tag is the primary identity.
-
-Derived display names must not be used as identifiers.
-
----
-
-# Identity and Equality
-
-Two Language values are equal when their normalized canonical tags are equal.
+Canonical casing SHOULD be normalized.
 
 Examples:
 
 ```text
 ZH-hans
-zh-Hans
 zh-hans
+zh-Hans
 ```
 
-should normalize to:
+normalize to:
 
 ```text
 zh-Hans
 ```
 
-Language equality must not depend on:
+---
 
-* Display name
-* Provider code
-* User interface language
-* Translated language name
-* Font availability
-* Detection confidence
+# Language Value Object
 
-When less-specific and more-specific tags are compared, they are compatible but not equal.
+Recommended conceptual representation:
+
+```text
+Language
+├── canonicalTag
+├── baseLanguage
+├── script?
+├── region?
+└── variants[]
+```
+
+Derived metadata MAY include:
+
+```text
+displayName
+nativeName
+defaultWritingDirection
+defaultTextOrientation
+```
+
+Derived metadata MUST NOT participate in Language identity unless explicitly defined.
+
+The canonical normalized tag is the primary identity.
+
+---
+
+# Equality
+
+Two Language values are equal when their normalized canonical tags are equal.
 
 Example:
 
 ```text
-zh
+zh-Hans == zh-Hans
 ```
 
-is not equal to:
+but:
 
 ```text
-zh-Hans
+zh != zh-Hans
 ```
 
-However, it may be considered compatible under a fallback policy.
+The latter MAY be compatible under a matching policy, but they are not equal.
+
+Language equality MUST NOT depend on:
+
+* display name,
+* provider code,
+* font availability,
+* detection confidence,
+* user-interface language,
+* translated language name.
 
 ---
 
 # Base Language
 
-The base language represents the primary linguistic identity.
+Base language identifies the principal linguistic language.
 
 Examples:
 
-| Code | Language   |
-| ---- | ---------- |
-| `vi` | Vietnamese |
-| `zh` | Chinese    |
-| `en` | English    |
-| `ja` | Japanese   |
-| `ko` | Korean     |
-| `th` | Thai       |
-| `fr` | French     |
-| `de` | German     |
-| `es` | Spanish    |
-| `ru` | Russian    |
+```text
+vi
+zh
+en
+ja
+ko
+th
+fr
+de
+es
+ru
+```
 
-Base language codes should use ISO 639 identifiers accepted by the canonical language-tag standard.
+Codes SHOULD follow those accepted by the canonical language-tag standard.
 
-Three-letter language codes may be supported when no suitable two-letter code exists.
+Three-letter codes MAY be supported where appropriate.
 
 ---
 
 # Script
 
-Script identifies the writing system used to encode the language.
+Script represents the writing system.
 
 Examples:
 
-| Script Code | Script                  |
-| ----------- | ----------------------- |
-| `Latn`      | Latin                   |
-| `Hans`      | Simplified Han          |
-| `Hant`      | Traditional Han         |
-| `Jpan`      | Japanese writing system |
-| `Kore`      | Korean writing system   |
-| `Cyrl`      | Cyrillic                |
-| `Arab`      | Arabic                  |
-| `Thai`      | Thai                    |
-| `Deva`      | Devanagari              |
+```text
+Latn
+Hans
+Hant
+Jpan
+Kore
+Cyrl
+Arab
+Thai
+Deva
+```
 
-Language and script must remain separate.
+Language and Script MUST remain distinct.
 
-Examples:
+Example:
 
 ```text
 zh-Hans
 zh-Hant
 ```
 
-share the same base language but use different scripts.
+share:
 
-Script affects:
+```text
+baseLanguage = zh
+```
 
-* OCR recognition models
-* Character normalization
-* Font fallback
-* Glyph coverage
-* Line breaking
-* Text orientation
-* Transliteration
-* Translation validation
+while differing in Script.
+
+Script MAY influence:
+
+* OCR model compatibility,
+* character normalization,
+* font coverage,
+* transliteration,
+* line breaking,
+* validation.
 
 ---
 
 # Region
 
-Region represents geographic or cultural language variation.
+Region represents geographical or cultural variation.
 
 Examples:
 
@@ -331,17 +322,7 @@ zh-Hant-TW
 zh-Hant-HK
 ```
 
-Region may affect:
-
-* Vocabulary
-* Spelling
-* Date formatting
-* Punctuation
-* Localization
-* Formality conventions
-* Translation preference
-
-Region must not be inferred automatically from language unless a configured default is explicitly applied.
+Region MUST NOT be silently inferred and persisted from base language alone.
 
 For example:
 
@@ -349,36 +330,29 @@ For example:
 en
 ```
 
-must not silently become:
+MUST NOT automatically become:
 
 ```text
 en-US
 ```
 
-inside persisted domain data.
+without an explicit configured default or resolution policy.
 
 ---
 
 # Variant
 
-Variants describe additional linguistic conventions not fully represented by language, script or region.
+Variants represent additional language conventions not captured by base language, Script, or Region.
 
-Variants should be used sparingly.
+Variants SHOULD be used sparingly.
 
-Possible uses include:
-
-* Orthographic conventions
-* Historical language forms
-* Romanization systems
-* Specialized language variants
-
-Provider-specific labels must not be stored as canonical variants.
+Provider-specific labels MUST NOT become canonical Language variants.
 
 ---
 
 # Language Range
 
-Some configuration requires a range rather than an exact language.
+A `LanguageRange` represents matching intent rather than an exact language identity.
 
 Examples:
 
@@ -388,119 +362,92 @@ zh-*
 zh-Hans
 ```
 
-A Language Range may be used for:
+LanguageRange MAY be used for:
 
-* Provider capability rules
-* Font selection
-* Glossary applicability
-* Translation profile selection
-* Validation policy
-* Fallback configuration
+* provider capability matching,
+* Glossary applicability,
+* profile matching,
+* font compatibility,
+* fallback rules.
 
-Language Range and Language must be separate value types.
-
-A range describes compatibility.
-
-A Language describes an actual or selected language identity.
+Language and LanguageRange MUST remain different Value Objects.
 
 ---
 
-# Undefined and Unknown Language
+# Undefined Language
 
-CRAI must distinguish between:
+CRAI MUST distinguish:
 
-| Value                  | Meaning                                               |
-| ---------------------- | ----------------------------------------------------- |
-| `und`                  | Language is undetermined                              |
-| `unknown` domain state | Detection has not run or no conclusion is available   |
-| `mixed` domain state   | Content intentionally contains multiple languages     |
-| `invalid`              | Supplied value is not a valid language representation |
+```text
+no value
+und
+mixed
+invalid
+```
 
-The canonical tag `und` may be used when content exists but its language cannot be determined.
+Meaning:
 
-Absence of a language value may mean detection has not yet occurred.
+* **no value** — no language assertion currently exists.
+* **`und`** — content exists but language is undetermined.
+* **mixed** — content intentionally contains multiple languages.
+* **invalid** — an invalid language representation was supplied.
 
-These states must not be collapsed into one value.
+These cases MUST NOT be collapsed.
 
 ---
 
 # Mixed-Language Content
 
-A Page, paragraph or Text Block may contain more than one language.
+Content MAY contain more than one language.
 
 Examples:
 
-* Chinese dialogue containing an English name
-* Vietnamese text containing Japanese terminology
-* A bilingual page
-* Romanized pronunciation beside original characters
-* Sound effects written in another script
+* Chinese dialogue containing an English skill name,
+* Japanese text containing Latin-script names,
+* bilingual content,
+* mixed-language captions.
 
-Recommended representation:
+Recommended analysis:
 
 ```text
-Language Analysis
-├── Primary Language
-├── Secondary Languages
-├── Script Distribution
-├── Segment Languages
-└── Confidence
+LanguageAnalysis
+├── primaryLanguage?
+├── secondaryLanguages[]
+├── languageSpans[]
+├── scriptSpans[]
+└── confidence?
 ```
 
-Mixed-language content may be represented using:
+Mixed-language content SHOULD NOT automatically be split into multiple TextBlocks.
 
-* One primary language
-* Zero or more secondary languages
-* Optional language spans
-* Optional script spans
-
-The domain should not create one Text Block per language unless layout or editing requirements justify it.
+Segmentation depends on content and processing requirements.
 
 ---
 
 # Language Span
 
-A Language Span associates part of a text value with a language.
+A LanguageSpan associates a portion of text with a Language.
 
 ```text
-Language Span
-├── Start Offset
-├── End Offset
-├── Language
-├── Script
-└── Confidence
+LanguageSpan
+├── startOffset
+├── endOffset
+├── language
+├── script?
+└── confidence?
 ```
 
-Example:
+Canonical offsets MUST use an explicitly defined text-indexing unit.
 
-```text
-他使用了 Skill Burst。
-```
+Unicode code-point or another stable documented representation SHOULD be preferred.
 
-Possible analysis:
-
-```text
-[0..5]  zh-Hans
-[5..16] en
-[16..17] zh-Hans
-```
-
-Offsets must use a clearly defined unit, such as Unicode code-point index.
-
-Byte offsets should not be used for canonical domain mapping.
+Raw byte offsets SHOULD NOT be used as canonical domain offsets.
 
 ---
 
 # Script Span
 
-A Script Span identifies writing-system changes independently of language.
-
-This is useful because:
-
-* A language may use several scripts.
-* Different languages may share one script.
-* A foreign term may use the same language but a different script.
-* Romanized names may remain part of the same linguistic expression.
+A ScriptSpan identifies writing-system variation independently of language.
 
 Example:
 
@@ -508,1361 +455,1304 @@ Example:
 東京 Tokyo
 ```
 
-may contain:
+may use Japanese writing plus Latin script without necessarily representing two unrelated languages.
 
-* Japanese script
-* Latin script
-
-without necessarily being treated as two unrelated languages.
+Language spans and Script spans MUST remain conceptually distinct.
 
 ---
 
 # Source Language
 
-Source Language represents the language expected or detected in source content.
+Source language represents the language of source content.
 
-It may be declared at multiple levels:
+CRAI MUST distinguish:
 
 ```text
-Project Default
-      │
-      ▼
-Book Override
-      │
-      ▼
-Chapter Override
-      │
-      ▼
-Page Detection
-      │
-      ▼
-Text Block Detection
+Declared Language
+Detected Language
+Confirmed Language
+Effective Language
 ```
 
-More specific values may override broader defaults.
+These are different concepts.
 
-However, detected values and configured values must remain distinguishable.
+A detected value MUST NOT silently overwrite a configured value.
 
-Recommended fields:
-
-* Declared Language
-* Detected Language
-* Effective Language
-* Detection Confidence
-* Resolution Source
+A configured value MUST NOT erase detection evidence.
 
 ---
 
-# Target Language
+# Declared Language
 
-Target Language defines the language into which source content is translated.
+Declared language expresses configuration or metadata intent.
 
-Target Language should normally be explicitly selected.
+Possible sources include:
 
-It may originate from:
+* Project configuration,
+* Book override,
+* Chapter override,
+* content metadata,
+* explicit operation input,
+* imported metadata.
 
-* Project settings
-* Book or Chapter override
-* Reading session preference
-* One-time user request
-* Translation Profile
+Declared values express expected or selected language.
 
-Automatic target-language detection should not be used for ordinary translation execution.
-
-A Translation must store its exact target language tag.
-
----
-
-# Effective Language Resolution
-
-Language configuration may exist at several levels.
-
-Recommended resolution order:
-
-```text
-Explicit Operation Override
-        ↓ fallback
-Text Block Language
-        ↓ fallback
-Page Language
-        ↓ fallback
-Chapter Override
-        ↓ fallback
-Book Override
-        ↓ fallback
-Project Default
-        ↓ fallback
-Undetermined
-```
-
-Not every use case should use the same hierarchy.
-
-Examples:
-
-* OCR may prioritize Page detection.
-* Translation may prioritize Text Block language.
-* Rendering may prioritize Translation target language.
-* Glossary selection may combine project defaults with exact block language.
-
-The resolved result should include its source.
+They are not evidence that automatic detection reached the same conclusion.
 
 ---
 
-# Language Resolution Result
+# Detected Language
 
-Recommended structure:
+Detected language is produced by a detection capability.
+
+A detection result SHOULD preserve:
 
 ```text
-Language Resolution
-├── Effective Language
-├── Resolution Source
-├── Confidence
-├── Alternatives
-├── Warnings
-└── Resolution Revision
+LanguageDetectionResult
+├── scope
+├── primaryCandidate
+├── alternativeCandidates[]
+├── scriptCandidates[]
+├── confidence?
+├── detectorId
+├── detectorVersion?
+├── inputHash
+└── createdAt
 ```
 
-Resolution sources may include:
+Detection is execution behavior.
 
-* User selected
-* Project configured
-* Book configured
-* Chapter configured
-* Page detected
-* Text Block detected
-* Provider detected
-* Imported metadata
-* Fallback
-* Undetermined
-
-Configured language and detected language must not overwrite each other silently.
+The Language domain defines how its result is represented.
 
 ---
 
-# Language Detection
+# Detection Scope
 
-Language detection is an application or infrastructure capability.
-
-The domain records its result.
-
-Recommended detection result:
+Detection MAY operate on:
 
 ```text
-Language Detection Result
-├── Primary Candidate
-├── Alternative Candidates
-├── Script Candidates
-├── Confidence
-├── Detection Scope
-├── Detector ID
-├── Detector Version
-├── Input Hash
-└── Created Time
+Project sample
+Book
+Chapter
+Page
+TextBlock
+Text span
+Source artifact
 ```
 
-Detection scope may be:
+No one detection scope is universally required.
 
-* Project sample
-* Book
-* Chapter
-* Page
-* Text Block
-* Text span
-
-Provider-specific confidence values should be normalized before use.
-
----
-
-# Detection Candidate
-
-A candidate may include:
-
-* Language
-* Script
-* Confidence
-* Evidence
-* Rank
-
-Example:
-
-```text
-1. zh-Hans — 0.93
-2. ja      — 0.05
-3. ko      — 0.02
-```
-
-Confidence is comparative evidence.
-
-It is not a guarantee of correctness.
+In particular, text-native content MUST NOT require Page-level detection.
 
 ---
 
 # Detection Confidence
 
-Recommended normalized confidence range:
+Confidence SHOULD use a normalized representation when providers allow it.
+
+Recommended range:
 
 ```text
-0.0 to 1.0
+0.0 <= confidence <= 1.0
 ```
 
-Suggested interpretation:
+Confidence is evidence, not probability guaranteed to have identical statistical meaning across providers.
 
-| Range       | Meaning              |
-| ----------- | -------------------- |
-| `0.90–1.00` | Very high confidence |
-| `0.75–0.89` | High confidence      |
-| `0.50–0.74` | Moderate confidence  |
-| `0.25–0.49` | Low confidence       |
-| `0.00–0.24` | Very low confidence  |
+Threshold interpretation MUST remain configurable.
 
-Thresholds should be configurable.
-
-They must not be treated as universal statistical guarantees across providers.
+Missing confidence MUST remain distinct from zero.
 
 ---
 
-# Language Confirmation
+# Confirmed Language
 
-Users may confirm or correct a detected language.
+A user or trusted workflow MAY confirm or correct language.
 
-A confirmed language should record:
+Confirmation SHOULD preserve:
 
-* Confirmed Language
-* Previous Detected Language
-* Actor
-* Confirmation Time
-* Scope
-* Reason
-* Revision
+```text
+scope
+confirmedLanguage
+previousDetection?
+actor
+confirmedAt
+reason?
+revision
+```
 
-User confirmation has higher authority than automatic detection for the same scope.
+Confirmed language has higher authority than automatic detection at the same scope.
 
-A later detection operation must not silently replace a confirmed language.
-
----
-
-# Writing Direction
-
-Language and writing direction are related but separate.
-
-Supported writing directions may include:
-
-| Direction | Meaning       |
-| --------- | ------------- |
-| `ltr`     | Left to right |
-| `rtl`     | Right to left |
-| `ttb`     | Top to bottom |
-| `btt`     | Bottom to top |
-
-Examples:
-
-* Vietnamese usually uses `ltr`.
-* English usually uses `ltr`.
-* Arabic commonly uses `rtl`.
-* Traditional East Asian layouts may use vertical `ttb`.
-
-Writing direction may be overridden at Text Block level.
-
-The default direction from Language is only a fallback.
+A later detection MUST NOT silently replace it.
 
 ---
 
-# Text Orientation
+# Effective Language
 
-Text Orientation describes glyph arrangement within a writing direction.
+`EffectiveLanguage` is the language selected for a particular operation after resolution.
 
-Possible values:
-
-* Horizontal
-* Vertical
-* Upright
-* Sideways
-* Mixed
-* Unknown
-
-For comics, orientation may differ between Text Blocks on the same Page.
+It SHOULD be represented together with provenance.
 
 Example:
 
 ```text
-Page Language: zh-Hans
-Block A: horizontal
-Block B: vertical
-Block C: rotated sound effect
+LanguageResolution
+├── effectiveLanguage
+├── resolutionSource
+├── confidence?
+├── alternatives[]
+├── warnings[]
+└── resolutionRevision
 ```
 
-Language must not force all Text Blocks into one orientation.
+The effective language MUST NOT erase its source information.
 
 ---
 
-# Reading Direction
+# Resolution Is Operation-Specific
 
-Reading Direction describes the order in which content units are consumed.
-
-It is distinct from:
-
-* Language
-* Writing Direction
-* Text Orientation
-
-Examples:
-
-* A Japanese manga may use right-to-left page and panel order.
-* Japanese text inside a speech bubble may be vertical.
-* A translated Vietnamese side panel may still display left-to-right.
-* A web novel may use top-to-bottom paragraph order.
-
-Reading direction belongs primarily to Book, Page layout or Presentation configuration.
-
-Language only provides defaults where needed.
-
----
-
-# Punctuation Profile
-
-Languages and scripts may use different punctuation conventions.
-
-Examples include:
-
-* Full-width punctuation
-* Chinese quotation marks
-* Japanese corner brackets
-* Latin quotation marks
-* Ellipsis styles
-* Sentence-ending punctuation
-* Spacing before punctuation
-* Repeated emphasis marks
-
-A Punctuation Profile may define:
-
-* Quote pairs
-* Bracket pairs
-* Sentence terminators
-* Ellipsis form
-* Whitespace policy
-* Full-width normalization policy
-* Vertical punctuation behavior
-
-Punctuation conversion must occur through an explicit normalization or translation policy.
-
-Language identification alone must not mutate punctuation.
-
----
-
-# Unicode Normalization
-
-Text normalization should use a declared Unicode normalization strategy.
-
-Possible forms:
-
-* NFC
-* NFD
-* NFKC
-* NFKD
-* Preserve
-
-Recommended default for canonical text:
-
-```text
-NFC
-```
-
-Compatibility normalization such as NFKC may change semantic or stylistic distinctions and must be applied deliberately.
-
-Raw OCR text should remain available when destructive normalization occurs.
-
----
-
-# Chinese Language Handling
-
-Chinese content requires explicit script handling.
-
-Recommended canonical forms:
-
-```text
-zh-Hans
-zh-Hant
-```
-
-Avoid using region alone to infer script.
+CRAI MUST NOT assume one global resolution hierarchy works for every operation.
 
 For example:
 
-* `zh-CN` often implies Simplified Chinese in practice.
-* `zh-TW` often implies Traditional Chinese.
-* `zh-SG` often uses Simplified Chinese.
-* `zh-HK` commonly uses Traditional Chinese.
-
-However, CRAI should preserve explicit script when known.
-
-Preferred canonical translation configuration:
-
 ```text
-zh-Hans → vi
-zh-Hant → vi
+Translation
+    prioritizes exact TextBlock language
 ```
 
-rather than depending only on regional assumptions.
+```text
+OCR
+    may prioritize expected visual/source languages
+```
+
+```text
+Glossary
+    may match exact Translation language pair
+```
+
+```text
+Presentation
+    usually follows effective target-language metadata
+```
+
+Each consuming capability SHOULD define its own resolution policy.
 
 ---
 
-# Simplified and Traditional Chinese
+# Generic Resolution Precedence
 
-Simplified and Traditional Chinese conversion is not identical to translation.
-
-It is a script-conversion or orthographic transformation.
+Where a generic source-language resolution is useful, recommended precedence is:
 
 ```text
-zh-Hans ⇄ zh-Hant
+Explicit Operation Override
+        |
+        v
+Confirmed Content Language
+        |
+        v
+Explicit TextBlock Override
+        |
+        v
+Optional Page Override / Detection
+        |
+        v
+Chapter Override
+        |
+        v
+Optional Book Override
+        |
+        v
+Project Default
+        |
+        v
+Trusted Detection Result
+        |
+        v
+und
 ```
 
-Conversion may be:
+Optional hierarchy levels MUST simply be skipped when they do not exist.
 
-* Character based
-* Phrase aware
-* Region aware
-* Terminology aware
-
-The result may require context because one source character can map to several target characters.
-
-Script conversion should be modeled separately from semantic translation when exact distinction matters.
+`Book` and `Page` MUST NOT be mandatory.
 
 ---
 
-# Japanese Language Handling
+# Detection vs Configuration
 
-Japanese content commonly combines:
+Detected and configured values are not direct overwrite layers.
 
-* Kanji
-* Hiragana
-* Katakana
-* Latin characters
-* Arabic numerals
-
-The canonical language may remain:
+Example:
 
 ```text
-ja
+Project declared: zh-Hans
+
+TextBlock detected: zh-Hant
+confidence: 0.97
 ```
 
-or use a script identifier when a lower-level subsystem requires one.
+The system MAY produce:
 
-Mixed Japanese scripts do not imply mixed languages.
+```text
+effectiveLanguage: zh-Hant
+resolutionSource: detected_text_block
+warning: conflicts_with_project_default
+```
 
-OCR and normalization must preserve script distinctions.
+or request user confirmation depending on policy.
+
+It MUST NOT silently rewrite the Project declaration.
 
 ---
 
-# Korean Language Handling
+# Target Language
 
-Korean content may contain:
+Target language defines the Translation output language.
 
-* Hangul
-* Hanja
-* Latin text
-* Numbers
+Target language SHOULD normally be explicitly selected or resolved from explicit user/project configuration.
 
-The canonical language is normally:
+Possible sources:
 
-```text
-ko
-```
+* Project preference,
+* optional Book/Chapter preference,
+* reading-session preference,
+* Translation Profile,
+* explicit one-time request.
 
-Script analysis may still be used for OCR, font selection and validation.
+Automatic target-language detection SHOULD NOT be the normal Translation mechanism.
 
----
-
-# Vietnamese Language Handling
-
-The canonical Vietnamese tag is:
-
-```text
-vi
-```
-
-Vietnamese output requires:
-
-* Full Unicode diacritic support
-* Correct combining-mark handling
-* Vietnamese-aware font coverage
-* Word and punctuation spacing
-* Reliable line wrapping
-* Preservation of proper names
-* Avoidance of corrupted decomposed characters
-
-Canonical translated text should normally be normalized to NFC.
-
-Rendering must use fonts with complete Vietnamese glyph coverage.
+Every published Translation MUST preserve the exact target Language value used.
 
 ---
 
 # Language Pair
 
-A Language Pair connects one source language to one target language.
+A `LanguagePair` is a directional Value Object.
 
 ```text
-Language Pair
-├── Source Language
-├── Target Language
-├── Translation Direction
-└── Compatibility Metadata
+LanguagePair
+├── sourceLanguage
+└── targetLanguage
 ```
 
 Examples:
 
 ```text
-zh-Hans → vi
-zh-Hant → vi
-ja → vi
-ko → vi
-en → vi
+zh-Hans -> vi
+zh-Hant -> vi
+ja -> vi
+ko -> vi
+en -> vi
 ```
 
-Language Pair is a Value Object.
+Direction is part of identity.
 
-It participates in:
-
-* Translation identity
-* Profile matching
-* Provider routing
-* Glossary selection
-* Cache identity
-* Validation
-* Metrics
-
-A reversed pair is a different value.
+Therefore:
 
 ```text
-zh-Hans → vi
+zh-Hans -> vi
 ```
 
 is not equal to:
 
 ```text
-vi → zh-Hans
+vi -> zh-Hans
 ```
 
 ---
 
-# Language Pair Compatibility
+# Language Pair Use
 
-A translation provider may support:
+LanguagePair MAY participate in:
 
-* Exact pairs
-* Source language families
-* Automatic source detection
-* Any-to-any translation
-* Script-specific pairs
-* Region-specific pairs
+* Translation identity,
+* Translation Profile matching,
+* provider capability matching,
+* Glossary selection,
+* cache identity,
+* validation,
+* metrics.
 
-Compatibility should be evaluated through provider capability mapping.
+Provider fallback MUST NOT weaken the exact LanguagePair stored in Translation domain records.
+
+---
+
+# Language Compatibility
+
+Compatibility and equality MUST remain separate.
+
+Recommended match strength:
+
+```text
+EXACT
+SCRIPT
+BASE_LANGUAGE
+RANGE
+FALLBACK
+NONE
+```
 
 Example:
 
 ```text
-Requested: zh-Hans → vi
-Provider supports: zh → vi
+requested: zh-Hans
+provider capability: zh
 ```
 
-This may be compatible.
+may be compatible through `BASE_LANGUAGE`.
 
-However, the domain must preserve the original exact requested pair.
-
-Provider fallback must not weaken stored language identity.
-
----
-
-# Provider Language Mapping
-
-Providers often use incompatible codes.
-
-Examples:
+But the requested Language remains:
 
 ```text
-zh
-zh-CN
 zh-Hans
-zh_chs
-ChineseSimplified
-auto
 ```
 
-CRAI should use adapters:
-
-```text
-Canonical Language
-        │
-        ▼
-Provider Language Mapper
-        │
-        ▼
-Provider-Specific Code
-```
-
-Reverse mapping is also required:
-
-```text
-Provider Response Code
-        │
-        ▼
-Provider Language Mapper
-        │
-        ▼
-Canonical Language
-```
-
-Provider codes must remain inside provider adapters.
-
 ---
 
-# Provider Mapping Record
+# Fallback
 
-Recommended mapping structure:
-
-```text
-Provider Language Mapping
-├── Provider ID
-├── Canonical Language Range
-├── Provider Code
-├── Capability Type
-├── Direction
-├── Mapping Revision
-└── Limitations
-```
-
-Limitations may include:
-
-* Detection only
-* Translation only
-* OCR only
-* No vertical text
-* No regional distinction
-* Script automatically converted
-* Target language unsupported
-* Experimental support
-
----
-
-# OCR Language Profile
-
-OCR language selection may differ from Translation language selection.
-
-An OCR Language Profile may include:
-
-* Expected Languages
-* Expected Scripts
-* Primary Language
-* Fallback Languages
-* Vertical Text Support
-* Dictionary Support
-* Character Set
-* Detection Mode
-* Confidence Threshold
-
-Examples:
-
-```text
-Expected:
-- zh-Hans
-- en
-
-Primary:
-- zh-Hans
-```
-
-A Page may use one OCR request for several expected languages.
-
-Text Blocks should still preserve their detected effective language individually.
-
----
-
-# Translation Language Profile
-
-A Translation Language Profile may define:
-
-* Source Language Range
-* Target Language
-* Source Script Policy
-* Target Script Policy
-* Automatic Detection Policy
-* Mixed-Language Policy
-* Transliteration Policy
-* Untranslated-Term Policy
-* Validation Thresholds
-
-This profile should reference the general Translation Profile rather than duplicate unrelated style settings.
-
----
-
-# Glossary Language Scope
-
-Every Glossary Entry should declare language scope.
-
-Possible fields:
-
-* Source Language Range
-* Target Language Range
-* Source Term
-* Target Term
-* Script
-* Region
-* Case Sensitivity
-* Match Policy
-
-Example:
-
-```text
-Source: zh-Hans
-Target: vi
-Term: 灵力
-Translation: linh lực
-```
-
-A glossary entry for `zh-Hans → vi` must not automatically apply to unrelated language pairs.
-
----
-
-# Character Name Language
-
-Character names may have several language-specific forms.
-
-```text
-Character Name
-├── Original Form
-├── Language
-├── Script
-├── Romanization
-├── Target Translation
-├── Aliases
-└── Approval Status
-```
-
-Example:
-
-```text
-Original: 李青
-Language: zh-Hans
-Vietnamese: Lý Thanh
-Romanization: Lǐ Qīng
-```
-
-Original name, romanization and translated name must remain distinguishable.
-
----
-
-# Transliteration
-
-Transliteration converts text between writing systems without translating meaning.
-
-Examples:
-
-* Chinese characters to Pinyin
-* Japanese kana to Romaji
-* Korean Hangul to Latin script
-* Cyrillic to Latin script
-
-Transliteration should declare:
-
-* Source Language
-* Source Script
-* Target Script
-* Transliteration Standard
-* Result
-* Revision
-
-Transliteration is not a Translation unless the product explicitly presents it as one output type.
-
----
-
-# Romanization
-
-Romanization is a specialized form of transliteration into Latin script.
-
-Examples:
-
-* Pinyin
-* Hepburn
-* Revised Romanization
-* Wade–Giles
-
-Romanization standards must be explicit.
-
-A generated romanized form should not replace the original name or canonical Translation automatically.
-
----
-
-# Locale
-
-Locale and Language must remain separate.
-
-A Locale may include:
-
-```text
-Language
-+
-Region
-+
-Formatting Preferences
-```
-
-Locale affects:
-
-* Number formatting
-* Date formatting
-* Time formatting
-* Sorting
-* Currency display
-* User interface formatting
-
-Translation target language does not automatically determine user interface locale.
-
-Example:
-
-```text
-Translation target: vi
-UI locale: en-US
-```
-
-is valid.
-
----
-
-# Application Localization
-
-Application localization controls the language of the CRAI interface.
-
-It is separate from content language.
-
-Examples:
-
-```text
-UI Language: vi
-Source Content: zh-Hans
-Target Content: vi
-```
-
-or:
-
-```text
-UI Language: en
-Source Content: ja
-Target Content: vi
-```
-
-The Localization module owns UI messages and resource bundles.
-
-The Language domain provides canonical identifiers only.
-
----
-
-# Font Compatibility
-
-Language and script influence font requirements.
-
-A font compatibility query may use:
-
-* Language
-* Script
-* Required Unicode ranges
-* Text orientation
-* Weight
-* Style
-* Rendering mode
-
-The Language domain does not select font files directly.
-
-It provides metadata used by the Font or Rendering subsystem.
-
-Font selection must consider actual glyph coverage rather than language name alone.
-
----
-
-# Line Breaking
-
-Line-breaking rules may vary by language and script.
-
-Examples:
-
-* Vietnamese normally breaks at word boundaries.
-* Chinese can often break between characters.
-* Japanese requires line-start and line-end restrictions.
-* Punctuation may not be allowed at certain line positions.
-* Vertical text requires different layout rules.
-
-Language provides the line-breaking profile identifier.
-
-Presentation and Rendering execute the actual layout.
-
----
-
-# Word Segmentation
-
-Not all languages use whitespace to separate words.
-
-Examples:
-
-* Vietnamese uses whitespace but may contain multi-syllable lexical units.
-* Chinese normally has no word spaces.
-* Japanese combines several scripts without word spaces.
-* Thai commonly omits spaces between words.
-
-Text processing must not assume that splitting on whitespace produces linguistic words.
-
-Word segmentation belongs to a Language Processing capability.
-
-The domain records which segmentation profile or version was used when relevant.
-
----
-
-# Sentence Segmentation
-
-Sentence boundaries depend on language-specific punctuation and context.
-
-Sentence segmentation may be used for:
-
-* Translation grouping
-* Context construction
-* Novel paragraph processing
-* Quality evaluation
-* Reading assistance
-
-Segmentation results should preserve source offsets and segmentation revision.
-
-A sentence is a derived structure.
-
-It must not replace the original Text Block content.
-
----
-
-# Language Capability
-
-CRAI may maintain a registry of supported capabilities.
-
-```text
-Language Capability
-├── Language Range
-├── OCR Support
-├── Translation Support
-├── Detection Support
-├── Vertical Text Support
-├── Transliteration Support
-├── Font Support
-└── Quality Status
-```
-
-Capability status may include:
-
-* Supported
-* Experimental
-* Partial
-* Unsupported
-* Provider dependent
-* Local only
-* Cloud only
-
-Support must be evaluated per operation.
-
-A language may be supported for translation but not OCR.
-
----
-
-# Capability Matrix
-
-Example conceptual matrix:
-
-| Language  |       OCR | Translation to Vietnamese |         Vertical Text |         Local Mode |
-| --------- | --------: | ------------------------: | --------------------: | -----------------: |
-| `zh-Hans` | Supported |                 Supported |               Partial | Provider dependent |
-| `zh-Hant` |   Partial |                 Supported |               Partial | Provider dependent |
-| `ja`      |   Partial |                 Supported |             Supported | Provider dependent |
-| `ko`      | Supported |                 Supported |               Limited | Provider dependent |
-| `en`      | Supported |                 Supported | Not normally required |          Supported |
-| `vi`      | Supported |         Source and target | Not normally required |          Supported |
-
-This matrix is runtime configuration, not a fixed domain truth.
-
-It may change as providers and local models change.
-
----
-
-# Language Registry
-
-A Language Registry may provide:
-
-* Tag validation
-* Canonicalization
-* Display names
-* Native names
-* Script metadata
-* Default direction
-* Parent-language fallback
-* Capability references
-* Deprecation metadata
-
-The registry should rely on standardized language metadata.
-
-Application business records should store canonical tags rather than database-specific numeric identifiers alone.
-
----
-
-# Fallback Hierarchy
-
-Language fallback may remove specificity progressively.
+Language matching MAY progressively reduce specificity.
 
 Example:
 
 ```text
 zh-Hant-TW
-    ↓
+    |
+    v
 zh-Hant
-    ↓
+    |
+    v
 zh
-    ↓
+    |
+    v
 und
 ```
 
-Another example:
+Fallback MAY support:
+
+* provider matching,
+* Glossary lookup,
+* profile matching,
+* font matching.
+
+Fallback MUST NOT mutate persisted exact language identity.
+
+The match result SHOULD indicate the fallback level used.
+
+---
+
+# Provider Language Mapping
+
+Provider language identifiers remain adapter-level configuration.
+
+Conceptually:
 
 ```text
-en-GB
-   ↓
-en
-   ↓
-und
+Canonical Language
+       |
+       v
+Provider Language Mapper
+       |
+       v
+Provider Code
 ```
 
-Fallback may be used for:
+and:
 
-* Provider matching
-* Glossary lookup
-* Translation profile lookup
-* Font selection
-* UI display names
+```text
+Provider Response Code
+       |
+       v
+Provider Language Mapper
+       |
+       v
+Canonical Language
+```
 
-Fallback must not mutate the stored exact language.
+Examples of provider-only codes might include:
 
-The result should record which fallback level was used.
+```text
+zh_chs
+ChineseSimplified
+auto
+```
 
----
-
-# Compatibility Matching
-
-Recommended match strengths:
-
-| Match      | Description                              |
-| ---------- | ---------------------------------------- |
-| `exact`    | Full canonical tags match                |
-| `script`   | Base language and script match           |
-| `language` | Base language matches                    |
-| `range`    | A configured range includes the language |
-| `fallback` | Match obtained through parent fallback   |
-| `none`     | No compatible match                      |
-
-Exact matching should be preferred.
-
-Weak fallback should produce diagnostics when it may affect quality.
+Such values MUST NOT escape provider boundaries as canonical domain language values.
 
 ---
 
-# Language Change
+# Provider Mapping Record
 
-Changing a configured language may affect downstream artifacts.
+Provider configuration MAY define:
 
-Possible impacts:
+```text
+ProviderLanguageMapping
+├── providerId
+├── operation
+├── canonicalLanguageRange
+├── providerCode
+├── direction
+├── mappingRevision
+└── limitations
+```
 
-| Change                             | Impact                                          |
-| ---------------------------------- | ----------------------------------------------- |
-| Display name changed               | No content invalidation                         |
-| Region metadata added              | Review may be recommended                       |
-| Script changed                     | OCR and Translation may become stale            |
-| Source language corrected          | Translation may become stale                    |
-| Target language changed            | New Translation required                        |
-| Writing-direction override changed | Presentation becomes stale                      |
-| Detection confidence updated       | Usually no invalidation                         |
-| Language confirmed by user         | Dependent processing may require reconciliation |
+Limitations MAY include:
 
-Impact must be determined through explicit dependency rules.
+* detection only,
+* OCR only,
+* Translation only,
+* no vertical-text support,
+* no Script distinction,
+* automatic Script conversion.
+
+This configuration is NOT core immutable Language-domain truth.
+
+---
+
+# OCR Language Profile
+
+OCR MAY use a language profile distinct from Translation configuration.
+
+Example:
+
+```text
+OCRLanguageProfile
+├── expectedLanguages[]
+├── expectedScripts[]
+├── primaryLanguage?
+├── fallbackLanguages[]
+├── detectionMode
+└── confidenceThreshold?
+```
+
+A visual resource MAY be processed with multiple expected languages.
+
+Individual TextBlocks SHOULD retain their own language analysis afterward.
+
+---
+
+# Translation Language Profile
+
+Translation language configuration MAY include:
+
+```text
+sourceLanguageRange
+targetLanguage
+sourceScriptPolicy
+targetScriptPolicy
+mixedLanguagePolicy
+transliterationPolicy
+untranslatedTermPolicy
+validationPolicy
+```
+
+This SHOULD integrate with Translation Profile rather than duplicate unrelated style settings.
+
+---
+
+# Glossary Language Scope
+
+Glossary entries SHOULD declare language applicability.
+
+Example:
+
+```text
+sourceRange: zh-Hans
+targetRange: vi
+sourceTerm: 灵力
+targetTerm: linh lực
+```
+
+A Glossary entry MUST NOT automatically apply to unrelated LanguagePairs.
+
+Exact match SHOULD be preferred over weaker fallback matches.
+
+---
+
+# Character Language Forms
+
+Character names MAY have multiple language/script forms.
+
+Conceptual model:
+
+```text
+CharacterNameForm
+├── value
+├── language
+├── script?
+├── type
+└── approvalStatus?
+```
+
+Possible types include:
+
+```text
+ORIGINAL
+TRANSLATED
+TRANSLITERATED
+ALIAS
+```
+
+Original name, Translation, alias, and romanization MUST remain distinguishable.
+
+---
+
+# Transliteration
+
+Transliteration transforms writing representation without necessarily translating semantic meaning.
+
+Examples:
+
+* Chinese → Pinyin,
+* Japanese → Romaji,
+* Korean → Latin script,
+* Cyrillic → Latin script.
+
+A Transliteration result SHOULD preserve:
+
+```text
+sourceLanguage
+sourceScript
+targetScript
+standard
+result
+revision
+```
+
+Transliteration MUST remain distinguishable from semantic Translation.
+
+---
+
+# Romanization
+
+Romanization is Transliteration into Latin script.
+
+Examples:
+
+```text
+Pinyin
+Hepburn
+Revised Romanization
+Wade-Giles
+```
+
+The standard SHOULD be explicit.
+
+Romanized output MUST NOT overwrite original or translated names automatically.
+
+---
+
+# Chinese Handling
+
+CRAI SHOULD preserve explicit Chinese Script when known.
+
+Preferred values:
+
+```text
+zh-Hans
+zh-Hant
+```
+
+Region alone SHOULD NOT be treated as authoritative Script identity.
+
+For Translation configuration, prefer:
+
+```text
+zh-Hans -> vi
+zh-Hant -> vi
+```
+
+when Script is known.
+
+---
+
+# Simplified / Traditional Conversion
+
+Conversion between:
+
+```text
+zh-Hans <-> zh-Hant
+```
+
+is not inherently semantic Translation.
+
+It is primarily Script/orthographic transformation.
+
+Some transformations may still require context.
+
+CRAI SHOULD model Script conversion separately when that distinction matters.
+
+---
+
+# Japanese Handling
+
+Japanese commonly combines:
+
+* Kanji,
+* Hiragana,
+* Katakana,
+* Latin characters,
+* numbers.
+
+Canonical Language can normally remain:
+
+```text
+ja
+```
+
+Mixed scripts do NOT imply mixed languages.
+
+---
+
+# Korean Handling
+
+Korean may combine:
+
+* Hangul,
+* Hanja,
+* Latin text,
+* numbers.
+
+Canonical language is normally:
+
+```text
+ko
+```
+
+Script information MAY still assist OCR and Presentation.
+
+---
+
+# Vietnamese Handling
+
+Canonical Vietnamese language:
+
+```text
+vi
+```
+
+CRAI SHOULD preserve:
+
+* Unicode diacritics,
+* valid combining sequences,
+* Vietnamese glyph coverage,
+* correct punctuation spacing,
+* proper-name distinctions.
+
+Canonical Vietnamese translated text SHOULD normally use NFC normalization.
+
+---
+
+# Writing Direction
+
+Writing direction and Language MUST remain distinct.
+
+Possible values include:
+
+```text
+LTR
+RTL
+TTB
+BTT
+```
+
+A Language MAY provide a default writing-direction hint.
+
+That default is only fallback metadata.
+
+TextBlock-specific direction MAY override it.
+
+---
+
+# Text Orientation
+
+Text Orientation describes visual glyph arrangement.
+
+Possible values:
+
+```text
+HORIZONTAL
+VERTICAL
+UPRIGHT
+SIDEWAYS
+ROTATED
+MIXED
+UNKNOWN
+```
+
+Language MUST NOT force every TextBlock into one orientation.
+
+---
+
+# Reading Direction
+
+Reading Direction describes navigation/consumption order.
+
+It is separate from:
+
+* Language,
+* Writing Direction,
+* Text Orientation.
+
+Reading Direction belongs primarily to content hierarchy and Presentation behavior.
+
+Language MAY provide defaults only when useful.
+
+---
+
+# Punctuation
+
+Language/Script metadata MAY reference punctuation profiles.
+
+Possible profile concerns:
+
+* quote pairs,
+* brackets,
+* sentence terminators,
+* ellipsis,
+* spacing,
+* full-width punctuation,
+* vertical punctuation.
+
+Language identity alone MUST NOT automatically mutate punctuation.
+
+Punctuation changes occur through explicit normalization or Translation policy.
+
+---
+
+# Unicode Normalization
+
+Text-processing stages SHOULD use an explicit Unicode normalization policy.
+
+Possible values:
+
+```text
+NFC
+NFD
+NFKC
+NFKD
+PRESERVE
+```
+
+Recommended canonical text default:
+
+```text
+NFC
+```
+
+Compatibility normalization such as NFKC MUST be applied deliberately because it can alter distinctions.
+
+---
+
+# Word Segmentation
+
+Word segmentation is language-sensitive.
+
+CRAI MUST NOT assume whitespace splitting works universally.
+
+Examples:
+
+* Chinese normally does not use spaces between words.
+* Japanese combines several scripts.
+* Thai commonly omits word spaces.
+* Vietnamese whitespace does not always correspond to lexical units.
+
+Segmentation execution belongs to a language-processing capability.
+
+The domain MAY preserve segmentation profile/revision metadata.
+
+---
+
+# Sentence Segmentation
+
+Sentence boundaries are derived linguistic structures.
+
+Segmentation MAY support:
+
+* Translation grouping,
+* context building,
+* novel processing,
+* quality evaluation.
+
+Derived sentences MUST preserve source mapping.
+
+They MUST NOT replace original TextBlock content.
+
+---
+
+# Language Capability
+
+CRAI MAY maintain runtime capability metadata such as:
+
+```text
+LanguageCapability
+├── languageRange
+├── operation
+├── supportLevel
+├── limitations
+└── source
+```
+
+Possible support levels:
+
+```text
+SUPPORTED
+EXPERIMENTAL
+PARTIAL
+UNSUPPORTED
+PROVIDER_DEPENDENT
+LOCAL_ONLY
+CLOUD_ONLY
+```
+
+Capability MUST be evaluated per operation.
+
+A Language may be supported for Translation but not OCR.
+
+---
+
+# Capability Is Runtime Knowledge
+
+Language capability MUST NOT be treated as immutable domain truth.
+
+Support can change when:
+
+* providers change,
+* models change,
+* local runtimes improve,
+* configuration changes.
+
+Therefore static examples in documentation are illustrative only.
+
+Runtime/provider architecture remains authoritative for actual support.
+
+---
+
+# Language Registry
+
+A Language Registry MAY provide:
+
+* canonicalization,
+* validation,
+* display metadata,
+* native names,
+* Script metadata,
+* default-direction hints,
+* parent fallback,
+* deprecation metadata.
+
+Business records SHOULD persist canonical tags.
+
+They SHOULD NOT depend solely on database-specific numeric language IDs.
+
+---
+
+# Language Change Impact
+
+Language changes MAY invalidate downstream artifacts.
+
+Possible impact examples:
+
+```text
+display name change
+    -> NONE
+
+detection confidence change
+    -> usually NONE
+
+source language correction
+    -> Translation may become STALE
+
+Script correction
+    -> OCR / Translation may become STALE
+
+target language change
+    -> new Translation identity
+
+writing-direction override
+    -> Presentation may become STALE
+```
+
+Dependency impact MUST be explicit.
+
+A Language change MUST NOT indiscriminately invalidate all project data.
 
 ---
 
 # Revision Model
 
-Language standards and application mappings evolve.
+Language-related registries and mappings MAY be versioned.
 
-Versioned components may include:
+Examples:
 
-* Language Registry Revision
-* Provider Mapping Revision
-* Detection Result Revision
-* Language Resolution Revision
-* Punctuation Profile Revision
-* Normalization Profile Revision
-* Segmentation Profile Revision
+```text
+LanguageRegistryRevision
+ProviderMappingRevision
+DetectionResultRevision
+LanguageResolutionRevision
+PunctuationProfileRevision
+NormalizationProfileRevision
+SegmentationProfileRevision
+```
 
-Canonical language tags themselves should remain stable.
+Canonical Language tags themselves SHOULD remain stable.
 
-Changes to provider mappings must not rewrite historical Translation records.
+Historical Translation records MUST preserve the exact Language values used at creation.
 
 ---
 
 # Validation
 
-Language validation should verify:
+Language validation SHOULD check:
 
-* Tag syntax is valid
-* Language code is recognized or explicitly private
-* Script code is valid
-* Region code is valid
-* Variant structure is valid
-* Canonical casing is used
-* Forbidden provider codes are not persisted
-* Source and target language are compatible with the operation
-* Required script is supported
-* `und` usage follows policy
-* Mixed-language state contains sufficient metadata
-* Language spans remain inside text boundaries
-* Span ranges do not overlap illegally
+* language-tag syntax,
+* recognized base language or permitted private use,
+* valid Script,
+* valid Region,
+* valid Variant structure,
+* canonical casing,
+* absence of provider-only codes,
+* operation compatibility where required,
+* valid LanguageRanges,
+* valid LanguagePairs,
+* valid span boundaries.
 
-Invalid language values must not enter persisted domain records.
+Invalid canonical values MUST NOT enter durable domain state.
 
 ---
 
 # Private-Use Tags
 
-Private-use language tags may be required for internal experiments.
+Private-use tags MAY be supported for controlled experiments.
 
-They must:
+They SHOULD:
 
-* Follow valid private-use syntax
-* Be documented
-* Remain isolated from external provider mapping
-* Not replace standard tags when a standard tag exists
-* Include migration rules if promoted to a standard representation
+* follow valid syntax,
+* be documented,
+* remain isolated from ordinary provider mapping,
+* not replace standard tags,
+* include migration rules.
 
-Private-use identifiers should be exceptional.
-
----
-
-# Error Conditions
-
-Typical errors include:
-
-* Invalid language tag
-* Unknown language code
-* Invalid script code
-* Invalid region code
-* Unsupported source language
-* Unsupported target language
-* Unsupported language pair
-* Provider mapping missing
-* Ambiguous provider mapping
-* Language detection failed
-* Detection confidence below threshold
-* Mixed language not allowed
-* Script mismatch
-* Writing direction conflict
-* Language span out of range
-* Language range invalid
-* Target language undetermined
-* Confirmed language overwrite attempted
-* Unsupported transliteration standard
-
-Errors should use canonical domain error categories.
-
-Provider-specific error messages should be normalized before propagation.
-
----
-
-# Events
-
-Typical domain events include:
-
-* `LanguageDetected`
-* `LanguageDetectionFailed`
-* `LanguageConfirmed`
-* `LanguageCorrected`
-* `LanguageResolutionChanged`
-* `SourceLanguageChanged`
-* `TargetLanguageChanged`
-* `LanguagePairChanged`
-* `ScriptDetected`
-* `ScriptChanged`
-* `MixedLanguageDetected`
-* `LanguageCapabilityChanged`
-* `ProviderLanguageMappingChanged`
-* `LanguageProfileChanged`
-
-Events should include:
-
-* Scope identifier
-* Previous value
-* New value
-* Resolution source
-* Confidence
-* Actor
-* Revision
-* Correlation ID
-
-Raw source text should not be included unless explicitly required.
+Private-use values SHOULD remain exceptional.
 
 ---
 
 # Persistence
 
-Recommended persisted representations:
+Recommended Language Value representation:
 
 ```text
-Language Value
-├── Canonical Tag
-├── Base Language
-├── Script
-├── Region
-└── Variants
+Language
+├── canonicalTag
+├── baseLanguage
+├── script?
+├── region?
+└── variants[]
 ```
 
-Detected language metadata may be stored separately:
+Detection metadata SHOULD be stored separately:
 
 ```text
-Language Detection
-├── Scope Type
-├── Scope ID
-├── Candidates
-├── Confidence
-├── Detector
-├── Input Hash
-└── Revision
+LanguageDetection
+├── scopeType
+├── scopeId
+├── candidates
+├── confidence
+├── detector
+├── inputHash
+└── revision
 ```
 
-Provider mapping should be stored in configuration:
+Resolution SHOULD also remain explicit when persistence is required:
 
 ```text
-Provider Language Mapping
-├── Provider
-├── Operation
-├── Canonical Range
-├── Provider Code
-└── Revision
+LanguageResolution
+├── scope
+├── operation
+├── effectiveLanguage
+├── source
+├── warnings
+└── revision
 ```
 
-Derived display names should not be duplicated into every business record.
+Provider mapping belongs in runtime/provider configuration.
 
 ---
 
 # Cache Participation
 
-Language affects cache validity.
+Language-significant state MAY participate in cache identity.
 
-OCR cache keys may include:
-
-* Expected Language Range
-* Expected Scripts
-* OCR Language Profile Revision
-
-Translation cache keys must include:
-
-* Source Language
-* Target Language
-* Script Policy
-* Language Profile Revision
-
-Rendering cache keys may include:
-
-* Target Language
-* Script
-* Writing Direction
-* Text Orientation
-* Line-Breaking Profile
-* Font Profile
-
-Changing language-significant configuration must invalidate only dependent caches.
-
----
-
-# Security and Privacy
-
-Language metadata is normally low sensitivity.
-
-However, language use may reveal:
-
-* Reading interests
-* Geographic background
-* Cultural preferences
-* Content origin
-* User identity characteristics
-
-Requirements:
-
-* Do not infer user nationality from content language.
-* Do not infer ethnicity from selected language.
-* Do not use content language as authorization evidence.
-* Avoid logging private source text during detection.
-* Send only necessary text samples to remote detectors.
-* Respect local-only processing settings.
-* Keep Project-specific language preferences isolated.
-
-Language detection is a technical classification, not a personal identity claim.
-
----
-
-# Comic Processing Example
+OCR cache MAY consider:
 
 ```text
-Captured Comic Page
-        │
-        ▼
-Project Source Default: zh-Hans
-        │
-        ▼
-OCR Profile: zh-Hans + en
-        │
-        ▼
-Text Block A detected as zh-Hans
-Text Block B detected as zh-Hans
-Text Block C detected as en
-        │
-        ▼
-Effective source languages resolved
-        │
-        ▼
+expectedLanguageRange
+expectedScripts
+OCRLanguageProfileRevision
+```
+
+Translation cache SHOULD consider:
+
+```text
+sourceLanguage
+targetLanguage
+Script policy
+Translation-language configuration revision
+```
+
+Presentation/rendering cache MAY consider:
+
+```text
+targetLanguage
+Script
+writingDirection
+textOrientation
+lineBreakProfile
+fontProfile
+```
+
+Only affected caches SHOULD be invalidated when Language-significant configuration changes.
+
+---
+
+# Privacy
+
+Language metadata is usually lower sensitivity than source content, but MAY still reveal user interests or content origins.
+
+Rules SHOULD include:
+
+* do not infer nationality from content Language,
+* do not infer ethnicity from Language selection,
+* do not use Language as authorization evidence,
+* avoid logging raw content during detection,
+* send only necessary samples to remote detectors,
+* respect local-processing preferences,
+* isolate Project-scoped preferences.
+
+Language detection is technical classification, not personal identity inference.
+
+---
+
+# Events
+
+Language Value Objects themselves do not emit events.
+
+Events arise when scoped language-related domain state changes.
+
+Possible events include:
+
+```text
+SourceLanguageConfigured
+TargetLanguageConfigured
+LanguageDetected
+LanguageDetectionFailed
+LanguageConfirmed
+LanguageCorrected
+LanguageResolutionChanged
+MixedLanguageDetected
+ScriptDetected
+```
+
+Provider/runtime configuration MAY separately emit:
+
+```text
+ProviderLanguageMappingChanged
+LanguageCapabilityChanged
+```
+
+Events SHOULD preserve:
+
+* scope,
+* previous value,
+* new value,
+* resolution source,
+* confidence when relevant,
+* actor,
+* revision,
+* correlation identity.
+
+Raw source text SHOULD NOT be included by default.
+
+---
+
+# Errors
+
+Stable domain errors MAY include:
+
+```text
+LANGUAGE_TAG_INVALID
+LANGUAGE_CODE_UNKNOWN
+LANGUAGE_SCRIPT_INVALID
+LANGUAGE_REGION_INVALID
+LANGUAGE_RANGE_INVALID
+LANGUAGE_PAIR_INVALID
+LANGUAGE_SOURCE_UNSUPPORTED
+LANGUAGE_TARGET_UNSUPPORTED
+LANGUAGE_PAIR_UNSUPPORTED
+LANGUAGE_MAPPING_MISSING
+LANGUAGE_MAPPING_AMBIGUOUS
+LANGUAGE_DETECTION_FAILED
+LANGUAGE_MIXED_NOT_ALLOWED
+LANGUAGE_SCRIPT_MISMATCH
+LANGUAGE_SPAN_INVALID
+LANGUAGE_CONFIRMED_OVERRIDE_CONFLICT
+TRANSLITERATION_STANDARD_UNSUPPORTED
+```
+
+Provider-specific failures MUST be translated at provider/module boundaries.
+
+---
+
+# Architecture Invariants
+
+1. Language identity uses a canonical normalized language tag.
+
+2. Provider-specific language codes MUST NOT escape provider boundaries as canonical values.
+
+3. Language, Script, Region, Writing Direction, Text Orientation, Reading Direction, and Locale remain distinct concepts.
+
+4. Display names MUST NOT be canonical identifiers.
+
+5. Configured, detected, confirmed, and effective Language values remain distinguishable.
+
+6. User-confirmed Language has higher authority than automatic detection at the same scope.
+
+7. Language equality requires equal normalized canonical tags.
+
+8. Compatibility MUST NOT be confused with equality.
+
+9. Target Language MUST be explicit before Translation publication.
+
+10. LanguagePair is directional.
+
+11. Reverse LanguagePair is a different value.
+
+12. TextBlock Language MAY be more specific than parent content defaults.
+
+13. Page MUST NOT be required for Language representation or resolution.
+
+14. Book MUST NOT be required for Language representation or resolution.
+
+15. Mixed-language content preserves primary/secondary or span information when required.
+
+16. LanguageSpan offsets MUST use a stable documented indexing model.
+
+17. Script conversion is distinct from semantic Translation.
+
+18. Transliteration is distinct from semantic Translation.
+
+19. UI localization is distinct from content Language.
+
+20. Language MUST NOT directly determine Reading Direction.
+
+21. Language MUST NOT directly select concrete font assets.
+
+22. Text normalization policy MUST be explicit.
+
+23. Language changes invalidate only dependent artifacts.
+
+24. Historical Translation revisions preserve exact original Language identities.
+
+25. Fallback matching MUST NOT mutate stored exact Language.
+
+26. Language-sensitive cache identity includes relevant Language configuration.
+
+27. Detection confidence is evidence, not guaranteed correctness.
+
+28. Cross-Project Language preferences MUST NOT leak implicitly.
+
+29. Language detection MUST NOT be used as a personal-identity claim.
+
+30. Invalid canonical Language values MUST NOT enter durable state.
+
+31. Language resolution MUST be operation-specific when consumer semantics differ.
+
+32. Optional hierarchy levels MUST be skipped rather than synthesized.
+
+33. Runtime Language capability MUST NOT be treated as immutable core-domain truth.
+
+---
+
+# Comic Example
+
+```text
+Project:
+    declared source: zh-Hans
+    target: vi
+
+Page:
+    detection suggests zh-Hans
+
+TextBlocks:
+    Block A -> zh-Hans
+    Block B -> zh-Hans
+    Block C -> en
+```
+
+Translation resolution:
+
+```text
+Block A:
+    zh-Hans -> vi
+
+Block B:
+    zh-Hans -> vi
+
+Block C:
+    en -> vi
+```
+
+The Page MAY expose a primary language summary.
+
+Each TextBlock preserves its own effective source Language.
+
+---
+
+# Text-Native Novel Example
+
+```text
+Project default:
+    zh-Hans
+
+Chapter:
+    declared zh-Hans
+
+Paragraph TextBlock:
+    detected zh-Hans
+```
+
+Resolution:
+
+```text
+TextBlock effective source:
+    zh-Hans
+
 Translation:
-zh-Hans → vi
-en → vi
-        │
-        ▼
-Vietnamese side-panel presentation
+    zh-Hans -> vi
 ```
 
-Each Text Block preserves its own effective language.
-
-The Page may still retain `zh-Hans` as its primary language.
+No Page exists or is required.
 
 ---
 
-# Traditional Chinese Example
+# Conflict Example
 
 ```text
-Project Default: zh-Hans
-        │
-        ▼
-Page Detection: zh-Hant
-        │
-        ▼
-Confidence: High
-        │
-        ▼
-Conflict Warning
-        │
-        ▼
-User Confirms zh-Hant
-        │
-        ▼
-Translation Profile:
-zh-Hant → vi
+Project declared:
+    zh-Hans
+
+TextBlock detected:
+    zh-Hant
+    confidence: high
 ```
 
-The detected value must not silently rewrite the Project default.
+CRAI SHOULD preserve both values.
 
-The user confirmation creates a scoped override.
+Policy MAY:
+
+* use detected `zh-Hant`,
+* request user confirmation,
+* warn about the conflict.
+
+It MUST NOT silently rewrite the Project default.
 
 ---
 
@@ -1874,185 +1764,135 @@ Source:
 快使用 Ultimate Skill！
 ```
 
-Analysis:
+Possible LanguageAnalysis:
 
 ```text
-Primary Language: zh-Hans
-Secondary Language: en
+primaryLanguage: zh-Hans
 
-Spans:
-- 快使用          → zh-Hans
-- Ultimate Skill → en
-- ！             → inherited punctuation context
+secondaryLanguages:
+    - en
+
+spans:
+    zh-Hans -> 快使用
+    en      -> Ultimate Skill
 ```
 
-Translation policy may choose to:
+Translation policy MAY:
 
-* Translate the English term
-* Preserve the English term
-* Apply a glossary entry
-* Transliterate it
-* Show bilingual output
+* translate the English term,
+* preserve it,
+* use Glossary terminology,
+* transliterate it,
+* display bilingual output.
 
-The selected behavior belongs to the Translation Profile.
-
----
-
-# Novel Processing Example
-
-```text
-Browser Paragraph
-        │
-        ▼
-Declared Chapter Language: zh-Hans
-        │
-        ▼
-Paragraph Script Analysis
-        │
-        ▼
-Language Resolution
-        │
-        ▼
-Sentence Segmentation
-        │
-        ▼
-Context-Aware Translation to vi
-        │
-        ▼
-Vietnamese-aware line breaking
-```
-
-Language identity remains stable through extraction, translation and presentation.
-
----
-
-# Architecture Invariants
-
-1. Language is represented by a canonical normalized tag.
-2. Provider-specific language codes never escape provider adapters.
-3. Language, Script, Region and Writing Direction remain separate concepts.
-4. Display names are never used as canonical identifiers.
-5. Configured language and detected language remain distinguishable.
-6. User-confirmed language has higher authority than automatic detection at the same scope.
-7. Language equality requires equal normalized canonical tags.
-8. Compatible language tags are not necessarily equal.
-9. Target language must be explicit before Translation publication.
-10. A Language Pair is directional.
-11. Reversing a Language Pair creates a different value.
-12. Text Blocks may override Page-level language.
-13. Mixed-language content preserves primary and secondary language information.
-14. Language spans preserve valid source offsets.
-15. Script conversion is not automatically treated as semantic translation.
-16. Transliteration is distinct from translation.
-17. UI localization is distinct from source and target content language.
-18. Language does not directly determine reading direction.
-19. Language does not directly select a concrete font file.
-20. Canonical text normalization policy is explicit.
-21. Language changes invalidate only dependent artifacts.
-22. Historical Translation records preserve their original language tags.
-23. Fallback matching never mutates the stored exact language.
-24. Cache keys include language-significant configuration.
-25. Language detection confidence is evidence, not guaranteed correctness.
-26. Cross-Project language preferences must not leak.
-27. Language detection must not be used to infer personal identity.
-28. Unsupported or invalid language values cannot enter durable domain state.
-
----
-
-# Open Decisions
-
-The following decisions should remain open until implementation and prototype testing:
-
-* Whether CRAI stores parsed language components or only canonical tags
-* Which language-registry library should be used
-* Whether Page-level language detection runs automatically
-* Whether Text Block detection is always enabled
-* Which confidence threshold triggers user confirmation
-* How mixed-language OCR requests are configured
-* Whether Chinese script detection occurs before or after OCR
-* Whether Chinese script conversion is supported in the MVP
-* Whether `zh-CN` is normalized or preserved separately from `zh-Hans`
-* How provider codes with weak script distinctions are mapped
-* Which romanization standards are supported
-* Whether transliteration is stored as Translation or auxiliary output
-* How language spans are represented efficiently
-* Which Unicode normalization form is used for every processing stage
-* How Vietnamese word wrapping is validated
-* Whether locale-specific Vietnamese variants are needed
-* How script-aware font fallback is configured
-* Whether language capability information is static or dynamically discovered
-* Whether language changes trigger automatic retranslation
-* How unsupported source languages are presented to the user
-* Whether source language auto-detection may be delegated to Translation providers
-* How language detection works for very short comic sound effects
-* Whether punctuation inherits language from neighboring spans
-* How private-use language tags are migrated
+That behavior belongs to Translation policy, not Language identity.
 
 ---
 
 # Recommended MVP Scope
 
-The first CRAI MVP should support:
+Initial CRAI Language support SHOULD include:
 
-* Canonical BCP 47-compatible language tags
-* `zh-Hans`
-* `zh-Hant`
-* `en`
-* `vi`
-* Optional `ja`
-* Optional `ko`
-* Explicit target language selection
-* Project source-language default
-* Text Block language override
-* Basic language detection metadata
-* Basic script detection
-* Mixed Chinese and English content
-* Provider language-code mapping
-* Source-to-target Language Pair
-* Language-aware translation cache
-* Vietnamese Unicode normalization
-* Basic font compatibility metadata
-* Horizontal and vertical text orientation metadata
+* canonical BCP 47-compatible tags,
+* `zh-Hans`,
+* `zh-Hant`,
+* `en`,
+* `vi`,
+* optional `ja`,
+* optional `ko`,
+* explicit target-language selection,
+* Project source default,
+* Chapter/TextBlock overrides,
+* optional Page language metadata,
+* configured vs detected distinction,
+* user confirmation,
+* basic detection metadata,
+* basic Script metadata,
+* Chinese + English mixed-content handling,
+* provider-language mapping,
+* directional LanguagePair,
+* Language-aware Translation cache,
+* NFC Vietnamese output,
+* horizontal/vertical orientation metadata.
 
-The MVP may defer:
+MVP MAY defer:
 
-* Detailed language spans
-* Automatic regional variant detection
-* Advanced transliteration
-* Chinese script conversion
-* Dynamic provider capability discovery
-* Complex locale formatting
-* Private-use language tags
-* User-defined language registries
-* Full linguistic segmentation
-* Fine-grained dialect handling
-* Cross-language translation memory exchange
+* detailed LanguageSpans,
+* automatic regional-variant detection,
+* advanced Transliteration,
+* Simplified/Traditional conversion,
+* dynamic provider-capability discovery,
+* complex Locale formatting,
+* private-use tags,
+* user-defined registries,
+* advanced linguistic segmentation,
+* dialect modeling.
+
+---
+
+# Open Decisions
+
+The following SHOULD remain open until implementation/prototype validation:
+
+* whether only canonical tags or parsed components are persisted,
+* Language Registry implementation,
+* when automatic detection runs,
+* confidence threshold for confirmation,
+* mixed-language detection granularity,
+* Chinese Script detection strategy,
+* Simplified/Traditional conversion support,
+* handling of `zh-CN` versus explicit `zh-Hans`,
+* weak provider Script mappings,
+* supported romanization standards,
+* Transliteration persistence model,
+* LanguageSpan indexing representation,
+* normalization policy per processing stage,
+* Vietnamese line-breaking validation,
+* font fallback strategy,
+* runtime capability-discovery model,
+* automatic retranslation after Language correction,
+* short-text detection behavior,
+* punctuation span inheritance.
 
 ---
 
 # Related Documents
 
-* README.md
-* PROJECT.md
-* BOOK.md
-* CHAPTER.md
-* PAGE.md
-* TEXT_BLOCK.md
-* TRANSLATION.md
-* GLOSSARY.md
-* CHARACTER.md
-* PROFILE.md
-* SESSION.md
+Domain:
+
+* `README.md`
+* `PROJECT.md`
+* `BOOK.md`
+* `CHAPTER.md`
+* `PAGE.md`
+* `TEXT_BLOCK.md`
+* `TRANSLATION.md`
+* `GLOSSARY.md`
+* `CHARACTER.md`
+* `PROFILE.md`
+* `SESSION.md`
+
+Architecture:
+
 * `docs/architecture/CAPABILITY_MAP.md`
+* `docs/architecture/OWNERSHIP_MAP.md`
 * `docs/architecture/DATA_FLOW.md`
 * `docs/architecture/STATE_MACHINE.md`
 * `docs/architecture/EVENT_BUS.md`
+
+AI / Translation:
+
 * `docs/architecture/ai/PIPELINE.md`
 * `docs/architecture/ai/CONTEXT.md`
 * `docs/architecture/ai/PROMPTS.md`
 * `docs/architecture/ai/MODELS.md`
 * `docs/architecture/ai/ROUTING.md`
 * `docs/architecture/ai/RESPONSE.md`
+
+Presentation:
+
 * `docs/architecture/presentation/FONTS.md`
 * `docs/architecture/presentation/LAYOUT.md`
 * `docs/architecture/presentation/TYPOGRAPHY.md`
+
+Module contracts remain authoritative for runtime/provider capability and execution behavior.

@@ -1,7 +1,7 @@
 # Text Recognition
 
 > **Status:** Draft
-> **Version:** 1.1
+> **Version:** 1.2.0
 > **Layer:** OCR Architecture
 > **Depends On:** Detection
 > **Next Layer:** Text Direction, Layout Analysis, OCR Postprocessing
@@ -57,8 +57,8 @@ Recognition không chịu trách nhiệm:
 * semantic rewriting
 * rendering
 * Runtime scheduling
-* Runtime retry
-* Runtime cancellation
+* Runtime same-work retry
+* Runtime cancellation authority
 * Event Bus semantics
 * global cache lifecycle
 
@@ -354,21 +354,27 @@ Context resolution phải provider-neutral.
 
 # 14. Stage 4 — Provider Invocation
 
-Recognition gọi OCR Provider thông qua Provider Contract.
+Recognition sử dụng OCR execution capability thông qua Provider Contract và resolved ExecutionBinding.
 
 Conceptually:
 
 ```text
-Recognition
+Recognition semantic work
+    ↓
+Resolved ExecutionBinding
     ↓
 OCR Provider Contract
     ↓
 Provider Adapter
     ↓
-OCR Engine
+Provider Runtime / OCR Engine
 ```
 
-Recognition không gọi trực tiếp SDK/API của provider.
+Recognition không gọi trực tiếp SDK/API của provider và không tự chọn Provider.
+
+Provider eligibility, selection hoặc alternative execution thuộc AI Routing / Provider Management / Recovery owner tương ứng.
+
+Runtime thực thi resolved ExecutionBinding.
 
 ---
 
@@ -382,7 +388,7 @@ Provider request có thể chứa:
 * region type
 * recognition mode
 * timeout hint
-* privacy classification
+* resolved privacy/policy constraints
 
 Provider-specific request schema không được trở thành public OCR contract.
 
@@ -718,6 +724,8 @@ Public Recognition Result không thay đổi theo provider.
 
 Nếu CRAI dùng nhiều Provider, mỗi output vẫn phải normalize về cùng Recognition Contract.
 
+Việc chọn hoặc compose nhiều Provider không thuộc Recognition ownership.
+
 Ví dụ:
 
 ```text
@@ -808,31 +816,60 @@ Quality không thay đổi Recognition Result.
 
 Recognition không sở hữu:
 
+* ExecutionScope hoặc ExecutionRevision
+* WorkItem hoặc Attempt lifecycle
 * Queued / Running lifecycle
-* execution attempts
 * Scheduler behavior
-* Runtime retry
+* Runtime Retry Policy hoặc retry budget
 * cancellation authority
-* stale-result authority
+* execution authority
+* stale-result rejection
+* Runtime Artifact publication
 
-Runtime điều phối execution.
+Runtime sở hữu execution mechanics và execution authority trên.
 
-Recognition chỉ tạo semantic output/failure information.
+Recognition chỉ tạo:
+
+* semantic Recognition Result candidate
+* Recognition-specific semantic failure information
+* semantic compatibility information
+* execution/resource hints khi contract cho phép
+
+Khi Recognition execution hoàn thành, Runtime Control quyết định completion còn execution authority hay phải bị reject vì stale hoặc cancelled trước Runtime publication.
+
+Recognition không quyết định downstream Business continuation.
 
 ---
 
-# 42. Retry Integration
+# 42. Retry and Recovery Integration
 
 Recognition có thể cung cấp:
 
 * recognition failure category
 * low-confidence result
-* provider availability hint
-* fallback recommendation
+* provider capability hoặc availability evidence
+* Retry hint
+* Recovery hoặc fallback recommendation
 
-Nhưng không tự schedule retry.
+Recognition không tự schedule Retry và không tự chọn alternative Provider.
 
-Retry ownership thuộc Runtime.
+Ownership:
+
+```text
+Same-work Retry
+    → Runtime Retry Policy
+
+Alternative execution / Fallback
+    → AI Routing / Recovery
+
+New Attempt execution
+    → Pipeline Runtime / Runtime
+
+Scheduling
+    → Runtime Scheduler
+```
+
+Recommendation hoặc evidence từ Recognition không chuyển decision authority sang Recognition.
 
 ---
 
@@ -848,7 +885,7 @@ Ví dụ result không còn compatible khi:
 * provider/model capability version changes
 * relevant language/script hint changes
 
-Global cache lifecycle thuộc Runtime.
+Global cache lifecycle thuộc Runtime Cache Policy.
 
 ---
 
@@ -879,9 +916,11 @@ Recognition-specific semantic errors có thể gồm:
 * RecognitionResultInvalid
 * EmptyRecognitionResult
 
-Provider-native errors phải được map trước khi crossing Recognition boundary.
+Provider-native errors phải được map sang Recognition/provider-neutral failure trước khi crossing Recognition boundary.
 
-Runtime Error Model sở hữu execution normalization.
+Recognition sở hữu semantic meaning của Recognition-specific errors.
+
+Runtime Error Model sở hữu execution-level normalization và cross-runtime failure representation.
 
 ---
 
@@ -897,7 +936,7 @@ Recognition có thể cung cấp measurements như:
 * provider identity
 * model version
 
-Telemetry transport thuộc Runtime/Infrastructure.
+Runtime Observability sở hữu execution correlation; telemetry transport và lifecycle thuộc Infrastructure.
 
 ---
 
@@ -908,9 +947,10 @@ Recognition có thể xử lý private text content.
 Do đó:
 
 * không log full recognized text mặc định
-* provider request phải tuân thủ privacy policy
+* provider request phải tuân thủ resolved privacy/policy constraints
 * provider metadata không được chứa secret
-* local-only content không được gửi remote provider
+* local-only content không được gửi remote Provider
+* eligible Provider hoặc ExecutionBinding phải được lọc theo resolved privacy constraints trước execution
 
 ---
 
@@ -966,13 +1006,27 @@ Recognition phải luôn đảm bảo:
 
 16. Recognition không sở hữu Runtime scheduling.
 
-17. Recognition không sở hữu Runtime retry.
+17. Recognition không sở hữu Runtime Retry Policy hoặc Retry budget.
 
 18. Recognition không sở hữu cancellation authority.
 
-19. Recognition không sở hữu global cache lifecycle.
+19. Recognition không sở hữu Runtime execution authority hoặc stale-result decision.
 
-20. Downstream không cần truy cập lại OCR Provider để hiểu Recognition Result.
+20. Recognition không sở hữu Runtime Artifact publication.
+
+21. Recognition không sở hữu downstream Business continuation.
+
+22. Recognition không sở hữu global cache lifecycle.
+
+23. Recognition semantic compatibility không bị Runtime Cache Policy redefine.
+
+24. Recognition không tự chọn Provider hoặc Fallback.
+
+25. Provider selection hoặc alternative execution thuộc Routing/Recovery owner tương ứng.
+
+26. Downstream không cần truy cập lại OCR Provider để hiểu Recognition Result.
+
+27. Resolved privacy/policy constraints phải được giữ khi remote execution được xem xét.
 
 ---
 
@@ -1025,28 +1079,35 @@ Không bắt buộc ngay:
 
 # 51. Ownership References
 
-| Concern                | Owner               |
-| ---------------------- | ------------------- |
-| Region                 | `DETECTION.md`      |
-| Region Geometry        | `DETECTION.md`      |
-| Recognition Result     | `RECOGNITION.md`    |
-| Character              | `RECOGNITION.md`    |
-| Word                   | `RECOGNITION.md`    |
-| Line                   | `RECOGNITION.md`    |
-| Paragraph              | `RECOGNITION.md`    |
-| Recognition Confidence | `RECOGNITION.md`    |
-| Writing Direction      | `TEXT_DIRECTION.md` |
-| Layout Tree            | `LAYOUT.md`         |
-| OCR Document           | `POSTPROCESS.md`    |
-| Quality                | `QUALITY.md`        |
-| Reading Order          | `READING_ORDER.md`  |
-| Provider Contract      | `PROVIDERS.md`      |
-| Retry                  | Runtime             |
-| Cancellation           | Runtime             |
-| Scheduling             | Runtime             |
-| Cache Lifecycle        | Runtime             |
-| Event Transport        | Event Bus           |
-| Telemetry Transport    | Infrastructure      |
+| Concern | Owner |
+| --- | --- |
+| Region | `DETECTION.md` |
+| Region Geometry | `DETECTION.md` |
+| Recognition Result | `RECOGNITION.md` |
+| Character | `RECOGNITION.md` |
+| Word | `RECOGNITION.md` |
+| Line | `RECOGNITION.md` |
+| Paragraph | `RECOGNITION.md` |
+| Recognition Confidence | `RECOGNITION.md` |
+| Recognition semantic compatibility | `RECOGNITION.md` |
+| Writing Direction | `TEXT_DIRECTION.md` |
+| Layout Tree | `LAYOUT.md` |
+| OCR Document | `POSTPROCESS.md` |
+| Quality | `QUALITY.md` |
+| Reading Order | `READING_ORDER.md` |
+| Provider Contract / Adapter | `PROVIDERS.md` |
+| Provider selection / eligibility | AI Routing / Provider Management |
+| Alternative execution / Fallback | AI Routing / Recovery |
+| Same-work Retry | Runtime Retry Policy |
+| Cancellation Authority | Runtime Control / Cancellation |
+| Scheduling | Runtime Scheduler |
+| Execution Authority / stale-result rejection | Runtime Control |
+| Runtime Artifact publication | Runtime Artifact boundary |
+| Business continuation | Business Pipeline Orchestration |
+| Cache Lifecycle | Runtime Cache Policy |
+| Event Transport | Event Bus |
+| Execution Error Normalization | Runtime Error Model |
+| Telemetry Transport | Infrastructure |
 
 ---
 
@@ -1112,5 +1173,5 @@ Recognition owns recognized text.
 
 Text Direction owns writing direction.
 
-Runtime owns execution.
+Runtime owns execution mechanics and execution authority.
 ```

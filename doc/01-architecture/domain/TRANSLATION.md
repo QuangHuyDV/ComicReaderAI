@@ -1,7 +1,7 @@
 # Translation Domain
 
 * **Document:** Domain / Translation
-* **Version:** 1.0.0
+* **Version:** 2.0.0
 * **Status:** Draft
 * **Owner:** CRAI Architecture
 
@@ -9,96 +9,128 @@
 
 # Purpose
 
-A Translation represents a validated target-language interpretation of one or more source Text Blocks.
+A `Translation` represents a durable target-language interpretation of one or more exact source TextBlock revisions.
 
 It preserves the relationship between:
 
-* Source content
-* Source revisions
-* Target language
-* Translation configuration
-* Context
-* Glossary
-* Generated output
-* User corrections
-* Review decisions
+* source content,
+* source revisions,
+* target language,
+* translation intent,
+* effective configuration,
+* context,
+* glossary,
+* character information,
+* translated output,
+* user corrections,
+* review decisions,
+* and revision history.
 
-A Translation is a domain result.
+A Translation is a **domain result**.
 
 It is not:
 
-* A provider request
-* A provider response
-* A prompt
-* A runtime job
-* A cache entry
-* A rendered text layer
+* a provider request,
+* a provider response,
+* a prompt,
+* a runtime job,
+* a retry attempt,
+* a cache entry,
+* a streaming buffer,
+* a rendered text layer.
 
-Provider execution artifacts are normalized and validated before they become Translation domain records.
+Provider and runtime artifacts MUST be normalized and validated before durable Translation revisions are published.
 
 ---
 
 # Domain Role
 
-The Translation domain connects source Text Blocks to user-visible target-language content.
+Conceptually:
 
 ```text
-Text Blocks
-     │
-     ▼
+TextBlock Revisions
+        |
+        v
 Translation Input Snapshot
-     │
-     ▼
-AI or Translation Provider
-     │
-     ▼
-Normalized Response
-     │
-     ▼
-Validated Translation
-     │
-     ├──► Review
-     ├──► Presentation
-     ├──► Rendering
-     ├──► Export
-     └──► Memory and Glossary Feedback
+        |
+        v
+Translation Execution
+        |
+        v
+Normalized Candidate
+        |
+        v
+Domain Validation
+        |
+        v
+Translation Revision
+        |
+        +--> Review
+        |
+        +--> Presentation
+        |
+        +--> Rendering
+        |
+        +--> Export
 ```
 
-The Translation domain preserves business meaning and revision history without depending on a concrete provider, model or transport protocol.
+Translation preserves stable business meaning independently from:
+
+* provider,
+* model,
+* transport,
+* retry strategy,
+* infrastructure.
 
 ---
 
-# Ownership Boundary
+# Ownership
 
-A Translation belongs to exactly one Page.
+Translation is an independently addressable domain resource.
+
+It does NOT belong transactionally to Page.
+
+A Translation belongs to a valid Project/content scope through its source relationship.
+
+Typical relationship:
 
 ```text
-Page Aggregate
-├── Text Blocks
-├── Translation Groups
-├── Translations
-│   ├── Source References
-│   ├── Translation Revisions
-│   ├── Review State
-│   ├── Quality Metadata
-│   └── Active Revision
-├── Render Layers
-└── Diagnostics
+Project
+   |
+   v
+TextBlock Revision(s)
+   |
+   v
+Translation
 ```
 
-A Translation may use contextual information from:
+For image-based content:
 
-* Other Text Blocks on the Page
-* Previous Pages
-* Current Chapter
-* Character registry
-* Glossary
-* Reading session
-* Project preferences
+```text
+Page
+  |
+  v
+TextBlock
+  |
+  v
+Translation
+```
 
-Context usage does not transfer ownership.
+For text-native content:
 
-The Translation remains owned by the Page containing its primary source Text Blocks.
+```text
+Chapter
+  |
+  v
+TextBlock
+  |
+  v
+Translation
+```
+
+`pageId` MAY be available as contextual or indexing metadata.
+
+It MUST NOT be required for Translation identity.
 
 ---
 
@@ -106,683 +138,618 @@ The Translation remains owned by the Page containing its primary source Text Blo
 
 A Translation is responsible for:
 
-* Identifying translated output
-* Referencing exact source Text Block revisions
-* Declaring source and target languages
-* Preserving translated text
-* Tracking translation revisions
-* Recording translation status
-* Tracking review and approval
-* Detecting stale results
-* Preserving translation lineage
-* Linking user corrections
-* Supporting presentation and rendering
-* Supporting translation history
-* Recording quality and warning metadata
-* Supporting deterministic cache validation
-* Preserving translation alternatives when configured
+* stable logical Translation identity,
+* exact source association,
+* target language,
+* Translation revision history,
+* effective translated content,
+* active revision selection,
+* source compatibility,
+* stale detection,
+* Translation lineage,
+* correction history,
+* configuration/context snapshot references,
+* glossary/context dependency references,
+* quality metadata,
+* domain lifecycle.
 
-A Translation is not responsible for:
+A Translation is NOT responsible for:
 
-* Building prompts
-* Selecting a provider
-* Executing AI requests
-* Managing provider authentication
-* Retrying network calls
-* Performing routing or fallback
-* Managing token budgets
-* Rendering text into images
-* Persisting provider credentials
-* Orchestrating Page or Chapter processing
-
-Those responsibilities belong to AI Pipeline, Provider, Runtime, Rendering, Preferences and Storage components.
+* prompt construction,
+* provider selection,
+* provider authentication,
+* network execution,
+* retries,
+* fallback routing,
+* token budgeting,
+* model invocation,
+* streaming transport,
+* Presentation layout,
+* rendering,
+* provider credentials.
 
 ---
 
 # Identity
 
-Every Translation has a stable identity.
+Every Translation has a stable logical identity.
 
 Typical fields include:
 
-* Translation ID
-* Page ID
-* Translation Group ID
-* Source Language
-* Target Language
-* Translation Type
-* Status
-* Active Revision
-* Created Time
-* Updated Time
-* Version
+```text
+Translation
+├── translationId
+├── projectId
+├── targetLanguage
+├── purpose
+├── sourceRelationshipId
+├── activeRevisionId?
+├── lifecycleStatus
+├── createdAt
+├── updatedAt
+└── version
+```
 
-A Translation ID identifies one logical translation result associated with a stable source relationship.
+Optional indexing fields MAY include:
 
-Changing translated wording does not necessarily create a new Translation ID.
+```text
+chapterId?
+pageId?
+translationGroupId?
+```
 
-Instead, it normally creates a new Translation Revision.
-
-A new Translation ID is required when:
-
-* Source membership changes materially
-* Text Blocks are split or merged
-* Target language changes
-* Translation purpose changes
-* The previous record represents a different logical result
-* Reconciliation cannot preserve identity safely
+These fields MUST NOT replace exact source-revision references.
 
 ---
 
-# Translation Types
+# Logical Identity
 
-Recommended translation types include:
+A Translation ID represents one stable translation relationship.
 
-| Type              | Description                                                     |
-| ----------------- | --------------------------------------------------------------- |
-| `direct`          | Standard source-to-target translation                           |
-| `contextual`      | Translation generated using surrounding story context           |
-| `literal`         | Translation prioritizing close source correspondence            |
-| `natural`         | Translation prioritizing target-language readability            |
-| `localized`       | Translation adapted to target cultural or stylistic conventions |
-| `bilingual`       | Source and target content are presented together                |
-| `summary`         | Condensed meaning rather than full translation                  |
-| `explanation`     | Translation accompanied by explanatory information              |
-| `transliteration` | Script or pronunciation conversion                              |
-| `manual`          | Translation entered directly by a user                          |
-| `imported`        | Translation imported from an external source                    |
+A new Translation ID is normally required when:
 
-Translation type represents semantic intent.
+* primary source membership changes materially,
+* source blocks are split or merged into a different logical result,
+* target language changes,
+* translation purpose changes,
+* reconciliation cannot safely preserve identity.
 
-It must not be derived from a provider or model name.
+Changing wording alone SHOULD create a new Translation Revision rather than a new Translation identity.
+
+---
+
+# Translation Purpose
+
+Translation purpose describes semantic intent.
+
+Recommended values MAY include:
+
+```text
+DIRECT
+LITERAL
+NATURAL
+LOCALIZED
+BILINGUAL
+SUMMARY
+EXPLANATION
+TRANSLITERATION
+MANUAL
+IMPORTED
+```
+
+`CONTEXTUAL` is normally better represented as execution/context strategy rather than a fundamentally different translated-content identity.
+
+Provider or model names MUST NOT define Translation purpose.
 
 ---
 
 # Source Association
 
-A Translation must reference exact source input.
+Every Translation MUST reference at least one exact primary TextBlock revision.
 
-For a single Text Block:
-
-```text
-Translation
-└── Text Block ID
-    └── Text Block Revision
-```
-
-For contextual or grouped translation:
+Single source:
 
 ```text
 Translation
-└── Source Members
-    ├── Text Block A / Revision 2
-    ├── Text Block B / Revision 1
-    └── Text Block C / Revision 4
+└── Source
+    ├── textBlockId
+    └── revision
 ```
 
-Each source member should include:
+Grouped source:
 
-* Text Block ID
-* Text Block Revision
-* Source Sequence
-* Effective Source Text Hash
-* Source Language
-* Role in Translation
-* Output Mapping Key
+```text
+Translation
+└── Primary Sources
+    ├── Block A / Revision 2
+    ├── Block B / Revision 4
+    └── Block C / Revision 1
+```
 
-A Translation must never reference only the current mutable Text Block state.
+Each source member SHOULD preserve:
 
-It must preserve the exact revisions used during translation.
+```text
+textBlockId
+textBlockRevision
+effectiveSourceTextHash
+sourceLanguage
+sequence
+mappingKey
+role
+```
+
+A Translation MUST NOT depend only on the mutable "current TextBlock".
 
 ---
 
-# Primary and Context Sources
+# Source Roles
 
-Translation sources are classified by role.
+Translation inputs MAY have roles such as:
 
-| Role          | Description                                                   |
-| ------------- | ------------------------------------------------------------- |
-| `primary`     | Source content that must produce translated output            |
-| `context`     | Supporting content used to improve interpretation             |
-| `glossary`    | Approved terminology constraints                              |
-| `character`   | Character information such as names, gender or speaking style |
-| `history`     | Previous dialogue or narration                                |
-| `instruction` | User or project translation instruction                       |
+```text
+PRIMARY
+CONTEXT
+HISTORY
+INSTRUCTION
+```
 
-Only primary sources require direct output mapping.
+Glossary and Character references SHOULD generally be represented through explicit snapshots rather than pretending they are TextBlock sources.
 
-Context sources influence translation but do not automatically produce separate Translation records.
+Only `PRIMARY` inputs require direct output mapping.
+
+---
+
+# Source Snapshot
+
+A Translation Revision MUST preserve a stable source snapshot.
+
+Conceptually:
+
+```text
+SourceSnapshot
+├── primary TextBlock revisions
+├── ordered source hashes
+├── source languages
+├── source semantic metadata
+└── sourceSnapshotHash
+```
+
+The snapshot MAY reference immutable records rather than duplicate complete source content.
+
+It MUST be sufficient to determine whether the Translation remains compatible with current source state.
 
 ---
 
 # Translation Group
 
-Several Text Blocks may be processed together using a Translation Group.
+Multiple TextBlocks MAY be translated together for context or efficiency.
 
 ```text
-Translation Group
-├── Ordered Source Members
-├── Context Scope
-├── Group Revision
-├── Translation Profile
-└── Output Mapping Strategy
+TranslationGroup
+├── ordered members
+├── group revision
+├── context policy
+└── mapping strategy
 ```
 
-A Translation Group is responsible for:
+TranslationGroup is a Translation-domain processing/context structure.
 
-* Preserving source order
-* Defining translation context
-* Defining grouping boundaries
-* Supporting one provider request for several blocks
-* Mapping output back to individual Text Blocks
+It does NOT own TextBlocks.
 
-A Translation Group does not own Text Blocks.
+Membership changes create a new group revision.
 
-It references their exact revisions.
+---
 
-Group membership changes create a new Group Revision.
+# Group vs Translation
+
+A group request does not require one monolithic Translation result.
+
+Recommended model:
+
+```text
+TranslationGroup
+       |
+       v
+Execution
+       |
+       +--> Translation for Block A
+       +--> Translation for Block B
+       +--> Translation for Block C
+```
+
+This preserves TextBlock-level identity while allowing shared context and one provider request.
+
+A future feature MAY support genuine many-to-one or one-to-many Translation relationships when explicitly required.
 
 ---
 
 # Output Mapping
 
-Grouped translation must preserve output-to-source mapping.
+Grouped Translation MUST preserve deterministic source-to-output mapping.
 
-Recommended provider-independent shape:
+Recommended provider-independent mapping:
 
 ```text
-Translation Output
-├── Item A
-│   ├── Mapping Key: block-a
-│   └── Target Text
-├── Item B
-│   ├── Mapping Key: block-b
-│   └── Target Text
-└── Item C
-    ├── Mapping Key: block-c
-    └── Target Text
+Output
+├── block-a -> translated text
+├── block-b -> translated text
+└── block-c -> translated text
 ```
 
-Mapping must not depend solely on array position when stable mapping keys are available.
+Mapping SHOULD use stable keys.
 
-A response is invalid when:
+Array position alone SHOULD NOT be relied upon when stable keys are available.
 
-* Required primary blocks are missing
-* Unknown mapping keys are returned
-* One output is assigned ambiguously
-* Output order conflicts with declared mapping
-* Several blocks are collapsed without an allowed mapping strategy
+Invalid mapping includes:
+
+* missing required primary output,
+* unknown mapping keys,
+* ambiguous assignment,
+* accidental output collapse,
+* unsupported split/merge mapping.
 
 ---
 
 # Translation Representations
 
-A Translation may preserve several text representations.
+A Translation Revision MAY preserve several representations:
 
 ```text
-Raw Provider Output
-        │
-        ▼
-Normalized Translation
-        │
-        ▼
-Post-Processed Translation
-        │
-        ▼
-User-Corrected Translation
-        │
-        ▼
+Normalized Generated Text
+        |
+        v
+Post-Processed Text
+        |
+        v
+User-Corrected Text
+        |
+        v
 Effective Translation
 ```
 
-## Raw Provider Output
+Raw provider payload is execution/diagnostic data and SHOULD normally remain outside the canonical Translation Revision.
 
-The unmodified provider result.
+---
 
-It is useful for:
+# Normalized Translation
 
-* Diagnostics
-* Reproducibility
-* Response repair
-* Provider comparison
-* Audit
+Generated provider output MUST be normalized into CRAI's canonical representation before publication.
 
-Raw provider output is not automatically trusted.
+Normalization MAY include:
 
-It may use provider-specific structure and should normally be stored separately from the canonical Translation.
+* schema conversion,
+* mapping resolution,
+* Unicode normalization,
+* whitespace normalization,
+* protocol artifact removal.
 
-## Normalized Translation
+Normalization MUST NOT silently alter semantic meaning.
 
-Provider output converted into the CRAI canonical response format.
+---
 
-Normalization may include:
+# Post-Processed Translation
 
-* Schema conversion
-* Mapping-key resolution
-* Unicode normalization
-* Whitespace normalization
-* Provider metadata extraction
-* Removal of protocol artifacts
+Deterministic post-processing MAY include:
 
-Normalization must not silently change semantic meaning.
+* punctuation cleanup,
+* spacing normalization,
+* formatting cleanup,
+* approved glossary enforcement,
+* script conversion,
+* honorific normalization,
+* safe line-break normalization.
 
-## Post-Processed Translation
+Any processing-significant post-processing policy SHOULD be versioned.
 
-Translation after deterministic CRAI rules are applied.
+---
 
-Post-processing may include:
+# User-Corrected Translation
 
-* Approved glossary enforcement
-* Punctuation normalization
-* Spacing normalization
-* Formatting cleanup
-* Honorific normalization
-* Script conversion
-* Safe line-break handling
+Users MAY edit translated content.
 
-## User-Corrected Translation
+User correction creates a new immutable Translation Revision.
 
-An optional translation explicitly edited or approved by the user.
+It MUST NOT mutate previous revisions.
 
-User-corrected translation has higher authority than generated output.
+Corrections SHOULD record:
 
-## Effective Translation
+* parent revision,
+* actor,
+* timestamp,
+* correction type,
+* changed fields.
 
-The text consumed by Presentation, Rendering and Export.
+Approved user corrections MUST NOT be silently overwritten by later automatic generation.
 
-Resolution order:
+---
+
+# Effective Translation
+
+Effective translation is the text consumed by downstream capabilities.
+
+Recommended precedence:
 
 ```text
-Approved User Correction
-        ↓ fallback
-Current User Correction
-        ↓ fallback
-Post-Processed Translation
-        ↓ fallback
-Normalized Translation
+Approved User Revision
+        |
+        v fallback
+Current User Revision
+        |
+        v fallback
+Post-Processed Generated Revision
+        |
+        v fallback
+Validated Normalized Revision
 ```
 
-Raw provider output is not used directly for presentation unless explicitly permitted for diagnostics.
+Raw unvalidated provider output MUST NOT become normal user-visible canonical Translation.
 
 ---
 
 # Translation Revision
 
-Translation identity and revision are separate.
+Translation identity and Translation revision are separate.
 
 ```text
-Translation ID: stable logical translation
-Revision:       version of translated content and decisions
+translationId
+    stable logical relationship
+
+translationRevision
+    immutable translated-content version
 ```
 
-A Translation Revision should include:
+A Translation Revision SHOULD contain:
 
-* Translation ID
-* Revision Number
-* Parent Revision
-* Target Text
-* Source Snapshot
-* Source Content Hash
-* Translation Profile Revision
-* Context Revision
-* Glossary Revision
-* Prompt Template Revision
-* Post-Processing Revision
-* Creation Source
-* Created Time
-* Actor
-* Status
-* Quality Metadata
+```text
+translationRevisionId
+translationId
+revisionNumber
+parentRevisionId?
+targetText
+sourceSnapshotId
+sourceHash
+configurationSnapshotId
+configurationHash
+contextSnapshotId?
+glossarySnapshotId?
+characterContextSnapshotId?
+creationSource
+createdAt
+actor?
+qualityMetadata?
+```
 
-A revision must be immutable after publication.
-
-Any processing-significant change creates a new revision.
+Published revisions MUST be immutable.
 
 ---
 
 # Revision Creation Sources
 
-A Translation Revision may originate from:
-
-| Source             | Description                                         |
-| ------------------ | --------------------------------------------------- |
-| `provider`         | Created from an automated provider result           |
-| `user_edit`        | Created by direct user correction                   |
-| `review_edit`      | Created during formal review                        |
-| `glossary_reapply` | Created after applying updated terminology          |
-| `post_process`     | Created by a deterministic post-processing revision |
-| `import`           | Imported from an external translation source        |
-| `migration`        | Created during schema or data migration             |
-| `reconciliation`   | Preserved or rebuilt after source regeneration      |
-
-Creation source describes lineage and authority.
-
-It does not determine approval automatically.
-
----
-
-# Translation Profile
-
-Translation behavior is configured through a versioned Translation Profile.
-
-Typical profile fields include:
-
-* Translation Profile ID
-* Profile Revision
-* Translation Type
-* Source Language
-* Target Language
-* Preferred Style
-* Formality
-* Honorific Policy
-* Name Policy
-* Sound-Effect Policy
-* Localization Policy
-* Formatting Rules
-* Context Policy
-* Glossary Policy
-* Provider Preference
-* Quality Policy
-
-The Translation domain stores a reference to the effective profile revision.
-
-It does not resolve configuration hierarchy itself.
-
-The Preferences component produces the effective configuration used for execution.
-
----
-
-# Style
-
-Translation style may include:
-
-* Literal
-* Natural
-* Concise
-* Descriptive
-* Formal
-* Informal
-* Comic dialogue
-* Novel prose
-* Technical
-* Historical
-* Child-friendly
-* User-defined
-
-Style is a domain-level translation intent.
-
-Concrete prompt wording remains an AI Pipeline concern.
-
-The same style must be expressible across different providers.
-
----
-
-# Language Pair
-
-Every Translation declares:
-
-* Effective Source Language
-* Target Language
-
-Optional fields may include:
-
-* Source Script
-* Target Script
-* Regional Variant
-* Mixed-Language Strategy
-* Transliteration Policy
-
-Examples:
+Possible creation sources include:
 
 ```text
-zh-Hans → vi
-zh-Hant → vi
-en → vi
-ja → vi
-ko → vi
+PROVIDER
+USER_EDIT
+REVIEW_EDIT
+POST_PROCESS
+GLOSSARY_REAPPLY
+IMPORT
+MIGRATION
+RECONCILIATION
 ```
 
-A target language change creates a different logical Translation.
+Creation source describes lineage.
 
-Different target languages must not share the same active Translation record.
-
----
-
-# Glossary Association
-
-A Translation may reference a Glossary Snapshot.
-
-```text
-Glossary Snapshot
-├── Glossary ID
-├── Glossary Revision
-├── Selected Entry IDs
-├── Applied Entry Revisions
-└── Snapshot Hash
-```
-
-The Translation should record which glossary entries were applied when practical.
-
-Glossary changes do not silently mutate existing Translation revisions.
-
-Instead, affected translations may become stale or eligible for regeneration.
-
-Approved user translation may override a general glossary rule when explicitly recorded.
-
----
-
-# Character Context
-
-Character information may influence:
-
-* Name translation
-* Pronouns
-* Gendered language
-* Formality
-* Honorifics
-* Speech style
-* Relationship terms
-* Repeated catchphrases
-
-A Translation may record a Character Context Snapshot containing:
-
-* Character IDs
-* Character Revisions
-* Speaker Mapping
-* Relevant Aliases
-* Applied Style Rules
-* Snapshot Hash
-
-Character changes may invalidate translations only when the changed information affects their output.
-
----
-
-# Context Snapshot
-
-A Translation must preserve the effective context identity used during generation.
-
-A Context Snapshot may include:
-
-* Context Revision
-* Current Page
-* Current Chapter
-* Previous Text Blocks
-* Previous Translation References
-* Character References
-* Glossary References
-* Session Preferences
-* User Instructions
-* Context Hash
-
-The snapshot does not necessarily store all raw context inline.
-
-It may reference immutable context records or hashes.
-
-Context must be sufficient to explain why a translation may differ from another generation of the same source text.
-
----
-
-# Lifecycle
-
-```text
-Requested
-    │
-    ▼
-Generating
-    │
-    ▼
-Validating
-    │
-    ├──► Failed
-    │
-    ▼
-Generated
-    │
-    ▼
-Post Processed
-    │
-    ├──► Needs Review
-    │
-    └──► Ready
-              │
-       ┌──────┼─────────┐
-       ▼      ▼         ▼
-   Approved  Stale   Superseded
-```
-
-Lifecycle meaning:
-
-* `Requested`: Translation intent has been created.
-* `Generating`: An execution is in progress.
-* `Validating`: Normalized provider output is being validated.
-* `Generated`: A valid normalized output exists.
-* `Post Processed`: Deterministic output processing has completed.
-* `Ready`: Translation may be used by Presentation or Rendering.
-* `Needs Review`: Translation requires user or reviewer attention.
-* `Approved`: Translation has been explicitly accepted.
-* `Stale`: One or more required inputs have changed.
-* `Superseded`: A newer Translation or incompatible source relationship replaced it.
-* `Failed`: No valid translation result was produced.
-
-Runtime retry attempts do not create separate lifecycle states in the domain unless their final outcome changes business state.
+It MUST NOT automatically imply approval.
 
 ---
 
 # Active Revision
 
-A Translation may have many revisions but only one active revision for a given usage context.
+One Translation may contain multiple revisions.
 
 ```text
 Translation
 ├── Revision 1
 ├── Revision 2
 ├── Revision 3
-└── Active Revision: 3
+└── activeRevision -> Revision 3
 ```
 
-The active revision must:
+An active revision MUST:
 
-* Belong to the Translation
-* Reference compatible source revisions
-* Match the target language
-* Pass required validation
-* Not be superseded
-* Not be stale unless stale usage is explicitly allowed
+* belong to the Translation,
+* reference compatible source revisions,
+* match the Translation target language,
+* satisfy required validation,
+* not be invalidated,
+* not be superseded,
+* not be stale unless policy explicitly permits stale use.
 
-Changing the active revision is a domain operation and should emit an event.
-
----
-
-# Staleness
-
-A Translation becomes stale when one or more translation-significant inputs change.
-
-Typical stale causes include:
-
-* Effective source text changed
-* Text Block revision changed
-* Text Blocks were split or merged
-* Translation Group membership changed
-* Source language changed
-* Target language changed
-* Translation Profile changed
-* Glossary changed
-* Character information changed
-* User instruction changed
-* Context policy changed
-* Prompt template changed
-* Post-processing policy changed
-* Safety or validation policy changed
-
-Not every configuration change must invalidate every Translation.
-
-Staleness should be determined from explicit dependency impact.
+Changing active revision is a domain operation.
 
 ---
 
-# Stale Impact Classification
+# Language Pair
 
-Recommended impact categories:
+Every Translation Revision MUST preserve:
 
-| Impact               | Description                                              |
-| -------------------- | -------------------------------------------------------- |
-| `none`               | Change cannot affect translation output                  |
-| `presentation_only`  | Translation remains valid; only display must refresh     |
-| `review_recommended` | Existing output may remain usable but should be reviewed |
-| `translation_stale`  | Translation must be regenerated or reapproved            |
-| `source_invalid`     | Translation source relationship is no longer valid       |
+```text
+effectiveSourceLanguage
+targetLanguage
+```
 
-Examples:
+Optional metadata MAY include:
 
-* Font-size change: `presentation_only`
-* Glossary entry for unrelated term: `none`
-* Character gender correction used in dialogue: `translation_stale`
-* Text Block split: `source_invalid`
-* Style change from literal to natural: `translation_stale`
+```text
+sourceScript
+targetScript
+regionalVariant
+mixedLanguageStrategy
+transliterationPolicy
+```
+
+Changing target language creates a different logical Translation.
+
+---
+
+# Translation Profile
+
+Translation behavior MAY be defined by a versioned Translation Profile.
+
+Possible intent fields include:
+
+* target language,
+* translation purpose,
+* style,
+* formality,
+* honorific policy,
+* naming policy,
+* sound-effect policy,
+* localization policy,
+* formatting policy,
+* context policy,
+* glossary policy,
+* quality policy.
+
+Provider preference MAY exist in effective execution configuration, but provider identity MUST NOT become Translation business identity.
+
+Translation records reference the exact effective configuration revision used.
+
+---
+
+# Configuration Resolution
+
+Translation Domain does NOT resolve Project/Book/Chapter/TextBlock configuration hierarchy itself.
+
+A Preferences/configuration capability SHOULD produce an effective immutable configuration snapshot.
+
+```text
+Project preferences
+       |
+Book override?
+       |
+Chapter override?
+       |
+TextBlock override?
+       |
+       v
+Effective Translation Configuration
+       |
+       v
+Translation Execution
+```
+
+Translation preserves a reference/hash to that effective configuration.
+
+---
+
+# Context Snapshot
+
+Context used to produce output SHOULD be identifiable.
+
+Possible inputs:
+
+```text
+previous TextBlocks
+previous Translations
+current Chapter context
+Character references
+user instructions
+session context
+```
+
+A Context Snapshot SHOULD preserve:
+
+```text
+contextRevision
+reference identities
+relevant revisions
+contextHash
+```
+
+It need not duplicate all raw context inline.
+
+---
+
+# Glossary Snapshot
+
+Translation MAY reference a Glossary Snapshot.
+
+Example:
+
+```text
+GlossarySnapshot
+├── glossaryId
+├── glossaryRevision
+├── selected entries
+├── entry revisions
+└── snapshotHash
+```
+
+Glossary updates MUST NOT silently mutate previous Translation revisions.
+
+Dependency impact determines whether existing output:
+
+* remains valid,
+* should be reviewed,
+* becomes stale.
+
+---
+
+# Character Context Snapshot
+
+Relevant Character information MAY be snapshotted.
+
+Possible information:
+
+* Character IDs,
+* Character revisions,
+* aliases,
+* speaker mapping,
+* naming rules,
+* speech-style rules.
+
+Character changes invalidate Translation only when changed information is translation-significant.
 
 ---
 
 # Source Hash
 
-A Translation should contain a deterministic source hash.
+Translation SHOULD maintain a deterministic source hash.
 
-The source hash may include:
+Possible inputs:
 
-* Ordered primary Text Block IDs
-* Text Block revisions
-* Effective source texts
-* Source languages
-* Translation-significant block types
-* Translation Group revision
+```text
+ordered primary TextBlock IDs
+exact TextBlock revisions
+effective source hashes
+source language
+translation-significant semantic metadata
+group revision
+```
 
-The source hash must not depend on provider execution metadata.
-
-It supports:
-
-* Stale detection
-* Cache lookup
-* Request deduplication
-* Idempotent processing
-* Revision comparison
-* Audit
+Source hash MUST NOT include provider runtime data.
 
 ---
 
 # Configuration Hash
 
-A separate configuration hash may include:
+Configuration hash MAY include:
 
-* Translation Profile revision
-* Target language
-* Glossary snapshot
-* Character context snapshot
-* Context policy
-* Prompt template revision
-* Output schema revision
-* Post-processing revision
-* Safety policy revision
+```text
+Translation Profile revision
+target language
+Glossary snapshot
+Character Context snapshot
+Context policy
+instruction revision
+output schema revision
+post-processing revision
+validation policy revision
+```
 
-Translation cache validity should normally require both:
+Cache compatibility generally requires:
 
 ```text
 Source Hash
@@ -790,887 +757,927 @@ Source Hash
 Configuration Hash
 ```
 
-Provider identity may be included in a separate execution hash when provider-specific reproducibility is required.
+Provider identity MAY be part of a separate execution/reproducibility hash when required.
 
 ---
 
-# Translation Alternatives
+# Staleness
 
-CRAI may retain several translation alternatives.
+A Translation Revision becomes stale when a dependency that can affect translated meaning changes.
+
+Typical causes:
+
+* source TextBlock revision changed,
+* effective source text changed,
+* primary source membership changed,
+* source language changed,
+* Translation Profile changed,
+* relevant glossary entry changed,
+* relevant Character information changed,
+* relevant user instruction changed,
+* context policy changed,
+* translation-significant post-processing changed.
+
+Staleness MUST use dependency impact rather than blanket invalidation.
+
+---
+
+# Stale Impact
+
+Recommended impact categories:
 
 ```text
-Translation
-├── Alternative A: literal
-├── Alternative B: natural
-├── Alternative C: user-edited
-└── Active Alternative: C
+NONE
+PRESENTATION_ONLY
+REVIEW_RECOMMENDED
+TRANSLATION_STALE
+SOURCE_INVALID
 ```
-
-Alternatives may differ by:
-
-* Style
-* Provider
-* Model
-* Context
-* Glossary application
-* User correction
-* Translation strategy
-
-Each alternative must remain traceable to its own source and configuration snapshots.
-
-Alternatives must not be silently merged.
-
----
-
-# Manual Correction
-
-Users may edit translated text.
-
-Correction rules:
-
-1. Existing Translation Revisions remain immutable.
-2. A correction creates a new revision.
-3. The correction records its parent revision.
-4. The editor and timestamp are preserved.
-5. The corrected revision becomes active according to policy.
-6. Rendering and Presentation refresh only affected outputs.
-7. Correction does not alter source Text Blocks.
-8. Correction may optionally create glossary or memory candidates.
-9. Automatic regeneration must not overwrite an approved correction silently.
-
-User corrections may be classified as:
-
-* Typographic
-* Terminology
-* Name correction
-* Grammar
-* Style
-* Meaning correction
-* Missing content
-* Formatting
-* Other
-
-Classification supports quality evaluation and reusable learning.
-
----
-
-# Approval and Review
-
-Translation review state is separate from translation generation state.
-
-Recommended review statuses:
-
-| Status              | Description                              |
-| ------------------- | ---------------------------------------- |
-| `unreviewed`        | No review decision exists                |
-| `review_requested`  | Review is required                       |
-| `in_review`         | A reviewer is evaluating the translation |
-| `changes_requested` | Translation requires correction          |
-| `approved`          | Translation is accepted                  |
-| `rejected`          | Translation must not be used             |
-| `waived`            | Review was intentionally skipped         |
-
-Review metadata may include:
-
-* Reviewer ID
-* Review Time
-* Reviewed Revision
-* Decision
-* Comments
-* Issue Categories
-* Quality Score
-
-Approval applies to an exact Translation Revision.
-
-A newer revision is not automatically approved.
-
----
-
-# Quality Metadata
-
-A Translation may record quality indicators.
-
-Possible fields include:
-
-* Provider Confidence
-* Language Validation Result
-* Glossary Compliance
-* Source Coverage
-* Mapping Completeness
-* Warning Count
-* Review Score
-* User Correction Count
-* Suspected Hallucination
-* Suspected Omission
-* Suspected Added Meaning
-* Fluency Score
-* Consistency Score
-
-Provider confidence and CRAI validation confidence must remain distinguishable.
-
-Quality metadata assists review and diagnostics.
-
-It does not automatically prove correctness.
-
----
-
-# Validation
-
-Before entering the `Ready` state, a Translation must pass validation.
-
-Validation may include:
-
-* Translation ID is present
-* Page ownership is valid
-* Primary source list is not empty
-* Every primary Text Block exists
-* Every source revision exists
-* Source hashes match
-* Target language is valid
-* Effective translation is not empty
-* Output mapping is complete
-* No unknown mapping keys exist
-* Translation revision is immutable
-* Translation Profile reference is valid
-* Required glossary constraints are satisfied
-* Output schema is valid
-* Safety policy is satisfied
-* Length limits are respected
-* Rejected output is not activated
-* Superseded source is not used as current input
-
-Warnings may be accepted when policy allows.
-
-Validation errors prevent activation.
-
----
-
-# Completeness Validation
-
-For grouped translation, completeness validation should verify:
-
-```text
-Expected Primary Source Keys
-            =
-Returned Translation Keys
-```
-
-Allowed exceptions must be explicit.
 
 Examples:
 
-* A sound effect may intentionally remain untranslated.
-* Two source blocks may be merged into one target block when the mapping strategy permits it.
-* One source paragraph may be split into several display segments.
-
-The output must still preserve deterministic source association.
-
----
-
-# Language Validation
-
-Language validation may verify:
-
-* Output primarily uses the target language
-* Required source terms remain unchanged
-* Forbidden scripts are absent
-* Transliteration follows policy
-* Mixed-language output is intentional
-* Provider explanations are not included accidentally
-* JSON or formatting syntax is not exposed as translated text
-
-Language validation should allow names, terminology and quoted source text according to profile rules.
-
----
-
-# Terminology Validation
-
-Terminology validation may check:
-
-* Required glossary entries
-* Locked character names
-* Location names
-* Organization names
-* Skills and item names
-* Honorific policy
-* Repeated terminology consistency
-* Forbidden translations
-
-Terminology violations may:
-
-* Trigger deterministic correction
-* Mark the Translation as `Needs Review`
-* Reject the generated revision
-* Request regeneration
-
-Policy determines the appropriate response.
-
----
-
-# Failure Handling
-
-Typical domain-level failures include:
-
-* Source Text Block missing
-* Source revision mismatch
-* Empty translation
-* Invalid target language
-* Incomplete output mapping
-* Unknown output mapping key
-* Invalid Translation Profile
-* Invalid glossary reference
-* Context snapshot unavailable
-* Output schema invalid
-* Translation too long
-* Translation too short
-* Language validation failed
-* Safety validation failed
-* Revision conflict
-* Approved revision overwrite attempted
-* Stale Translation activated
-* Superseded source used
-* Review state conflict
-
-Provider-specific network, authentication, rate-limit and model errors must be translated into stable execution errors before entering the Translation domain.
-
----
-
-# Interaction with Provider Execution
-
-The domain and execution layers must remain separate.
-
 ```text
-Translation Intent
-        │
-        ▼
-Canonical AI Request
-        │
-        ▼
-Provider Adapter
-        │
-        ▼
-Raw Provider Response
-        │
-        ▼
-Canonical AI Response
-        │
-        ▼
-Validation
-        │
-        ▼
-Translation Revision
+font change
+    -> PRESENTATION_ONLY
+
+unrelated glossary entry change
+    -> NONE
+
+speaker gender correction used by Translation
+    -> TRANSLATION_STALE
+
+source TextBlock split
+    -> SOURCE_INVALID
 ```
 
-Provider execution metadata may include:
+---
 
-* Provider ID
-* Model ID
-* Model Version
-* Request ID
-* Attempt Count
-* Fallback Usage
-* Token Usage
-* Cost
-* Latency
-* Finish Reason
+# Translation Lifecycle
 
-This metadata is useful for diagnostics and lineage.
+Translation lifecycle describes durable logical result availability.
 
-It must not become required business logic for consuming a Translation.
+Recommended states:
+
+```text
+Created
+   |
+   v
+Active
+   |
+   +--> Stale
+   |
+   +--> Superseded
+   |
+   +--> Invalidated
+   |
+   v
+Archived
+```
+
+Suggested statuses:
+
+```text
+CREATED
+ACTIVE
+STALE
+SUPERSEDED
+INVALIDATED
+ARCHIVED
+```
+
+A Translation becomes `ACTIVE` when it has at least one valid published revision selected for normal use.
+
+---
+
+# Execution Lifecycle Is Separate
+
+The following states belong to Translation Execution:
+
+```text
+REQUESTED
+QUEUED
+GENERATING
+STREAMING
+VALIDATING
+POST_PROCESSING
+SUCCEEDED
+FAILED
+CANCELLED
+```
+
+They MUST NOT be core Translation lifecycle states.
+
+Example:
+
+```text
+Translation: ACTIVE
+activeRevision: 5
+
+Regeneration Execution:
+    status: RUNNING
+```
+
+The existing Translation remains usable until a new compatible revision is published.
+
+---
+
+# Translation Execution
+
+A Translation Execution represents one attempt/workflow to produce a candidate revision.
+
+Typical fields MAY include:
+
+```text
+executionId
+logicalRequestId
+sourceSnapshotId
+configurationSnapshotId
+status
+startedAt
+completedAt
+```
+
+Provider-specific attempt metadata remains inside execution/runtime records.
+
+---
+
+# Provider Attempt
+
+An execution MAY contain one or more Provider Attempts.
+
+```text
+Translation Execution
+├── Attempt 1: Provider A
+├── Attempt 2: Provider A retry
+└── Attempt 3: Provider B fallback
+```
+
+Possible metadata:
+
+```text
+providerId
+modelId
+requestId
+attemptNumber
+latency
+tokenUsage
+cost
+finishReason
+error
+```
+
+This metadata is operational lineage.
+
+Consumers of a Translation MUST NOT require it for ordinary business behavior.
 
 ---
 
 # Retry and Fallback
 
-Retries and fallback belong to runtime execution.
+Retry/fallback belongs to execution.
 
 Domain rules:
 
-* Retry attempts do not create duplicate Translation identities.
-* All attempts preserve the same logical request identity.
-* Failed attempts may be recorded in diagnostics.
-* Only validated successful output creates a Translation Revision.
-* Fallback provider usage is recorded as lineage metadata.
-* A late result must not overwrite a newer active revision.
-* Cancelled work must not publish a Translation Revision.
-* Duplicate successful results must be reconciled idempotently.
+1. retries MUST NOT create duplicate logical Translation identities,
+2. attempts share the same immutable logical request inputs,
+3. only validated successful output may publish a revision,
+4. cancelled work MUST NOT publish active output,
+5. late results MUST undergo compatibility checks,
+6. duplicate successful results MUST be handled idempotently.
 
 ---
 
 # Streaming
 
-Streaming output is provisional until final validation.
+Streaming text is provisional execution output.
 
 ```text
-Streaming Chunks
-      │
-      ▼
+Provider Stream
+      |
+      v
 Provisional Assembly
-      │
-      ▼
-Partial Presentation
-      │
-      ▼
+      |
+      v
+Optional Temporary Display
+      |
+      v
 Final Validation
-      │
-      ▼
-Published Translation Revision
+      |
+      v
+Translation Revision
 ```
 
-Partial streamed text may be displayed temporarily.
+Partial content MUST NOT become a normal durable Translation Revision unless an explicit partial-result policy exists.
 
-It must not become a durable Translation Revision unless:
-
-* The stream completes
-* Partial-result policy explicitly permits it
-* The result passes validation
-* Its incomplete status is preserved
-
-Final streaming and non-streaming execution must produce equivalent Translation domain records for equivalent output.
+Equivalent final streamed and non-streamed results SHOULD produce equivalent domain records.
 
 ---
 
-# Cache Interaction
+# Validation
 
-Translation cache is an optimization layer.
+Before a candidate becomes a published Translation Revision, validation SHOULD include:
 
-A cached result may be used only when compatible with:
+* valid Translation identity,
+* valid primary source snapshot,
+* every source revision exists,
+* source hashes match,
+* valid target language,
+* non-empty effective output,
+* deterministic output mapping,
+* valid configuration reference,
+* valid glossary/context references,
+* output schema validity,
+* language validation,
+* required safety validation,
+* stale source protection,
+* superseded source protection.
 
-* Source Hash
-* Configuration Hash
-* Output Schema Revision
-* Validation Policy Revision
-* Target Language
-* Translation Type
+Page ownership MUST NOT be a universal validation requirement.
 
-Cache behavior must not bypass:
+---
 
-* Domain validation
-* Source revision checks
-* Approval protection
-* Stale detection
-* Safety rules
+# Completeness Validation
 
-A cache entry is not the source of truth.
+Grouped execution MUST verify that required primary source mappings are complete.
 
-The Translation Revision is the durable domain record.
+Conceptually:
+
+```text
+Expected Primary Keys
+        =
+Returned Output Keys
+```
+
+Explicit exceptions MAY exist.
+
+Examples:
+
+* sound effect intentionally left untranslated,
+* permitted many-to-one mapping,
+* permitted one-to-many mapping.
+
+Association MUST remain deterministic.
+
+---
+
+# Review
+
+Translation Review is separate from Translation generation and core lifecycle.
+
+Possible review states include:
+
+```text
+UNREVIEWED
+REVIEW_REQUESTED
+IN_REVIEW
+CHANGES_REQUESTED
+APPROVED
+REJECTED
+WAIVED
+```
+
+Review MUST reference an exact Translation Revision.
+
+Approval of Revision 3 does NOT imply approval of Revision 4.
+
+---
+
+# Review Ownership
+
+Review records SHOULD be independently owned by the Review workflow/domain.
+
+Translation MAY expose a derived review summary.
+
+Example:
+
+```text
+Translation Revision
+        |
+        v
+Review Record
+```
+
+Translation MUST NOT duplicate complete Review workflow state as authoritative domain data.
+
+---
+
+# Quality Metadata
+
+Translation revisions MAY preserve stable quality indicators such as:
+
+* language validation,
+* glossary compliance,
+* source coverage,
+* mapping completeness,
+* warnings,
+* suspected omission,
+* suspected added meaning,
+* consistency score.
+
+Provider confidence and CRAI validation signals MUST remain distinguishable.
+
+Quality metadata is advisory unless policy explicitly uses it for activation.
+
+---
+
+# Manual Correction
+
+User correction MUST:
+
+1. create a new immutable Translation Revision,
+2. preserve the previous revision,
+3. record parent revision,
+4. preserve actor and time,
+5. activate according to policy,
+6. invalidate only dependent Presentation/Rendering outputs,
+7. never mutate source TextBlocks,
+8. optionally produce Glossary/Memory candidates.
+
+Automatic regeneration MUST NOT silently overwrite protected user revisions.
+
+---
+
+# Alternatives
+
+Multiple Translation alternatives MAY be retained.
+
+Example:
+
+```text
+Translation
+├── Revision/Alternative A
+├── Revision/Alternative B
+└── selected active revision
+```
+
+However, "alternative" and "revision" SHOULD NOT be conflated blindly.
+
+A future model MAY distinguish:
+
+```text
+Translation
+   |
+   +--> Variant: Literal
+   |      └── revisions
+   |
+   +--> Variant: Natural
+          └── revisions
+```
+
+For MVP, a simpler revision model is acceptable.
+
+---
+
+# Cache
+
+Translation cache is an optimization.
+
+Cache entries are NOT domain truth.
+
+Cached output MUST still pass:
+
+* source compatibility,
+* configuration compatibility,
+* validation,
+* approval protection,
+* stale checks,
+* safety rules.
+
+A cache hit MAY produce or reuse a valid Translation Revision according to explicit publication policy.
+
+---
+
+# Idempotency
+
+Translation publication MUST be idempotent for equivalent logical input.
+
+Recommended idempotency material:
+
+```text
+sourceHash
+configurationHash
+targetLanguage
+translationPurpose
+logicalRequestPurpose
+```
+
+`pageId` MUST NOT be required as part of universal identity.
+
+This permits legitimate reuse across non-Page content.
+
+---
+
+# Concurrency
+
+Concurrent executions MUST preserve source snapshots.
+
+Rules:
+
+1. each execution reads immutable source/configuration snapshots,
+2. late results are compatibility-checked,
+3. stale results MUST NOT become active automatically,
+4. user revisions MUST NOT be silently overwritten,
+5. active-revision changes require atomic consistency,
+6. duplicate results are reconciled idempotently,
+7. cancellation prevents publication when possible.
+
+---
+
+# Reconciliation
+
+Translation MAY require reconciliation after TextBlock regeneration.
+
+Possible outcomes:
+
+```text
+PRESERVED
+STALE
+REMAPPED
+SPLIT_REQUIRED
+MERGE_REQUIRED
+ORPHANED
+SUPERSEDED
+```
+
+Automatic remapping MUST require strong evidence.
+
+Ambiguous remapping SHOULD require review rather than attach Translation to incorrect source content.
 
 ---
 
 # Presentation Association
 
-Presentation consumes the effective active Translation Revision.
-
-Recommended mapping:
+Presentation consumes an exact Translation Revision.
 
 ```text
-Text Block
-    │
-    ├──► Translation
-    │       └── Active Revision
-    │
-    └──► Presentation Item
-            ├── Translation Revision ID
-            ├── Display Mode
-            ├── Source Marker
-            └── Layout Metadata
+TextBlock Revision
+        |
+        v
+Translation Revision
+        |
+        v
+Presentation Item
 ```
 
-Presentation may use:
+Presentation MAY use:
 
-* Side panel
-* Overlay
-* Bilingual view
-* Reader view
-* Tooltip
-* Subtitle-like list
-* Export view
+* side panel,
+* overlay,
+* bilingual reader,
+* tooltip,
+* subtitle list,
+* formatted document,
+* export view.
 
-Presentation settings must not modify Translation content.
+Presentation MUST NOT mutate canonical Translation content.
 
-Any presentation-specific text shortening must be represented as a derived display value, not as the canonical Translation.
+Display-specific shortening or wrapping is derived presentation state.
 
 ---
 
 # Rendering Association
 
-Rendering uses an exact Translation Revision.
+Rendering SHOULD reference:
 
-A Render Layer should reference:
+```text
+translationId
+translationRevisionId
+textBlockId
+sourceGeometryRevision
+renderingProfileRevision
+```
 
-* Translation ID
-* Translation Revision
-* Text Block ID
-* Source Geometry Revision
-* Rendering Profile Revision
+Changing active Translation MAY invalidate dependent Render/Presentation artifacts.
 
-If the active Translation changes, dependent Render Layers become stale.
-
-Previously exported immutable assets remain historical outputs.
-
----
-
-# Import
-
-Imported translations must preserve:
-
-* Import Source
-* Original Identifier
-* Source Text association
-* Target Language
-* Imported Text
-* Import Time
-* Import Revision
-* Trust Level
-* Review Status
-
-Imported text must not be treated as approved automatically unless import policy explicitly permits it.
-
-When source mapping is uncertain, the imported result should require review.
+Historical immutable outputs remain linked to the revision used when created.
 
 ---
 
 # Export
 
-Translation export may include:
+Translation export MUST reference exact revision identities.
 
-* Plain translated text
-* Bilingual text
-* Ordered Text Block translations
-* Structured JSON
-* Subtitle-like format
-* Chapter document
-* Translation memory format
-* Rendered image association
+Possible exports include:
 
-Exports must reference an exact Translation Revision.
+* translated text,
+* bilingual text,
+* structured TextBlock translation,
+* JSON,
+* chapter document,
+* subtitle-like representation,
+* Translation Memory representation.
 
-Changing the active Translation later does not mutate previous immutable exports.
+Changing active Translation later MUST NOT mutate historical exported artifacts.
+
+---
+
+# Import
+
+Imported translations SHOULD preserve:
+
+* external source,
+* original identifier,
+* source mapping,
+* target language,
+* imported content,
+* import time,
+* trust level.
+
+Imported content MUST NOT automatically become approved unless policy explicitly permits it.
+
+Uncertain source mapping SHOULD require review.
 
 ---
 
 # Persistence
 
-Recommended persistent separation:
+Recommended separation:
 
 ```text
-Translation Record
+Translation
 ├── identity
-├── page ownership
+├── Project scope
 ├── target language
-├── translation type
-├── lifecycle status
-├── active revision
-└── review summary
+├── translation purpose
+├── lifecycle
+└── active revision
+```
 
-Translation Revision
-├── immutable target text
-├── source snapshot
+```text
+TranslationRevision
+├── immutable target content
+├── exact source snapshot
 ├── source hash
 ├── configuration hash
 ├── context references
 ├── glossary references
+├── character references
 ├── lineage
 ├── quality metadata
 └── creation metadata
+```
 
-Translation Execution
-├── request identity
+```text
+TranslationExecution
+├── execution identity
+├── source/config snapshot
+├── runtime lifecycle
 ├── provider attempts
-├── model metadata
-├── latency
-├── token usage
-├── cost
-└── errors
+├── token/cost/latency metadata
+└── execution errors
+```
 
-Translation Review
-├── reviewed revision
+```text
+TranslationReview
+├── exact revision reference
 ├── reviewer
 ├── decision
 ├── issues
 └── comments
 ```
 
-Execution records may use a shorter retention period than domain revisions.
-
-Provider payloads should not be stored inside the canonical Translation record.
+These records MAY have different retention policies.
 
 ---
 
 # Retention
 
-Suggested retention policy:
+Suggested policy:
 
-* Active Translation revisions: retain while the Page exists
-* Approved revisions: durable retention
-* User corrections: durable retention
-* Superseded revisions: retain according to history policy
-* Failed execution records: retain for diagnostics
-* Raw provider responses: short-lived unless debugging is enabled
-* Token and cost metadata: retain according to observability policy
-* Stale translations: retain when useful for comparison or rollback
-* Partial streaming output: discard unless explicitly retained
-* Imported translations: retain according to source and licensing policy
+* active Translation revisions: durable while source relationship remains relevant,
+* approved revisions: durable,
+* user corrections: durable,
+* superseded revisions: according to history policy,
+* stale revisions: retain when useful for history/rollback,
+* failed executions: diagnostic retention,
+* raw provider responses: short-lived unless required,
+* token/cost metadata: observability retention,
+* streaming buffers: normally ephemeral.
 
-Deleting a Translation must not leave dangling Presentation, Rendering, Review or Export references.
+Retention MUST NOT depend universally on Page lifetime.
 
 ---
 
 # Privacy
 
-Translations may contain private or copyrighted content.
+Translation may contain copyrighted, private, or sensitive content.
 
-Requirements:
+Default rules SHOULD include:
 
-* Do not log source or translated text by default.
-* Send only required context to remote providers.
-* Respect provider retention and training policies.
-* Protect user corrections and reading history.
-* Allow local-only translation profiles where supported.
-* Support temporary sessions without durable persistence.
-* Do not expose glossary or character context across Projects.
-* Exclude raw content from general metrics and traces.
-* Apply deletion and retention policies consistently to provider payloads.
+* do not log source or translated text,
+* send only necessary provider context,
+* honor provider retention/training policies,
+* support local-only profiles when available,
+* support temporary non-persistent sessions,
+* isolate Project context,
+* exclude raw content from ordinary metrics and traces.
 
-Telemetry should prefer:
-
-* Identifiers
-* Hashes
-* Text lengths
-* Language pairs
-* Durations
-* Token counts
-* Status
-* Error categories
-
----
-
-# Idempotency
-
-Translation creation must be idempotent for the same logical input.
-
-An idempotency key may include:
-
-* Page ID
-* Translation Group Revision
-* Source Hash
-* Configuration Hash
-* Target Language
-* Translation Type
-* Request Purpose
-
-Repeated execution with the same key should not create uncontrolled duplicate Translation records.
-
-A new valid result may create:
-
-* No change, when content is identical
-* A new alternative
-* A new Translation Revision
-* A provider comparison record
-
-The selected behavior must be explicit.
-
----
-
-# Concurrency
-
-Several translation operations may run concurrently.
-
-Concurrency rules:
-
-1. Every operation reads an immutable source snapshot.
-2. Every operation preserves a request revision.
-3. Late results are checked before publication.
-4. Results based on stale source cannot become active automatically.
-5. User corrections cannot be overwritten silently.
-6. Only one active revision change is committed atomically.
-7. Duplicate executions are reconciled idempotently.
-8. Cancellation prevents publication when possible.
-
-Example:
+Telemetry SHOULD prefer:
 
 ```text
-Request A starts from Text Block Revision 2
-Request B starts from Text Block Revision 3
-
-Request A finishes after Request B
-
-Request A result:
-- may be retained as historical
-- must not replace the Revision 3 result
+translationId
+revisionId
+hash
+language pair
+text length
+duration
+token usage
+status
+error category
 ```
-
----
-
-# Reconciliation
-
-Translations may require reconciliation after Text Block regeneration.
-
-Possible outcomes:
-
-| Outcome          | Description                                                  |
-| ---------------- | ------------------------------------------------------------ |
-| `preserved`      | Source identity and revision compatibility remain valid      |
-| `stale`          | Logical source remains but input changed                     |
-| `remapped`       | Translation is safely associated with reconciled Text Blocks |
-| `split_required` | One previous translation must map to several new blocks      |
-| `merge_required` | Several previous translations may map to one new block       |
-| `orphaned`       | No valid source relationship remains                         |
-| `superseded`     | A new translation replaces the previous logical result       |
-
-Automatic remapping must require strong evidence.
-
-Ambiguous reconciliation should request review rather than silently attach a Translation to the wrong Text Block.
 
 ---
 
 # Events
 
-Typical domain events include:
+Translation domain events SHOULD represent durable Translation state changes.
 
-* `TranslationRequested`
-* `TranslationGenerationStarted`
-* `TranslationGenerated`
-* `TranslationValidated`
-* `TranslationPostProcessed`
-* `TranslationReady`
-* `TranslationFailed`
-* `TranslationRevisionCreated`
-* `TranslationActivated`
-* `TranslationCorrected`
-* `TranslationReviewRequested`
-* `TranslationApproved`
-* `TranslationRejected`
-* `TranslationMarkedStale`
-* `TranslationRegenerationRequested`
-* `TranslationSuperseded`
-* `TranslationAlternativeAdded`
-* `TranslationMappingFailed`
-* `TranslationInvalidated`
+Examples:
 
-Events should carry:
+```text
+TranslationCreated
+TranslationRevisionPublished
+TranslationActivated
+TranslationCorrected
+TranslationMarkedStale
+TranslationSuperseded
+TranslationInvalidated
+TranslationArchived
+TranslationRestored
+```
 
-* Translation ID
-* Translation Revision
-* Page ID
-* Source references
-* Target language
-* Status
-* Correlation identifiers
-* Changed-field metadata
+Review events belong to Review.
 
-Events should not contain raw provider credentials or large prompt payloads.
+Execution events belong to Translation execution/runtime:
 
-Raw source and target text should be excluded from general event envelopes unless the consumer contract explicitly requires them.
+```text
+TranslationExecutionRequested
+TranslationExecutionStarted
+TranslationExecutionFailed
+TranslationExecutionCompleted
+```
+
+The fact that an execution event contains `translationId` does not make it a core Translation-domain lifecycle event.
 
 ---
 
-# Processing Example: Comic Page
+# Error Conditions
+
+Stable Translation-domain errors MAY include:
 
 ```text
-Three ordered Text Blocks
-        │
-        ▼
-Create Translation Group Revision 1
-        │
-        ▼
-Build source and context snapshots
-        │
-        ▼
-Generate Chinese-to-Vietnamese translation
-        │
-        ▼
-Normalize provider response
-        │
-        ▼
-Map output to each Text Block
-        │
-        ▼
-Validate language and completeness
-        │
-        ▼
-Create Translation Revisions
-        │
-        ▼
-Publish active translations
-        │
-        ▼
-Show results in side panel
+TRANSLATION_NOT_FOUND
+TRANSLATION_SOURCE_INVALID
+TRANSLATION_SOURCE_REVISION_MISMATCH
+TRANSLATION_MAPPING_INVALID
+TRANSLATION_TARGET_LANGUAGE_INVALID
+TRANSLATION_REVISION_CONFLICT
+TRANSLATION_REVISION_STALE
+TRANSLATION_REVISION_SUPERSEDED
+TRANSLATION_ACTIVATION_INVALID
+TRANSLATION_CONFIGURATION_INVALID
+TRANSLATION_CONTEXT_INVALID
+TRANSLATION_GLOSSARY_INVALID
+TRANSLATION_APPROVED_REVISION_PROTECTED
 ```
 
-Each output remains associated with its original speech bubble or text region.
+Provider/runtime failures remain execution errors rather than Translation-domain errors unless they prevent domain publication.
 
 ---
 
-# Processing Example: Browser Novel
+# Aggregate Boundary
+
+Recommended Translation aggregate:
 
 ```text
-Ordered paragraph Text Blocks
-        │
-        ▼
-Group paragraphs by context and size
-        │
-        ▼
-Translate each group incrementally
-        │
-        ▼
-Map output to paragraph identifiers
-        │
-        ▼
-Validate paragraph coverage
-        │
-        ▼
-Create Translation Revisions
-        │
-        ▼
-Render formatted Vietnamese paragraphs
+Translation Aggregate
+
+owns
+    Translation identity
+    Project scope
+    target language
+    translation purpose
+    lifecycle
+    active revision selection
+    Translation revision history references
 ```
 
-Paragraph grouping improves context without losing paragraph-level identity.
+Translation Revision owns immutable translated-content state.
+
+Translation does NOT own:
+
+```text
+TextBlock state
+Page state
+Provider execution
+Retry state
+Review workflow
+Presentation state
+Rendering state
+Cache implementation
+```
 
 ---
 
-# Processing Example: User Correction
+# Transactional Consistency
+
+Domain operations:
 
 ```text
-Active Translation Revision 2
-        │
-        ▼
-User corrects a character name
-        │
-        ▼
-Create Translation Revision 3
-        │
-        ├── Parent: Revision 2
-        ├── Source: user_edit
-        └── Change: terminology
-        │
-        ▼
-Activate Revision 3
-        │
-        ▼
-Invalidate affected render output
-        │
-        ▼
-Create optional glossary candidate
+Activate Translation Revision
+    -> Translation transaction
 ```
 
-The provider-generated revision remains available in history.
+```text
+Publish validated Revision
+    -> Translation publication transaction
+```
+
+```text
+Mark Translation stale
+    -> Translation domain operation
+```
+
+Execution:
+
+```text
+Call provider
+    -> Translation Execution
+```
+
+Review:
+
+```text
+Approve Translation
+    -> Review workflow + exact revision reference
+```
+
+Presentation:
+
+```text
+Display Translation
+    -> Presentation workflow
+```
+
+These SHOULD NOT require one global transaction.
 
 ---
 
 # Architecture Invariants
 
-1. Every Translation belongs to exactly one Page.
-2. A Translation references at least one primary Text Block.
-3. Every source reference includes an exact Text Block revision.
-4. Translation never modifies source Text Block content.
-5. Translation identity and Translation revision are separate.
-6. Published Translation Revisions are immutable.
-7. Every processing-significant translation change creates a new revision.
-8. Target language is part of logical Translation identity.
-9. Provider-specific formats never enter the domain directly.
-10. Only normalized and validated output becomes a Translation Revision.
-11. Grouped translation preserves deterministic output mapping.
-12. Context sources do not become primary output sources automatically.
-13. User corrections have higher authority than generated output.
-14. Approved revisions cannot be overwritten silently.
-15. Stale results cannot become active automatically.
-16. Source and configuration hashes are deterministic.
-17. Retry attempts do not create duplicate logical Translations.
-18. Cancelled operations do not publish active revisions.
-19. Late results cannot overwrite newer compatible revisions.
-20. Cache results must pass the same domain validation as live results.
-21. Presentation and Rendering reference exact Translation Revisions.
-22. Presentation formatting does not mutate canonical Translation content.
-23. Provider identity is lineage metadata, not business identity.
-24. Translation history remains traceable.
-25. Translation records cannot outlive their Page.
-26. Cross-Project context and glossary references are prohibited.
-27. Raw source and translated text are excluded from logs by default.
-28. Exported immutable output remains linked to the revision used to create it.
+1. `translationId` represents stable logical Translation identity.
+
+2. Translation MUST belong to a valid Project/content scope.
+
+3. Translation is NOT required to belong to a Page.
+
+4. Every Translation references at least one primary TextBlock revision.
+
+5. Every primary source reference includes an exact TextBlock revision.
+
+6. Translation MUST NOT modify source TextBlock content.
+
+7. Translation identity and Translation revision are separate.
+
+8. Published Translation Revisions are immutable.
+
+9. Every processing-significant translated-content change creates a new revision.
+
+10. Target language is part of logical Translation identity.
+
+11. Provider-specific formats MUST NOT enter canonical Translation state directly.
+
+12. Only normalized and validated output may become a published generated Translation Revision.
+
+13. Grouped translation MUST preserve deterministic output mapping.
+
+14. Context sources MUST NOT automatically become primary output sources.
+
+15. User corrections have higher authority according to explicit policy.
+
+16. Approved/protected revisions MUST NOT be overwritten silently.
+
+17. Stale revisions MUST NOT become active automatically.
+
+18. Source and configuration hashes MUST be deterministic.
+
+19. Retry attempts MUST NOT create uncontrolled duplicate logical Translations.
+
+20. Cancelled executions MUST NOT publish active revisions.
+
+21. Late execution results MUST NOT overwrite newer incompatible state.
+
+22. Cache results MUST pass normal domain validation.
+
+23. Presentation and Rendering reference exact Translation Revisions.
+
+24. Presentation formatting MUST NOT mutate canonical Translation content.
+
+25. Provider identity is execution lineage, not Translation business identity.
+
+26. Translation history MUST remain traceable.
+
+27. Translation retention MUST NOT depend universally on Page lifetime.
+
+28. Cross-Project context references MUST follow explicit sharing policy and MUST NOT leak private Project context implicitly.
+
+29. Raw source and target content SHOULD be excluded from ordinary logs.
+
+30. Exported immutable output MUST remain linked to the exact Translation Revision used.
+
+31. Translation lifecycle MUST remain independent from Translation Execution lifecycle.
+
+32. Review status MUST apply to an exact Translation Revision and MUST NOT be inferred solely from Translation lifecycle.
+
+---
+
+# MVP Recommendation
+
+For CRAI MVP, Translation SHOULD support:
+
+* Simplified Chinese → Vietnamese,
+* English → Vietnamese,
+* TextBlock-revision input,
+* contextual grouping,
+* deterministic source mapping,
+* basic Translation Profile,
+* glossary application,
+* one active Translation per TextBlock + target language,
+* immutable Translation revisions,
+* manual correction,
+* stale detection,
+* idempotent publication,
+* cache compatibility,
+* side-panel Presentation,
+* basic validation and warnings.
+
+MVP MAY defer:
+
+* complex Translation variants,
+* formal approval workflow,
+* collaborative review,
+* advanced quality scoring,
+* complex split/merge reconciliation,
+* long-term provider-response storage,
+* automatic glossary learning,
+* Translation Memory interchange,
+* full provider-comparison history.
 
 ---
 
 # Open Decisions
 
-The following decisions should remain open until prototype validation:
+The following SHOULD remain open until prototype validation:
 
-* Whether one Translation record represents one Text Block or one Translation Group
-* Whether grouped requests create one group result plus child translations
-* How many alternatives should be retained
-* Whether raw provider output is stored by default
-* How long failed execution data is retained
-* Whether all user edits become durable revisions
-* Which quality checks run in the MVP
-* Whether low-confidence translations require automatic review
-* How glossary changes determine affected translations
-* Whether prompt-template changes invalidate existing translations
-* How much previous dialogue should be included as context
-* Whether translation cache is shared across Pages with identical content
-* Whether provider identity participates in cache compatibility
-* How sound effects should be translated
-* Whether literal and natural output should be generated together
-* How partial streaming output is presented
-* Whether automatic regeneration may replace unapproved output
-* How Text Block split and merge reconciliation should behave
-* Which correction types become glossary or memory candidates
-* Whether approved translations may be reused across repeated source content
-* How translation quality is measured without reliable reference translations
-
----
-
-# Recommended MVP Scope
-
-For the first CRAI MVP, Translation should support:
-
-* Simplified Chinese to Vietnamese
-* English to Vietnamese
-* Ordered Text Block input
-* Context-aware grouped translation
-* Deterministic source mapping
-* Basic Translation Profile
-* Basic glossary enforcement
-* One active Translation Revision per Text Block
-* Manual translation correction
-* Stale detection from source changes
-* Retry-safe idempotent publication
-* Translation cache
-* Side-panel presentation
-* Basic warnings and diagnostics
-
-The MVP may defer:
-
-* Multiple simultaneous alternatives
-* Formal approval workflow
-* Advanced quality scoring
-* Collaborative review
-* Translation memory exchange formats
-* Cross-device synchronization
-* Automatic glossary learning
-* Complex reconciliation after block split or merge
-* Full provider comparison history
-* Long-term raw response retention
+* whether TranslationGroup is durable or ephemeral,
+* whether one Translation can intentionally own multiple primary TextBlocks,
+* whether grouped execution always produces child Translations per TextBlock,
+* exact alternative/variant model,
+* raw provider-response retention,
+* quality-validation scope for MVP,
+* glossary dependency tracking granularity,
+* prompt-template impact on staleness,
+* context-window policy,
+* cache reuse across identical source TextBlocks,
+* provider identity in execution-cache compatibility,
+* sound-effect Translation policy,
+* literal vs natural multi-variant support,
+* partial streaming Presentation behavior,
+* automatic regeneration policy,
+* split/merge reconciliation,
+* Translation Memory candidate rules,
+* reuse of approved Translation across repeated source content.
 
 ---
 
 # Related Documents
 
-* README.md
-* PROJECT.md
-* BOOK.md
-* CHAPTER.md
-* PAGE.md
-* IMAGE.md
-* TEXT_BLOCK.md
-* LANGUAGE.md
-* GLOSSARY.md
-* CHARACTER.md
-* SESSION.md
-* PROFILE.md
+Domain:
+
+* `README.md`
+* `PROJECT.md`
+* `BOOK.md`
+* `CHAPTER.md`
+* `PAGE.md`
+* `IMAGE.md`
+* `TEXT_BLOCK.md`
+* `LANGUAGE.md`
+* `GLOSSARY.md`
+* `CHARACTER.md`
+* `SESSION.md`
+* `PROFILE.md`
+
+Architecture:
+
+* `docs/architecture/CAPABILITY_MAP.md`
+* `docs/architecture/OWNERSHIP_MAP.md`
 * `docs/architecture/STATE_MACHINE.md`
 * `docs/architecture/EVENT_BUS.md`
+* `docs/architecture/MODULE_DEPENDENCY.md`
 * `docs/architecture/DATA_FLOW.md`
+
+AI / Translation execution:
+
 * `docs/architecture/ai/PIPELINE.md`
 * `docs/architecture/ai/STAGES.md`
 * `docs/architecture/ai/REQUEST.md`
@@ -1681,3 +1688,5 @@ The MVP may defer:
 * `docs/architecture/ai/RETRY.md`
 * `docs/architecture/ai/FALLBACK.md`
 * `docs/architecture/ai/STREAMING.md`
+
+Module contracts remain authoritative for module-specific runtime ownership and execution behavior.
