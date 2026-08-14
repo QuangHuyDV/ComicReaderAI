@@ -1,473 +1,325 @@
-# 03-infrastructure/resource-manager/MODULE.md
+# Secret Management Module
 
-# Module: Resource Manager
-
-## Purpose
-
-Resource Manager chịu trách nhiệm quản lý toàn bộ tài nguyên (resource) mà CRAI sử dụng trong suốt vòng đời của ứng dụng.
-
-Khác với Configuration hay Scheduler, module này **không thực hiện nghiệp vụ** mà đóng vai trò là tầng điều phối và quản lý tài nguyên hệ thống nhằm đảm bảo:
-
-* Khởi tạo đúng thứ tự.
-* Chia sẻ resource dùng chung.
-* Quản lý lifecycle.
-* Giải phóng tài nguyên đúng lúc.
-* Theo dõi tình trạng hoạt động.
-* Ngăn rò rỉ tài nguyên (resource leak).
-* Hỗ trợ graceful shutdown.
-
-Đây là một trong những module hạ tầng cốt lõi mà hầu như mọi module khác đều phụ thuộc.
+> **Project:** CRAI
+> **Layer:** Infrastructure
+> **Module:** Secret Management
+> **Document:** Module Architecture
+> **Path:** `03-infrastructure/secret-management/MODULE.md`
+> **Version:** 0.1
+> **Status:** Architecture Draft
+> **Last Updated:** 2026-08-14
+> **Source of Truth:**
+>
+> - `doc/01-architecture/core/CAPABILITY_MAP.md`
+> - `doc/01-architecture/core/DATA_FLOW.md`
+> - `doc/03-infrastructure/configuration/MODULE.md`
+> - `doc/03-infrastructure/logging/MODULE.md`
+> - `doc/03-infrastructure/telemetry/MODULE.md`
 
 ---
 
-# Responsibilities
+## 1. Purpose
 
-## Resource Registration
+The Secret Management module provides CRAI with a unified, secure mechanism for storing and retrieving sensitive credentials and configuration values.
 
-Cho phép module khác đăng ký resource.
-
-Ví dụ:
-
-* OCR Engine
-* Translator Client
-* Browser Instance
-* Image Cache
-* Font Cache
-* HTTP Client
-* WebSocket Client
-* GPU Context
-* Database Connection
-* Thread Pool
-* Worker Pool
+It abstracts the underlying secret storage backend so that business modules and other infrastructure modules can access secrets through a stable interface without depending on a specific keystore implementation.
 
 ---
 
-## Resource Discovery
+## 2. Module Goal
 
-Cho phép module khác lấy resource đã được đăng ký.
+The module must:
 
-Ví dụ
+- prevent secrets from appearing in logs, events, or observable outputs;
+- allow secrets to be stored with associated policies (expiration, rotation);
+- allow secrets to be retrieved by authorized modules only;
+- support backend replacement without changing consumer code;
+- support proactive expiration detection;
+- support manual and scheduled rotation.
 
-Presentation cần:
+The primary optimization target is:
 
-```
-Renderer
-```
-
-Resource Manager trả về instance hiện có.
-
-Nếu chưa tồn tại:
-
-* tạo mới
-* hoặc báo lỗi
-* hoặc trả Lazy Resource
-
-tùy policy.
-
----
-
-## Lifecycle Management
-
-Quản lý toàn bộ vòng đời resource.
-
-```
-Created
-↓
-
-Initializing
-↓
-
-Ready
-↓
-
-Busy
-↓
-
-Idle
-↓
-
-Disposing
-↓
-
-Disposed
-```
-
-Resource Manager đảm bảo:
-
-* init đúng lúc
-* dispose đúng lúc
-* không dispose resource đang sử dụng
-* không tạo duplicate
-
----
-
-## Shared Resource Management
-
-Một số resource cần dùng chung.
-
-Ví dụ
-
-```
-HTTP Client
-
-GPU Context
-
-Translation Engine
-
-Playwright Browser
-
-Logger
-```
-
-Không nên tạo mới mỗi lần sử dụng.
-
-Resource Manager sẽ quản lý singleton hoặc pool tùy loại resource.
-
----
-
-## Resource Pool
-
-Một số resource có chi phí tạo cao.
-
-Ví dụ
-
-```
-OCR Worker
-
-Translator Worker
-
-Image Decoder
-
-Playwright Context
-
-AI Model Session
-```
-
-Resource Manager hỗ trợ:
-
-* acquire
-* release
-* timeout
-* maximum size
-* minimum idle
-* auto expand
-* auto shrink
-
----
-
-## Resource Health Monitoring
-
-Theo dõi tình trạng resource.
-
-Ví dụ
-
-```
-Healthy
-
-Busy
-
-Slow
-
-Disconnected
-
-Restarting
-
-Failed
-```
-
-Nếu resource lỗi:
-
-* restart
-* recreate
-* remove khỏi pool
-* notify Telemetry
-
----
-
-## Dependency Resolution
-
-Một số resource phụ thuộc resource khác.
-
-Ví dụ
-
-```
-Translator
-
-↓
-
-HTTP Client
-
-↓
-
-Configuration
-
-↓
-
-Logger
-```
-
-Resource Manager đảm bảo dependency được khởi tạo đúng thứ tự.
-
----
-
-## Graceful Shutdown
-
-Khi ứng dụng đóng:
-
-```
-Stop Scheduler
-
-↓
-
-Stop Workers
-
-↓
-
-Flush Cache
-
-↓
-
-Close Browser
-
-↓
-
-Close HTTP
-
-↓
-
-Release GPU
-
-↓
-
-Dispose Logger
-```
-
-Không để resource bị mất dữ liệu.
-
----
-
-## Memory Protection
-
-Theo dõi:
-
-* memory usage
-* object count
-* cache size
-* image buffer
-* OCR buffer
-* translation buffer
-
-Khi vượt ngưỡng:
-
-* release cache
-* shrink pool
-* GC hint
-* emit warning
-
----
-
-## Leak Detection
-
-Phát hiện:
-
-* resource không release
-* worker bị treo
-* browser context quên đóng
-* stream chưa dispose
-* file handle chưa close
-
----
-
-## Resource Statistics
-
-Thu thập:
-
-* active resources
-* idle resources
-* pool size
-* acquire count
-* release count
-* average lifetime
-* memory usage
-* failure count
-
-Telemetry sẽ sử dụng các thống kê này.
-
----
-
-# Out of Scope
-
-Không chịu trách nhiệm:
-
-* OCR
-* Translation
-* Rendering
-* Download
-* Storage
-* Scheduler
-* Event Bus
-* Logging
-* Telemetry
-
-Module chỉ quản lý lifecycle của các thành phần trên.
-
----
-
-# Public Responsibilities
-
-Resource Manager cung cấp:
-
-* register resource
-* unregister resource
-* acquire resource
-* release resource
-* resolve dependency
-* initialize
-* dispose
-* monitor health
-* collect statistics
-
----
-
-# Dependencies
-
-Required
-
-* Configuration
-* Logging
-* Event Bus
-* Telemetry
-
-Optional
-
-* Scheduler
-* Cache
-* Storage
-
----
-
-# Used By
-
-Hầu như toàn bộ hệ thống:
-
-* Presentation
-* OCR
-* Translation
-* Overlay
-* Automation
-* Browser
-* Downloader
-* Cache
-* AI
-* Export
-* Synchronization
-
----
-
-# Design Principles
-
-## Lazy Initialization
-
-Chỉ tạo resource khi cần.
-
----
-
-## Deterministic Lifecycle
-
-Lifecycle rõ ràng.
-
-Không tồn tại resource ở trạng thái không xác định.
-
----
-
-## Reusable Resources
-
-Ưu tiên tái sử dụng.
-
-Giảm:
-
-* startup time
-* memory
-* CPU
-* GPU
-
----
-
-## Isolation
-
-Resource lỗi không làm hỏng resource khác.
-
----
-
-## Fail Fast
-
-Khởi tạo thất bại phải báo ngay.
-
-Không tiếp tục với resource không hợp lệ.
-
----
-
-## Graceful Recovery
-
-Có thể:
-
-* recreate
-* restart
-* reconnect
-
-mà không cần khởi động lại toàn bộ ứng dụng.
-
----
-
-## Observable
-
-Mọi thay đổi lifecycle đều sinh metric và event để Logging và Telemetry theo dõi.
-
----
-
-# Typical Flow
-
-```
-Application Start
-        │
-        ▼
-Register Resources
-        │
-        ▼
-Resolve Dependencies
-        │
-        ▼
-Initialize Resources
-        │
-        ▼
-Ready
-        │
-        ▼
-Acquire / Release
-        │
-        ▼
-Health Monitoring
-        │
-        ▼
-Graceful Shutdown
-        │
-        ▼
-Dispose All Resources
+```text
+secure, auditable credential access
+without coupling business logic to a specific secret storage technology
 ```
 
 ---
 
-# Future Extensions
+## 3. Architectural Position
 
-Có thể mở rộng thêm:
+```text
+Business Module (e.g., Translation, Provider Management)
+    ↓ ResolveSecret(secretId)
+Secret Management
+    ↓ delegates to
+Secret Store Adapter
+    ↓ implements
+Local Keystore / OS Keychain / Remote Vault
+```
 
-* Dynamic Resource Plugin
-* Distributed Resource Manager
-* Remote Worker Pool
-* GPU Pool
-* AI Model Pool
-* Multi-browser Pool
-* Adaptive Pool Scaling
-* Resource Priority Scheduling
-* Memory Pressure Response
-* Automatic Resource Migration
+Composition Root owns:
+
+- Secret Management construction;
+- backend adapter wiring;
+- startup decryption key injection;
+- shutdown flush and lock.
+
+---
+
+## 4. Terminology
+
+### 4.1 Secret
+
+A `Secret` is a named, protected value that must not be exposed outside the module boundary.
+
+Examples:
+
+```text
+translation.api-key.deepl
+ai.api-key.openai
+storage.encryption-key.v1
+provider.oauth-token.google
+```
+
+### 4.2 Secret Identity
+
+A `SecretId` uniquely identifies a secret within the CRAI secret registry.
+
+Convention:
+
+```text
+{domain}.{type}.{qualifier}
+```
+
+Examples:
+
+```text
+translation.api-key.deepl
+ai.api-key.openai
+provider.oauth-token.google
+storage.encryption-key.v1
+```
+
+### 4.3 Secret Value
+
+A `SecretValue` is the resolved, decrypted credential value.
+
+It must be treated as sensitive throughout its lifetime.
+
+It must not be logged, serialized to disk, or published as an event.
+
+### 4.4 Secret Policy
+
+A `SecretPolicy` describes the lifecycle rules for a secret:
+
+```text
+SecretPolicy {
+    expiresAt          optional expiration time
+    rotationInterval   optional scheduled rotation period
+    accessScope        which modules may resolve this secret
+    storageMode        LOCAL_KEYSTORE | OS_KEYCHAIN | REMOTE_VAULT
+}
+```
+
+### 4.5 Secret Store Adapter
+
+A `SecretStoreAdapter` is the implementation interface connecting Secret Management to a specific backend:
+
+```text
+LocalEncryptedKeystore
+OSKeychain (Windows Credential Manager / macOS Keychain)
+RemoteVault (HashiCorp Vault / AWS Secrets Manager)
+```
+
+---
+
+## 5. Responsibilities
+
+### 5.1 Secret Registration
+
+Secret Management allows authorized callers to register a secret definition before its value is stored.
+
+Registration includes:
+
+- secret identity;
+- description;
+- policy.
+
+### 5.2 Secret Storage
+
+Secret Management encrypts and persists the secret value to the configured backend.
+
+The plaintext value must not be retained in memory longer than necessary.
+
+### 5.3 Secret Resolution
+
+Secret Management decrypts and returns the secret value to authorized callers.
+
+Resolution must:
+
+- verify the caller's access scope;
+- check expiration;
+- return a typed `SecretValue` not a raw string.
+
+### 5.4 Secret Revocation
+
+Secret Management deletes or marks a secret as revoked.
+
+Revoked secrets must not be resolvable.
+
+### 5.5 Expiration Monitoring
+
+Secret Management tracks expiration timestamps and emits `SecretExpirationWarning` events before expiry.
+
+Proactive monitoring reduces runtime failures caused by unexpected secret expiration.
+
+### 5.6 Rotation Support
+
+Secret Management supports manual rotation via `RotateSecret()` and scheduled rotation via Scheduler integration.
+
+Rotation must:
+
+- generate or accept a new value;
+- update the stored secret atomically where possible;
+- emit a `SecretRotated` event;
+- not interrupt active usage of the old value within a configured grace period.
+
+### 5.7 Access Control
+
+Every `ResolveSecret()` call must be validated against the `accessScope` defined in the secret policy.
+
+Unauthorized access must be rejected with `SECRET_ACCESS_DENIED`, not `SECRET_NOT_FOUND`.
+
+### 5.8 Backend Abstraction
+
+Secret Management delegates all persistence operations to a `SecretStoreAdapter`.
+
+Consumers have no direct access to the adapter.
+
+---
+
+## 6. Non-Responsibilities
+
+### 6.1 Authentication logic
+
+Secret Management provides credentials.
+
+It does not authenticate with external providers.
+
+Authentication belongs to the consuming module.
+
+### 6.2 Network calls
+
+Secret Management does not call translation or AI APIs.
+
+### 6.3 Configuration management
+
+Application configuration belongs to the Configuration module.
+
+Secret Management stores only sensitive values.
+
+### 6.4 Business rules
+
+Secret Management has no knowledge of how credentials are used in business workflows.
+
+---
+
+## 7. Core Components
+
+```text
+Secret Registry
+Secret Store Adapter (interface)
+Local Encrypted Keystore (default adapter)
+OS Keychain Adapter (optional)
+Remote Vault Adapter (future)
+Encryption Layer
+Access Policy Enforcer
+Expiration Monitor
+Rotation Manager
+Secret Audit Log (structured, value-free)
+```
+
+---
+
+## 8. Data Model
+
+Conceptual structure:
+
+```text
+SecretDefinition {
+    secretId
+    description
+    policy
+    createdAt
+    updatedAt
+    status     ACTIVE | EXPIRED | REVOKED
+}
+
+SecretValue {
+    secretId
+    value      (sensitive, in-memory only)
+    resolvedAt
+    expiresAt
+}
+```
+
+---
+
+## 9. Security Invariants
+
+The following must hold at all times:
+
+```text
+1. Secret values never appear in log output.
+2. Secret values never appear in Event Bus payloads.
+3. Secret values are never written to disk in plaintext.
+4. Access to a secret requires a valid, authorized caller identity.
+5. Revoked secrets cannot be resolved.
+6. Expired secrets trigger a warning before expiry, not a silent failure.
+```
+
+---
+
+## 10. MVP Scope
+
+MVP includes:
+
+- local encrypted keystore;
+- manual `StoreSecret` and `ResolveSecret`;
+- API key support for translation and AI providers;
+- expiration warning;
+- structured audit log (no values);
+- Scheduler integration for expiration checks.
+
+Deferred:
+
+- OS Keychain adapter;
+- Remote Vault adapter;
+- automatic secret rotation;
+- hardware security module support;
+- distributed secret management.
+
+---
+
+## 11. Dependencies
+
+Required:
+
+- Configuration (load backend config, encryption key source)
+- Logging (structured audit, no values)
+- Telemetry (access count, expiration metrics)
+
+Optional:
+
+- Scheduler (periodic expiration and rotation checks)
+
+---
+
+## 12. Used By
+
+- Provider Management (resolve provider API keys)
+- Translation (resolve translation provider credentials)
+- Storage (resolve database encryption key)
+- AI (resolve AI provider API key)
+- Plugin system (resolve plugin credentials)

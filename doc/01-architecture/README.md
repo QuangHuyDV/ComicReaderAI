@@ -1,38 +1,77 @@
-# Runtime Architecture
+# Architecture Documentation
 
-This directory defines how CRAI executes asynchronous and real-time work while the application is running.
+> **Project:** CRAI
+> **Directory:** `doc/01-architecture/`
+> **Status:** Complete and consistency-reviewed
 
-Runtime architecture transforms product flows into safe, responsive, and resource-aware execution.
-
----
-
-## Runtime Scope
-
-The runtime is responsible for:
-
-- creating and coordinating processing pipelines
-- buffering work between stages
-- scheduling workers
-- canceling obsolete work
-- applying backpressure
-- managing transient resources
-- preventing stale results
-- maintaining UI responsiveness
-- collecting execution metrics
-
-The runtime does not implement:
-
-- OCR algorithms
-- translation logic
-- layout detection algorithms
-- UI component rendering
-- persistent database schemas
-
-Those responsibilities belong to their respective modules.
+This directory contains the system-wide architecture of CRAI, organized by concern.
 
 ---
 
-## Core Runtime Principles
+## Purpose
+
+`01-architecture/` defines **how CRAI is designed** — its capabilities, domain models, processing flows, runtime execution model, and all major subsystem architectures.
+
+It does not define business module contracts or infrastructure implementation details.
+Those belong to `02-modules/` and `03-infrastructure/` respectively.
+
+---
+
+## Architecture Overview
+
+CRAI architecture is organized into four primary layers:
+
+```text
+Business Modules      (02-modules/)
+    → own business meaning and contracts
+
+Runtime               (01-architecture/runtime/)
+    → owns execution orchestration and authority
+
+Infrastructure        (03-infrastructure/)
+    → provides technical capabilities
+
+Storage               (02-modules/storage/)
+    → owns persistence mechanisms
+```
+
+The domain model and all cross-cutting concerns are defined here in `01-architecture/`.
+
+---
+
+## Subdirectory Map
+
+| Subdirectory | Responsibility |
+|---|---|
+| `core/` | Foundational architecture: capability map, data flow, event bus, state machine, event conventions |
+| `domain/` | Domain model definitions: Book, Chapter, Page, Session, Translation, Workspace, Glossary, Character, Language, Profile |
+| `flows/` | End-to-end product flows: Screen Comic, Structured Text, Content Change, Reading Session |
+| `modules/` | Module map, ownership map, module dependency rules |
+| `runtime/` | Runtime execution model: pipeline, queue, scheduler, cancellation, memory, threading, resource lifecycle, performance |
+| `ocr/` | OCR subsystem architecture: pipeline, detection, recognition, preprocessing, postprocessing, reading order, layout, quality, providers |
+| `text/` | Text model and segmentation architecture |
+| `translate/` | Translation architecture: translation model, context model |
+| `ai/` | AI subsystem architecture: pipeline, models, prompts, routing, context, cache, cost control, fallback, safety, streaming |
+| `plugin/` | Plugin system: API, lifecycle, discovery, configuration, dependency, registry, security, versioning |
+
+---
+
+## Reading Order
+
+For a new contributor or AI session working on architecture:
+
+1. `core/README.md`
+2. `core/CAPABILITY_MAP.md`
+3. `domain/README.md`
+4. `flows/README.md`
+5. `modules/MODULE_MAP.md`
+6. `runtime/README.md`
+
+Read `ocr/`, `text/`, `translate/`, `ai/`, `plugin/` only when working on those specific areas.
+
+---
+
+## Core Architecture Principles
 
 ### Latest Valid Revision Wins
 
@@ -62,94 +101,39 @@ Reusable work should be resolved before expensive processing begins.
 
 Only a complete and currently valid presentation model may update the UI.
 
-### Obsolete Work Is Disposable
-
-The runtime is optimized for current user experience, not for completing every task.
-
 ---
 
-## Runtime Document Order
+## Runtime Execution Model
 
-Read and design runtime behavior in the following order:
-
-1. `PIPELINE_RUNTIME.md`
-2. `WORK_QUEUE.md`
-3. `SCHEDULER.md`
-4. `CANCELLATION.md`
-5. `CACHE_POLICY.md`
-6. `MEMORY_MODEL.md`
-7. `THREADING_MODEL.md`
-8. `RESOURCE_LIFECYCLE.md`
-9. `PERFORMANCE_MODEL.md`
-
-Each document depends on decisions from the documents above it.
-
----
-
-## Document Responsibilities
-
-| Document | Primary question |
-|---|---|
-| `PIPELINE_RUNTIME.md` | How does work move through runtime stages? |
-| `WORK_QUEUE.md` | Where is pending work held between stages? |
-| `SCHEDULER.md` | Which work is selected for execution? |
-| `CANCELLATION.md` | How is obsolete or interrupted work stopped? |
-| `CACHE_POLICY.md` | Which results are reusable and how are they validated? |
-| `MEMORY_MODEL.md` | Which runtime data remains in memory and for how long? |
-| `THREADING_MODEL.md` | Which execution contexts run each type of work? |
-| `RESOURCE_LIFECYCLE.md` | When are runtime resources created and disposed? |
-| `PERFORMANCE_MODEL.md` | What latency and resource budgets must be maintained? |
-
----
-
-## High-Level Runtime Model
+The canonical Runtime v2 execution flow:
 
 ```text
-Source Observation
+Stable Business Content / Intent
     ↓
-Revision Creation
+ExecutionScope
     ↓
-Pipeline Coordinator
+ExecutionRevision
     ↓
-Stage Queue
+BusinessExecutionPlan
     ↓
-Scheduler
+WorkItem
     ↓
-Worker
+Attempt
     ↓
-Immutable Result
+Candidate Runtime Artifact
     ↓
-Revision Validation
+Execution Authority Validation
     ↓
-Next Stage or Presentation
+Ownership Transfer
+    ↓
+Runtime Artifact Publication
+    ↓
+Business Acceptance
+    ↓
+Presentation Commit
 ```
 
----
-
-## Queue Payload Rule
-
-Queues should normally store lightweight work descriptors rather than large payloads.
-
-Example:
-
-```text
-Work Item
-├── Session ID
-├── Revision ID
-├── Stage
-├── Priority
-├── Attempt
-└── Cancellation Handle
-```
-
-Large data such as images and OCR results should be accessed through revision-scoped storage.
-
-This rule reduces:
-
-- payload copying
-- queue memory usage
-- synchronization cost
-- accidental mutable sharing
+Full details in `runtime/README.md` and `runtime/PIPELINE_RUNTIME.md`.
 
 ---
 
@@ -176,22 +160,10 @@ Runtime must not contain domain-specific processing logic.
 
 ## Current Status
 
-Completed drafts:
+Architecture phase: **Complete and consistency-reviewed**
 
-- `PIPELINE_RUNTIME.md`
-- `WORK_QUEUE.md`
+All subdirectories have been reviewed and synchronized with the Runtime v2 model.
 
-Next document:
+The next project phase is: **Technology Selection**
 
-```text
-SCHEDULER.md
-```
-
-The scheduler will define:
-
-- revision priority
-- stage priority
-- worker assignment
-- obsolete-work elimination
-- retry decisions
-- fairness between active sessions
+See `.meta/PROJECT_STATUS.md` for full status details.

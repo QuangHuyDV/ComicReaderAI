@@ -1,6 +1,6 @@
 # CRAI — Project Status
 
-**Updated:** 2026-08-09  
+**Updated:** 2026-08-14  
 **Project key:** `CRAI`  
 **Document role:** Current project entry point and architecture status summary  
 **Approach:** Documentation First · Capability First · User Experience First · Provider Independent
@@ -75,12 +75,12 @@ Implementation
 | Project Foundation | ✅ Complete | AI, project and module rules are established. |
 | Product Analysis | ✅ Complete | Product goal, scope and primary user journeys are defined. |
 | Capability Analysis | ✅ Complete | Core capabilities and their boundaries are documented. |
-| Core Architecture | ✅ Complete | State, event, dependency and data-flow foundations are defined. |
-| Runtime Architecture | ✅ Runtime v2 synchronized | Runtime documents now use the same WorkItem/Attempt, authority, Candidate Artifact, ownership, publication, Lease, retention and disposal model. |
-| Business Module Architecture | 🟡 Final Runtime v2 synchronization | Recognition, Presentation, Reading Session, Capture, Preferences, Diagnostics and UI Adapter have been re-reviewed against the current ownership/runtime model. Text Processing is the remaining business-module review area before the final cross-module consistency sweep. |
-| Detailed Recognition/OCR Architecture | ✅ Runtime v2 synchronized | The detailed `doc/01-architecture/ocr/` set has been reconciled with the Recognition module boundary: internal OCR phases remain Attempt-local, provider-independent and non-authoritative for scheduling/retry/publication. |
+| Core Architecture | ✅ Complete and consistency-reviewed | `01-architecture/` has completed the current project-wide consistency sweep, including core, flow, models/domain, modules, text, translate, AI, plugin, Runtime and OCR architecture. |
+| Runtime Architecture | ✅ Runtime v2 synchronized | Runtime documents use the canonical ExecutionScope/ExecutionRevision/WorkItem/Attempt model together with execution authority, Runtime Artifact publication, Resource Lease, retention, disposal and process-topology boundaries. |
+| Business Module Architecture | ✅ Complete and Runtime v2 synchronized | The current `02-modules/` business-module set has completed the standard document sets and the Runtime v2 ownership synchronization pass. |
+| Detailed Recognition/OCR Architecture | ✅ Complete and Runtime v2 synchronized | The full `01-architecture/ocr/` set has been reviewed and synchronized with Recognition, Runtime v2, Provider/Routing, Cache, Resource and Business Pipeline boundaries. |
 | Infrastructure Architecture | ✅ Complete | All seven Infrastructure modules (Configuration, Secret Management, Event Bus, Logging, Telemetry, Scheduler and Resource Manager) have completed the standard document set. |
-| Technology Selection | ⏳ Not Started | Frameworks, languages, providers and process topology have not been finalized. |
+| Technology Selection | ⏳ Next Phase | Core language/runtime, desktop/UI framework, persistence technology, OCR/Recognition implementation candidates, provider/framework feasibility, build, dependency enforcement, packaging and testing stack have not yet been selected. Architectural process topology is already defined. |
 | Implementation | ❌ Not Started | No production implementation has begun. |
 
 The current business-module set is:
@@ -103,9 +103,11 @@ Capabilities such as OCR, preprocessing, region detection, layout interpretation
 Runtime v2 is now the shared execution language across the project:
 
 ```text
-Session
+ApplicationInstance
     ↓
-Revision
+ExecutionScope
+    ↓
+ExecutionRevision
     ↓
 BusinessExecutionPlan
     ↓
@@ -113,16 +115,22 @@ WorkItem
     ↓
 Attempt
     ↓
-Candidate Artifact
+Candidate Runtime Artifact
     ↓
-Authority Validation
+Execution Authority Validation
     ↓
 Ownership Transfer
     ↓
-Artifact Publication
+Runtime Artifact Publication
+    ↓
+Business Acceptance
     ↓
 Presentation Commit
 ```
+
+`ReadingSession` remains a Business/Domain concept and must not be conflated with `ExecutionScope`.
+
+Domain or business revisions must not be conflated with `ExecutionRevision`.
 
 ---
 
@@ -187,31 +195,45 @@ Recognition does not own WorkItem/Attempt lifecycle, retry, cancellation authori
 
 ## 1.5 Current Focus
 
-The immediate focus is now the final project-wide Runtime v2 consistency and legacy-terminology review before technology selection.
+The project-wide architecture consistency sweep is complete for the current documentation baseline.
 
-Current priorities are:
-
-1. run the final cross-module terminology/ownership consistency sweep
-2. review current-authority architecture summaries for stale pre-Runtime-v2 wording
-3. remove direct stage-completion chaining or module-owned execution authority where still present
-4. verify all current module boundaries remain consistent with Runtime v2 and Event Convention
-5. begin technology selection after this consistency sweep is closed
-
-The core business modules now synchronized with Runtime v2 include:
+Completed at this point:
 
 ```text
-Capture
-Recognition
-Text Processing
-Translation
-Presentation
-Reading Session
-Preferences
-Diagnostics
-UI Adapter
+.meta / Project Foundation
+    → complete
+
+01-architecture
+    → complete and consistency-reviewed
+
+02-modules
+    → complete and Runtime v2 synchronized
+
+03-infrastructure
+    → complete
+
+Runtime Process Topology
+    → architecture defined
 ```
 
-Detailed `doc/01-architecture/ocr/` synchronization is also complete.
+The next project phase is:
+
+```text
+Technology Selection
+```
+
+Immediate priorities:
+
+1. select the core implementation language and runtime;
+2. select the desktop application and UI framework;
+3. determine persistence/database technology for the local-first MVP;
+4. evaluate OCR/Recognition implementation candidates against the current OCR and Recognition contracts;
+5. evaluate Translation/AI provider and framework feasibility without coupling business architecture to a provider;
+6. select build, packaging and dependency-enforcement approach;
+7. select the testing stack and define MVP acceptance/test strategy;
+8. convert the selected technologies into an MVP Implementation Plan before production coding begins.
+
+Technology Selection must preserve the already-defined architecture instead of redesigning module ownership around framework limitations.
 
 ## 1.6 Architecture Snapshot
 
@@ -236,9 +258,11 @@ UI Adapter
 The current Runtime execution flow is:
 
 ```text
-Stable Content
+Stable Business Content / Intent
     ↓
-Revision
+ExecutionScope
+    ↓
+ExecutionRevision
     ↓
 BusinessExecutionPlan
     ↓
@@ -246,13 +270,15 @@ WorkItem
     ↓
 Attempt
     ↓
-Candidate Artifact
+Candidate Runtime Artifact
     ↓
-Authority Validation
+Execution Authority Validation
     ↓
 Ownership Transfer
     ↓
-Artifact Publication
+Runtime Artifact Publication
+    ↓
+Business Acceptance
     ↓
 Presentation Commit
 ```
@@ -261,12 +287,12 @@ Supporting Runtime responsibilities:
 
 ```text
 Runtime Control
-├── revision and execution authority
-├── WorkItem and Attempt lifecycle
-├── scheduling and bounded queues
-├── cancellation and retry coordination
-├── Candidate acceptance and publication coordination
-└── terminal outcome acceptance
+├── ExecutionScope / ExecutionRevision authority
+├── WorkItem and Attempt execution coordination
+├── execution-authority validation
+├── cancellation authority
+├── Runtime Artifact publication coordination
+└── accepted Runtime execution outcome coordination
 
 Resource Manager / Artifact Store
 ├── Resource registration
@@ -316,30 +342,34 @@ Pipeline stages and module events never independently decide the next business s
 
 ## 1.7 How to Resume
 
-For current architecture work, continue from `doc/02-modules/text-processing/` and apply the same Runtime v2 ownership review used for the recently synchronized modules.
+For current CRAI work, do not restart the Architecture, Business Module or Infrastructure documentation passes unless a concrete Technology Selection finding exposes a real architectural conflict.
 
-For Recognition/OCR detail work, treat `doc/02-modules/recognition/` as the module boundary and `doc/01-architecture/ocr/` as its internal architecture.
+Current entry point:
 
-## Resume the Project
+```text
+Technology Selection
+```
 
-For a new AI session or a new contributor, use this reading order:
+Recommended resume order:
 
-1. read this Executive Summary
-2. read the current architecture snapshot and module progress sections
-3. read the specific module or architecture document relevant to the assigned task
-4. read Development History only when the reason behind a decision is needed
-5. verify the current-focus and next-task sections before proposing new work
-6. for Recognition work, read `doc/02-modules/recognition/README.md` before the detailed `doc/01-architecture/ocr/` documents
+1. read this Executive Summary;
+2. treat `01-architecture/`, `02-modules/` and `03-infrastructure/` as the current architecture baseline;
+3. read the architecture/module documents relevant to the technology being evaluated;
+4. record technology decisions explicitly rather than silently embedding them into architecture documents;
+5. use Development History only when the reason behind an existing decision is needed;
+6. after the technology stack is selected, create the MVP Implementation Plan and test/acceptance plan.
 
-Do not rely on an older progress entry when it conflicts with the current summary or the latest detailed module documents.
+For Recognition/OCR work, `02-modules/recognition/` remains the business-module boundary and `01-architecture/ocr/` remains its detailed internal architecture.
+
+Do not rely on older progress entries when they conflict with this Executive Summary or with the latest authoritative detailed documents.
 
 When updating this file:
 
-- keep the Executive Summary limited to current truth
-- move chronological changes into Development History
-- avoid duplicating detailed contracts already owned by module documents
-- update status, current focus and next task together
-- mark uncertainty explicitly instead of guessing
+- keep the Executive Summary limited to current truth;
+- move chronological changes into Development History;
+- avoid duplicating detailed contracts already owned by module or architecture documents;
+- update status, current focus and next task together;
+- mark uncertainty explicitly instead of guessing.
 
 ---
 
@@ -4853,40 +4883,73 @@ UI Adapter does not orchestrate the business pipeline, does not own Runtime retr
 
 # 40. Current Next Step
 
+The project-wide legacy terminology, ownership and Runtime v2 consistency review is complete for the current baseline.
+
+Current completed documentation baseline:
+
+```text
+.meta
+    → Project foundation complete
+
+01-architecture
+    → complete and consistency-reviewed
+
+02-modules
+    → complete and Runtime v2 synchronized
+
+03-infrastructure
+    → complete
+
+Process Topology
+    → architectural model defined
+```
+
 Continue with:
 
 ```text
-Project-Wide Legacy Terminology and Ownership Review
-```
-
-Recommended review order:
-
-```text
-1. doc/01-architecture/core/
-2. doc/01-architecture/modules/
-3. doc/01-architecture/runtime/ current-authority summaries
-4. doc/02-modules/ cross-module references
-5. .meta/ current project/module maps
-6. PROJECT_STATUS.md final consistency pass
-```
-
-Primary goals:
-
-1. remove stale pre-Runtime-v2 terminology from current-authority sections;
-2. verify no business module owns WorkItem/Attempt, retry, cancellation, Scheduler admission or Artifact publication authority;
-3. verify no direct stage-completion event chain implicitly controls downstream execution;
-4. verify Preferences/Diagnostics/UI Adapter use the new contextual and adapter boundaries;
-5. verify historical sections remain historical and are not mistaken for current architecture;
-6. close the architecture consistency sweep before Technology Selection.
-
-After this review:
-
-```text
 Technology Selection
-    ↓
-Process Topology
-    ↓
-Provider / Framework feasibility
-    ↓
-Implementation Planning
 ```
+
+Recommended Technology Selection order:
+
+```text
+1. Core Language / Runtime
+2. Desktop Application + UI Framework
+3. Persistence / Local Database
+4. OCR / Recognition Implementation Candidates
+5. Translation / AI Provider and Framework Feasibility
+6. Build / Packaging / Distribution
+7. Dependency Enforcement
+8. Testing Stack
+9. MVP Acceptance and Test Strategy
+10. MVP Implementation Plan
+```
+
+Technology decisions must be evaluated against the existing architecture, especially:
+
+- desktop-first UX and Side Panel-first MVP;
+- Text Flow preferred over OCR when structured text is available;
+- provider-independent Business Architecture;
+- serializable public boundaries;
+- immutable Runtime Artifacts;
+- ExecutionScope / ExecutionRevision / WorkItem / Attempt identity;
+- Runtime-owned execution authority, scheduling, cancellation and same-work Retry;
+- AI Routing / Recovery ownership of alternative execution and Fallback;
+- Business Pipeline Orchestration ownership of downstream Business progression;
+- explicit Resource ownership, Lease, retention and disposal;
+- privacy-by-default and local-only constraints;
+- predominantly single-process MVP with optional isolation only where a concrete dependency requires it.
+
+After Technology Selection:
+
+```text
+Provider / Framework Feasibility Validation
+    ↓
+MVP Acceptance + Test Strategy
+    ↓
+MVP Implementation Plan
+    ↓
+Implementation
+```
+
+Production implementation should not begin by reopening completed architecture groups. Any architecture change discovered during Technology Selection must be recorded as a targeted decision with a concrete reason and impact scope.
