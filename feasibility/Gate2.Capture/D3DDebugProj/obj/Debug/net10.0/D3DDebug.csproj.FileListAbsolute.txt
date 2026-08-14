@@ -1,0 +1,15 @@
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\bin\Debug\net10.0\D3DDebug.exe
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\bin\Debug\net10.0\D3DDebug.deps.json
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\bin\Debug\net10.0\D3DDebug.runtimeconfig.json
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\bin\Debug\net10.0\D3DDebug.dll
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\bin\Debug\net10.0\D3DDebug.pdb
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\D3DDebug.GeneratedMSBuildEditorConfig.editorconfig
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\D3DDebug.AssemblyInfoInputs.cache
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\D3DDebug.AssemblyInfo.cs
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\D3DDebug.csproj.CoreCompileInputs.cache
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\D3DDebug.sourcelink.json
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\D3DDebug.dll
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\refint\D3DDebug.dll
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\D3DDebug.pdb
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\D3DDebug.genruntimeconfig.cache
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate2.Capture\D3DDebugProj\obj\Debug\net10.0\ref\D3DDebug.dll
