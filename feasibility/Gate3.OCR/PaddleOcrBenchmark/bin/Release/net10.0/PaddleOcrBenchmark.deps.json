@@ -1,0 +1,291 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "PaddleOcrBenchmark/1.0.0": {
+        "dependencies": {
+          "OpenCvSharp4": "4.13.0.20260627",
+          "OpenCvSharp4.runtime.win": "4.13.0.20260627",
+          "Sdcb.PaddleInference.runtime.win64.openblas": "3.3.1.70",
+          "Sdcb.PaddleOCR": "3.3.1",
+          "Sdcb.PaddleOCR.Models.Local": "3.3.1",
+          "SkiaSharp": "4.151.1",
+          "SkiaSharp.NativeAssets.Win32": "4.151.1"
+        },
+        "runtime": {
+          "PaddleOcrBenchmark.dll": {}
+        }
+      },
+      "OpenCvSharp4/4.13.0.20260627": {
+        "runtime": {
+          "lib/net8.0/OpenCvSharp.dll": {
+            "assemblyVersion": "4.0.0.0",
+            "fileVersion": "4.0.0.0"
+          }
+        }
+      },
+      "OpenCvSharp4.runtime.win/4.13.0.20260627": {
+        "runtimeTargets": {
+          "runtimes/win-x64/native/OpenCvSharpExtern.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/opencv_videoio_ffmpeg4130_64.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "2025.12.0.0"
+          }
+        }
+      },
+      "Sdcb.PaddleInference/3.3.1": {
+        "runtime": {
+          "lib/net8.0/Sdcb.PaddleInference.dll": {
+            "assemblyVersion": "3.3.1.0",
+            "fileVersion": "3.3.1.0"
+          }
+        }
+      },
+      "Sdcb.PaddleInference.runtime.win64.openblas/3.3.1.70": {
+        "runtimeTargets": {
+          "runtimes/win-x64/native/common.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/onnxruntime.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "1.11.22.423"
+          },
+          "runtimes/win-x64/native/onnxruntime_providers_shared.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/openblas.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/paddle2onnx.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/paddle_inference_c.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/phi.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          }
+        }
+      },
+      "Sdcb.PaddleOCR/3.3.1": {
+        "dependencies": {
+          "OpenCvSharp4": "4.13.0.20260627",
+          "Sdcb.PaddleInference": "3.3.1",
+          "YamlDotNet": "16.3.0"
+        },
+        "runtime": {
+          "lib/netstandard2.0/Sdcb.PaddleOCR.dll": {
+            "assemblyVersion": "3.3.1.0",
+            "fileVersion": "3.3.1.0"
+          }
+        }
+      },
+      "Sdcb.PaddleOCR.Models.Local/3.3.1": {
+        "dependencies": {
+          "Sdcb.PaddleOCR": "3.3.1",
+          "Sdcb.PaddleOCR.Models.LocalV5": "3.0.0",
+          "Sdcb.PaddleOCR.Models.Shared": "2.7.0.1",
+          "YamlDotNet": "16.3.0"
+        },
+        "runtime": {
+          "lib/netstandard2.0/Sdcb.PaddleOCR.Models.Local.dll": {
+            "assemblyVersion": "3.3.1.0",
+            "fileVersion": "3.3.1.0"
+          }
+        }
+      },
+      "Sdcb.PaddleOCR.Models.LocalV5/3.0.0": {
+        "runtime": {
+          "lib/netstandard2.0/Sdcb.PaddleOCR.Models.LocalV5.dll": {
+            "assemblyVersion": "3.0.0.0",
+            "fileVersion": "3.0.0.0"
+          }
+        }
+      },
+      "Sdcb.PaddleOCR.Models.Shared/2.7.0.1": {
+        "runtime": {
+          "lib/netstandard2.0/Sdcb.PaddleOCR.Models.Shared.dll": {
+            "assemblyVersion": "2.7.0.1",
+            "fileVersion": "2.7.0.1"
+          }
+        }
+      },
+      "SkiaSharp/4.151.1": {
+        "dependencies": {
+          "SkiaSharp.NativeAssets.Win32": "4.151.1",
+          "SkiaSharp.NativeAssets.macOS": "4.151.1"
+        },
+        "runtime": {
+          "lib/net10.0/SkiaSharp.dll": {
+            "assemblyVersion": "4.151.0.0",
+            "fileVersion": "4.151.1.0"
+          }
+        }
+      },
+      "SkiaSharp.NativeAssets.macOS/4.151.1": {
+        "runtimeTargets": {
+          "runtimes/osx/native/libSkiaSharp.dylib": {
+            "rid": "osx",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          }
+        }
+      },
+      "SkiaSharp.NativeAssets.Win32/4.151.1": {
+        "runtimeTargets": {
+          "runtimes/win-arm64/native/libSkiaSharp.dll": {
+            "rid": "win-arm64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-arm64/native/libSkiaSharp.pdb": {
+            "rid": "win-arm64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/libSkiaSharp.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/libSkiaSharp.pdb": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x86/native/libSkiaSharp.dll": {
+            "rid": "win-x86",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x86/native/libSkiaSharp.pdb": {
+            "rid": "win-x86",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          }
+        }
+      },
+      "YamlDotNet/16.3.0": {
+        "runtime": {
+          "lib/net8.0/YamlDotNet.dll": {
+            "assemblyVersion": "16.0.0.0",
+            "fileVersion": "16.3.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "PaddleOcrBenchmark/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "OpenCvSharp4/4.13.0.20260627": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-nYk95jkyYY9f0sF5KqZ3OB1SWkmqsfV7eN0ROiQds/rxpSn0v1G0QIedMbwuqbdPhvQnOIG2DDmpkLnHEJMh8Q==",
+      "path": "opencvsharp4/4.13.0.20260627",
+      "hashPath": "opencvsharp4.4.13.0.20260627.nupkg.sha512"
+    },
+    "OpenCvSharp4.runtime.win/4.13.0.20260627": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-POIxR+CTpwHJIdam6wd8U2fprWv5QnIUw50jw79WEGb37He3T1h11SdtwSj9p2PLSfrzonMjO2t71wqi5uFsoQ==",
+      "path": "opencvsharp4.runtime.win/4.13.0.20260627",
+      "hashPath": "opencvsharp4.runtime.win.4.13.0.20260627.nupkg.sha512"
+    },
+    "Sdcb.PaddleInference/3.3.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-HHH+006iIA/NANcJLoQhrT5nlC1T2j600aZ1r+0Y+eoI+lucMkvIbtLww8zRB0rGtW6bsuukLnoaUpmBOLjRKQ==",
+      "path": "sdcb.paddleinference/3.3.1",
+      "hashPath": "sdcb.paddleinference.3.3.1.nupkg.sha512"
+    },
+    "Sdcb.PaddleInference.runtime.win64.openblas/3.3.1.70": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-Kb2nmehU1L6jOkkCzjyvhm1W1kLnicUoq3yq4euRTCVJUnEfBFUlIrVkoq2wAoW8u0nHLFKYKdF6H1Mm+yuZMQ==",
+      "path": "sdcb.paddleinference.runtime.win64.openblas/3.3.1.70",
+      "hashPath": "sdcb.paddleinference.runtime.win64.openblas.3.3.1.70.nupkg.sha512"
+    },
+    "Sdcb.PaddleOCR/3.3.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-G2rUVdPtyOp5FHosuo/w9SKmynLnxxgIACv9Hz+YZLFsUakGZfxL8exIrFirRImqjhW9xgKNu/r866cwK1MFEw==",
+      "path": "sdcb.paddleocr/3.3.1",
+      "hashPath": "sdcb.paddleocr.3.3.1.nupkg.sha512"
+    },
+    "Sdcb.PaddleOCR.Models.Local/3.3.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-PJUl3SGde5oybRiZc/CU4fkH3yeEiQ1AHuZW2UuhmY3yPxnB7Hjf/UTbWZlDvjQyBQB1hybYC2/YXPyay9UN/g==",
+      "path": "sdcb.paddleocr.models.local/3.3.1",
+      "hashPath": "sdcb.paddleocr.models.local.3.3.1.nupkg.sha512"
+    },
+    "Sdcb.PaddleOCR.Models.LocalV5/3.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-1eOr6jFrPKbntiHtiEJ0R93d8ptzgOj8z6sV5xvVoQkKnAo1LP9avg6TAVDnpQidzEeYUjYYgO3G//QJBIbZ6w==",
+      "path": "sdcb.paddleocr.models.localv5/3.0.0",
+      "hashPath": "sdcb.paddleocr.models.localv5.3.0.0.nupkg.sha512"
+    },
+    "Sdcb.PaddleOCR.Models.Shared/2.7.0.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-b1h41loXb9w3sgcXRBMtsMPkYI1bN/r+eKpKkFrsopEdUpUQXNRhr2GZ0SqNq9SbN7YzMacVTE4H1O6hBZqx0A==",
+      "path": "sdcb.paddleocr.models.shared/2.7.0.1",
+      "hashPath": "sdcb.paddleocr.models.shared.2.7.0.1.nupkg.sha512"
+    },
+    "SkiaSharp/4.151.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-FNlVsGZ9to3o9pObVqhIZanHjUGOoPb/Zxk5svCSLMJnKwxPKV7sIJrjs9BpB/jF3j9OdsaMOb4cfwSJbjueSw==",
+      "path": "skiasharp/4.151.1",
+      "hashPath": "skiasharp.4.151.1.nupkg.sha512"
+    },
+    "SkiaSharp.NativeAssets.macOS/4.151.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-nLXwdhi0oB7pqqNLbSOLX+FIZQOMAU/yFPspzcDTJjTmPbMWyp0JWyeVj8sFJ/cweurEfT0J/lvfgdXX2EFHXA==",
+      "path": "skiasharp.nativeassets.macos/4.151.1",
+      "hashPath": "skiasharp.nativeassets.macos.4.151.1.nupkg.sha512"
+    },
+    "SkiaSharp.NativeAssets.Win32/4.151.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-G+nln30ZX2ZuhH+ungf6x/QMXCje38KTS0VTfQeMyeY8uyMBmsZwFz2D30ZxUjZqsVbEIcaC2bsYF65876s4Yg==",
+      "path": "skiasharp.nativeassets.win32/4.151.1",
+      "hashPath": "skiasharp.nativeassets.win32.4.151.1.nupkg.sha512"
+    },
+    "YamlDotNet/16.3.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-SgMOdxbz8X65z8hraIs6hOEdnkH6hESTAIUa7viEngHOYaH+6q5XJmwr1+yb9vJpNQ19hCQY69xbFsLtXpobQA==",
+      "path": "yamldotnet/16.3.0",
+      "hashPath": "yamldotnet.16.3.0.nupkg.sha512"
+    }
+  }
+}

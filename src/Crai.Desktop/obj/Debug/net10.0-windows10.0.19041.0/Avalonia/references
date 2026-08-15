@@ -23,11 +23,36 @@ C:\Users\Admin\.nuget\packages\avalonia.win32\12.1.1\lib\net10.0\Avalonia.Win32.
 C:\Users\Admin\.nuget\packages\avalonia.x11\12.1.1\lib\net10.0\Avalonia.X11.dll
 C:\Users\Admin\.nuget\packages\avaloniaui.diagnosticssupport\2.2.3\lib\net10.0\AvaloniaUI.DiagnosticsSupport.Avalonia.dll
 C:\Users\Admin\.nuget\packages\communitytoolkit.mvvm\8.4.2\lib\net8.0-windows10.0.17763\CommunityToolkit.Mvvm.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\ref\Crai.Application.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\ref\Crai.Domain.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Infrastructure\obj\Debug\net10.0\ref\Crai.Infrastructure.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.Capture\obj\Debug\net10.0\ref\Crai.Modules.Capture.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.Diagnostics\obj\Debug\net10.0\ref\Crai.Modules.Diagnostics.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.Preferences\obj\Debug\net10.0\ref\Crai.Modules.Preferences.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.Presentation\obj\Debug\net10.0\ref\Crai.Modules.Presentation.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.ProviderMgmt\obj\Debug\net10.0\ref\Crai.Modules.ProviderMgmt.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.Recognition\obj\Debug\net10.0-windows10.0.19041.0\ref\Crai.Modules.Recognition.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.Storage\obj\Debug\net10.0\ref\Crai.Modules.Storage.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.TextProcessing\obj\Debug\net10.0\ref\Crai.Modules.TextProcessing.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.Translation\obj\Debug\net10.0\ref\Crai.Modules.Translation.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Modules.UiAdapter\obj\Debug\net10.0\ref\Crai.Modules.UiAdapter.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Platform.Windows\obj\Debug\net10.0\ref\Crai.Platform.Windows.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Runtime\obj\Debug\net10.0\ref\Crai.Runtime.dll
 C:\Users\Admin\.nuget\packages\harfbuzzsharp\8.3.1.3\lib\net8.0-windows10.0.19041\HarfBuzzSharp.dll
 C:\Users\Admin\.nuget\packages\microcom.runtime\0.11.6\lib\net8.0\MicroCom.Runtime.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\Microsoft.CSharp.dll
-C:\Users\Admin\.nuget\packages\microsoft.extensions.dependencyinjection.abstractions\8.0.0\lib\net8.0\Microsoft.Extensions.DependencyInjection.Abstractions.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.configuration.abstractions\9.0.2\lib\net9.0\Microsoft.Extensions.Configuration.Abstractions.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.configuration.binder\9.0.2\lib\net9.0\Microsoft.Extensions.Configuration.Binder.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.configuration\9.0.2\lib\net9.0\Microsoft.Extensions.Configuration.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.configuration.fileextensions\9.0.2\lib\net9.0\Microsoft.Extensions.Configuration.FileExtensions.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.configuration.json\9.0.2\lib\net9.0\Microsoft.Extensions.Configuration.Json.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.dependencyinjection.abstractions\9.0.2\lib\net9.0\Microsoft.Extensions.DependencyInjection.Abstractions.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.dependencyinjection\9.0.2\lib\net9.0\Microsoft.Extensions.DependencyInjection.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.fileproviders.abstractions\9.0.2\lib\net9.0\Microsoft.Extensions.FileProviders.Abstractions.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.fileproviders.physical\9.0.2\lib\net9.0\Microsoft.Extensions.FileProviders.Physical.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.filesystemglobbing\9.0.2\lib\net9.0\Microsoft.Extensions.FileSystemGlobbing.dll
 C:\Users\Admin\.nuget\packages\microsoft.extensions.logging.abstractions\8.0.0\lib\net8.0\Microsoft.Extensions.Logging.Abstractions.dll
+C:\Users\Admin\.nuget\packages\microsoft.extensions.primitives\9.0.2\lib\net9.0\Microsoft.Extensions.Primitives.dll
 C:\Users\Admin\.nuget\packages\microsoft.io.recyclablememorystream\3.0.1\lib\net6.0\Microsoft.IO.RecyclableMemoryStream.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\Microsoft.VisualBasic.Core.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\Microsoft.VisualBasic.dll
@@ -36,8 +61,10 @@ C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\Micr
 C:\Users\Admin\.nuget\packages\microsoft.windows.sdk.net.ref\10.0.19041.57\lib\net8.0\Microsoft.Windows.SDK.NET.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\mscorlib.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\netstandard.dll
-C:\Users\Admin\.nuget\packages\sharpgen.runtime.com\2.4.2-beta\lib\net9.0\SharpGen.Runtime.COM.dll
-C:\Users\Admin\.nuget\packages\sharpgen.runtime\2.4.2-beta\lib\net9.0\SharpGen.Runtime.dll
+C:\Users\Admin\.nuget\packages\serilog\4.0.1\lib\net8.0\Serilog.dll
+C:\Users\Admin\.nuget\packages\serilog.formatting.compact\3.0.0\lib\net8.0\Serilog.Formatting.Compact.dll
+C:\Users\Admin\.nuget\packages\serilog.sinks.console\6.0.0\lib\net8.0\Serilog.Sinks.Console.dll
+C:\Users\Admin\.nuget\packages\serilog.sinks.file\6.0.0\lib\net8.0\Serilog.Sinks.File.dll
 C:\Users\Admin\.nuget\packages\skiasharp\3.119.4\ref\net10.0-windows10.0.19041\SkiaSharp.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.AppContext.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Buffers.dll
@@ -159,6 +186,7 @@ C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\Syst
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Security.Cryptography.Encoding.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Security.Cryptography.OpenSsl.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Security.Cryptography.Primitives.dll
+C:\Users\Admin\.nuget\packages\system.security.cryptography.protecteddata\9.0.2\lib\net9.0\System.Security.Cryptography.ProtectedData.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Security.Cryptography.X509Certificates.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Security.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Security.Principal.dll
@@ -199,9 +227,5 @@ C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\Syst
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Xml.XPath.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Xml.XPath.XDocument.dll
 C:\Users\Admin\.nuget\packages\tmds.dbus.protocol\0.94.1\lib\net9.0\Tmds.DBus.Protocol.dll
-C:\Users\Admin\.nuget\packages\vortice.direct3d11\3.8.3\lib\net10.0\Vortice.Direct3D11.dll
-C:\Users\Admin\.nuget\packages\vortice.directx\3.8.3\lib\net10.0\Vortice.DirectX.dll
-C:\Users\Admin\.nuget\packages\vortice.dxgi\3.8.3\lib\net10.0\Vortice.DXGI.dll
-C:\Users\Admin\.nuget\packages\vortice.mathematics\2.1.0\lib\net10.0-windows10.0.19041\Vortice.Mathematics.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\WindowsBase.dll
 C:\Users\Admin\.nuget\packages\microsoft.windows.sdk.net.ref\10.0.19041.57\lib\net8.0\WinRT.Runtime.dll

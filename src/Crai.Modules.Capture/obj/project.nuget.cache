@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "dgSpecHash": "ZnoXCv4SJKQ=",
+  "success": true,
+  "projectFilePath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Capture\\Crai.Modules.Capture.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Admin\\.nuget\\packages\\avalonia\\12.1.1\\avalonia.12.1.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\avalonia.buildservices\\11.3.2\\avalonia.buildservices.11.3.2.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\avalonia.remote.protocol\\12.1.1\\avalonia.remote.protocol.12.1.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\microcom.runtime\\0.11.6\\microcom.runtime.0.11.6.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\9.0.2\\microsoft.extensions.dependencyinjection.abstractions.9.0.2.nupkg.sha512"
+  ],
+  "logs": []
+}

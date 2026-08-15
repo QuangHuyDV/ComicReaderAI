@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "QJhwF53Glqc=",
+  "success": true,
+  "projectFilePath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Application\\Crai.Application.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Admin\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\9.0.2\\microsoft.extensions.dependencyinjection.abstractions.9.0.2.nupkg.sha512"
+  ],
+  "logs": []
+}

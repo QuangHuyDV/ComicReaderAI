@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Crai.Desktop")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4fecda1c7455f3f6078de9c294d62c2d5f364278")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+96ca784e0b30215287729846b976fff4ad0f64c2")]
 [assembly: System.Reflection.AssemblyProductAttribute("Crai.Desktop")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Crai.Desktop")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

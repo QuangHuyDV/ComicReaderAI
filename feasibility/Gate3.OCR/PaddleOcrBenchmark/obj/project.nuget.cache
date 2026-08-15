@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "dgSpecHash": "JCXx72rnpV8=",
+  "success": true,
+  "projectFilePath": "F:\\mydata\\myproject\\ComicReaderAI\\feasibility\\Gate3.OCR\\PaddleOcrBenchmark\\PaddleOcrBenchmark.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Admin\\.nuget\\packages\\opencvsharp4\\4.13.0.20260627\\opencvsharp4.4.13.0.20260627.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\opencvsharp4.runtime.win\\4.13.0.20260627\\opencvsharp4.runtime.win.4.13.0.20260627.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\sdcb.paddleinference\\3.3.1\\sdcb.paddleinference.3.3.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\sdcb.paddleinference.runtime.win64.openblas\\3.3.1.70\\sdcb.paddleinference.runtime.win64.openblas.3.3.1.70.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\sdcb.paddleocr\\3.3.1\\sdcb.paddleocr.3.3.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\sdcb.paddleocr.models.local\\3.3.1\\sdcb.paddleocr.models.local.3.3.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\sdcb.paddleocr.models.localv5\\3.0.0\\sdcb.paddleocr.models.localv5.3.0.0.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\sdcb.paddleocr.models.shared\\2.7.0.1\\sdcb.paddleocr.models.shared.2.7.0.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\skiasharp\\4.151.1\\skiasharp.4.151.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\skiasharp.nativeassets.win32\\4.151.1\\skiasharp.nativeassets.win32.4.151.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\yamldotnet\\16.3.0\\yamldotnet.16.3.0.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.19041.57\\microsoft.windows.sdk.net.ref.10.0.19041.57.nupkg.sha512"
+  ],
+  "logs": []
+}

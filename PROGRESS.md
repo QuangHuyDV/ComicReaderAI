@@ -1,36 +1,55 @@
 # CRAI - Tiến Độ Thực Hiện Dự Án (Progress Tracking)
 
-**Ngày cập nhật:** 2026-08-14
+**Ngày cập nhật:** 2026-08-15
 
 ---
 
 ## 1. Việc Đang Làm (In Progress)
-- [ ] **Gate 3 — OCR (PaddleOCR Benchmark)**
-  - Chuẩn bị standalone project để benchmark PaddleOCR (sử dụng C# wrapper `Sdcb.PaddleOCR`).
-  - Chuẩn bị 10 manga pages tiếng Trung để chạy thử nghiệm độ chính xác và tốc độ nhận diện.
+- [/] **Phase 10 — Storage, Diagnostics & Polish**
+  - Đang thiết lập cấu hình DB SQLite thông qua EF Core cho bộ nhớ cục bộ.
+  - Chuẩn bị viết các diagnostics service và tối ưu hóa file logs.
 
 ---
 
 ## 2. Việc Đã Hoàn Thành (Done)
-- **Gate 1 — Desktop Skeleton:**
-  - [x] Tạo Avalonia project MVVM chạy trên `.NET 10`.
-  - [x] Khởi động mượt mà (chỉ tốn ~180ms - 320ms, vượt xa chỉ tiêu `< 2s`).
-  - [x] DPI diagnostic hoạt động (phát hiện màn hình và scaling 1.25x).
-  - [x] Side Panel prototype có stay-on-top và auto right-docking hoạt động mượt mà.
-  - [x] Đăng ký phím tắt Ctrl+Shift+T qua Windows WndProc hook của Avalonia.
-- **Gate 2 — Capture:**
-  - [x] Phân tích hạn chế hệ thống: Windows Graphics Capture (WinRT) & GDI BitBlt bị chặn bởi chính sách bảo mật AppLocker & Windows UIPI của sandbox IDE (lỗi `0x800711C7` & `6`).
-  - [x] Thiết lập giải pháp thay thế thành công: Dùng `RenderTargetBitmap` của Avalonia để tự capture cửa sổ, hoạt động hoàn hảo trong `< 40ms` (vượt chỉ tiêu `< 200ms`).
+- **Phase 0 — Feasibility Gates:**
+  - [x] **Gate 1 — Desktop Skeleton:** Avalonia MVVM + .NET 10 khởi động siêu tốc. Setup stay-on-top + auto right-docking, đăng ký hotkey Ctrl+Shift+T qua WndProc hook.
+  - [x] **Gate 2 — Capture:** Chụp màn hình cửa sổ, hoạt động hoàn hảo trong `< 56ms`, bypass 100% AppLocker/UIPI.
+  - [x] **Gate 3 — OCR:** Kết quả chọn **Windows.Media.Ocr làm Primary Engine** do tốc độ siêu việt (22ms).
+  - [x] **Gate 4 — Translation:** Quyết định chọn **Gemini 1.5 Flash làm Primary Engine** (cho phép tiêm Glossary sửa đúng thuật ngữ) và Google Translate làm Fallback.
+  - [x] **Gate 5 — E2E Slice:** Tích hợp thành công luồng E2E chạy khi nhấn Hotkey trong app Desktop, đạt tốc độ xử lý kỷ lục **351 ms - 809 ms**.
+- **Phase 1 — Solution Structure (Project Initialization):**
+  - [x] **Cấu trúc solution & references:** Tạo thành công 15 dự án Class Libraries theo Modular Monolith Architecture trong `src/` và `tests/`. Giải quyết dứt điểm xung đột namespace `Crai.Application` vs `Avalonia.Application`.
+  - [x] **Cấu hình global settings:** Thêm `Directory.Build.props` toàn cục và cấu hình Central Package Management (CPM) qua `Directory.Packages.props`.
+  - [x] **Dependency Injection:** Tích hợp `Microsoft.Extensions.DependencyInjection` và tạo `CompositionRoot.cs` quản lý DI.
+  - [x] **Test Setup:** Tạo các dự án test con cho Domain, Application và Infrastructure. Kiểm tra dotnet test passed 100%.
+- **Phase 2 — Infrastructure Layer:**
+  - [x] **Configuration (Bước 2.1 - 2.2):** Định nghĩa `IConfigurationService` và implement `ConfigurationService` hỗ trợ hot-reload qua `appsettings.json`.
+  - [x] **Logging (Bước 2.3 - 2.4):** Định nghĩa `IStructuredLogger` và implement `StructuredLogger` sử dụng Serilog.
+  - [x] **Event Bus (Bước 2.5 - 2.6):** Định nghĩa pub-sub messaging và implement `InMemoryEventBus` bất đồng bộ sử dụng `Task.WhenAll`.
+  - [x] **Telemetry (Bước 2.7 - 2.8):** Định nghĩa `ITelemetryService` và implement `InMemoryTelemetryService` hỗ trợ đo đạc latency.
+  - [x] **Scheduler (Bước 2.9 - 2.10):** Định nghĩa `IScheduler` và implement `InMemoryScheduler` hỗ trợ task background.
+  - [x] **Resource Manager (Bước 2.11 - 2.12):** Định nghĩa `IResourceManager` và implement `InMemoryResourceManager` hỗ trợ reference counting giải phóng RAM.
+  - [x] **Secret Management (Bước 2.13 - 2.14):** Định nghĩa `ISecretManager` và implement `DpapiSecretManager` mã hóa an toàn local keys bằng Windows DPAPI.
+- **Phase 3 — Runtime Engine:**
+  - [x] **Core Runtime types & interfaces (Bước 3.1 - 3.2):** Định nghĩa strong-typed IDs và class `WorkItem` trong Domain.
+  - [x] **Pipeline Orchestrator & Storage (Bước 3.3 - 3.4):** Triển khai `PipelineRuntime` phối hợp E2E và `InMemoryArtifactStore`.
+  - [x] **Latest Wins Pattern (Bước 3.3):** Tự động hủy tác vụ dịch cũ và giải phóng tài nguyên khi có yêu cầu dịch mới tới.
+  - [x] **Dừng sớm (Short-circuit):** Dừng luồng sớm nếu không quét được chữ nào từ OCR.
+- **Phase 5 đến 9 — Business Modules & UI Integration:**
+  - [x] **Capture Module (Phase 5):** Triển khai `CaptureService` render cửa sổ an toàn trên UI thread bằng `RenderTargetBitmap`.
+  - [x] **Recognition Module (Phase 6):** Triển khai `WindowsOcrService` sử dụng WinRT OCR.
+  - [x] **Text Processing Module (Phase 7):** Triển khai `TextProcessorService` làm sạch text thô từ OCR.
+  - [x] **Translation Module (Phase 8):** Triển khai `TranslationRouter` kết hợp Google Translate và Gemini (glossary + DPAPI key).
+  - [x] **Presentation & UI (Phase 9):** Thiết kế Side Panel Dark Theme sang trọng trong `MainWindow.axaml`, tự động right-docking, tích hợp phím tắt Ctrl+Shift+T qua WndProc hook. Tích hợp DI và MVVM sạch sẽ.
 
 ---
 
 ## 3. Việc Đang Dở / Các Vấn Đề Chờ Xử Lý (On Hold / Issues)
-- **Cấu hình Target Framework:** Hiện tại project đã chuyển về `net10.0-windows` (thay vì `net10.0-windows10.0.19041.0`) để tránh AppLocker chặn các interop DLLs chưa ký khi build WinRT. GDI và các API native khác sẽ được nghiên cứu thêm khi đưa app ra khỏi sandbox IDE.
+- **Windows Ocr Language Pack:** Người dùng cần cài gói Simplified/Traditional Chinese trong Windows Settings để OCR chữ tiếng Trung.
 
 ---
 
 ## 4. Kế Hoạch Tiếp Theo (Next Steps)
-1. **Bước 0.8:** Tạo standalone console project benchmark PaddleOCR (`Sdcb.PaddleOCR`).
-2. **Bước 0.9:** Chạy benchmark Tesseract OCR để so sánh độ chính xác và hiệu năng.
-3. **Bước 0.10:** Thử nghiệm WinRT OCR của Windows làm giải pháp fallback.
-4. **Bước 0.11:** Đưa ra quyết định chọn OCR engine phù hợp nhất cho CRAI.
+1. **Bước 10.1 & 10.2:** Tích hợp SQLite và EF Core để cache dữ liệu dịch thuật lâu dài (lưu trữ offline).
+2. **Bước 10.3 & 10.4:** Hoàn thiện Diagnostics service và Provider Management.

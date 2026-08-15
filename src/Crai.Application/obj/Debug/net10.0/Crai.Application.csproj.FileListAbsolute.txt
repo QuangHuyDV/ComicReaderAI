@@ -1,0 +1,16 @@
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\bin\Debug\net10.0\Crai.Application.deps.json
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\bin\Debug\net10.0\Crai.Application.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\bin\Debug\net10.0\Crai.Application.pdb
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\bin\Debug\net10.0\Crai.Domain.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\bin\Debug\net10.0\Crai.Domain.pdb
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\Crai.Application.csproj.AssemblyReference.cache
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\Crai.Application.GeneratedMSBuildEditorConfig.editorconfig
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\Crai.Application.AssemblyInfoInputs.cache
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\Crai.Application.AssemblyInfo.cs
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\Crai.Application.csproj.CoreCompileInputs.cache
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\Crai.Application.sourcelink.json
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\Crai.App.5301FE30.Up2Date
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\Crai.Application.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\refint\Crai.Application.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\Crai.Application.pdb
+F:\mydata\myproject\ComicReaderAI\src\Crai.Application\obj\Debug\net10.0\ref\Crai.Application.dll

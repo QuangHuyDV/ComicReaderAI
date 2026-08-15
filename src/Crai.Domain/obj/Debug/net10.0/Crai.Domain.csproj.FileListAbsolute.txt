@@ -1,0 +1,12 @@
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\bin\Debug\net10.0\Crai.Domain.deps.json
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\bin\Debug\net10.0\Crai.Domain.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\bin\Debug\net10.0\Crai.Domain.pdb
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\Crai.Domain.GeneratedMSBuildEditorConfig.editorconfig
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\Crai.Domain.AssemblyInfoInputs.cache
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\Crai.Domain.AssemblyInfo.cs
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\Crai.Domain.csproj.CoreCompileInputs.cache
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\Crai.Domain.sourcelink.json
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\Crai.Domain.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\refint\Crai.Domain.dll
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\Crai.Domain.pdb
+F:\mydata\myproject\ComicReaderAI\src\Crai.Domain\obj\Debug\net10.0\ref\Crai.Domain.dll

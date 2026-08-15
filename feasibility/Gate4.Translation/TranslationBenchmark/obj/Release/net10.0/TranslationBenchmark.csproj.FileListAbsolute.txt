@@ -1,0 +1,15 @@
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\bin\Release\net10.0\TranslationBenchmark.exe
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\bin\Release\net10.0\TranslationBenchmark.deps.json
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\bin\Release\net10.0\TranslationBenchmark.runtimeconfig.json
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\bin\Release\net10.0\TranslationBenchmark.dll
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\bin\Release\net10.0\TranslationBenchmark.pdb
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\TranslationBenchmark.GeneratedMSBuildEditorConfig.editorconfig
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\TranslationBenchmark.AssemblyInfoInputs.cache
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\TranslationBenchmark.AssemblyInfo.cs
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\TranslationBenchmark.csproj.CoreCompileInputs.cache
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\TranslationBenchmark.sourcelink.json
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\TranslationBenchmark.dll
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\refint\TranslationBenchmark.dll
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\TranslationBenchmark.pdb
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\TranslationBenchmark.genruntimeconfig.cache
+F:\mydata\myproject\ComicReaderAI\feasibility\Gate4.Translation\TranslationBenchmark\obj\Release\net10.0\ref\TranslationBenchmark.dll

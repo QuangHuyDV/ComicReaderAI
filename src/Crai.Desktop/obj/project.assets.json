@@ -1,7 +1,7 @@
 {
   "version": 4,
   "targets": {
-    "net10.0-windows": {
+    "net10.0-windows10.0.19041.0": {
       "Avalonia/12.1.1": {
         "type": "package",
         "dependencies": {
@@ -334,12 +334,12 @@
       "CommunityToolkit.Mvvm/8.4.2": {
         "type": "package",
         "compile": {
-          "lib/net8.0/CommunityToolkit.Mvvm.dll": {
+          "lib/net8.0-windows10.0.17763/CommunityToolkit.Mvvm.dll": {
             "related": ".xml"
           }
         },
         "runtime": {
-          "lib/net8.0/CommunityToolkit.Mvvm.dll": {
+          "lib/net8.0-windows10.0.17763/CommunityToolkit.Mvvm.dll": {
             "related": ".xml"
           }
         },
@@ -350,16 +350,15 @@
       "HarfBuzzSharp/8.3.1.3": {
         "type": "package",
         "dependencies": {
-          "HarfBuzzSharp.NativeAssets.Win32": "8.3.1.3",
-          "HarfBuzzSharp.NativeAssets.macOS": "8.3.1.3"
+          "HarfBuzzSharp.NativeAssets.Win32": "8.3.1.3"
         },
         "compile": {
-          "lib/net8.0/HarfBuzzSharp.dll": {
+          "lib/net8.0-windows10.0.19041/HarfBuzzSharp.dll": {
             "related": ".pdb"
           }
         },
         "runtime": {
-          "lib/net8.0/HarfBuzzSharp.dll": {
+          "lib/net8.0-windows10.0.19041/HarfBuzzSharp.dll": {
             "related": ".pdb"
           }
         }
@@ -419,21 +418,6 @@
           }
         }
       },
-      "HarfBuzzSharp.NativeAssets.macOS/8.3.1.3": {
-        "type": "package",
-        "compile": {
-          "lib/net8.0/_._": {}
-        },
-        "runtime": {
-          "lib/net8.0/_._": {}
-        },
-        "runtimeTargets": {
-          "runtimes/osx/native/libHarfBuzzSharp.dylib": {
-            "assetType": "native",
-            "rid": "osx"
-          }
-        }
-      },
       "HarfBuzzSharp.NativeAssets.WebAssembly/8.3.1.3": {
         "type": "package",
         "compile": {
@@ -450,10 +434,10 @@
       "HarfBuzzSharp.NativeAssets.Win32/8.3.1.3": {
         "type": "package",
         "compile": {
-          "lib/net8.0/_._": {}
+          "lib/net8.0-windows10.0.19041/_._": {}
         },
         "runtime": {
-          "lib/net8.0/_._": {}
+          "lib/net8.0-windows10.0.19041/_._": {}
         },
         "runtimeTargets": {
           "runtimes/win-arm64/native/libHarfBuzzSharp.dll": {
@@ -491,20 +475,198 @@
           "lib/net8.0/MicroCom.Runtime.dll": {}
         }
       },
-      "Microsoft.Extensions.DependencyInjection.Abstractions/8.0.0": {
+      "Microsoft.Extensions.Configuration/9.0.2": {
         "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration.Abstractions": "9.0.2",
+          "Microsoft.Extensions.Primitives": "9.0.2"
+        },
         "compile": {
-          "lib/net8.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.dll": {
             "related": ".xml"
           }
         },
         "runtime": {
-          "lib/net8.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.dll": {
             "related": ".xml"
           }
         },
         "build": {
-          "buildTransitive/net6.0/_._": {}
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
+      "Microsoft.Extensions.Configuration.Abstractions/9.0.2": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.Primitives": "9.0.2"
+        },
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.Abstractions.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.Abstractions.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
+      "Microsoft.Extensions.Configuration.Binder/9.0.2": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration.Abstractions": "9.0.2"
+        },
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.Binder.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.Binder.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/netstandard2.0/Microsoft.Extensions.Configuration.Binder.targets": {}
+        }
+      },
+      "Microsoft.Extensions.Configuration.FileExtensions/9.0.2": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration": "9.0.2",
+          "Microsoft.Extensions.Configuration.Abstractions": "9.0.2",
+          "Microsoft.Extensions.FileProviders.Abstractions": "9.0.2",
+          "Microsoft.Extensions.FileProviders.Physical": "9.0.2",
+          "Microsoft.Extensions.Primitives": "9.0.2"
+        },
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.FileExtensions.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.FileExtensions.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
+      "Microsoft.Extensions.Configuration.Json/9.0.2": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration": "9.0.2",
+          "Microsoft.Extensions.Configuration.Abstractions": "9.0.2",
+          "Microsoft.Extensions.Configuration.FileExtensions": "9.0.2",
+          "Microsoft.Extensions.FileProviders.Abstractions": "9.0.2"
+        },
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.Json.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.Configuration.Json.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection/9.0.2": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2"
+        },
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.DependencyInjection.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.DependencyInjection.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions/9.0.2": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
+      "Microsoft.Extensions.FileProviders.Abstractions/9.0.2": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.Primitives": "9.0.2"
+        },
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.FileProviders.Abstractions.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.FileProviders.Abstractions.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
+      "Microsoft.Extensions.FileProviders.Physical/9.0.2": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.FileProviders.Abstractions": "9.0.2",
+          "Microsoft.Extensions.FileSystemGlobbing": "9.0.2",
+          "Microsoft.Extensions.Primitives": "9.0.2"
+        },
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.FileProviders.Physical.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.FileProviders.Physical.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
+      "Microsoft.Extensions.FileSystemGlobbing/9.0.2": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.FileSystemGlobbing.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.FileSystemGlobbing.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
         }
       },
       "Microsoft.Extensions.Logging.Abstractions/8.0.0": {
@@ -526,6 +688,22 @@
           "buildTransitive/net6.0/Microsoft.Extensions.Logging.Abstractions.targets": {}
         }
       },
+      "Microsoft.Extensions.Primitives/9.0.2": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.Primitives.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.Primitives.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
       "Microsoft.IO.RecyclableMemoryStream/3.0.1": {
         "type": "package",
         "compile": {
@@ -539,50 +717,77 @@
           }
         }
       },
-      "SharpGen.Runtime/2.4.2-beta": {
+      "Serilog/4.0.1": {
         "type": "package",
         "compile": {
-          "lib/net9.0/SharpGen.Runtime.dll": {}
+          "lib/net8.0/Serilog.dll": {
+            "related": ".xml"
+          }
         },
         "runtime": {
-          "lib/net9.0/SharpGen.Runtime.dll": {}
-        },
-        "build": {
-          "build/_._": {}
-        },
-        "buildMultiTargeting": {
-          "buildMultiTargeting/_._": {}
+          "lib/net8.0/Serilog.dll": {
+            "related": ".xml"
+          }
         }
       },
-      "SharpGen.Runtime.COM/2.4.2-beta": {
+      "Serilog.Formatting.Compact/3.0.0": {
         "type": "package",
         "dependencies": {
-          "SharpGen.Runtime": "2.4.2-beta"
+          "Serilog": "4.0.0"
         },
         "compile": {
-          "lib/net9.0/SharpGen.Runtime.COM.dll": {}
+          "lib/net8.0/Serilog.Formatting.Compact.dll": {
+            "related": ".xml"
+          }
         },
         "runtime": {
-          "lib/net9.0/SharpGen.Runtime.COM.dll": {}
+          "lib/net8.0/Serilog.Formatting.Compact.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Serilog.Sinks.Console/6.0.0": {
+        "type": "package",
+        "dependencies": {
+          "Serilog": "4.0.0"
         },
-        "build": {
-          "build/_._": {}
+        "compile": {
+          "lib/net8.0/Serilog.Sinks.Console.dll": {
+            "related": ".xml"
+          }
         },
-        "buildMultiTargeting": {
-          "buildMultiTargeting/_._": {}
+        "runtime": {
+          "lib/net8.0/Serilog.Sinks.Console.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Serilog.Sinks.File/6.0.0": {
+        "type": "package",
+        "dependencies": {
+          "Serilog": "4.0.0"
+        },
+        "compile": {
+          "lib/net8.0/Serilog.Sinks.File.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/Serilog.Sinks.File.dll": {
+            "related": ".xml"
+          }
         }
       },
       "SkiaSharp/3.119.4": {
         "type": "package",
         "dependencies": {
-          "SkiaSharp.NativeAssets.Win32": "3.119.4",
-          "SkiaSharp.NativeAssets.macOS": "3.119.4"
+          "SkiaSharp.NativeAssets.Win32": "3.119.4"
         },
         "compile": {
-          "ref/net10.0/SkiaSharp.dll": {}
+          "ref/net10.0-windows10.0.19041/SkiaSharp.dll": {}
         },
         "runtime": {
-          "lib/net10.0/SkiaSharp.dll": {
+          "lib/net10.0-windows10.0.19041/SkiaSharp.dll": {
             "related": ".pdb"
           }
         }
@@ -650,21 +855,6 @@
           }
         }
       },
-      "SkiaSharp.NativeAssets.macOS/3.119.4": {
-        "type": "package",
-        "compile": {
-          "lib/net10.0/_._": {}
-        },
-        "runtime": {
-          "lib/net10.0/_._": {}
-        },
-        "runtimeTargets": {
-          "runtimes/osx/native/libSkiaSharp.dylib": {
-            "assetType": "native",
-            "rid": "osx"
-          }
-        }
-      },
       "SkiaSharp.NativeAssets.WebAssembly/3.119.4": {
         "type": "package",
         "compile": {
@@ -681,10 +871,10 @@
       "SkiaSharp.NativeAssets.Win32/3.119.4": {
         "type": "package",
         "compile": {
-          "lib/net10.0/_._": {}
+          "lib/net10.0-windows10.0.19041/_._": {}
         },
         "runtime": {
-          "lib/net10.0/_._": {}
+          "lib/net10.0-windows10.0.19041/_._": {}
         },
         "runtimeTargets": {
           "runtimes/win-arm64/native/libSkiaSharp.dll": {
@@ -713,6 +903,22 @@
           }
         }
       },
+      "System.Security.Cryptography.ProtectedData/9.0.2": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/System.Security.Cryptography.ProtectedData.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/System.Security.Cryptography.ProtectedData.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
       "Tmds.DBus.Protocol/0.94.1": {
         "type": "package",
         "compile": {
@@ -726,87 +932,212 @@
           }
         }
       },
-      "Vortice.Direct3D11/3.8.3": {
-        "type": "package",
+      "Crai.Application/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
         "dependencies": {
-          "SharpGen.Runtime": "2.4.2-beta",
-          "Vortice.DXGI": "3.8.3"
+          "Crai.Domain": "1.0.0",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2"
         },
         "compile": {
-          "lib/net10.0/Vortice.Direct3D11.dll": {
-            "related": ".xml"
-          }
+          "bin/placeholder/Crai.Application.dll": {}
         },
         "runtime": {
-          "lib/net10.0/Vortice.Direct3D11.dll": {
-            "related": ".xml"
-          }
-        },
-        "build": {
-          "build/Vortice.Direct3D11.props": {}
-        },
-        "buildMultiTargeting": {
-          "buildMultiTargeting/Vortice.Direct3D11.props": {}
+          "bin/placeholder/Crai.Application.dll": {}
         }
       },
-      "Vortice.DirectX/3.8.3": {
-        "type": "package",
-        "dependencies": {
-          "SharpGen.Runtime": "2.4.2-beta",
-          "SharpGen.Runtime.COM": "2.4.2-beta",
-          "Vortice.Mathematics": "2.1.0"
-        },
+      "Crai.Domain/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
         "compile": {
-          "lib/net10.0/Vortice.DirectX.dll": {
-            "related": ".xml"
-          }
+          "bin/placeholder/Crai.Domain.dll": {}
         },
         "runtime": {
-          "lib/net10.0/Vortice.DirectX.dll": {
-            "related": ".xml"
-          }
-        },
-        "build": {
-          "build/_._": {}
-        },
-        "buildMultiTargeting": {
-          "buildMultiTargeting/_._": {}
+          "bin/placeholder/Crai.Domain.dll": {}
         }
       },
-      "Vortice.DXGI/3.8.3": {
-        "type": "package",
+      "Crai.Infrastructure/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
         "dependencies": {
-          "SharpGen.Runtime": "2.4.2-beta",
-          "Vortice.DirectX": "3.8.3"
+          "Crai.Application": "1.0.0",
+          "Microsoft.Extensions.Configuration": "9.0.2",
+          "Microsoft.Extensions.Configuration.Binder": "9.0.2",
+          "Microsoft.Extensions.Configuration.Json": "9.0.2",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2",
+          "Serilog": "4.0.1",
+          "Serilog.Formatting.Compact": "3.0.0",
+          "Serilog.Sinks.Console": "6.0.0",
+          "Serilog.Sinks.File": "6.0.0",
+          "System.Security.Cryptography.ProtectedData": "9.0.2"
         },
         "compile": {
-          "lib/net10.0/Vortice.DXGI.dll": {
-            "related": ".xml"
-          }
+          "bin/placeholder/Crai.Infrastructure.dll": {}
         },
         "runtime": {
-          "lib/net10.0/Vortice.DXGI.dll": {
-            "related": ".xml"
-          }
-        },
-        "build": {
-          "build/Vortice.DXGI.props": {}
-        },
-        "buildMultiTargeting": {
-          "buildMultiTargeting/Vortice.DXGI.props": {}
+          "bin/placeholder/Crai.Infrastructure.dll": {}
         }
       },
-      "Vortice.Mathematics/2.1.0": {
-        "type": "package",
+      "Crai.Modules.Capture/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Avalonia": "12.1.1",
+          "Crai.Application": "1.0.0",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2"
+        },
         "compile": {
-          "lib/net10.0/Vortice.Mathematics.dll": {
-            "related": ".pdb;.xml"
-          }
+          "bin/placeholder/Crai.Modules.Capture.dll": {}
         },
         "runtime": {
-          "lib/net10.0/Vortice.Mathematics.dll": {
-            "related": ".pdb;.xml"
-          }
+          "bin/placeholder/Crai.Modules.Capture.dll": {}
+        }
+      },
+      "Crai.Modules.Diagnostics/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Modules.Diagnostics.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Modules.Diagnostics.dll": {}
+        }
+      },
+      "Crai.Modules.Preferences/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Modules.Preferences.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Modules.Preferences.dll": {}
+        }
+      },
+      "Crai.Modules.Presentation/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Modules.Presentation.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Modules.Presentation.dll": {}
+        }
+      },
+      "Crai.Modules.ProviderMgmt/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Modules.ProviderMgmt.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Modules.ProviderMgmt.dll": {}
+        }
+      },
+      "Crai.Modules.Recognition/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Modules.Recognition.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Modules.Recognition.dll": {}
+        }
+      },
+      "Crai.Modules.Storage/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Modules.Storage.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Modules.Storage.dll": {}
+        }
+      },
+      "Crai.Modules.TextProcessing/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Modules.TextProcessing.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Modules.TextProcessing.dll": {}
+        }
+      },
+      "Crai.Modules.Translation/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Modules.Translation.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Modules.Translation.dll": {}
+        }
+      },
+      "Crai.Modules.UiAdapter/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Modules.UiAdapter.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Modules.UiAdapter.dll": {}
+        }
+      },
+      "Crai.Platform.Windows/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Platform.Windows.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Platform.Windows.dll": {}
+        }
+      },
+      "Crai.Runtime/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Crai.Application": "1.0.0",
+          "Crai.Infrastructure": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Crai.Runtime.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Crai.Runtime.dll": {}
         }
       }
     }
@@ -1302,30 +1633,6 @@
         "runtimes/linux-x86/native/libHarfBuzzSharp.so"
       ]
     },
-    "HarfBuzzSharp.NativeAssets.macOS/8.3.1.3": {
-      "sha512": "KPTq0xnslkI6nAo0jh3ptcQPJvZZr7MWYXa2jUe4SnHc9q+JlHElmNXp0sfFoiTgoCX7WOYpYsurypuH9Gehxw==",
-      "type": "package",
-      "path": "harfbuzzsharp.nativeassets.macos/8.3.1.3",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "LICENSE.txt",
-        "README.md",
-        "THIRD-PARTY-NOTICES.txt",
-        "buildTransitive/net462/HarfBuzzSharp.NativeAssets.macOS.targets",
-        "buildTransitive/net8.0-macos14.0/HarfBuzzSharp.NativeAssets.macOS.targets",
-        "harfbuzzsharp.nativeassets.macos.8.3.1.3.nupkg.sha512",
-        "harfbuzzsharp.nativeassets.macos.nuspec",
-        "icon.png",
-        "lib/net462/_._",
-        "lib/net6.0/_._",
-        "lib/net8.0-macos14.0/_._",
-        "lib/net8.0/_._",
-        "lib/netstandard2.0/_._",
-        "lib/netstandard2.1/_._",
-        "runtimes/osx/native/libHarfBuzzSharp.dylib"
-      ]
-    },
     "HarfBuzzSharp.NativeAssets.WebAssembly/8.3.1.3": {
       "sha512": "w2QfdNm9Uz/sUa0B5D+OnVQhyq3G/fBq6ibQMdWBlQqqwh0g0/5j3RFvYqZAmRZ5+RzvjVe8o8SFFnWYUSkuxA==",
       "type": "package",
@@ -1406,10 +1713,193 @@
         "microcom.runtime.nuspec"
       ]
     },
-    "Microsoft.Extensions.DependencyInjection.Abstractions/8.0.0": {
-      "sha512": "cjWrLkJXK0rs4zofsK4bSdg+jhDLTaxrkXu4gS6Y7MAlCvRyNNgwY/lJi5RDlQOnSZweHqoyvgvbdvQsRIW+hg==",
+    "Microsoft.Extensions.Configuration/9.0.2": {
+      "sha512": "EBZW+u96tApIvNtjymXEIS44tH0I/jNwABHo4c33AchWOiDWCq2rL3klpnIo+xGrxoVGJzPDISV6hZ+a9C9SzQ==",
       "type": "package",
-      "path": "microsoft.extensions.dependencyinjection.abstractions/8.0.0",
+      "path": "microsoft.extensions.configuration/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/Microsoft.Extensions.Configuration.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/Microsoft.Extensions.Configuration.targets",
+        "lib/net462/Microsoft.Extensions.Configuration.dll",
+        "lib/net462/Microsoft.Extensions.Configuration.xml",
+        "lib/net8.0/Microsoft.Extensions.Configuration.dll",
+        "lib/net8.0/Microsoft.Extensions.Configuration.xml",
+        "lib/net9.0/Microsoft.Extensions.Configuration.dll",
+        "lib/net9.0/Microsoft.Extensions.Configuration.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.xml",
+        "microsoft.extensions.configuration.9.0.2.nupkg.sha512",
+        "microsoft.extensions.configuration.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Microsoft.Extensions.Configuration.Abstractions/9.0.2": {
+      "sha512": "I0O/270E/lUNqbBxlRVjxKOMZyYjP88dpEgQTveml+h2lTzAP4vbawLVwjS9SC7lKaU893bwyyNz0IVJYsm9EA==",
+      "type": "package",
+      "path": "microsoft.extensions.configuration.abstractions/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/Microsoft.Extensions.Configuration.Abstractions.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/Microsoft.Extensions.Configuration.Abstractions.targets",
+        "lib/net462/Microsoft.Extensions.Configuration.Abstractions.dll",
+        "lib/net462/Microsoft.Extensions.Configuration.Abstractions.xml",
+        "lib/net8.0/Microsoft.Extensions.Configuration.Abstractions.dll",
+        "lib/net8.0/Microsoft.Extensions.Configuration.Abstractions.xml",
+        "lib/net9.0/Microsoft.Extensions.Configuration.Abstractions.dll",
+        "lib/net9.0/Microsoft.Extensions.Configuration.Abstractions.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.Abstractions.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.Abstractions.xml",
+        "microsoft.extensions.configuration.abstractions.9.0.2.nupkg.sha512",
+        "microsoft.extensions.configuration.abstractions.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Microsoft.Extensions.Configuration.Binder/9.0.2": {
+      "sha512": "krJ04xR0aPXrOf5dkNASg6aJjsdzexvsMRL6UNOUjiTzqBvRr95sJ1owoKEm89bSONQCfZNhHrAFV9ahDqIPIw==",
+      "type": "package",
+      "path": "microsoft.extensions.configuration.binder/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "analyzers/dotnet/cs/Microsoft.Extensions.Configuration.Binder.SourceGeneration.dll",
+        "analyzers/dotnet/cs/cs/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/de/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/es/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/fr/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/it/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/ja/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/ko/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/pl/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/pt-BR/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/ru/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/tr/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/zh-Hans/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "analyzers/dotnet/cs/zh-Hant/Microsoft.Extensions.Configuration.Binder.SourceGeneration.resources.dll",
+        "buildTransitive/netstandard2.0/Microsoft.Extensions.Configuration.Binder.targets",
+        "lib/net462/Microsoft.Extensions.Configuration.Binder.dll",
+        "lib/net462/Microsoft.Extensions.Configuration.Binder.xml",
+        "lib/net8.0/Microsoft.Extensions.Configuration.Binder.dll",
+        "lib/net8.0/Microsoft.Extensions.Configuration.Binder.xml",
+        "lib/net9.0/Microsoft.Extensions.Configuration.Binder.dll",
+        "lib/net9.0/Microsoft.Extensions.Configuration.Binder.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.Binder.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.Binder.xml",
+        "microsoft.extensions.configuration.binder.9.0.2.nupkg.sha512",
+        "microsoft.extensions.configuration.binder.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Microsoft.Extensions.Configuration.FileExtensions/9.0.2": {
+      "sha512": "tPgue19a0G+8Vb1ShCj4PmhjvVaEOfFb1L89WCr5aEpY1JUgIuYWsfELKf92Njwg53o4C+yWbE4UqbyQtLpKTg==",
+      "type": "package",
+      "path": "microsoft.extensions.configuration.fileextensions/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/Microsoft.Extensions.Configuration.FileExtensions.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/Microsoft.Extensions.Configuration.FileExtensions.targets",
+        "lib/net462/Microsoft.Extensions.Configuration.FileExtensions.dll",
+        "lib/net462/Microsoft.Extensions.Configuration.FileExtensions.xml",
+        "lib/net8.0/Microsoft.Extensions.Configuration.FileExtensions.dll",
+        "lib/net8.0/Microsoft.Extensions.Configuration.FileExtensions.xml",
+        "lib/net9.0/Microsoft.Extensions.Configuration.FileExtensions.dll",
+        "lib/net9.0/Microsoft.Extensions.Configuration.FileExtensions.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.FileExtensions.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.FileExtensions.xml",
+        "microsoft.extensions.configuration.fileextensions.9.0.2.nupkg.sha512",
+        "microsoft.extensions.configuration.fileextensions.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Microsoft.Extensions.Configuration.Json/9.0.2": {
+      "sha512": "u2eIYagO91VmRbKYQ5pmElWC6JWX7GPQbP57EX09zzFcI1ZMPDCykr07ikPB4ecgBZzG+UAhTcViTLe0gSF4WQ==",
+      "type": "package",
+      "path": "microsoft.extensions.configuration.json/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/Microsoft.Extensions.Configuration.Json.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/Microsoft.Extensions.Configuration.Json.targets",
+        "lib/net462/Microsoft.Extensions.Configuration.Json.dll",
+        "lib/net462/Microsoft.Extensions.Configuration.Json.xml",
+        "lib/net8.0/Microsoft.Extensions.Configuration.Json.dll",
+        "lib/net8.0/Microsoft.Extensions.Configuration.Json.xml",
+        "lib/net9.0/Microsoft.Extensions.Configuration.Json.dll",
+        "lib/net9.0/Microsoft.Extensions.Configuration.Json.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.Json.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.Configuration.Json.xml",
+        "lib/netstandard2.1/Microsoft.Extensions.Configuration.Json.dll",
+        "lib/netstandard2.1/Microsoft.Extensions.Configuration.Json.xml",
+        "microsoft.extensions.configuration.json.9.0.2.nupkg.sha512",
+        "microsoft.extensions.configuration.json.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Microsoft.Extensions.DependencyInjection/9.0.2": {
+      "sha512": "ZffbJrskOZ40JTzcTyKwFHS5eACSWp2bUQBBApIgGV+es8RaTD4OxUG7XxFr3RIPLXtYQ1jQzF2DjKB5fZn7Qg==",
+      "type": "package",
+      "path": "microsoft.extensions.dependencyinjection/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/Microsoft.Extensions.DependencyInjection.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/Microsoft.Extensions.DependencyInjection.targets",
+        "lib/net462/Microsoft.Extensions.DependencyInjection.dll",
+        "lib/net462/Microsoft.Extensions.DependencyInjection.xml",
+        "lib/net8.0/Microsoft.Extensions.DependencyInjection.dll",
+        "lib/net8.0/Microsoft.Extensions.DependencyInjection.xml",
+        "lib/net9.0/Microsoft.Extensions.DependencyInjection.dll",
+        "lib/net9.0/Microsoft.Extensions.DependencyInjection.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.DependencyInjection.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.DependencyInjection.xml",
+        "lib/netstandard2.1/Microsoft.Extensions.DependencyInjection.dll",
+        "lib/netstandard2.1/Microsoft.Extensions.DependencyInjection.xml",
+        "microsoft.extensions.dependencyinjection.9.0.2.nupkg.sha512",
+        "microsoft.extensions.dependencyinjection.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Microsoft.Extensions.DependencyInjection.Abstractions/9.0.2": {
+      "sha512": "MNe7GSTBf3jQx5vYrXF0NZvn6l7hUKF6J54ENfAgCO8y6xjN1XUmKKWG464LP2ye6QqDiA1dkaWEZBYnhoZzjg==",
+      "type": "package",
+      "path": "microsoft.extensions.dependencyinjection.abstractions/9.0.2",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
@@ -1419,22 +1909,104 @@
         "THIRD-PARTY-NOTICES.TXT",
         "buildTransitive/net461/Microsoft.Extensions.DependencyInjection.Abstractions.targets",
         "buildTransitive/net462/_._",
-        "buildTransitive/net6.0/_._",
+        "buildTransitive/net8.0/_._",
         "buildTransitive/netcoreapp2.0/Microsoft.Extensions.DependencyInjection.Abstractions.targets",
         "lib/net462/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
         "lib/net462/Microsoft.Extensions.DependencyInjection.Abstractions.xml",
-        "lib/net6.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
-        "lib/net6.0/Microsoft.Extensions.DependencyInjection.Abstractions.xml",
-        "lib/net7.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
-        "lib/net7.0/Microsoft.Extensions.DependencyInjection.Abstractions.xml",
         "lib/net8.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
         "lib/net8.0/Microsoft.Extensions.DependencyInjection.Abstractions.xml",
+        "lib/net9.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "lib/net9.0/Microsoft.Extensions.DependencyInjection.Abstractions.xml",
         "lib/netstandard2.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
         "lib/netstandard2.0/Microsoft.Extensions.DependencyInjection.Abstractions.xml",
         "lib/netstandard2.1/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
         "lib/netstandard2.1/Microsoft.Extensions.DependencyInjection.Abstractions.xml",
-        "microsoft.extensions.dependencyinjection.abstractions.8.0.0.nupkg.sha512",
+        "microsoft.extensions.dependencyinjection.abstractions.9.0.2.nupkg.sha512",
         "microsoft.extensions.dependencyinjection.abstractions.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Microsoft.Extensions.FileProviders.Abstractions/9.0.2": {
+      "sha512": "IcOBmTlr2jySswU+3x8c3ql87FRwTVPQgVKaV5AXzPT5u0VItfNU8SMbESpdSp5STwxT/1R99WYszgHWsVkzhg==",
+      "type": "package",
+      "path": "microsoft.extensions.fileproviders.abstractions/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/Microsoft.Extensions.FileProviders.Abstractions.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/Microsoft.Extensions.FileProviders.Abstractions.targets",
+        "lib/net462/Microsoft.Extensions.FileProviders.Abstractions.dll",
+        "lib/net462/Microsoft.Extensions.FileProviders.Abstractions.xml",
+        "lib/net8.0/Microsoft.Extensions.FileProviders.Abstractions.dll",
+        "lib/net8.0/Microsoft.Extensions.FileProviders.Abstractions.xml",
+        "lib/net9.0/Microsoft.Extensions.FileProviders.Abstractions.dll",
+        "lib/net9.0/Microsoft.Extensions.FileProviders.Abstractions.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.FileProviders.Abstractions.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.FileProviders.Abstractions.xml",
+        "microsoft.extensions.fileproviders.abstractions.9.0.2.nupkg.sha512",
+        "microsoft.extensions.fileproviders.abstractions.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Microsoft.Extensions.FileProviders.Physical/9.0.2": {
+      "sha512": "WcPkJx/OAaXG5xHvxYsoLY8qGsyCfHWsbDJtfMtHRWtceF/EmqAsqkHYsouh82gjxdZwfySvj3nGVi8AkwlYhA==",
+      "type": "package",
+      "path": "microsoft.extensions.fileproviders.physical/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/Microsoft.Extensions.FileProviders.Physical.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/Microsoft.Extensions.FileProviders.Physical.targets",
+        "lib/net462/Microsoft.Extensions.FileProviders.Physical.dll",
+        "lib/net462/Microsoft.Extensions.FileProviders.Physical.xml",
+        "lib/net8.0/Microsoft.Extensions.FileProviders.Physical.dll",
+        "lib/net8.0/Microsoft.Extensions.FileProviders.Physical.xml",
+        "lib/net9.0/Microsoft.Extensions.FileProviders.Physical.dll",
+        "lib/net9.0/Microsoft.Extensions.FileProviders.Physical.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.FileProviders.Physical.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.FileProviders.Physical.xml",
+        "microsoft.extensions.fileproviders.physical.9.0.2.nupkg.sha512",
+        "microsoft.extensions.fileproviders.physical.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Microsoft.Extensions.FileSystemGlobbing/9.0.2": {
+      "sha512": "wAjk+6rvvU4WesskJ6rJX1FYL/S9zvnpqMai/pXb07+gtXpO7DhFfuKzYHwkKN3HAUq2W4CD+YLYenHwAS3DCA==",
+      "type": "package",
+      "path": "microsoft.extensions.filesystemglobbing/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/Microsoft.Extensions.FileSystemGlobbing.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/Microsoft.Extensions.FileSystemGlobbing.targets",
+        "lib/net462/Microsoft.Extensions.FileSystemGlobbing.dll",
+        "lib/net462/Microsoft.Extensions.FileSystemGlobbing.xml",
+        "lib/net8.0/Microsoft.Extensions.FileSystemGlobbing.dll",
+        "lib/net8.0/Microsoft.Extensions.FileSystemGlobbing.xml",
+        "lib/net9.0/Microsoft.Extensions.FileSystemGlobbing.dll",
+        "lib/net9.0/Microsoft.Extensions.FileSystemGlobbing.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.FileSystemGlobbing.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.FileSystemGlobbing.xml",
+        "microsoft.extensions.filesystemglobbing.9.0.2.nupkg.sha512",
+        "microsoft.extensions.filesystemglobbing.nuspec",
         "useSharedDesignerContext.txt"
       ]
     },
@@ -1511,6 +2083,34 @@
         "useSharedDesignerContext.txt"
       ]
     },
+    "Microsoft.Extensions.Primitives/9.0.2": {
+      "sha512": "puBMtKe/wLuYa7H6docBkLlfec+h8L35DXqsDKKJgW0WY5oCwJ3cBJKcDaZchv6knAyqOMfsl6VUbaR++E5LXA==",
+      "type": "package",
+      "path": "microsoft.extensions.primitives/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/Microsoft.Extensions.Primitives.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/Microsoft.Extensions.Primitives.targets",
+        "lib/net462/Microsoft.Extensions.Primitives.dll",
+        "lib/net462/Microsoft.Extensions.Primitives.xml",
+        "lib/net8.0/Microsoft.Extensions.Primitives.dll",
+        "lib/net8.0/Microsoft.Extensions.Primitives.xml",
+        "lib/net9.0/Microsoft.Extensions.Primitives.dll",
+        "lib/net9.0/Microsoft.Extensions.Primitives.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.Primitives.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.Primitives.xml",
+        "microsoft.extensions.primitives.9.0.2.nupkg.sha512",
+        "microsoft.extensions.primitives.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
     "Microsoft.IO.RecyclableMemoryStream/3.0.1": {
       "sha512": "s/s20YTVY9r9TPfTrN5g8zPF1YhwxyqO6PxUkrYTGI2B+OGPe9AdajWZrLhFqXIvqIW23fnUE4+ztrUWNU1+9g==",
       "type": "package",
@@ -1529,42 +2129,96 @@
         "microsoft.io.recyclablememorystream.nuspec"
       ]
     },
-    "SharpGen.Runtime/2.4.2-beta": {
-      "sha512": "niTtWAUov1F7wZGAlVeEvW+Tnqvg5yTmhI7rxmYu2Utoyu2TbC9tWWpUpMs0PQg5lu5svoYpCAztNjxCqMFP/w==",
+    "Serilog/4.0.1": {
+      "sha512": "pzeDRXdpSLSsgBHpZcmpIDxqMy845Ab4s+dfnBg0sN9h8q/4Wo3vAoe0QCGPze1Q06EVtEPupS+UvLm8iXQmTQ==",
       "type": "package",
-      "path": "sharpgen.runtime/2.4.2-beta",
+      "path": "serilog/4.0.1",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
-        "build/Mapping.xml",
-        "build/SharpGen.Runtime.props",
-        "buildMultiTargeting/SharpGen.Runtime.props",
-        "lib/net8.0/SharpGen.Runtime.dll",
-        "lib/net9.0/SharpGen.Runtime.dll",
-        "lib/netstandard2.0/SharpGen.Runtime.dll",
-        "lib/netstandard2.1/SharpGen.Runtime.dll",
-        "sharpgen.runtime.2.4.2-beta.nupkg.sha512",
-        "sharpgen.runtime.nuspec"
+        "README.md",
+        "icon.png",
+        "lib/net462/Serilog.dll",
+        "lib/net462/Serilog.xml",
+        "lib/net471/Serilog.dll",
+        "lib/net471/Serilog.xml",
+        "lib/net6.0/Serilog.dll",
+        "lib/net6.0/Serilog.xml",
+        "lib/net8.0/Serilog.dll",
+        "lib/net8.0/Serilog.xml",
+        "lib/netstandard2.0/Serilog.dll",
+        "lib/netstandard2.0/Serilog.xml",
+        "serilog.4.0.1.nupkg.sha512",
+        "serilog.nuspec"
       ]
     },
-    "SharpGen.Runtime.COM/2.4.2-beta": {
-      "sha512": "9lxDFMiepqo3lJQzMSjECCIONeCc2f3Drokgj6HtrTLZcJSftNgcLbD6/iXYj2iphkwgrZb1oLsDOZxoFZkawQ==",
+    "Serilog.Formatting.Compact/3.0.0": {
+      "sha512": "wQsv14w9cqlfB5FX2MZpNsTawckN4a8dryuNGbebB/3Nh1pXnROHZov3swtu3Nj5oNG7Ba+xdu7Et/ulAUPanQ==",
       "type": "package",
-      "path": "sharpgen.runtime.com/2.4.2-beta",
+      "path": "serilog.formatting.compact/3.0.0",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
-        "build/SharpGen.Runtime.COM.BindMapping.xml",
-        "build/SharpGen.Runtime.COM.props",
-        "buildMultiTargeting/SharpGen.Runtime.COM.props",
-        "lib/net462/SharpGen.Runtime.COM.dll",
-        "lib/net471/SharpGen.Runtime.COM.dll",
-        "lib/net8.0/SharpGen.Runtime.COM.dll",
-        "lib/net9.0/SharpGen.Runtime.COM.dll",
-        "lib/netstandard2.0/SharpGen.Runtime.COM.dll",
-        "lib/netstandard2.1/SharpGen.Runtime.COM.dll",
-        "sharpgen.runtime.com.2.4.2-beta.nupkg.sha512",
-        "sharpgen.runtime.com.nuspec"
+        "README.md",
+        "lib/net462/Serilog.Formatting.Compact.dll",
+        "lib/net462/Serilog.Formatting.Compact.xml",
+        "lib/net471/Serilog.Formatting.Compact.dll",
+        "lib/net471/Serilog.Formatting.Compact.xml",
+        "lib/net6.0/Serilog.Formatting.Compact.dll",
+        "lib/net6.0/Serilog.Formatting.Compact.xml",
+        "lib/net8.0/Serilog.Formatting.Compact.dll",
+        "lib/net8.0/Serilog.Formatting.Compact.xml",
+        "lib/netstandard2.0/Serilog.Formatting.Compact.dll",
+        "lib/netstandard2.0/Serilog.Formatting.Compact.xml",
+        "serilog-extension-nuget.png",
+        "serilog.formatting.compact.3.0.0.nupkg.sha512",
+        "serilog.formatting.compact.nuspec"
+      ]
+    },
+    "Serilog.Sinks.Console/6.0.0": {
+      "sha512": "fQGWqVMClCP2yEyTXPIinSr5c+CBGUvBybPxjAGcf7ctDhadFhrQw03Mv8rJ07/wR5PDfFjewf2LimvXCDzpbA==",
+      "type": "package",
+      "path": "serilog.sinks.console/6.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "icon.png",
+        "lib/net462/Serilog.Sinks.Console.dll",
+        "lib/net462/Serilog.Sinks.Console.xml",
+        "lib/net471/Serilog.Sinks.Console.dll",
+        "lib/net471/Serilog.Sinks.Console.xml",
+        "lib/net6.0/Serilog.Sinks.Console.dll",
+        "lib/net6.0/Serilog.Sinks.Console.xml",
+        "lib/net8.0/Serilog.Sinks.Console.dll",
+        "lib/net8.0/Serilog.Sinks.Console.xml",
+        "lib/netstandard2.0/Serilog.Sinks.Console.dll",
+        "lib/netstandard2.0/Serilog.Sinks.Console.xml",
+        "serilog.sinks.console.6.0.0.nupkg.sha512",
+        "serilog.sinks.console.nuspec"
+      ]
+    },
+    "Serilog.Sinks.File/6.0.0": {
+      "sha512": "lxjg89Y8gJMmFxVkbZ+qDgjl+T4yC5F7WSLTvA+5q0R04tfKVLRL/EHpYoJ/MEQd2EeCKDuylBIVnAYMotmh2A==",
+      "type": "package",
+      "path": "serilog.sinks.file/6.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "lib/net462/Serilog.Sinks.File.dll",
+        "lib/net462/Serilog.Sinks.File.xml",
+        "lib/net471/Serilog.Sinks.File.dll",
+        "lib/net471/Serilog.Sinks.File.xml",
+        "lib/net6.0/Serilog.Sinks.File.dll",
+        "lib/net6.0/Serilog.Sinks.File.xml",
+        "lib/net8.0/Serilog.Sinks.File.dll",
+        "lib/net8.0/Serilog.Sinks.File.xml",
+        "lib/netstandard2.0/Serilog.Sinks.File.dll",
+        "lib/netstandard2.0/Serilog.Sinks.File.xml",
+        "serilog-sink-nuget.png",
+        "serilog.sinks.file.6.0.0.nupkg.sha512",
+        "serilog.sinks.file.nuspec"
       ]
     },
     "SkiaSharp/3.119.4": {
@@ -1689,37 +2343,6 @@
         "skiasharp.nativeassets.linux.nuspec"
       ]
     },
-    "SkiaSharp.NativeAssets.macOS/3.119.4": {
-      "sha512": "fgBOWEqbY012x7gMfJU4ezgz6dfhJb30Z6YdW35h85Zoe39+a8YNbAAwL29ihPfWoppg5AjvyKNzD1oCvlqWwA==",
-      "type": "package",
-      "path": "skiasharp.nativeassets.macos/3.119.4",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "LICENSE.txt",
-        "README.md",
-        "THIRD-PARTY-NOTICES.txt",
-        "build/net462/SkiaSharp.NativeAssets.macOS.targets",
-        "build/net48/SkiaSharp.NativeAssets.macOS.targets",
-        "buildTransitive/net10.0-macos26.2/SkiaSharp.NativeAssets.macOS.targets",
-        "buildTransitive/net462/SkiaSharp.NativeAssets.macOS.targets",
-        "buildTransitive/net48/SkiaSharp.NativeAssets.macOS.targets",
-        "buildTransitive/net9.0-macos15.0/SkiaSharp.NativeAssets.macOS.targets",
-        "icon.png",
-        "lib/net10.0-macos26.2/_._",
-        "lib/net10.0/_._",
-        "lib/net462/_._",
-        "lib/net48/_._",
-        "lib/net6.0/_._",
-        "lib/net9.0-macos15.0/_._",
-        "lib/net9.0/_._",
-        "lib/netstandard2.0/_._",
-        "lib/netstandard2.1/_._",
-        "runtimes/osx/native/libSkiaSharp.dylib",
-        "skiasharp.nativeassets.macos.3.119.4.nupkg.sha512",
-        "skiasharp.nativeassets.macos.nuspec"
-      ]
-    },
     "SkiaSharp.NativeAssets.WebAssembly/3.119.4": {
       "sha512": "S1HOxtBbD4bYDtA2e9WH5TX+lxqRrTPvKjrjttRhxnHNNu7YY8VFo/LeCP7tNqoTA6PV+8vsvNbmRUEC2ip8RQ==",
       "type": "package",
@@ -1792,6 +2415,40 @@
         "skiasharp.nativeassets.win32.nuspec"
       ]
     },
+    "System.Security.Cryptography.ProtectedData/9.0.2": {
+      "sha512": "+z9JWtU9di45tW/w6zpuJms4SnAAqKY2Usmmxs7MpOhxWoIeR2pKl1vEkaFbEx52ZfrMFcZXsFe+8WERMozzGg==",
+      "type": "package",
+      "path": "system.security.cryptography.protecteddata/9.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/System.Security.Cryptography.ProtectedData.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/System.Security.Cryptography.ProtectedData.targets",
+        "lib/MonoAndroid10/_._",
+        "lib/MonoTouch10/_._",
+        "lib/net462/System.Security.Cryptography.ProtectedData.dll",
+        "lib/net462/System.Security.Cryptography.ProtectedData.xml",
+        "lib/net8.0/System.Security.Cryptography.ProtectedData.dll",
+        "lib/net8.0/System.Security.Cryptography.ProtectedData.xml",
+        "lib/net9.0/System.Security.Cryptography.ProtectedData.dll",
+        "lib/net9.0/System.Security.Cryptography.ProtectedData.xml",
+        "lib/netstandard2.0/System.Security.Cryptography.ProtectedData.dll",
+        "lib/netstandard2.0/System.Security.Cryptography.ProtectedData.xml",
+        "lib/xamarinios10/_._",
+        "lib/xamarinmac20/_._",
+        "lib/xamarintvos10/_._",
+        "lib/xamarinwatchos10/_._",
+        "system.security.cryptography.protecteddata.9.0.2.nupkg.sha512",
+        "system.security.cryptography.protecteddata.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
     "Tmds.DBus.Protocol/0.94.1": {
       "sha512": "11YMr7FnAbL83bQmVxlhbIKHvSLxjO81D12Ej0QMSGXMDTxNA9MTOa4MQxx43nv5el/efuPHwzyrj6a5ha2gug==",
       "type": "package",
@@ -1815,119 +2472,106 @@
         "tmds.dbus.protocol.nuspec"
       ]
     },
-    "Vortice.Direct3D11/3.8.3": {
-      "sha512": "JgFUswu2mgrSwcd0KRF2AnfeE5VbMEgcicmxPD1g2yXyomPIHbnX3wldBNHPOzzD0URC1WJ/pO1ymfi3imZwvg==",
-      "type": "package",
-      "path": "vortice.direct3d11/3.8.3",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "README.md",
-        "build/Vortice.Direct3D11.BindMapping.xml",
-        "build/Vortice.Direct3D11.props",
-        "buildMultiTargeting/Vortice.Direct3D11.props",
-        "lib/net10.0/Vortice.Direct3D11.dll",
-        "lib/net10.0/Vortice.Direct3D11.xml",
-        "lib/net8.0/Vortice.Direct3D11.dll",
-        "lib/net8.0/Vortice.Direct3D11.xml",
-        "lib/net9.0/Vortice.Direct3D11.dll",
-        "lib/net9.0/Vortice.Direct3D11.xml",
-        "vortice.direct3d11.3.8.3.nupkg.sha512",
-        "vortice.direct3d11.nuspec"
-      ]
+    "Crai.Application/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Application/Crai.Application.csproj",
+      "msbuildProject": "../Crai.Application/Crai.Application.csproj"
     },
-    "Vortice.DirectX/3.8.3": {
-      "sha512": "nKwSavv0w5rDF7prSefqAVPDcTyqrfZxKFMVfttiXPfm62VdA/1d+b3PhCZpW4xO7jXczXDwjQdWgD1zGsvM8w==",
-      "type": "package",
-      "path": "vortice.directx/3.8.3",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "README.md",
-        "build/Vortice.DirectX.BindMapping.xml",
-        "build/Vortice.DirectX.props",
-        "buildMultiTargeting/Vortice.DirectX.props",
-        "lib/net10.0-windows10.0.22621/Vortice.DirectX.dll",
-        "lib/net10.0-windows10.0.22621/Vortice.DirectX.xml",
-        "lib/net10.0/Vortice.DirectX.dll",
-        "lib/net10.0/Vortice.DirectX.xml",
-        "lib/net8.0-windows10.0.22621/Vortice.DirectX.dll",
-        "lib/net8.0-windows10.0.22621/Vortice.DirectX.xml",
-        "lib/net8.0/Vortice.DirectX.dll",
-        "lib/net8.0/Vortice.DirectX.xml",
-        "lib/net9.0-windows10.0.22621/Vortice.DirectX.dll",
-        "lib/net9.0-windows10.0.22621/Vortice.DirectX.xml",
-        "lib/net9.0/Vortice.DirectX.dll",
-        "lib/net9.0/Vortice.DirectX.xml",
-        "vortice.directx.3.8.3.nupkg.sha512",
-        "vortice.directx.nuspec"
-      ]
+    "Crai.Domain/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Domain/Crai.Domain.csproj",
+      "msbuildProject": "../Crai.Domain/Crai.Domain.csproj"
     },
-    "Vortice.DXGI/3.8.3": {
-      "sha512": "MbAUnTeQ6WD99ctAdrj5CQO2I7oaax0Kt2eVdWSUj0bYP9Ed0726+s7dIHe4+tqhpmINW/dcPt0mNtc72o+E0w==",
-      "type": "package",
-      "path": "vortice.dxgi/3.8.3",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "README.md",
-        "build/Vortice.DXGI.BindMapping.xml",
-        "build/Vortice.DXGI.props",
-        "buildMultiTargeting/Vortice.DXGI.props",
-        "lib/net10.0-windows10.0.22621/Vortice.DXGI.dll",
-        "lib/net10.0-windows10.0.22621/Vortice.DXGI.xml",
-        "lib/net10.0/Vortice.DXGI.dll",
-        "lib/net10.0/Vortice.DXGI.xml",
-        "lib/net8.0-windows10.0.22621/Vortice.DXGI.dll",
-        "lib/net8.0-windows10.0.22621/Vortice.DXGI.xml",
-        "lib/net8.0/Vortice.DXGI.dll",
-        "lib/net8.0/Vortice.DXGI.xml",
-        "lib/net9.0-windows10.0.22621/Vortice.DXGI.dll",
-        "lib/net9.0-windows10.0.22621/Vortice.DXGI.xml",
-        "lib/net9.0/Vortice.DXGI.dll",
-        "lib/net9.0/Vortice.DXGI.xml",
-        "vortice.dxgi.3.8.3.nupkg.sha512",
-        "vortice.dxgi.nuspec"
-      ]
+    "Crai.Infrastructure/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Infrastructure/Crai.Infrastructure.csproj",
+      "msbuildProject": "../Crai.Infrastructure/Crai.Infrastructure.csproj"
     },
-    "Vortice.Mathematics/2.1.0": {
-      "sha512": "KK+SjNSuKdP+zbavekubi+vaeb1Jo4k87ZF6CMkVWjr6RjJwc8peVtmgzXXDIMy4ZC3ZISyk3llY3q65ISOkBQ==",
-      "type": "package",
-      "path": "vortice.mathematics/2.1.0",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "README.md",
-        "lib/net10.0-windows10.0.19041/Vortice.Mathematics.dll",
-        "lib/net10.0-windows10.0.19041/Vortice.Mathematics.pdb",
-        "lib/net10.0-windows10.0.19041/Vortice.Mathematics.xml",
-        "lib/net10.0/Vortice.Mathematics.dll",
-        "lib/net10.0/Vortice.Mathematics.pdb",
-        "lib/net10.0/Vortice.Mathematics.xml",
-        "lib/net8.0/Vortice.Mathematics.dll",
-        "lib/net8.0/Vortice.Mathematics.pdb",
-        "lib/net8.0/Vortice.Mathematics.xml",
-        "lib/net9.0-windows10.0.19041/Vortice.Mathematics.dll",
-        "lib/net9.0-windows10.0.19041/Vortice.Mathematics.pdb",
-        "lib/net9.0-windows10.0.19041/Vortice.Mathematics.xml",
-        "lib/net9.0/Vortice.Mathematics.dll",
-        "lib/net9.0/Vortice.Mathematics.pdb",
-        "lib/net9.0/Vortice.Mathematics.xml",
-        "vortice.mathematics.2.1.0.nupkg.sha512",
-        "vortice.mathematics.nuspec"
-      ]
+    "Crai.Modules.Capture/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.Capture/Crai.Modules.Capture.csproj",
+      "msbuildProject": "../Crai.Modules.Capture/Crai.Modules.Capture.csproj"
+    },
+    "Crai.Modules.Diagnostics/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.Diagnostics/Crai.Modules.Diagnostics.csproj",
+      "msbuildProject": "../Crai.Modules.Diagnostics/Crai.Modules.Diagnostics.csproj"
+    },
+    "Crai.Modules.Preferences/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.Preferences/Crai.Modules.Preferences.csproj",
+      "msbuildProject": "../Crai.Modules.Preferences/Crai.Modules.Preferences.csproj"
+    },
+    "Crai.Modules.Presentation/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.Presentation/Crai.Modules.Presentation.csproj",
+      "msbuildProject": "../Crai.Modules.Presentation/Crai.Modules.Presentation.csproj"
+    },
+    "Crai.Modules.ProviderMgmt/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.ProviderMgmt/Crai.Modules.ProviderMgmt.csproj",
+      "msbuildProject": "../Crai.Modules.ProviderMgmt/Crai.Modules.ProviderMgmt.csproj"
+    },
+    "Crai.Modules.Recognition/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.Recognition/Crai.Modules.Recognition.csproj",
+      "msbuildProject": "../Crai.Modules.Recognition/Crai.Modules.Recognition.csproj"
+    },
+    "Crai.Modules.Storage/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.Storage/Crai.Modules.Storage.csproj",
+      "msbuildProject": "../Crai.Modules.Storage/Crai.Modules.Storage.csproj"
+    },
+    "Crai.Modules.TextProcessing/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.TextProcessing/Crai.Modules.TextProcessing.csproj",
+      "msbuildProject": "../Crai.Modules.TextProcessing/Crai.Modules.TextProcessing.csproj"
+    },
+    "Crai.Modules.Translation/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.Translation/Crai.Modules.Translation.csproj",
+      "msbuildProject": "../Crai.Modules.Translation/Crai.Modules.Translation.csproj"
+    },
+    "Crai.Modules.UiAdapter/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Modules.UiAdapter/Crai.Modules.UiAdapter.csproj",
+      "msbuildProject": "../Crai.Modules.UiAdapter/Crai.Modules.UiAdapter.csproj"
+    },
+    "Crai.Platform.Windows/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Platform.Windows/Crai.Platform.Windows.csproj",
+      "msbuildProject": "../Crai.Platform.Windows/Crai.Platform.Windows.csproj"
+    },
+    "Crai.Runtime/1.0.0": {
+      "type": "project",
+      "path": "../Crai.Runtime/Crai.Runtime.csproj",
+      "msbuildProject": "../Crai.Runtime/Crai.Runtime.csproj"
     }
   },
   "projectFileDependencyGroups": {
-    "net10.0-windows": [
+    "net10.0-windows10.0.19041.0": [
       "Avalonia >= 12.1.1",
       "Avalonia.Desktop >= 12.1.1",
       "Avalonia.Fonts.Inter >= 12.1.1",
       "Avalonia.Themes.Fluent >= 12.1.1",
       "AvaloniaUI.DiagnosticsSupport >= 2.2.3",
       "CommunityToolkit.Mvvm >= 8.4.2",
-      "Vortice.DXGI >= 3.8.3",
-      "Vortice.Direct3D11 >= 3.8.3"
+      "Crai.Application >= 1.0.0",
+      "Crai.Domain >= 1.0.0",
+      "Crai.Infrastructure >= 1.0.0",
+      "Crai.Modules.Capture >= 1.0.0",
+      "Crai.Modules.Diagnostics >= 1.0.0",
+      "Crai.Modules.Preferences >= 1.0.0",
+      "Crai.Modules.Presentation >= 1.0.0",
+      "Crai.Modules.ProviderMgmt >= 1.0.0",
+      "Crai.Modules.Recognition >= 1.0.0",
+      "Crai.Modules.Storage >= 1.0.0",
+      "Crai.Modules.TextProcessing >= 1.0.0",
+      "Crai.Modules.Translation >= 1.0.0",
+      "Crai.Modules.UiAdapter >= 1.0.0",
+      "Crai.Platform.Windows >= 1.0.0",
+      "Crai.Runtime >= 1.0.0",
+      "Microsoft.Extensions.DependencyInjection >= 9.0.2"
     ]
   },
   "packageFolders": {
@@ -1942,20 +2586,67 @@
       "packagesPath": "C:\\Users\\Admin\\.nuget\\packages\\",
       "outputPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Desktop\\obj\\",
       "projectStyle": "PackageReference",
+      "centralPackageVersionsManagementEnabled": true,
       "configFilePaths": [
         "C:\\Users\\Admin\\AppData\\Roaming\\NuGet\\NuGet.Config"
       ],
       "originalTargetFrameworks": [
-        "net10.0-windows"
+        "net10.0-windows10.0.19041.0"
       ],
       "sources": {
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
-        "net10.0-windows": {
-          "framework": "net10.0-windows7.0",
-          "targetAlias": "net10.0-windows",
-          "projectReferences": {}
+        "net10.0-windows10.0.19041.0": {
+          "framework": "net10.0-windows10.0.19041",
+          "targetAlias": "net10.0-windows10.0.19041.0",
+          "projectReferences": {
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Application\\Crai.Application.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Application\\Crai.Application.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Domain\\Crai.Domain.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Domain\\Crai.Domain.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Infrastructure\\Crai.Infrastructure.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Infrastructure\\Crai.Infrastructure.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Capture\\Crai.Modules.Capture.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Capture\\Crai.Modules.Capture.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Diagnostics\\Crai.Modules.Diagnostics.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Diagnostics\\Crai.Modules.Diagnostics.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Preferences\\Crai.Modules.Preferences.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Preferences\\Crai.Modules.Preferences.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Presentation\\Crai.Modules.Presentation.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Presentation\\Crai.Modules.Presentation.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.ProviderMgmt\\Crai.Modules.ProviderMgmt.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.ProviderMgmt\\Crai.Modules.ProviderMgmt.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Recognition\\Crai.Modules.Recognition.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Recognition\\Crai.Modules.Recognition.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Storage\\Crai.Modules.Storage.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Storage\\Crai.Modules.Storage.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.TextProcessing\\Crai.Modules.TextProcessing.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.TextProcessing\\Crai.Modules.TextProcessing.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Translation\\Crai.Modules.Translation.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.Translation\\Crai.Modules.Translation.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.UiAdapter\\Crai.Modules.UiAdapter.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Modules.UiAdapter\\Crai.Modules.UiAdapter.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Platform.Windows\\Crai.Platform.Windows.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Platform.Windows\\Crai.Platform.Windows.csproj"
+            },
+            "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Runtime\\Crai.Runtime.csproj": {
+              "projectPath": "F:\\mydata\\myproject\\ComicReaderAI\\src\\Crai.Runtime\\Crai.Runtime.csproj"
+            }
+          }
         }
       },
       "warningProperties": {
@@ -1971,42 +2662,74 @@
       "SdkAnalysisLevel": "10.0.400"
     },
     "frameworks": {
-      "net10.0-windows": {
-        "framework": "net10.0-windows7.0",
-        "targetAlias": "net10.0-windows",
+      "net10.0-windows10.0.19041.0": {
+        "framework": "net10.0-windows10.0.19041",
+        "targetAlias": "net10.0-windows10.0.19041.0",
         "dependencies": {
           "Avalonia": {
             "target": "Package",
-            "version": "[12.1.1, )"
+            "version": "[12.1.1, )",
+            "versionCentrallyManaged": true
           },
           "Avalonia.Desktop": {
             "target": "Package",
-            "version": "[12.1.1, )"
+            "version": "[12.1.1, )",
+            "versionCentrallyManaged": true
           },
           "Avalonia.Fonts.Inter": {
             "target": "Package",
-            "version": "[12.1.1, )"
+            "version": "[12.1.1, )",
+            "versionCentrallyManaged": true
           },
           "Avalonia.Themes.Fluent": {
             "target": "Package",
-            "version": "[12.1.1, )"
+            "version": "[12.1.1, )",
+            "versionCentrallyManaged": true
           },
           "AvaloniaUI.DiagnosticsSupport": {
             "target": "Package",
-            "version": "[2.2.3, )"
+            "version": "[2.2.3, )",
+            "versionCentrallyManaged": true
           },
           "CommunityToolkit.Mvvm": {
             "target": "Package",
-            "version": "[8.4.2, )"
+            "version": "[8.4.2, )",
+            "versionCentrallyManaged": true
           },
-          "Vortice.DXGI": {
+          "Microsoft.Extensions.DependencyInjection": {
             "target": "Package",
-            "version": "[3.8.3, )"
-          },
-          "Vortice.Direct3D11": {
-            "target": "Package",
-            "version": "[3.8.3, )"
+            "version": "[9.0.2, )",
+            "versionCentrallyManaged": true
           }
+        },
+        "centralPackageVersions": {
+          "Avalonia": "12.1.1",
+          "Avalonia.Desktop": "12.1.1",
+          "Avalonia.Fonts.Inter": "12.1.1",
+          "Avalonia.Themes.Fluent": "12.1.1",
+          "AvaloniaUI.DiagnosticsSupport": "2.2.3",
+          "CommunityToolkit.Mvvm": "8.4.2",
+          "coverlet.collector": "6.0.4",
+          "Microsoft.Extensions.Configuration": "9.0.2",
+          "Microsoft.Extensions.Configuration.Binder": "9.0.2",
+          "Microsoft.Extensions.Configuration.Json": "9.0.2",
+          "Microsoft.Extensions.DependencyInjection": "9.0.2",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2",
+          "Microsoft.NET.Test.Sdk": "17.13.0",
+          "OpenCvSharp4": "4.13.0.20260627",
+          "OpenCvSharp4.runtime.win": "4.13.0.20260627",
+          "Sdcb.PaddleInference.runtime.win64.openblas": "3.3.1.70",
+          "Sdcb.PaddleOCR": "3.3.1",
+          "Sdcb.PaddleOCR.Models.Local": "3.3.1",
+          "Serilog": "4.0.1",
+          "Serilog.Formatting.Compact": "3.0.0",
+          "Serilog.Sinks.Console": "6.0.0",
+          "Serilog.Sinks.File": "6.0.0",
+          "SkiaSharp": "4.151.1",
+          "SkiaSharp.NativeAssets.Win32": "4.151.1",
+          "System.Security.Cryptography.ProtectedData": "9.0.2",
+          "xunit": "2.9.3",
+          "xunit.runner.visualstudio": "3.0.2"
         },
         "imports": [
           "net461",
@@ -2019,8 +2742,17 @@
         ],
         "assetTargetFallback": true,
         "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.Windows.SDK.NET.Ref",
+            "version": "[10.0.19041.57, 10.0.19041.57]"
+          }
+        ],
         "frameworkReferences": {
           "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          },
+          "Microsoft.Windows.SDK.NET.Ref.Windows": {
             "privateAssets": "all"
           }
         },
