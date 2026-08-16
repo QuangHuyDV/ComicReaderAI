@@ -27,5 +27,6 @@
     <ProjectReference Include="..\..\src\Crai.Modules.Translation\Crai.Modules.Translation.csproj" />
     <ProjectReference Include="..\..\src\Crai.Modules.Presentation\Crai.Modules.Presentation.csproj" />
     <ProjectReference Include="..\..\src\Crai.Modules.TextProcessing\Crai.Modules.TextProcessing.csproj" />
+    <ProjectReference Include="..\..\src\Crai.Modules.Storage\Crai.Modules.Storage.csproj" />
   </ItemGroup>
 </Project>

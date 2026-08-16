@@ -20,5 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Crai.Infrastructure\Crai.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Crai.Modules.Storage\Crai.Modules.Storage.csproj" />
   </ItemGroup>
 </Project>

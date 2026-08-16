@@ -45,6 +45,9 @@
     <!-- Data Protection (Windows Cryptography DPAPI) -->
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="9.0.2" />
 
+    <!-- Database (SQLite) -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.2" />
+
     <!-- Testing packages -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

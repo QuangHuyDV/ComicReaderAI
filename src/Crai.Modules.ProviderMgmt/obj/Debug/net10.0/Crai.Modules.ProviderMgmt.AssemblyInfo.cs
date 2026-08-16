@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Crai.Modules.ProviderMgmt")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+96ca784e0b30215287729846b976fff4ad0f64c2")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+763034e8be2dc8e2ca97f3465e68b577b8b85ec5")]
 [assembly: System.Reflection.AssemblyProductAttribute("Crai.Modules.ProviderMgmt")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Crai.Modules.ProviderMgmt")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

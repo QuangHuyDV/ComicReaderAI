@@ -8,6 +8,7 @@ using Crai.Modules.Recognition;
 using Crai.Modules.Translation;
 using Crai.Modules.Presentation;
 using Crai.Modules.TextProcessing;
+using Crai.Modules.Storage;
 using Crai.Runtime;
 using Crai.Desktop.Services;
 using Crai.Desktop.ViewModels;
@@ -48,6 +49,7 @@ public static class CompositionRoot
         services.AddTranslationModuleServices();
         services.AddPresentationModuleServices();
         services.AddTextProcessingModuleServices();
+        services.AddStorageModuleServices();
 
         // 4. Đăng ký các ViewModels của Desktop App (để tự động resolve dependencies qua DI)
         services.AddTransient<MainViewModel>();

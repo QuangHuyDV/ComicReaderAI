@@ -156,6 +156,7 @@
           "AvaloniaUI.DiagnosticsSupport": "2.2.3",
           "CommunityToolkit.Mvvm": "8.4.2",
           "coverlet.collector": "6.0.4",
+          "Microsoft.Data.Sqlite": "9.0.2",
           "Microsoft.Extensions.Configuration": "9.0.2",
           "Microsoft.Extensions.Configuration.Binder": "9.0.2",
           "Microsoft.Extensions.Configuration.Json": "9.0.2",

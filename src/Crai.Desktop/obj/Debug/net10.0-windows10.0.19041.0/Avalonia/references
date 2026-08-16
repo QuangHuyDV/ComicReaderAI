@@ -41,6 +41,7 @@ F:\mydata\myproject\ComicReaderAI\src\Crai.Runtime\obj\Debug\net10.0\ref\Crai.Ru
 C:\Users\Admin\.nuget\packages\harfbuzzsharp\8.3.1.3\lib\net8.0-windows10.0.19041\HarfBuzzSharp.dll
 C:\Users\Admin\.nuget\packages\microcom.runtime\0.11.6\lib\net8.0\MicroCom.Runtime.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\Microsoft.CSharp.dll
+C:\Users\Admin\.nuget\packages\microsoft.data.sqlite.core\9.0.2\lib\net8.0\Microsoft.Data.Sqlite.dll
 C:\Users\Admin\.nuget\packages\microsoft.extensions.configuration.abstractions\9.0.2\lib\net9.0\Microsoft.Extensions.Configuration.Abstractions.dll
 C:\Users\Admin\.nuget\packages\microsoft.extensions.configuration.binder\9.0.2\lib\net9.0\Microsoft.Extensions.Configuration.Binder.dll
 C:\Users\Admin\.nuget\packages\microsoft.extensions.configuration\9.0.2\lib\net9.0\Microsoft.Extensions.Configuration.dll
@@ -66,6 +67,9 @@ C:\Users\Admin\.nuget\packages\serilog.formatting.compact\3.0.0\lib\net8.0\Seril
 C:\Users\Admin\.nuget\packages\serilog.sinks.console\6.0.0\lib\net8.0\Serilog.Sinks.Console.dll
 C:\Users\Admin\.nuget\packages\serilog.sinks.file\6.0.0\lib\net8.0\Serilog.Sinks.File.dll
 C:\Users\Admin\.nuget\packages\skiasharp\3.119.4\ref\net10.0-windows10.0.19041\SkiaSharp.dll
+C:\Users\Admin\.nuget\packages\sqlitepclraw.bundle_e_sqlite3\2.1.10\lib\netstandard2.0\SQLitePCLRaw.batteries_v2.dll
+C:\Users\Admin\.nuget\packages\sqlitepclraw.core\2.1.10\lib\netstandard2.0\SQLitePCLRaw.core.dll
+C:\Users\Admin\.nuget\packages\sqlitepclraw.provider.e_sqlite3\2.1.10\lib\net6.0-windows7.0\SQLitePCLRaw.provider.e_sqlite3.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.AppContext.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Buffers.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.11\ref\net10.0\System.Collections.Concurrent.dll

@@ -17,8 +17,14 @@ public static class ServiceRegistration
             sp.GetRequiredService<IStructuredLogger>()
         ));
 
-        // 2. Đăng ký Central Translation Service thông qua Router để hỗ trợ fallback
-        services.AddSingleton<ITranslationService, TranslationRouter>();
+        // 2. Đăng ký Central Translation Service thông qua Router để hỗ trợ fallback và caching
+        services.AddSingleton<ITranslationService, TranslationRouter>(sp => new TranslationRouter(
+            sp.GetRequiredService<GoogleTranslationEngine>(),
+            sp.GetRequiredService<GeminiTranslationEngine>(),
+            sp.GetRequiredService<IConfigurationService>(),
+            sp.GetRequiredService<ITranslationCache>(),
+            sp.GetRequiredService<IStructuredLogger>()
+        ));
 
         return services;
     }

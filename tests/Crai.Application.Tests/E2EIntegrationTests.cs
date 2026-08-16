@@ -17,6 +17,7 @@ using Crai.Modules.Recognition.Services;
 using Crai.Modules.Translation.Services;
 using Crai.Modules.Presentation.Services;
 using Crai.Modules.TextProcessing.Services;
+using Crai.Modules.Storage.Services;
 
 namespace Crai.Application.Tests;
 
@@ -28,6 +29,7 @@ public class E2EIntegrationTests : IDisposable
     private readonly ITelemetryService _mockTelemetry;
     private readonly IConfigurationService _configService;
     private readonly ISecretManager _secretManager;
+    private readonly ITranslationCache _translationCache;
 
     public E2EIntegrationTests()
     {
@@ -39,6 +41,7 @@ public class E2EIntegrationTests : IDisposable
         // Cấu hình in-memory config
         _configService = new ConfigurationService();
         _secretManager = new DpapiSecretManager(_mockLogger, "test_integration_secrets.dat");
+        _translationCache = new SqliteTranslationCache(_mockLogger, "test_integration_cache.db");
 
         // Tạo file ảnh test chứa chữ "HELLO" bằng SkiaSharp
         CreateOcrTestImage(_testImagePath, "HELLO");
@@ -48,6 +51,7 @@ public class E2EIntegrationTests : IDisposable
     {
         TryDeleteFile(_testImagePath);
         TryDeleteFile(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test_integration_secrets.dat"));
+        TryDeleteFile(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test_integration_cache.db"));
     }
 
     [Fact]
@@ -59,7 +63,7 @@ public class E2EIntegrationTests : IDisposable
         
         var googleEngine = new GoogleTranslationEngine(_mockLogger);
         var geminiEngine = new GeminiTranslationEngine(_secretManager, _mockLogger);
-        var realTranslation = new TranslationRouter(googleEngine, geminiEngine, _configService, _mockLogger);
+        var realTranslation = new TranslationRouter(googleEngine, geminiEngine, _configService, _translationCache, _mockLogger);
         
         var realPresentation = new OverlayPresentationService(_mockLogger);
 
