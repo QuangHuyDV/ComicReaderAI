@@ -48,6 +48,9 @@
     <!-- Database (SQLite) -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.2" />
 
+    <!-- Windows Drawing Support -->
+    <PackageVersion Include="System.Drawing.Common" Version="9.0.2" />
+
     <!-- Testing packages -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

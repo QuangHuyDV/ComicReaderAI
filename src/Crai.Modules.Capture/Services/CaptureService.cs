@@ -4,7 +4,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Crai.Application.Contracts.Services;
 using Crai.Application.Contracts.Infrastructure;
@@ -39,39 +38,43 @@ public class CaptureService : ICaptureService
 
         try
         {
-            // Thực thi trên UI Thread của Avalonia để tránh cross-thread exception
+            // Thực thi chụp màn hình trên UI Thread của Avalonia để đọc tọa độ màn hình an toàn
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var bounds = window.Bounds;
-                var scaling = window.Screens.Primary?.Scaling ?? 1.0;
-                var pixelSize = new PixelSize((int)(bounds.Width * scaling), (int)(bounds.Height * scaling));
-                var dpi = new Vector(96 * scaling, 96 * scaling);
+                // Lấy màn hình chính chứa cửa sổ (hoặc màn hình Primary làm mặc định)
+                var screen = window.Screens.Primary ?? window.Screens.All[0];
+                var bounds = screen.Bounds; // Tọa độ pixel thực tế của màn hình (Width x Height)
 
-                _logger.LogDebug($"[CaptureService] Đang chụp cửa sổ. Size: {bounds.Width}x{bounds.Height}, Scaling: {scaling}");
+                _logger.LogDebug($"[CaptureService] Đang chụp toàn màn hình Desktop. Tọa độ: X={bounds.X}, Y={bounds.Y}, Size={bounds.Width}x{bounds.Height}");
 
-                using var bitmap = new RenderTargetBitmap(pixelSize, dpi);
-                bitmap.Render(window);
-                
-                // Đảm bảo thư mục đầu ra tồn tại
-                var dir = Path.GetDirectoryName(outputFilePath);
-                if (dir != null && !Directory.Exists(dir))
+                // Chụp màn hình Desktop bằng API System.Drawing.Common (CopyFromScreen)
+                using (var bitmap = new System.Drawing.Bitmap(bounds.Width, bounds.Height))
                 {
-                    Directory.CreateDirectory(dir);
-                }
+                    using (var g = System.Drawing.Graphics.FromImage(bitmap))
+                    {
+                        g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, new System.Drawing.Size(bounds.Width, bounds.Height));
+                    }
 
-                // Xóa file cũ nếu có trước khi save
-                if (File.Exists(outputFilePath))
-                {
-                    File.Delete(outputFilePath);
-                }
+                    // Đảm bảo thư mục đầu ra tồn tại
+                    var dir = Path.GetDirectoryName(outputFilePath);
+                    if (dir != null && !Directory.Exists(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
 
-                // Sử dụng overload BitmapEncoderOptions mới để tránh warning obsolete
-                bitmap.Save(outputFilePath);
+                    // Xóa file cũ nếu có trước khi ghi đè
+                    if (File.Exists(outputFilePath))
+                    {
+                        File.Delete(outputFilePath);
+                    }
+
+                    bitmap.Save(outputFilePath, System.Drawing.Imaging.ImageFormat.Png);
+                }
             }, DispatcherPriority.Render);
 
-            _logger.LogDebug($"[CaptureService] Đã chụp và lưu thành công ảnh chụp màn hình tại: {outputFilePath}");
+            _logger.LogDebug($"[CaptureService] Đã chụp toàn màn hình Desktop thành công tại: {outputFilePath}");
             return outputFilePath;
         }
         catch (OperationCanceledException)
@@ -80,8 +83,8 @@ public class CaptureService : ICaptureService
         }
         catch (Exception ex)
         {
-            _logger.LogError($"[CaptureService] Lỗi khi chụp màn hình cửa sổ: {ex.Message}", ex);
-            throw new InvalidOperationException($"Lỗi khi chụp màn hình cửa sổ: {ex.Message}", ex);
+            _logger.LogError($"[CaptureService] Lỗi khi chụp toàn màn hình Desktop: {ex.Message}", ex);
+            throw new InvalidOperationException($"Lỗi khi chụp toàn màn hình Desktop: {ex.Message}", ex);
         }
     }
 }

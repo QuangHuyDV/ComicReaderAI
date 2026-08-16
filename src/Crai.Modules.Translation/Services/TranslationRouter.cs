@@ -14,6 +14,11 @@ public class TranslationRouter : ITranslationService
     private readonly ITranslationCache _translationCache;
     private readonly IStructuredLogger _logger;
 
+    /// <summary>
+    /// Cho phép ghi đè cấu hình Engine dịch động tại runtime.
+    /// </summary>
+    public static string? PreferredEngineOverride { get; set; }
+
     public TranslationRouter(
         GoogleTranslationEngine googleEngine,
         GeminiTranslationEngine geminiEngine,
@@ -54,8 +59,8 @@ public class TranslationRouter : ITranslationService
             _logger.LogWarning($"[TranslationRouter] Không thể truy cập Cache dịch thuật: {ex.Message}");
         }
 
-        // Lấy engine mong muốn từ cấu hình hệ thống
-        var preferredEngine = _configService.GetValue<string>("Translation:Engine") ?? "GoogleTranslate";
+        // Lấy engine mong muốn từ cấu hình hệ thống hoặc ghi đè runtime
+        var preferredEngine = PreferredEngineOverride ?? _configService.GetValue<string>("Translation:Engine") ?? "GoogleTranslate";
         string translatedText;
 
         if (preferredEngine.Equals("Gemini", StringComparison.OrdinalIgnoreCase))

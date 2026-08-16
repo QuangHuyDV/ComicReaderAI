@@ -1,0 +1,39 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="60" d:DesignHeight="60"
+        x:Class="Crai.Desktop.Views.FloatingBubbleWindow"
+        Title="CRAI Bubble"
+        Width="60" Height="60"
+        WindowDecorations="None"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        Topmost="True"
+        CanResize="False"
+        ShowInTaskbar="False">
+
+    <!-- Cấu hình bo tròn thành nút hình tròn, có đổ bóng phát sáng -->
+    <Border Name="BubbleBorder" Width="52" Height="52" 
+            CornerRadius="26" BorderThickness="2" BorderBrush="#FFFFFF"
+            PointerPressed="OnPointerPressed"
+            PointerMoved="OnPointerMoved"
+            PointerReleased="OnPointerReleased"
+            Cursor="Hand"
+            ToolTip.Tip="Click chuột trái: Dịch màn hình&#x0a;Click chuột phải: Cài đặt">
+        <Border.Background>
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                <GradientStop Color="#3A86FF" Offset="0.0"/>
+                <GradientStop Color="#8338EC" Offset="1.0"/>
+            </LinearGradientBrush>
+        </Border.Background>
+
+        <Grid>
+            <!-- Logo hoặc Text hiển thị trung tâm -->
+            <TextBlock Text="CRAI" 
+                       HorizontalAlignment="Center" VerticalAlignment="Center" 
+                       Foreground="White" FontSize="11" FontWeight="Heavy"
+                       LetterSpacing="0.5"/>
+        </Grid>
+    </Border>
+</Window>

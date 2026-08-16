@@ -35,6 +35,11 @@ public class WorkItem
     public string? TranslatedText { get; set; }
 
     /// <summary>
+    /// Kết quả OCR chi tiết chứa tọa độ dòng (gán động để tránh phụ thuộc vòng)
+    /// </summary>
+    public object? OcrResult { get; set; }
+
+    /// <summary>
     /// Chi tiết thông báo lỗi (nếu Status là Failed).
     /// </summary>
     public string? ErrorMessage { get; set; }

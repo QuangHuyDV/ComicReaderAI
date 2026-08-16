@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Crai.Application.Contracts.Runtime;
@@ -93,19 +94,20 @@ public class PipelineRuntime : IPipelineRuntime
 
             // 2. OCR / Recognition Step
             UpdateStatus(workItem, WorkItemStatus.Recognizing);
-            string rawText;
+            OcrResultInfo ocrResult;
             using (var span = _telemetry.StartTrace("Pipeline_Recognition"))
             {
-                rawText = await _recognitionService.RecognizeTextAsync(capturedPath, token);
+                ocrResult = await _recognitionService.RecognizeTextAsync(capturedPath, token);
             }
             UpdateStatus(workItem, WorkItemStatus.Recognized);
 
             // Xử lý chuẩn hóa text (Text Processing) trước khi dịch thuật
-            var normalizedText = _textProcessorService.NormalizeText(rawText);
+            var normalizedText = _textProcessorService.NormalizeText(ocrResult.FullText);
             workItem.RawText = normalizedText;
+            workItem.OcrResult = ocrResult; // Lưu kết quả OCR chi tiết (chứa tọa độ dòng) vào WorkItem
 
             // Tối ưu hóa dừng sớm: Nếu không có chữ nào nhận dạng được, kết thúc luôn
-            if (string.IsNullOrWhiteSpace(normalizedText))
+            if (string.IsNullOrWhiteSpace(normalizedText) || ocrResult.Lines.Count == 0)
             {
                 _logger.LogInfo($"[PipelineRuntime] Không phát hiện văn bản ở WorkItemId '{workItem.Id.Value}'. Kết thúc sớm.");
                 workItem.MarkAsCompleted("[Không phát hiện chữ]");
@@ -118,11 +120,31 @@ public class PipelineRuntime : IPipelineRuntime
 
             // 3. Translation Step
             UpdateStatus(workItem, WorkItemStatus.Translating);
-            string translatedText;
+            
+            // Dịch song song từng dòng chữ để đảm bảo tốc độ cực đại (phục vụ vẽ đè Overlay lên màn hình)
             using (var span = _telemetry.StartTrace("Pipeline_Translation"))
             {
-                translatedText = await _translationService.TranslateTextAsync(normalizedText, token);
+                var translateTasks = ocrResult.Lines.Select(async line =>
+                {
+                    if (string.IsNullOrWhiteSpace(line.Text)) return;
+                    try
+                    {
+                        // Chuẩn hóa dòng text trước khi gửi dịch
+                        var normalizedLine = _textProcessorService.NormalizeText(line.Text);
+                        line.TranslatedText = await _translationService.TranslateTextAsync(normalizedLine, token);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"[PipelineRuntime] Lỗi dịch dòng '{line.Text}': {ex.Message}");
+                        line.TranslatedText = "[Lỗi dịch]";
+                    }
+                });
+
+                await Task.WhenAll(translateTasks);
             }
+
+            // Tạo chuỗi dịch toàn cục ghép lại từ các dòng đã dịch
+            var translatedText = string.Join("\n", ocrResult.Lines.Select(l => l.TranslatedText));
             workItem.TranslatedText = translatedText;
             UpdateStatus(workItem, WorkItemStatus.Translated);
 

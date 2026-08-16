@@ -223,10 +223,11 @@ public class PipelineRuntimeTests
     {
         public string ResultText { get; set; } = "Hello";
         public Exception? ExceptionToThrow { get; set; }
-        public Task<string> RecognizeTextAsync(string imagePath, CancellationToken cancellationToken = default)
+        public Task<OcrResultInfo> RecognizeTextAsync(string imagePath, CancellationToken cancellationToken = default)
         {
             if (ExceptionToThrow != null) throw ExceptionToThrow;
-            return Task.FromResult(ResultText);
+            var lines = new List<OcrLineInfo> { new OcrLineInfo(ResultText, 10, 20, 100, 30) };
+            return Task.FromResult(new OcrResultInfo(ResultText, lines));
         }
     }
 

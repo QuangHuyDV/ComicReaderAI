@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Media.Ocr;
@@ -22,14 +23,14 @@ public class WindowsOcrService : IRecognitionService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<string> RecognizeTextAsync(string imagePath, CancellationToken cancellationToken = default)
+    public async Task<OcrResultInfo> RecognizeTextAsync(string imagePath, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
         {
             _logger.LogWarning($"[WindowsOcrService] File ảnh nguồn không tồn tại hoặc đường dẫn trống: '{imagePath}'");
-            return string.Empty;
+            return new OcrResultInfo(string.Empty, new List<OcrLineInfo>());
         }
 
         try
@@ -50,7 +51,7 @@ public class WindowsOcrService : IRecognitionService
                 // Fallback tạo OcrEngine mặc định của User
                 ocrEngine = OcrEngine.TryCreateFromLanguage(new Language("en-US"));
                 if (ocrEngine == null)
-                {
+                 {
                     throw new InvalidOperationException("Không thể tạo Windows OcrEngine cho cả ngôn ngữ chỉ định lẫn en-US.");
                 }
             }
@@ -71,7 +72,31 @@ public class WindowsOcrService : IRecognitionService
             var recognizedText = ocrResult.Text ?? string.Empty;
             _logger.LogDebug($"[WindowsOcrService] OCR thành công. Nhận diện được {recognizedText.Length} ký tự.");
 
-            return recognizedText;
+            // 4. Tính toán tọa độ Bounding Box của từng dòng bằng cách gộp BoundingRect các Words
+            var linesList = new List<OcrLineInfo>();
+            foreach (var line in ocrResult.Lines)
+            {
+                if (line.Words == null || line.Words.Count == 0) continue;
+
+                double minX = double.MaxValue;
+                double minY = double.MaxValue;
+                double maxX = double.MinValue;
+                double maxY = double.MinValue;
+
+                foreach (var word in line.Words)
+                {
+                    var rect = word.BoundingRect;
+                    if (rect.Left < minX) minX = rect.Left;
+                    if (rect.Top < minY) minY = rect.Top;
+                    if (rect.Right > maxX) maxX = rect.Right;
+                    if (rect.Bottom > maxY) maxY = rect.Bottom;
+                }
+
+                var lineText = line.Text ?? string.Empty;
+                linesList.Add(new OcrLineInfo(lineText, minX, minY, maxX - minX, maxY - minY));
+            }
+
+            return new OcrResultInfo(recognizedText, linesList);
         }
         catch (OperationCanceledException)
         {

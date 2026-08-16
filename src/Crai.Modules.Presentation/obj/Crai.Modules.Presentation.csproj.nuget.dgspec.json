@@ -83,6 +83,7 @@
             "Serilog.Sinks.File": "6.0.0",
             "SkiaSharp": "4.151.1",
             "SkiaSharp.NativeAssets.Win32": "4.151.1",
+            "System.Drawing.Common": "9.0.2",
             "System.Security.Cryptography.ProtectedData": "9.0.2",
             "xunit": "2.9.3",
             "xunit.runner.visualstudio": "3.0.2"
@@ -449,6 +450,7 @@
             "Serilog.Sinks.File": "6.0.0",
             "SkiaSharp": "4.151.1",
             "SkiaSharp.NativeAssets.Win32": "4.151.1",
+            "System.Drawing.Common": "9.0.2",
             "System.Security.Cryptography.ProtectedData": "9.0.2",
             "xunit": "2.9.3",
             "xunit.runner.visualstudio": "3.0.2"
@@ -819,6 +821,7 @@
             "Serilog.Sinks.File": "6.0.0",
             "SkiaSharp": "4.151.1",
             "SkiaSharp.NativeAssets.Win32": "4.151.1",
+            "System.Drawing.Common": "9.0.2",
             "System.Security.Cryptography.ProtectedData": "9.0.2",
             "xunit": "2.9.3",
             "xunit.runner.visualstudio": "3.0.2"
