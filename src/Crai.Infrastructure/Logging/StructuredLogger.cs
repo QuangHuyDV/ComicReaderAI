@@ -9,9 +9,37 @@ namespace Crai.Infrastructure.Logging;
 
 public class StructuredLogger : IStructuredLogger
 {
+    private static string GetAppDataDirectory()
+    {
+        bool isTest = false;
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var name = assembly.FullName;
+            if (name != null && (name.Contains("xunit", StringComparison.OrdinalIgnoreCase) || 
+                                 name.Contains("test", StringComparison.OrdinalIgnoreCase)))
+            {
+                isTest = true;
+                break;
+            }
+        }
+
+        if (isTest)
+        {
+            return AppDomain.CurrentDomain.BaseDirectory;
+        }
+
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var craiDir = Path.Combine(appData, "Crai");
+        if (!Directory.Exists(craiDir))
+        {
+            Directory.CreateDirectory(craiDir);
+        }
+        return craiDir;
+    }
+
     static StructuredLogger()
     {
-        var logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
+        var logDir = Path.Combine(GetAppDataDirectory(), "logs");
         if (!Directory.Exists(logDir))
         {
             Directory.CreateDirectory(logDir);

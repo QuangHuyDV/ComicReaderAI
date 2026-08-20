@@ -74,7 +74,7 @@ public class PipelineRuntime : IPipelineRuntime
         var token = linkedCts.Token;
 
         // Tạo file lưu trữ ảnh riêng biệt theo ID để tránh xung đột file IO giữa các frame song song
-        var workItemImagePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"runtime_capture_{workItem.Id.Value}.png");
+        var workItemImagePath = Path.Combine(Path.GetTempPath(), $"runtime_capture_{workItem.Id.Value}.png");
         workItem.RawImagePath = workItemImagePath;
 
         // Bắt đầu đo đạc latency của toàn bộ luồng E2E
@@ -135,6 +135,7 @@ public class PipelineRuntime : IPipelineRuntime
                     var translateTasks = blocks.Select(async block =>
                     {
                         if (string.IsNullOrWhiteSpace(block.Text)) return;
+                        if (!string.IsNullOrEmpty(block.TranslatedText) && block.TranslatedText != "[Loi dich]") return;
                         try
                         {
                             var normalizedBlockText = _textProcessorService.NormalizeText(block.Text);
@@ -142,8 +143,8 @@ public class PipelineRuntime : IPipelineRuntime
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning($"[PipelineRuntime] Lỗi dịch khối '{block.Text}': {ex.Message}");
-                            block.TranslatedText = "[Lỗi dịch]";
+                            _logger.LogWarning($"[PipelineRuntime] Loi dich khoi '{block.Text}': {ex.Message}");
+                            block.TranslatedText = "[Loi dich]";
                         }
                     });
 
@@ -159,6 +160,7 @@ public class PipelineRuntime : IPipelineRuntime
                     var translateTasks = ocrResult.Lines.Select(async line =>
                     {
                         if (string.IsNullOrWhiteSpace(line.Text)) return;
+                        if (!string.IsNullOrEmpty(line.TranslatedText) && line.TranslatedText != "[Loi dich]") return;
                         try
                         {
                             var normalizedLine = _textProcessorService.NormalizeText(line.Text);
@@ -166,8 +168,8 @@ public class PipelineRuntime : IPipelineRuntime
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning($"[PipelineRuntime] Lỗi dịch dòng '{line.Text}': {ex.Message}");
-                            line.TranslatedText = "[Lỗi dịch]";
+                            _logger.LogWarning($"[PipelineRuntime] Loi dich dong '{line.Text}': {ex.Message}");
+                            line.TranslatedText = "[Loi dich]";
                         }
                     });
 

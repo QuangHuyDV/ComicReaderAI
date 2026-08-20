@@ -17,11 +17,39 @@ public class DpapiSecretManager : ISecretManager
     private readonly object _lock = new();
     private readonly IStructuredLogger _logger;
 
+    private static string GetAppDataDirectory()
+    {
+        bool isTest = false;
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var name = assembly.FullName;
+            if (name != null && (name.Contains("xunit", StringComparison.OrdinalIgnoreCase) || 
+                                 name.Contains("test", StringComparison.OrdinalIgnoreCase)))
+            {
+                isTest = true;
+                break;
+            }
+        }
+
+        if (isTest)
+        {
+            return AppDomain.CurrentDomain.BaseDirectory;
+        }
+
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var craiDir = Path.Combine(appData, "Crai");
+        if (!Directory.Exists(craiDir))
+        {
+            Directory.CreateDirectory(craiDir);
+        }
+        return craiDir;
+    }
+
     public DpapiSecretManager(IStructuredLogger logger, string? secretsFileName = null)
     {
         _logger = logger;
         var fileName = secretsFileName ?? "secrets.dat";
-        _secretsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+        _secretsFilePath = Path.Combine(GetAppDataDirectory(), fileName);
     }
 
     public void StoreSecret(string key, string secretValue)

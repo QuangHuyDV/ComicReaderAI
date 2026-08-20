@@ -768,7 +768,8 @@
       "Crai.Modules.Recognition/1.0.0": {
         "dependencies": {
           "Crai.Application": "1.0.0",
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2"
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2",
+          "SkiaSharp": "4.151.1"
         },
         "runtime": {
           "Crai.Modules.Recognition.dll": {

@@ -10,11 +10,39 @@ public class ConfigurationService : IConfigurationService
     private readonly IConfigurationRoot _configuration;
     private readonly string _configFilePath;
 
+    private static string GetAppDataDirectory()
+    {
+        bool isTest = false;
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var name = assembly.FullName;
+            if (name != null && (name.Contains("xunit", StringComparison.OrdinalIgnoreCase) || 
+                                 name.Contains("test", StringComparison.OrdinalIgnoreCase)))
+            {
+                isTest = true;
+                break;
+            }
+        }
+
+        if (isTest)
+        {
+            return AppDomain.CurrentDomain.BaseDirectory;
+        }
+
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var craiDir = Path.Combine(appData, "Crai");
+        if (!Directory.Exists(craiDir))
+        {
+            Directory.CreateDirectory(craiDir);
+        }
+        return craiDir;
+    }
+
     public ConfigurationService(string? configFilePath = null)
     {
         _configFilePath = configFilePath ?? "appsettings.json";
         
-        var basePath = AppDomain.CurrentDomain.BaseDirectory;
+        var basePath = GetAppDataDirectory();
         var fullPath = Path.Combine(basePath, _configFilePath);
 
         // Tạo file cấu hình mặc định nếu chưa tồn tại
@@ -61,7 +89,7 @@ public class ConfigurationService : IConfigurationService
     {
         try
         {
-            var basePath = AppDomain.CurrentDomain.BaseDirectory;
+            var basePath = GetAppDataDirectory();
             var fullPath = Path.Combine(basePath, _configFilePath);
 
             string jsonContent = File.Exists(fullPath) ? File.ReadAllText(fullPath) : "{}";

@@ -50,6 +50,7 @@
   - [x] **Đa dạng hoá Kiểu hiển thị bản dịch**: Thêm 3 chế độ: Dịch đè che 100%, Dịch đè mờ (nhìn xuyên nền để tránh mất hình ảnh/artwork bên dưới), và Bảng phụ bên cạnh (Side Panel) song song. Tự động chuyển đổi và đóng/mở các Window tương ứng.
   - [x] **Dịch đè xuyên thấu (Click-Through)**: Thiết lập thuộc tính cửa sổ `WS_EX_TRANSPARENT` cho `TranslationOverlayWindow` ở tầng Win32, cho phép cuộn trang, di chuột, click và tương tác 100% xuyên qua bản dịch xuống trình duyệt/ứng dụng đọc truyện phía dưới.
   - [x] **Fix lỗi dịch tự động lặp lại (Continuous Translation)**: Tự động ẩn cửa sổ overlay cũ trước khi chụp màn hình và khôi phục sau khi chụp để tránh việc OCR chụp đè chính chữ đã dịch ở lượt trước.
+  - [x] **Chu kỳ dịch tự động linh hoạt & Tự động tạm dừng**: Cho phép thay đổi chu kỳ dịch (1s, 2s, 3s, 5s, 10s) trực tiếp qua Menu chuột phải, đồng thời tự động dừng vòng lặp dịch khi Menu chuột phải đang mở để tránh làm tự đóng menu của người dùng.
 
 ---
 

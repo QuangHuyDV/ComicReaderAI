@@ -36,6 +36,11 @@ public partial class FloatingBubbleWindow : Window
     private MenuItem? _itemContinuous;
     private readonly List<MenuItem> _durationMenuItems = new();
     private readonly List<MenuItem> _presentationModeMenuItems = new();
+    private readonly List<MenuItem> _continuousDelayMenuItems = new();
+    private MenuItem? _itemOcrWindows;
+    private MenuItem? _itemOcrAi;
+    private MenuItem? _itemProviderGemini;
+    private MenuItem? _itemProviderOpenAi;
     private MainWindow? _sidePanel;
     private TranslationOverlayWindow? _activeOverlay;
     private CancellationTokenSource? _continuousCts;
@@ -351,6 +356,41 @@ public partial class FloatingBubbleWindow : Window
         };
         menu.Items.Add(_itemContinuous);
 
+        // 1.6.5 Chu kỳ dịch tự động (Submenu)
+        var itemContinuousDelay = new MenuItem { Header = "⏱️ Chu kỳ dịch tự động" };
+        var delays = new (int value, string label)[]
+        {
+            (1000, "1 giây (Mặc định)"),
+            (2000, "2 giây"),
+            (3000, "3 giây"),
+            (5000, "5 giây"),
+            (10000, "10 giây")
+        };
+
+        _continuousDelayMenuItems.Clear();
+        foreach (var d in delays)
+        {
+            var item = new MenuItem { Header = d.label, Tag = d.value };
+            item.Click += (s, e) =>
+            {
+                var val = (int)((MenuItem)s!).Tag!;
+                _configService.UpdateValue("Translation:ContinuousDelayMs", val);
+                UpdateContinuousDelayMenuHeaders();
+                _logger.LogInfo($"[FloatingBubble] Đã đổi chu kỳ dịch tự động thành: {val} ms.");
+                
+                // Nếu đang bật dịch liên tục, khởi động lại luồng với delay mới
+                var isContinuous = _configService.GetValue<bool>("Translation:Continuous");
+                if (isContinuous)
+                {
+                    StartContinuousTranslation();
+                }
+            };
+            itemContinuousDelay.Items.Add(item);
+            _continuousDelayMenuItems.Add(item);
+        }
+        menu.Items.Add(itemContinuousDelay);
+        UpdateContinuousDelayMenuHeaders();
+
         // 1.7 Thời gian hiển thị bản dịch (Submenu)
         var itemDuration = new MenuItem { Header = "⏱️ Thời gian hiển thị bản dịch" };
         var durations = new (int value, string label)[]
@@ -380,13 +420,69 @@ public partial class FloatingBubbleWindow : Window
         menu.Items.Add(itemDuration);
         UpdateDurationMenuHeaders();
 
-        // 1.8 Cấu hình Gemini API Key
-        var itemApiKey = new MenuItem { Header = "🔑 Cấu hình Gemini API Key..." };
-        itemApiKey.Click += async (s, e) =>
+        // 1.8 Cấu hình bộ quét OCR & AI (Submenu)
+        var itemOcrAiSettings = new MenuItem { Header = "⚙️ Cấu hình bộ quét OCR & AI" };
+
+        // --- 1.8.1 Bộ quét chữ (OCR Engine) ---
+        var itemOcrEngine = new MenuItem { Header = "🔍 Chọn bộ quét chữ (OCR)" };
+        _itemOcrWindows = new MenuItem();
+        _itemOcrAi = new MenuItem();
+        UpdateOcrEngineMenuHeaders();
+        _itemOcrWindows.Click += (s, e) =>
         {
-            await PromptForGeminiApiKeyAsync();
+            _configService.UpdateValue("OCR:Engine", "Windows");
+            UpdateOcrEngineMenuHeaders();
+            _logger.LogInfo("[FloatingBubble] Đã đổi bộ quét OCR sang Windows OCR.");
         };
-        menu.Items.Add(itemApiKey);
+        _itemOcrAi.Click += (s, e) =>
+        {
+            _configService.UpdateValue("OCR:Engine", "AI");
+            UpdateOcrEngineMenuHeaders();
+            _logger.LogInfo("[FloatingBubble] Đã đổi bộ quét OCR sang AI OCR.");
+        };
+        itemOcrEngine.Items.Add(_itemOcrWindows);
+        itemOcrEngine.Items.Add(_itemOcrAi);
+        itemOcrAiSettings.Items.Add(itemOcrEngine);
+
+        // --- 1.8.2 Nhà cung cấp AI (AI Provider) ---
+        var itemAiProvider = new MenuItem { Header = "🤖 Chọn nhà cung cấp AI" };
+        _itemProviderGemini = new MenuItem();
+        _itemProviderOpenAi = new MenuItem();
+        UpdateAiProviderMenuHeaders();
+        _itemProviderGemini.Click += (s, e) =>
+        {
+            _configService.UpdateValue("AI:Provider", "Gemini");
+            UpdateAiProviderMenuHeaders();
+            _logger.LogInfo("[FloatingBubble] Đã đổi AI Provider sang Gemini.");
+        };
+        _itemProviderOpenAi.Click += (s, e) =>
+        {
+            _configService.UpdateValue("AI:Provider", "OpenAI");
+            UpdateAiProviderMenuHeaders();
+            _logger.LogInfo("[FloatingBubble] Đã đổi AI Provider sang OpenAI.");
+        };
+        itemAiProvider.Items.Add(_itemProviderGemini);
+        itemAiProvider.Items.Add(_itemProviderOpenAi);
+        itemOcrAiSettings.Items.Add(itemAiProvider);
+
+        itemOcrAiSettings.Items.Add(new Separator());
+
+        // --- 1.8.3 Cài đặt Gemini API Key ---
+        var itemGeminiKey = new MenuItem { Header = "🔑 Nhập Gemini API Key..." };
+        itemGeminiKey.Click += async (s, e) => await PromptForGeminiApiKeyAsync();
+        itemOcrAiSettings.Items.Add(itemGeminiKey);
+
+        // --- 1.8.4 Cài đặt OpenAI API Key ---
+        var itemOpenAiKey = new MenuItem { Header = "🔑 Nhập OpenAI API Key..." };
+        itemOpenAiKey.Click += async (s, e) => await PromptForOpenAiApiKeyAsync();
+        itemOcrAiSettings.Items.Add(itemOpenAiKey);
+
+        // --- 1.8.5 Cấu hình ngữ cảnh dịch (Prompt) ---
+        var itemPrompt = new MenuItem { Header = "📝 Cấu hình ngữ cảnh dịch (Prompt)..." };
+        itemPrompt.Click += async (s, e) => await PromptForSystemInstructionAsync();
+        itemOcrAiSettings.Items.Add(itemPrompt);
+
+        menu.Items.Add(itemOcrAiSettings);
 
         // 1.9 Kiểu hiển thị bản dịch (Submenu)
         var itemPresentation = new MenuItem { Header = "👁️ Kiểu hiển thị bản dịch" };
@@ -524,6 +620,31 @@ public partial class FloatingBubbleWindow : Window
         }
     }
 
+    private void UpdateContinuousDelayMenuHeaders()
+    {
+        var currentDelay = _configService.GetValue<int>("Translation:ContinuousDelayMs");
+        if (currentDelay <= 0) currentDelay = 1000; // Mặc định
+
+        foreach (var item in _continuousDelayMenuItems)
+        {
+            var val = (int)item.Tag!;
+            var label = val == 1000 ? "1 giây (Mặc định)" :
+                        val == 2000 ? "2 giây" :
+                        val == 3000 ? "3 giây" :
+                        val == 5000 ? "5 giây" :
+                        "10 giây";
+
+            if (val == currentDelay)
+            {
+                item.Header = "✓ " + label;
+            }
+            else
+            {
+                item.Header = "   " + label;
+            }
+        }
+    }
+
     private void StartContinuousTranslation()
     {
         StopContinuousTranslation();
@@ -535,10 +656,20 @@ public partial class FloatingBubbleWindow : Window
         {
             while (!token.IsCancellationRequested)
             {
-                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+                // Kiểm tra xem ContextMenu có đang mở không trên UI Thread
+                bool menuIsOpen = false;
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    await StartOverlayTranslationAsync();
+                    menuIsOpen = BubbleBorder.ContextMenu?.IsOpen ?? false;
                 });
+
+                if (!menuIsOpen)
+                {
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+                    {
+                        await StartOverlayTranslationAsync();
+                    });
+                }
 
                 var delayMs = _configService.GetValue<int>("Translation:ContinuousDelayMs");
                 if (delayMs <= 0) delayMs = 1000;
@@ -728,6 +859,312 @@ public partial class FloatingBubbleWindow : Window
         buttonPanel.Children.Add(btnSave);
         buttonPanel.Children.Add(btnCancel);
 
+        stackPanel.Children.Add(label);
+        stackPanel.Children.Add(textBox);
+        stackPanel.Children.Add(buttonPanel);
+
+        inputWindow.Content = stackPanel;
+
+        await inputWindow.ShowDialog(this);
+    }
+
+    private void UpdateOcrEngineMenuHeaders()
+    {
+        if (_itemOcrWindows == null || _itemOcrAi == null) return;
+        var currentOcr = _configService.GetValue<string>("OCR:Engine") ?? "Windows";
+        if (currentOcr.Equals("AI", StringComparison.OrdinalIgnoreCase))
+        {
+            _itemOcrWindows.Header = "   Windows OCR (Mặc định, offline)";
+            _itemOcrAi.Header = "✓ AI OCR (Nhận diện tranh ảnh nâng cao)";
+        }
+        else
+        {
+            _itemOcrWindows.Header = "✓ Windows OCR (Mặc định, offline)";
+            _itemOcrAi.Header = "   AI OCR (Nhận diện tranh ảnh nâng cao)";
+        }
+    }
+
+    private void UpdateAiProviderMenuHeaders()
+    {
+        if (_itemProviderGemini == null || _itemProviderOpenAi == null) return;
+        var currentProvider = _configService.GetValue<string>("AI:Provider") ?? "Gemini";
+        if (currentProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
+        {
+            _itemProviderGemini.Header = "   Gemini (Mặc định)";
+            _itemProviderOpenAi.Header = "✓ OpenAI (GPT-4o-mini / Custom)";
+        }
+        else
+        {
+            _itemProviderGemini.Header = "✓ Gemini (Mặc định)";
+            _itemProviderOpenAi.Header = "   OpenAI (GPT-4o-mini / Custom)";
+        }
+    }
+
+    private async Task PromptForOpenAiApiKeyAsync()
+    {
+        var inputWindow = new Window
+        {
+            Title = "Cấu hình OpenAI API Key",
+            Width = 450,
+            Height = 160,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            Topmost = true,
+            Background = new SolidColorBrush(Color.Parse("#1A1A1A")),
+            CanResize = false
+        };
+
+        var stackPanel = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 12
+        };
+
+        var label = new TextBlock
+        {
+            Text = "Nhập OpenAI API Key của bạn (sẽ được mã hoá bảo mật):",
+            Foreground = Brushes.White,
+            FontSize = 13,
+            FontWeight = FontWeight.Medium
+        };
+
+        var textBox = new TextBox
+        {
+            PlaceholderText = "sk-proj-...",
+            PasswordChar = '*',
+            Text = _secretManager.GetSecret("OpenAiApiKey") ?? "",
+            Foreground = Brushes.White,
+            Background = new SolidColorBrush(Color.Parse("#2D2D2D")),
+            BorderBrush = new SolidColorBrush(Color.Parse("#3D3D3D")),
+            Height = 32,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 10
+        };
+
+        var btnSave = new Button
+        {
+            Content = "Lưu lại",
+            Width = 90,
+            Height = 30,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.Parse("#007ACC")),
+            Foreground = Brushes.White,
+            Cursor = new Cursor(StandardCursorType.Hand)
+        };
+
+        var btnCancel = new Button
+        {
+            Content = "Hủy",
+            Width = 90,
+            Height = 30,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.Parse("#3D3D3D")),
+            Foreground = Brushes.White,
+            Cursor = new Cursor(StandardCursorType.Hand)
+        };
+
+        btnSave.Click += (s, e) =>
+        {
+            var key = textBox.Text?.Trim();
+            if (!string.IsNullOrEmpty(key))
+            {
+                _secretManager.StoreSecret("OpenAiApiKey", key);
+                _logger.LogInfo("[FloatingBubble] Đã cập nhật OpenAI API Key mới vào Windows DPAPI.");
+            }
+            else
+            {
+                _secretManager.RemoveSecret("OpenAiApiKey");
+                _logger.LogInfo("[FloatingBubble] Đã xóa OpenAI API Key khỏi Secret Manager.");
+            }
+            inputWindow.Close();
+        };
+
+        btnCancel.Click += (s, e) =>
+        {
+            inputWindow.Close();
+        };
+
+        buttonPanel.Children.Add(btnSave);
+        buttonPanel.Children.Add(btnCancel);
+
+        stackPanel.Children.Add(label);
+        stackPanel.Children.Add(textBox);
+        stackPanel.Children.Add(buttonPanel);
+
+        inputWindow.Content = stackPanel;
+
+        await inputWindow.ShowDialog(this);
+    }
+
+    private async Task PromptForSystemInstructionAsync()
+    {
+        var inputWindow = new Window
+        {
+            Title = "Cấu hình ngữ cảnh dịch thuật (Prompt)",
+            Width = 500,
+            Height = 440,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            Topmost = true,
+            Background = new SolidColorBrush(Color.Parse("#1A1A1A")),
+            CanResize = false
+        };
+
+        var stackPanel = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 12
+        };
+
+        var comboLabel = new TextBlock
+        {
+            Text = "Chọn mẫu nhanh (Presets):",
+            Foreground = Brushes.White,
+            FontSize = 13,
+            FontWeight = FontWeight.Medium
+        };
+
+        var defaultPrompt = "Bạn là dịch giả truyện tranh chuyên nghiệp Trung-Việt và Anh-Việt. Hãy dịch đoạn văn bản sau sang tiếng Việt một cách tự nhiên, mượt mà và phù hợp ngữ cảnh truyện tranh. " +
+                            "Đặc biệt chú ý sử dụng chính xác các xưng hô kiếm hiệp/tu tiên (ta, ngươi, huynh, đệ, các hạ, sư phụ, đệ tử,...) phù hợp ngữ cảnh.";
+
+        var label = new TextBlock
+        {
+            Text = "Nội dung chi tiết Prompt ngữ cảnh:",
+            Foreground = Brushes.White,
+            FontSize = 13,
+            FontWeight = FontWeight.Medium
+        };
+
+        var currentPrompt = _configService.GetValue<string>("Translation:SystemInstruction");
+        if (string.IsNullOrWhiteSpace(currentPrompt))
+        {
+            currentPrompt = defaultPrompt;
+        }
+
+        var textBox = new TextBox
+        {
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Text = currentPrompt,
+            Foreground = Brushes.White,
+            Background = new SolidColorBrush(Color.Parse("#2D2D2D")),
+            BorderBrush = new SolidColorBrush(Color.Parse("#3D3D3D")),
+            Height = 180,
+            VerticalContentAlignment = VerticalAlignment.Top
+        };
+
+        var comboBox = new ComboBox
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Background = new SolidColorBrush(Color.Parse("#2D2D2D")),
+            Foreground = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.Parse("#3D3D3D")),
+            Height = 32,
+            PlaceholderText = "Chọn mẫu nhanh để tự điền..."
+        };
+
+        var presets = new List<string>
+        {
+            "Mặc định (Tu Tiên / Xianxia / Manga tổng hợp)",
+            "Cổ trang / Kiếm hiệp / Ngôn tình",
+            "Hiện đại / Học đường / Đời thường"
+        };
+        comboBox.ItemsSource = presets;
+
+        comboBox.SelectionChanged += (s, e) =>
+        {
+            if (comboBox.SelectedIndex == 0)
+            {
+                textBox.Text = defaultPrompt;
+            }
+            else if (comboBox.SelectedIndex == 1)
+            {
+                textBox.Text = "Bạn là dịch giả truyện tranh kiếm hiệp, tu tiên, cổ trang Trung Quốc (Manhua) chuyên nghiệp. Hãy dịch văn bản sang tiếng Việt phù hợp bối cảnh cổ trang.\n" +
+                               "Lưu ý xưng hô cổ trang tự nhiên: ta - ngươi, huynh - đệ, sư phụ - đệ tử, các hạ, bổn tọa, tiên sinh, công tử, tiểu thư...\n" +
+                               "Sử dụng thuật ngữ tu tiên chính xác (Trúc Cơ, Kim Đan, Nguyên Anh, Luyện Khí, đan dược, pháp bảo, tông môn).";
+            }
+            else if (comboBox.SelectedIndex == 2)
+            {
+                textBox.Text = "Bạn là dịch giả truyện tranh hiện đại, học đường, đời thường (Manga/Manhua/Webtoon) chuyên nghiệp. Hãy dịch văn bản sang tiếng Việt trẻ trung, tự nhiên.\n" +
+                               "Xưng hô gần gũi phù hợp tuổi học sinh/hiện đại: tớ - cậu, mình - bạn, anh - em, chị - em, hoặc mày - tao (nếu đối thoại bạn bè thân thiết/cãi nhau).\n" +
+                               "Dịch thoát ý tự nhiên phù hợp với ngôn ngữ giới trẻ Việt Nam hiện nay.";
+            }
+        };
+
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 10
+        };
+
+        var btnSave = new Button
+        {
+            Content = "Lưu lại",
+            Width = 90,
+            Height = 30,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.Parse("#007ACC")),
+            Foreground = Brushes.White,
+            Cursor = new Cursor(StandardCursorType.Hand)
+        };
+
+        var btnReset = new Button
+        {
+            Content = "Khôi phục gốc",
+            Width = 110,
+            Height = 30,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.Parse("#7A5A00")),
+            Foreground = Brushes.White,
+            Cursor = new Cursor(StandardCursorType.Hand)
+        };
+
+        var btnCancel = new Button
+        {
+            Content = "Hủy",
+            Width = 90,
+            Height = 30,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.Parse("#3D3D3D")),
+            Foreground = Brushes.White,
+            Cursor = new Cursor(StandardCursorType.Hand)
+        };
+
+        btnSave.Click += (s, e) =>
+        {
+            var promptVal = textBox.Text?.Trim();
+            _configService.UpdateValue("Translation:SystemInstruction", promptVal ?? "");
+            _logger.LogInfo("[FloatingBubble] Đã lưu Prompt ngữ cảnh dịch thuật mới.");
+            inputWindow.Close();
+        };
+
+        btnReset.Click += (s, e) =>
+        {
+            textBox.Text = defaultPrompt;
+            comboBox.SelectedIndex = 0;
+        };
+
+        btnCancel.Click += (s, e) =>
+        {
+            inputWindow.Close();
+        };
+
+        buttonPanel.Children.Add(btnSave);
+        buttonPanel.Children.Add(btnReset);
+        buttonPanel.Children.Add(btnCancel);
+
+        stackPanel.Children.Add(comboLabel);
+        stackPanel.Children.Add(comboBox);
         stackPanel.Children.Add(label);
         stackPanel.Children.Add(textBox);
         stackPanel.Children.Add(buttonPanel);

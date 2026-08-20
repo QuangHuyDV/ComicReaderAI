@@ -8,8 +8,9 @@ public static class ServiceRegistration
 {
     public static IServiceCollection AddRecognitionModuleServices(this IServiceCollection services)
     {
-        // Đăng ký dịch vụ quét chữ Windows Media OCR (WinRT)
-        services.AddSingleton<IRecognitionService, WindowsOcrService>();
+        services.AddSingleton<WindowsOcrService>();
+        services.AddSingleton<AiOcrService>();
+        services.AddSingleton<IRecognitionService, OcrRouter>();
 
         return services;
     }

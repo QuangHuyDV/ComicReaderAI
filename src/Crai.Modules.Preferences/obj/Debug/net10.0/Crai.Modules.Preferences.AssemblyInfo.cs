@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Crai.Modules.Preferences")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6de7d1fe9e3f97eaad8df29e5e98a935d4954bcb")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e8130efe56d1b7d54e00bfe4ed0bae476dd4f754")]
 [assembly: System.Reflection.AssemblyProductAttribute("Crai.Modules.Preferences")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Crai.Modules.Preferences")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

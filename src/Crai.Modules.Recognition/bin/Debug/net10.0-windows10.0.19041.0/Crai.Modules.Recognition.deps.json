@@ -10,6 +10,7 @@
         "dependencies": {
           "Crai.Application": "1.0.0",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.2",
+          "SkiaSharp": "4.151.1",
           "runtimepack.Microsoft.Windows.SDK.NET.Ref": "10.0.19041.57"
         },
         "runtime": {
@@ -33,6 +34,51 @@
           "lib/net9.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
             "assemblyVersion": "9.0.0.0",
             "fileVersion": "9.0.225.6610"
+          }
+        }
+      },
+      "SkiaSharp/4.151.1": {
+        "dependencies": {
+          "SkiaSharp.NativeAssets.Win32": "4.151.1"
+        },
+        "runtime": {
+          "lib/net10.0-windows10.0.19041/SkiaSharp.dll": {
+            "assemblyVersion": "4.151.0.0",
+            "fileVersion": "4.151.1.0"
+          }
+        }
+      },
+      "SkiaSharp.NativeAssets.Win32/4.151.1": {
+        "runtimeTargets": {
+          "runtimes/win-arm64/native/libSkiaSharp.dll": {
+            "rid": "win-arm64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-arm64/native/libSkiaSharp.pdb": {
+            "rid": "win-arm64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/libSkiaSharp.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/libSkiaSharp.pdb": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x86/native/libSkiaSharp.dll": {
+            "rid": "win-x86",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x86/native/libSkiaSharp.pdb": {
+            "rid": "win-x86",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
           }
         }
       },
@@ -75,6 +121,20 @@
       "sha512": "sha512-MNe7GSTBf3jQx5vYrXF0NZvn6l7hUKF6J54ENfAgCO8y6xjN1XUmKKWG464LP2ye6QqDiA1dkaWEZBYnhoZzjg==",
       "path": "microsoft.extensions.dependencyinjection.abstractions/9.0.2",
       "hashPath": "microsoft.extensions.dependencyinjection.abstractions.9.0.2.nupkg.sha512"
+    },
+    "SkiaSharp/4.151.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-FNlVsGZ9to3o9pObVqhIZanHjUGOoPb/Zxk5svCSLMJnKwxPKV7sIJrjs9BpB/jF3j9OdsaMOb4cfwSJbjueSw==",
+      "path": "skiasharp/4.151.1",
+      "hashPath": "skiasharp.4.151.1.nupkg.sha512"
+    },
+    "SkiaSharp.NativeAssets.Win32/4.151.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-G+nln30ZX2ZuhH+ungf6x/QMXCje38KTS0VTfQeMyeY8uyMBmsZwFz2D30ZxUjZqsVbEIcaC2bsYF65876s4Yg==",
+      "path": "skiasharp.nativeassets.win32/4.151.1",
+      "hashPath": "skiasharp.nativeassets.win32.4.151.1.nupkg.sha512"
     },
     "Crai.Application/1.0.0": {
       "type": "project",

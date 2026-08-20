@@ -62,7 +62,7 @@ public class E2EIntegrationTests : IDisposable
         var realOcr = new WindowsOcrService(_configService, _mockLogger);
         
         var googleEngine = new GoogleTranslationEngine(_mockLogger);
-        var geminiEngine = new GeminiTranslationEngine(_secretManager, _mockLogger);
+        var geminiEngine = new GeminiTranslationEngine(_secretManager, _configService, _mockLogger);
         var realTranslation = new TranslationRouter(googleEngine, geminiEngine, _configService, _translationCache, _mockLogger);
         
         var realPresentation = new OverlayPresentationService(_mockLogger);

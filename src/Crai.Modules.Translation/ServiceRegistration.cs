@@ -14,6 +14,7 @@ public static class ServiceRegistration
         
         services.AddSingleton<GeminiTranslationEngine>(sp => new GeminiTranslationEngine(
             sp.GetRequiredService<ISecretManager>(),
+            sp.GetRequiredService<IConfigurationService>(),
             sp.GetRequiredService<IStructuredLogger>()
         ));
 

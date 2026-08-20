@@ -13,11 +13,13 @@ public class GeminiTranslationEngine
 {
     private static readonly HttpClient HttpClient = new HttpClient();
     private readonly ISecretManager _secretManager;
+    private readonly IConfigurationService _configService;
     private readonly IStructuredLogger _logger;
 
-    public GeminiTranslationEngine(ISecretManager secretManager, IStructuredLogger logger)
+    public GeminiTranslationEngine(ISecretManager secretManager, IConfigurationService configService, IStructuredLogger logger)
     {
         _secretManager = secretManager ?? throw new ArgumentNullException(nameof(secretManager));
+        _configService = configService ?? throw new ArgumentNullException(nameof(configService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -39,14 +41,18 @@ public class GeminiTranslationEngine
 
             var endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={apiKey}";
 
-            // Định nghĩa System Instruction chứa Glossary thuật ngữ Tu Tiên / Xianxia chuyên biệt để sửa lỗi dịch sai
-            var systemInstruction = "Bạn là dịch giả truyện tranh chuyên nghiệp Trung-Việt và Anh-Việt. Hãy dịch đoạn văn bản sau sang tiếng Việt một cách tự nhiên, mượt mà và phù hợp ngữ cảnh truyện tranh. " +
-                                    "Đặc biệt chú ý sử dụng chính xác các thuật ngữ Tu Tiên (Xianxia/Manhua) sau đây:\n" +
-                                    "- \"Foundation Establishment\" hoặc \"Zhu Ji\" hoặc \"筑基\" -> \"Trúc Cơ kỳ\"\n" +
-                                    "- \"Golden Core\" hoặc \"Jin Dan\" hoặc \"金丹\" -> \"Kim Đan kỳ\"\n" +
-                                    "- \"Nascent Soul\" hoặc \"Yuan Ying\" hoặc \"元婴\" -> \"Nguyên Anh kỳ\"\n" +
-                                    "- \"Qi Condensation\" hoặc \"Lian Qi\" hoặc \"炼气\" -> \"Luyện Khí kỳ\"\n" +
-                                    "Chỉ trả về chuỗi kết quả dịch duy nhất, không thêm lời giải thích nào khác.";
+            // Đọc Prompt ngữ cảnh tùy chỉnh từ cấu hình (nếu có)
+            var systemInstruction = _configService.GetValue<string>("Translation:SystemInstruction");
+            if (string.IsNullOrWhiteSpace(systemInstruction))
+            {
+                systemInstruction = "Bạn là dịch giả truyện tranh chuyên nghiệp Trung-Việt và Anh-Việt. Hãy dịch đoạn văn bản sau sang tiếng Việt một cách tự nhiên, mượt mà và phù hợp ngữ cảnh truyện tranh. " +
+                                        "Đặc biệt chú ý sử dụng chính xác các thuật ngữ Tu Tiên (Xianxia/Manhua) sau đây:\n" +
+                                        "- \"Foundation Establishment\" hoặc \"Zhu Ji\" hoặc \"筑基\" -> \"Trúc Cơ kỳ\"\n" +
+                                        "- \"Golden Core\" hoặc \"Jin Dan\" hoặc \"金丹\" -> \"Kim Đan kỳ\"\n" +
+                                        "- \"Nascent Soul\" hoặc \"Yuan Ying\" hoặc \"元婴\" -> \"Nguyên Anh kỳ\"\n" +
+                                        "- \"Qi Condensation\" hoặc \"Lian Qi\" hoặc \"炼气\" -> \"Luyện Khí kỳ\"\n" +
+                                        "Chỉ trả về chuỗi kết quả dịch duy nhất, không thêm lời giải thích nào khác.";
+            }
 
             // Tạo cấu trúc request body cho Gemini API
             var requestBody = new

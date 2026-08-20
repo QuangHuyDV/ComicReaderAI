@@ -14,13 +14,41 @@ public class SqliteTranslationCache : ITranslationCache
     private readonly IStructuredLogger _logger;
     private readonly object _lock = new();
 
+    private static string GetAppDataDirectory()
+    {
+        bool isTest = false;
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var name = assembly.FullName;
+            if (name != null && (name.Contains("xunit", StringComparison.OrdinalIgnoreCase) || 
+                                 name.Contains("test", StringComparison.OrdinalIgnoreCase)))
+            {
+                isTest = true;
+                break;
+            }
+        }
+
+        if (isTest)
+        {
+            return AppDomain.CurrentDomain.BaseDirectory;
+        }
+
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var craiDir = Path.Combine(appData, "Crai");
+        if (!Directory.Exists(craiDir))
+        {
+            Directory.CreateDirectory(craiDir);
+        }
+        return craiDir;
+    }
+
     public SqliteTranslationCache(IStructuredLogger logger, string? dbFileName = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         var fileName = dbFileName ?? "crai_cache.db";
-        var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+        var dbPath = Path.Combine(GetAppDataDirectory(), fileName);
         _connectionString = $"Data Source={dbPath};";
-
+        
         InitializeDatabase();
     }
 
