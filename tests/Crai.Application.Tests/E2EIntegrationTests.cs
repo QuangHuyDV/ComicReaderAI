@@ -75,7 +75,8 @@ public class E2EIntegrationTests : IDisposable
             realPresentation,
             _artifactStore,
             _mockLogger,
-            _mockTelemetry
+            _mockTelemetry,
+            _configService
         );
 
         // 2. Act

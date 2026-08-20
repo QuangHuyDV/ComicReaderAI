@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Crai.Application.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e65ae0d81dd4ebe88d6bb9e5653dbb98d45182c5")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0df346f118d18d4dabe0f6bebc4105ea0f48f107")]
 [assembly: System.Reflection.AssemblyProductAttribute("Crai.Application.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Crai.Application.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

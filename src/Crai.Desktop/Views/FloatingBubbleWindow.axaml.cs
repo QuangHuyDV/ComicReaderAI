@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -29,6 +30,11 @@ public partial class FloatingBubbleWindow : Window
     // MenuItems lưu trữ để thay đổi text động
     private MenuItem? _itemGoogle;
     private MenuItem? _itemGemini;
+    private MenuItem? _itemMergeLines;
+    private MenuItem? _itemContinuous;
+    private readonly List<MenuItem> _durationMenuItems = new();
+    private TranslationOverlayWindow? _activeOverlay;
+    private CancellationTokenSource? _continuousCts;
 
     // Các biến phục vụ drag-and-drop
     private bool _isDragging;
@@ -65,12 +71,23 @@ public partial class FloatingBubbleWindow : Window
     {
         // Dock về góc phải giữa màn hình
         DockToRightCenter();
+
+        var isContinuous = _configService.GetValue<bool>("Translation:Continuous");
+        if (isContinuous)
+        {
+            StartContinuousTranslation();
+        }
     }
 
     private void FloatingBubbleWindow_Closed(object? sender, EventArgs e)
     {
         _hotkeyProto?.Dispose();
         _hotkeyProto = null;
+
+        StopContinuousTranslation();
+
+        _activeOverlay?.Close();
+        _activeOverlay = null;
     }
 
     private void DockToRightCenter()
@@ -104,7 +121,7 @@ public partial class FloatingBubbleWindow : Window
         else if (properties.IsRightButtonPressed)
         {
             // Click chuột phải hiển thị menu cài đặt
-            ContextMenu?.Open(BubbleBorder);
+            BubbleBorder.ContextMenu?.Open(BubbleBorder);
             e.Handled = true;
         }
     }
@@ -154,26 +171,40 @@ public partial class FloatingBubbleWindow : Window
     {
         _logger.LogInfo("[FloatingBubble] Bắt đầu chạy tiến trình dịch màn hình...");
         
-        // Ẩn nút nổi để tránh che khuất hình ảnh game/truyện khi chụp màn hình
-        Hide();
-
-        // Chờ 100ms để hệ thống render cập nhật giao diện (ẩn nút nổi hoàn toàn trên desktop)
-        await Task.Delay(100);
+        bool isContinuous = _configService.GetValue<bool>("Translation:Continuous");
+        
+        // Chỉ ẩn nút nổi nếu không ở chế độ dịch liên tục
+        if (!isContinuous)
+        {
+            Hide();
+            // Chờ 100ms để hệ thống render cập nhật giao diện (ẩn nút nổi hoàn toàn trên desktop)
+            await Task.Delay(100);
+        }
 
         try
         {
             var workItem = await _pipelineRuntime.TriggerExecutionAsync();
 
-            if (workItem.Status == WorkItemStatus.Completed && workItem.OcrResult is OcrResultInfo ocrResult)
+            if (workItem.Status == WorkItemStatus.Completed && workItem.OcrResult is OcrResultInfo ocrResult && ocrResult.Lines.Count > 0)
             {
+                // Đóng Overlay cũ trước khi mở Overlay mới
+                _activeOverlay?.Close();
+
+                // Đọc cấu hình thời gian hiển thị
+                var duration = _configService.GetValue<int>("Translation:OverlayDuration");
+                if (duration == 0) duration = 8; // Mặc định 8 giây nếu chưa cấu hình
+
                 // Mở cửa sổ Overlay hiển thị chữ đè lên màn hình
-                var overlay = new TranslationOverlayWindow();
-                overlay.RenderTranslations(ocrResult.Lines);
-                overlay.Show();
+                _activeOverlay = new TranslationOverlayWindow(duration);
+                _activeOverlay.RenderTranslations(ocrResult.Lines);
+                _activeOverlay.Show();
             }
             else if (workItem.Status == WorkItemStatus.Completed)
             {
                 _logger.LogInfo("[FloatingBubble] Dịch xong nhưng không phát hiện chữ nào.");
+                // Tự động đóng overlay cũ khi không còn chữ
+                _activeOverlay?.Close();
+                _activeOverlay = null;
             }
         }
         catch (Exception ex)
@@ -182,8 +213,11 @@ public partial class FloatingBubbleWindow : Window
         }
         finally
         {
-            // Trở lại hiển thị nút nổi sau khi chụp/dịch xong
-            Show();
+            // Trở lại hiển thị nút nổi nếu đã ẩn
+            if (!isContinuous)
+            {
+                Show();
+            }
             BubbleBorder.BorderBrush = new SolidColorBrush(Colors.White);
         }
     }
@@ -218,9 +252,72 @@ public partial class FloatingBubbleWindow : Window
         var menu = new ContextMenu();
 
         // 1. Dịch màn hình
-        var itemTranslate = new MenuItem { Header = "⚡ Dịch Màn Kinh (Ctrl+Shift+T)" };
+        var itemTranslate = new MenuItem { Header = "⚡ Dịch Màn Hình (Ctrl+Shift+T)" };
         itemTranslate.Click += async (s, e) => await StartOverlayTranslationAsync();
         menu.Items.Add(itemTranslate);
+
+        // 1.5 Dịch gộp câu (MergeLines)
+        _itemMergeLines = new MenuItem();
+        UpdateMergeLinesMenuHeader();
+        _itemMergeLines.Click += (s, e) =>
+        {
+            var currentValue = _configService.GetValue<bool>("Translation:MergeLines");
+            _configService.UpdateValue("Translation:MergeLines", !currentValue);
+            UpdateMergeLinesMenuHeader();
+            _logger.LogInfo($"[FloatingBubble] Đã đổi chế độ dịch gộp câu thành: {!currentValue}.");
+        };
+        menu.Items.Add(_itemMergeLines);
+
+        // 1.6 Dịch liên tục (Continuous)
+        _itemContinuous = new MenuItem();
+        UpdateContinuousMenuHeader();
+        _itemContinuous.Click += (s, e) =>
+        {
+            var currentValue = _configService.GetValue<bool>("Translation:Continuous");
+            var newValue = !currentValue;
+            _configService.UpdateValue("Translation:Continuous", newValue);
+            UpdateContinuousMenuHeader();
+            _logger.LogInfo($"[FloatingBubble] Đã đổi chế độ dịch liên tục thành: {newValue}.");
+
+            if (newValue)
+            {
+                StartContinuousTranslation();
+            }
+            else
+            {
+                StopContinuousTranslation();
+            }
+        };
+        menu.Items.Add(_itemContinuous);
+
+        // 1.7 Thời gian hiển thị bản dịch (Submenu)
+        var itemDuration = new MenuItem { Header = "⏱️ Thời gian hiển thị bản dịch" };
+        var durations = new (int value, string label)[]
+        {
+            (5, "5 giây"),
+            (8, "8 giây (Mặc định)"),
+            (15, "15 giây"),
+            (30, "30 giây"),
+            (60, "60 giây"),
+            (-1, "Không tự tắt (Vô hạn)")
+        };
+
+        _durationMenuItems.Clear();
+        foreach (var dur in durations)
+        {
+            var item = new MenuItem { Header = dur.label, Tag = dur.value };
+            item.Click += (s, e) =>
+            {
+                var val = (int)((MenuItem)s!).Tag!;
+                _configService.UpdateValue("Translation:OverlayDuration", val);
+                UpdateDurationMenuHeaders();
+                _logger.LogInfo($"[FloatingBubble] Đã đổi thời gian hiển thị bản dịch thành: {val} giây.");
+            };
+            itemDuration.Items.Add(item);
+            _durationMenuItems.Add(item);
+        }
+        menu.Items.Add(itemDuration);
+        UpdateDurationMenuHeaders();
 
         menu.Items.Add(new Separator());
 
@@ -266,7 +363,102 @@ public partial class FloatingBubbleWindow : Window
         itemExit.Click += (s, e) => Close();
         menu.Items.Add(itemExit);
 
-        ContextMenu = menu;
+        BubbleBorder.ContextMenu = menu;
+    }
+
+    private void UpdateMergeLinesMenuHeader()
+    {
+        if (_itemMergeLines == null) return;
+        var mergeLines = _configService.GetValue<bool>("Translation:MergeLines");
+        if (mergeLines)
+        {
+            _itemMergeLines.Header = "✓ Dịch gộp câu (Không ngắt dòng)";
+        }
+        else
+        {
+            _itemMergeLines.Header = "   Dịch gộp câu (Không ngắt dòng)";
+        }
+    }
+
+    private void UpdateContinuousMenuHeader()
+    {
+        if (_itemContinuous == null) return;
+        var isContinuous = _configService.GetValue<bool>("Translation:Continuous");
+        if (isContinuous)
+        {
+            _itemContinuous.Header = "✓ Dịch liên tục (Tự động)";
+        }
+        else
+        {
+            _itemContinuous.Header = "   Dịch liên tục (Tự động)";
+        }
+    }
+
+    private void UpdateDurationMenuHeaders()
+    {
+        var currentDuration = _configService.GetValue<int>("Translation:OverlayDuration");
+        if (currentDuration == 0) currentDuration = 8;
+
+        foreach (var item in _durationMenuItems)
+        {
+            var val = (int)item.Tag!;
+            var label = val == 5 ? "5 giây" :
+                        val == 8 ? "8 giây (Mặc định)" :
+                        val == 15 ? "15 giây" :
+                        val == 30 ? "30 giây" :
+                        val == 60 ? "60 giây" :
+                        val == -1 ? "Không tự tắt (Vô hạn)" : "";
+
+            if (val == currentDuration)
+            {
+                item.Header = "✓ " + label;
+            }
+            else
+            {
+                item.Header = "   " + label;
+            }
+        }
+    }
+
+    private void StartContinuousTranslation()
+    {
+        StopContinuousTranslation();
+
+        _continuousCts = new CancellationTokenSource();
+        var token = _continuousCts.Token;
+
+        Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    await StartOverlayTranslationAsync();
+                });
+
+                var delayMs = _configService.GetValue<int>("Translation:ContinuousDelayMs");
+                if (delayMs <= 0) delayMs = 1000;
+
+                try
+                {
+                    await Task.Delay(delayMs, token);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+            }
+        }, token);
+    }
+
+    private void StopContinuousTranslation()
+    {
+        if (_continuousCts != null)
+        {
+            _continuousCts.Cancel();
+            _continuousCts.Dispose();
+            _continuousCts = null;
+        }
     }
 
     private void UpdateEngineMenuHeaders()

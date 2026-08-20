@@ -19,6 +19,7 @@ public class PipelineRuntimeTests
     private readonly MockLogger _mockLogger;
     private readonly MockTelemetry _mockTelemetry;
     private readonly ITextProcessorService _textProcessorService;
+    private readonly IConfigurationService _configService;
 
     private readonly FakeCaptureService _captureService;
     private readonly FakeRecognitionService _recognitionService;
@@ -31,6 +32,7 @@ public class PipelineRuntimeTests
         _mockLogger = new MockLogger();
         _mockTelemetry = new MockTelemetry();
         _textProcessorService = new TextProcessorService();
+        _configService = new FakeConfigService();
 
         _captureService = new FakeCaptureService();
         _recognitionService = new FakeRecognitionService();
@@ -54,7 +56,8 @@ public class PipelineRuntimeTests
             _presentationService,
             _artifactStore,
             _mockLogger,
-            _mockTelemetry
+            _mockTelemetry,
+            _configService
         );
 
         var statusHistory = new List<WorkItemStatus>();
@@ -104,7 +107,8 @@ public class PipelineRuntimeTests
             _presentationService,
             _artifactStore,
             _mockLogger,
-            _mockTelemetry
+            _mockTelemetry,
+            _configService
         );
 
         // Act
@@ -135,7 +139,8 @@ public class PipelineRuntimeTests
             _presentationService,
             _artifactStore,
             _mockLogger,
-            _mockTelemetry
+            _mockTelemetry,
+            _configService
         );
 
         // Act
@@ -167,7 +172,8 @@ public class PipelineRuntimeTests
             _presentationService,
             _artifactStore,
             _mockLogger,
-            _mockTelemetry
+            _mockTelemetry,
+            _configService
         );
 
         // Act
@@ -190,6 +196,61 @@ public class PipelineRuntimeTests
         
         Assert.Equal(WorkItemStatus.Completed, res2.Status); // Tác vụ 2 hoàn tất thành công
         Assert.Equal("Xin chào", res2.TranslatedText);
+    }
+
+    [Fact]
+    public void GroupLinesIntoBlocks_ShouldGroupCloseLines_AndKeepFarLinesSeparate()
+    {
+        // Arrange
+        var runtime = new PipelineRuntime(
+            _captureService,
+            _recognitionService,
+            _textProcessorService,
+            _translationService,
+            _presentationService,
+            _artifactStore,
+            _mockLogger,
+            _mockTelemetry,
+            _configService
+        );
+
+        // Bubble 1 (two lines very close vertically and overlapping horizontally)
+        var line1 = new OcrLineInfo("Hello", 100, 100, 80, 20);
+        var line2 = new OcrLineInfo("World", 100, 125, 75, 20);
+
+        // Bubble 2 (far away horizontally)
+        var line3 = new OcrLineInfo("Separate", 500, 100, 80, 20);
+
+        var lines = new List<OcrLineInfo> { line1, line2, line3 };
+
+        // Act
+        var blocks = runtime.GroupLinesIntoBlocks(lines);
+
+        // Assert
+        // We expect 2 blocks:
+        // Block 1: Hello World (contains line1 and line2)
+        // Block 2: Separate (contains line3)
+        Assert.Equal(2, blocks.Count);
+
+        var block1 = blocks.FirstOrDefault(b => b.Text.Contains("Hello"));
+        var block2 = blocks.FirstOrDefault(b => b.Text.Contains("Separate"));
+
+        Assert.NotNull(block1);
+        Assert.NotNull(block2);
+
+        // Check merged properties for block1
+        Assert.Equal("Hello World", block1.Text);
+        Assert.Equal(100, block1.X);
+        Assert.Equal(100, block1.Y);
+        Assert.Equal(80, block1.Width); // max(100+80, 100+75) - 100 = 80
+        Assert.Equal(45, block1.Height); // max(100+20, 125+20) - 100 = 145 - 100 = 45
+
+        // Check block2 properties (should remain identical to line3)
+        Assert.Equal("Separate", block2.Text);
+        Assert.Equal(500, block2.X);
+        Assert.Equal(100, block2.Y);
+        Assert.Equal(80, block2.Width);
+        Assert.Equal(20, block2.Height);
     }
 
     // Các class Mock/Fake phục vụ Test
@@ -275,5 +336,21 @@ public class PipelineRuntimeTests
             public DummyTraceSpan(string name) => Name = name;
             public void Dispose() { }
         }
+    }
+
+    private class FakeConfigService : IConfigurationService
+    {
+        public T? GetValue<T>(string key)
+        {
+            if (key == "Translation:MergeLines")
+            {
+                return (T)(object)false;
+            }
+            return default;
+        }
+
+        public T GetSection<T>(string sectionName) where T : class, new() => new();
+        public void Reload() { }
+        public void UpdateValue(string key, object value) { }
     }
 }

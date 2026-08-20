@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +21,7 @@ public class PipelineRuntime : IPipelineRuntime
     private readonly IArtifactStore _artifactStore;
     private readonly IStructuredLogger _logger;
     private readonly ITelemetryService _telemetry;
+    private readonly IConfigurationService _configService;
     
     private readonly object _runLock = new();
     private CancellationTokenSource? _activeCts;
@@ -34,7 +36,8 @@ public class PipelineRuntime : IPipelineRuntime
         IPresentationService presentationService,
         IArtifactStore artifactStore,
         IStructuredLogger logger,
-        ITelemetryService telemetry)
+        ITelemetryService telemetry,
+        IConfigurationService configService)
     {
         _captureService = captureService;
         _recognitionService = recognitionService;
@@ -44,6 +47,7 @@ public class PipelineRuntime : IPipelineRuntime
         _artifactStore = artifactStore;
         _logger = logger;
         _telemetry = telemetry;
+        _configService = configService;
     }
 
     public async Task<WorkItem> TriggerExecutionAsync(CancellationToken cancellationToken = default)
@@ -121,26 +125,54 @@ public class PipelineRuntime : IPipelineRuntime
             // 3. Translation Step
             UpdateStatus(workItem, WorkItemStatus.Translating);
             
-            // Dịch song song từng dòng chữ để đảm bảo tốc độ cực đại (phục vụ vẽ đè Overlay lên màn hình)
-            using (var span = _telemetry.StartTrace("Pipeline_Translation"))
+            bool mergeLines = _configService.GetValue<bool>("Translation:MergeLines");
+            if (mergeLines)
             {
-                var translateTasks = ocrResult.Lines.Select(async line =>
-                {
-                    if (string.IsNullOrWhiteSpace(line.Text)) return;
-                    try
-                    {
-                        // Chuẩn hóa dòng text trước khi gửi dịch
-                        var normalizedLine = _textProcessorService.NormalizeText(line.Text);
-                        line.TranslatedText = await _translationService.TranslateTextAsync(normalizedLine, token);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning($"[PipelineRuntime] Lỗi dịch dòng '{line.Text}': {ex.Message}");
-                        line.TranslatedText = "[Lỗi dịch]";
-                    }
-                });
+                var blocks = GroupLinesIntoBlocks(ocrResult.Lines);
 
-                await Task.WhenAll(translateTasks);
+                using (var span = _telemetry.StartTrace("Pipeline_Translation"))
+                {
+                    var translateTasks = blocks.Select(async block =>
+                    {
+                        if (string.IsNullOrWhiteSpace(block.Text)) return;
+                        try
+                        {
+                            var normalizedBlockText = _textProcessorService.NormalizeText(block.Text);
+                            block.TranslatedText = await _translationService.TranslateTextAsync(normalizedBlockText, token);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning($"[PipelineRuntime] Lỗi dịch khối '{block.Text}': {ex.Message}");
+                            block.TranslatedText = "[Lỗi dịch]";
+                        }
+                    });
+
+                    await Task.WhenAll(translateTasks);
+                }
+
+                ocrResult.Lines = blocks;
+            }
+            else
+            {
+                using (var span = _telemetry.StartTrace("Pipeline_Translation"))
+                {
+                    var translateTasks = ocrResult.Lines.Select(async line =>
+                    {
+                        if (string.IsNullOrWhiteSpace(line.Text)) return;
+                        try
+                        {
+                            var normalizedLine = _textProcessorService.NormalizeText(line.Text);
+                            line.TranslatedText = await _translationService.TranslateTextAsync(normalizedLine, token);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning($"[PipelineRuntime] Lỗi dịch dòng '{line.Text}': {ex.Message}");
+                            line.TranslatedText = "[Lỗi dịch]";
+                        }
+                    });
+
+                    await Task.WhenAll(translateTasks);
+                }
             }
 
             // Tạo chuỗi dịch toàn cục ghép lại từ các dòng đã dịch
@@ -236,5 +268,92 @@ public class PipelineRuntime : IPipelineRuntime
         {
             _logger.LogWarning($"[PipelineRuntime] Không thể xóa file tạm '{path}': {ex.Message}");
         }
+    }
+
+    public List<OcrLineInfo> GroupLinesIntoBlocks(List<OcrLineInfo> lines)
+    {
+        if (lines == null || lines.Count == 0) return new List<OcrLineInfo>();
+
+        int n = lines.Count;
+        var adj = new List<int>[n];
+        for (int i = 0; i < n; i++) adj[i] = new List<int>();
+
+        for (int i = 0; i < n; i++)
+        {
+            for (int j = i + 1; j < n; j++)
+            {
+                if (AreLinesClose(lines[i], lines[j]))
+                {
+                    adj[i].Add(j);
+                    adj[j].Add(i);
+                }
+            }
+        }
+
+        var visited = new bool[n];
+        var blocks = new List<OcrLineInfo>();
+
+        for (int i = 0; i < n; i++)
+        {
+            if (!visited[i])
+            {
+                var componentIndices = new List<int>();
+                var queue = new Queue<int>();
+                queue.Enqueue(i);
+                visited[i] = true;
+
+                while (queue.Count > 0)
+                {
+                    int u = queue.Dequeue();
+                    componentIndices.Add(u);
+
+                    foreach (int v in adj[u])
+                    {
+                        if (!visited[v])
+                        {
+                            visited[v] = true;
+                            queue.Enqueue(v);
+                        }
+                    }
+                }
+
+                var componentLines = componentIndices.Select(idx => lines[idx]).ToList();
+                var sortedComponentLines = componentLines
+                    .OrderBy(l => l.Y)
+                    .ThenBy(l => l.X)
+                    .ToList();
+
+                double minX = sortedComponentLines.Min(l => l.X);
+                double minY = sortedComponentLines.Min(l => l.Y);
+                double maxX = sortedComponentLines.Max(l => l.X + l.Width);
+                double maxY = sortedComponentLines.Max(l => l.Y + l.Height);
+
+                var mergedText = string.Join(" ", sortedComponentLines.Select(l => l.Text));
+
+                blocks.Add(new OcrLineInfo(mergedText, minX, minY, maxX - minX, maxY - minY));
+            }
+        }
+
+        return blocks;
+    }
+
+    private bool AreLinesClose(OcrLineInfo a, OcrLineInfo b)
+    {
+        double aBottom = a.Y + a.Height;
+        double bBottom = b.Y + b.Height;
+        double verticalGap = Math.Max(a.Y, b.Y) - Math.Min(aBottom, bBottom);
+
+        double aRight = a.X + a.Width;
+        double bRight = b.X + b.Width;
+        double horizontalGap = Math.Max(a.X, b.X) - Math.Min(aRight, bRight);
+
+        double maxHeight = Math.Max(a.Height, b.Height);
+        double maxVerticalGap = maxHeight * 2.0;
+        double maxHorizontalGap = maxHeight * 4.0;
+
+        bool isVerticallyClose = verticalGap <= maxVerticalGap;
+        bool isHorizontallyClose = horizontalGap <= maxHorizontalGap;
+
+        return isVerticallyClose && isHorizontallyClose;
     }
 }

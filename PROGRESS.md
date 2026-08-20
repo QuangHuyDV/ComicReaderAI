@@ -42,6 +42,11 @@
   - [x] **Presentation & UI (Phase 9):** Thiết kế Side Panel Dark Theme sang trọng trong `MainWindow.axaml`, tự động right-docking, tích hợp phím tắt Ctrl+Shift+T qua WndProc hook. Tích hợp DI và MVVM sạch sẽ.
 - **Phase 10 — Storage, Diagnostics & Polish:**
   - [x] **Storage Module Caching (Bước 10.1 - 10.2):** Định nghĩa `ITranslationCache` và triển khai `SqliteTranslationCache` sử dụng SQLite cục bộ giúp lưu trữ và truy xuất siêu tốc các bản dịch cũ, loại bỏ 100% cuộc gọi API dịch trùng lặp. Đầy đủ 4 unit tests passed 100%.
+- **Cải tiến & Sửa lỗi nâng cao (Tháng 8/2026):**
+  - [x] **Sửa lỗi Menu chuột phải (ContextMenu)**: Khắc phục sự cố xung đột bằng cách gán và mở trực tiếp menu cài đặt trên `BubbleBorder` của [FloatingBubbleWindow](file:///f:/mydata/myproject/ComicReaderAI/src/Crai.Desktop/Views/FloatingBubbleWindow.axaml.cs).
+  - [x] **Dịch gộp câu (MergeLines)**: Triển khai thuật toán gom nhóm dòng (line grouping) dựa trên khoảng cách hình học để hợp nhất các dòng chữ trong bóng thoại, dịch toàn bộ câu mượt mà và vẽ đè một khung dịch duy nhất.
+  - [x] **Chỉnh thời gian hiển thị & Dịch liên tục**: Cho phép chỉnh thời gian hiển thị bản dịch (5s, 8s, 15s, 30s, 60s, Vô hạn) và thêm chế độ tự động dịch liên tục (Continuous mode) sau mỗi 1s mà không làm nhấp nháy nút nổi.
+  - [x] **Đồng bộ cấu hình**: Mở rộng [IConfigurationService](file:///f:/mydata/myproject/ComicReaderAI/src/Crai.Application/Contracts/Infrastructure/IConfigurationService.cs) hỗ trợ cập nhật và lưu động các tuỳ chọn người dùng xuống file `appsettings.json`.
 
 ---
 

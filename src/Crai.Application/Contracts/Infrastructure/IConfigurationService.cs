@@ -18,4 +18,9 @@ public interface IConfigurationService
     /// Ép buộc nạp lại cấu hình từ disk.
     /// </summary>
     void Reload();
+
+    /// <summary>
+    /// Cập nhật giá trị cấu hình theo key và ghi xuống disk.
+    /// </summary>
+    void UpdateValue(string key, object value);
 }

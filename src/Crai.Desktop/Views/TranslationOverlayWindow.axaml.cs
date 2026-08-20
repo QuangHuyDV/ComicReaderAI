@@ -14,21 +14,26 @@ public partial class TranslationOverlayWindow : Window
 {
     private readonly DispatcherTimer _autoDismissTimer;
 
-    public TranslationOverlayWindow()
+    public TranslationOverlayWindow(int durationSeconds)
     {
         InitializeComponent();
 
-        // 1. Tự động đóng sau 8 giây để không cản trở sử dụng
-        _autoDismissTimer = new DispatcherTimer
+        _autoDismissTimer = new DispatcherTimer();
+
+        if (durationSeconds > 0)
         {
-            Interval = TimeSpan.FromSeconds(8)
-        };
-        _autoDismissTimer.Tick += (s, e) =>
-        {
-            _autoDismissTimer.Stop();
-            Close();
-        };
-        _autoDismissTimer.Start();
+            _autoDismissTimer.Interval = TimeSpan.FromSeconds(durationSeconds);
+            _autoDismissTimer.Tick += (s, e) =>
+            {
+                _autoDismissTimer.Stop();
+                Close();
+            };
+            _autoDismissTimer.Start();
+        }
+    }
+
+    public TranslationOverlayWindow() : this(8)
+    {
     }
 
     public void RenderTranslations(List<OcrLineInfo> lines)
