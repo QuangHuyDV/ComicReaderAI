@@ -7,6 +7,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Microsoft.Extensions.DependencyInjection;
 using Crai.Application.Contracts.Runtime;
@@ -14,6 +15,7 @@ using Crai.Application.Contracts.Services;
 using Crai.Application.Contracts.Infrastructure;
 using Crai.Domain.Runtime;
 using Crai.Desktop.Feasibility;
+using Crai.Desktop.ViewModels;
 using Crai.Modules.Translation.Services;
 
 namespace Crai.Desktop.Views;
@@ -33,6 +35,8 @@ public partial class FloatingBubbleWindow : Window
     private MenuItem? _itemMergeLines;
     private MenuItem? _itemContinuous;
     private readonly List<MenuItem> _durationMenuItems = new();
+    private readonly List<MenuItem> _presentationModeMenuItems = new();
+    private MainWindow? _sidePanel;
     private TranslationOverlayWindow? _activeOverlay;
     private CancellationTokenSource? _continuousCts;
 
@@ -56,6 +60,22 @@ public partial class FloatingBubbleWindow : Window
         // Đăng ký sự kiện cập nhật trạng thái
         _pipelineRuntime.WorkItemUpdated += OnWorkItemUpdated;
 
+        // Di chuyển Gemini API Key từ cấu hình thô sang Secret Manager an toàn (nếu có)
+        var configKey = _configService.GetValue<string>("Translation:GeminiApiKey");
+        if (!string.IsNullOrWhiteSpace(configKey))
+        {
+            try
+            {
+                _secretManager.StoreSecret("GeminiApiKey", configKey);
+                _configService.UpdateValue("Translation:GeminiApiKey", "");
+                _logger.LogInfo("[SecretManager] Đã mã hóa và di chuyển thành công GeminiApiKey từ appsettings.json vào Windows DPAPI Secret Manager.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"[SecretManager] Lỗi di chuyển GeminiApiKey: {ex.Message}", ex);
+            }
+        }
+
         // Đăng ký phím tắt toàn cục Ctrl+Shift+T
         _hotkeyProto = new GlobalHotkeyProto(this);
         _hotkeyProto.HotkeyTriggered += async () => await StartOverlayTranslationAsync();
@@ -77,6 +97,12 @@ public partial class FloatingBubbleWindow : Window
         {
             StartContinuousTranslation();
         }
+
+        var presentationMode = _configService.GetValue<string>("Translation:PresentationMode") ?? "Overlay";
+        if (presentationMode.Equals("SidePanel", StringComparison.OrdinalIgnoreCase))
+        {
+            OpenSidePanel();
+        }
     }
 
     private void FloatingBubbleWindow_Closed(object? sender, EventArgs e)
@@ -88,6 +114,8 @@ public partial class FloatingBubbleWindow : Window
 
         _activeOverlay?.Close();
         _activeOverlay = null;
+
+        CloseSidePanel();
     }
 
     private void DockToRightCenter()
@@ -173,13 +201,17 @@ public partial class FloatingBubbleWindow : Window
         
         bool isContinuous = _configService.GetValue<bool>("Translation:Continuous");
         
-        // Chỉ ẩn nút nổi nếu không ở chế độ dịch liên tục
+        // 1. Ẩn nút nổi (nếu không ở chế độ dịch liên tục)
         if (!isContinuous)
         {
             Hide();
-            // Chờ 100ms để hệ thống render cập nhật giao diện (ẩn nút nổi hoàn toàn trên desktop)
-            await Task.Delay(100);
         }
+
+        // 2. Tạm ẩn overlay đang hiển thị để tránh tự chụp đè bản dịch cũ
+        _activeOverlay?.Hide();
+
+        // Chờ 120ms để hệ thống render cập nhật ẩn các window trên desktop
+        await Task.Delay(120);
 
         try
         {
@@ -187,17 +219,28 @@ public partial class FloatingBubbleWindow : Window
 
             if (workItem.Status == WorkItemStatus.Completed && workItem.OcrResult is OcrResultInfo ocrResult && ocrResult.Lines.Count > 0)
             {
-                // Đóng Overlay cũ trước khi mở Overlay mới
-                _activeOverlay?.Close();
+                var mode = _configService.GetValue<string>("Translation:PresentationMode") ?? "Overlay";
 
-                // Đọc cấu hình thời gian hiển thị
-                var duration = _configService.GetValue<int>("Translation:OverlayDuration");
-                if (duration == 0) duration = 8; // Mặc định 8 giây nếu chưa cấu hình
+                if (mode.Equals("SidePanel", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Bản dịch đã tự động được render bên trong Side Panel nhờ ViewModel binding
+                    _activeOverlay?.Close();
+                    _activeOverlay = null;
+                }
+                else
+                {
+                    // Đóng Overlay cũ trước khi mở Overlay mới
+                    _activeOverlay?.Close();
 
-                // Mở cửa sổ Overlay hiển thị chữ đè lên màn hình
-                _activeOverlay = new TranslationOverlayWindow(duration);
-                _activeOverlay.RenderTranslations(ocrResult.Lines);
-                _activeOverlay.Show();
+                    // Đọc cấu hình thời gian hiển thị
+                    var duration = _configService.GetValue<int>("Translation:OverlayDuration");
+                    if (duration == 0) duration = 8; // Mặc định 8 giây nếu chưa cấu hình
+
+                    // Mở cửa sổ Overlay hiển thị chữ đè lên màn hình
+                    _activeOverlay = new TranslationOverlayWindow(duration);
+                    _activeOverlay.RenderTranslations(ocrResult.Lines, mode.Equals("OverlayTranslucent", StringComparison.OrdinalIgnoreCase));
+                    _activeOverlay.Show();
+                }
             }
             else if (workItem.Status == WorkItemStatus.Completed)
             {
@@ -206,10 +249,17 @@ public partial class FloatingBubbleWindow : Window
                 _activeOverlay?.Close();
                 _activeOverlay = null;
             }
+            else
+            {
+                // Nếu pipeline thất bại, khôi phục hiển thị overlay cũ
+                _activeOverlay?.Show();
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError($"[FloatingBubble] Lỗi dịch màn hình: {ex.Message}", ex);
+            // Khôi phục hiển thị overlay cũ nếu gặp lỗi
+            _activeOverlay?.Show();
         }
         finally
         {
@@ -250,6 +300,17 @@ public partial class FloatingBubbleWindow : Window
     private void InitializeContextMenu()
     {
         var menu = new ContextMenu();
+
+        // 0. Đóng bản dịch đang hiển thị
+        var itemCloseOverlay = new MenuItem { Header = "✕ Đóng bản dịch đang hiển thị" };
+        itemCloseOverlay.Click += (s, e) =>
+        {
+            _activeOverlay?.Close();
+            _activeOverlay = null;
+        };
+        menu.Items.Add(itemCloseOverlay);
+
+        menu.Items.Add(new Separator());
 
         // 1. Dịch màn hình
         var itemTranslate = new MenuItem { Header = "⚡ Dịch Màn Hình (Ctrl+Shift+T)" };
@@ -318,6 +379,49 @@ public partial class FloatingBubbleWindow : Window
         }
         menu.Items.Add(itemDuration);
         UpdateDurationMenuHeaders();
+
+        // 1.8 Cấu hình Gemini API Key
+        var itemApiKey = new MenuItem { Header = "🔑 Cấu hình Gemini API Key..." };
+        itemApiKey.Click += async (s, e) =>
+        {
+            await PromptForGeminiApiKeyAsync();
+        };
+        menu.Items.Add(itemApiKey);
+
+        // 1.9 Kiểu hiển thị bản dịch (Submenu)
+        var itemPresentation = new MenuItem { Header = "👁️ Kiểu hiển thị bản dịch" };
+        var modes = new (string value, string label)[]
+        {
+            ("Overlay", "Dịch đè màn hình (Che 100%)"),
+            ("OverlayTranslucent", "Dịch đè màn hình (Nhìn xuyên nền)"),
+            ("SidePanel", "Bảng phụ bên cạnh (Side Panel)")
+        };
+
+        _presentationModeMenuItems.Clear();
+        foreach (var m in modes)
+        {
+            var item = new MenuItem { Header = m.label, Tag = m.value };
+            item.Click += (s, e) =>
+            {
+                var val = (string)((MenuItem)s!).Tag!;
+                _configService.UpdateValue("Translation:PresentationMode", val);
+                UpdatePresentationModeMenuHeaders();
+                _logger.LogInfo($"[FloatingBubble] Đã đổi kiểu hiển thị bản dịch thành: {val}.");
+
+                if (val.Equals("SidePanel", StringComparison.OrdinalIgnoreCase))
+                {
+                    OpenSidePanel();
+                }
+                else
+                {
+                    CloseSidePanel();
+                }
+            };
+            itemPresentation.Items.Add(item);
+            _presentationModeMenuItems.Add(item);
+        }
+        menu.Items.Add(itemPresentation);
+        UpdatePresentationModeMenuHeaders();
 
         menu.Items.Add(new Separator());
 
@@ -479,5 +583,157 @@ public partial class FloatingBubbleWindow : Window
             _itemGoogle.Header = "✓ Google Translate (Mặc định)";
             _itemGemini.Header = "   Gemini AI (Glossary)";
         }
+    }
+
+    private void UpdatePresentationModeMenuHeaders()
+    {
+        var currentMode = _configService.GetValue<string>("Translation:PresentationMode") ?? "Overlay";
+
+        foreach (var item in _presentationModeMenuItems)
+        {
+            var val = (string)item.Tag!;
+            var label = val == "Overlay" ? "Dịch đè màn hình (Che 100%)" :
+                        val == "OverlayTranslucent" ? "Dịch đè màn hình (Nhìn xuyên nền)" :
+                        val == "SidePanel" ? "Bảng phụ bên cạnh (Side Panel)" : "";
+
+            if (val.Equals(currentMode, StringComparison.OrdinalIgnoreCase))
+            {
+                item.Header = "✓ " + label;
+            }
+            else
+            {
+                item.Header = "   " + label;
+            }
+        }
+    }
+
+    private void OpenSidePanel()
+    {
+        if (_sidePanel == null)
+        {
+            var vm = CompositionRoot.ServiceProvider.GetRequiredService<MainViewModel>();
+            _sidePanel = new MainWindow(registerHotkey: false)
+            {
+                DataContext = vm
+            };
+            _sidePanel.Closed += (s, e) => _sidePanel = null;
+            _sidePanel.Show();
+        }
+        else
+        {
+            _sidePanel.Activate();
+        }
+    }
+
+    private void CloseSidePanel()
+    {
+        if (_sidePanel != null)
+        {
+            _sidePanel.Close();
+            _sidePanel = null;
+        }
+    }
+
+    private async Task PromptForGeminiApiKeyAsync()
+    {
+        var inputWindow = new Window
+        {
+            Title = "Cấu hình Gemini API Key",
+            Width = 450,
+            Height = 160,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            Topmost = true,
+            Background = new SolidColorBrush(Color.Parse("#1A1A1A")),
+            CanResize = false
+        };
+
+        var stackPanel = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 12
+        };
+
+        var label = new TextBlock
+        {
+            Text = "Nhập Gemini API Key của bạn (sẽ được mã hoá bảo mật):",
+            Foreground = Brushes.White,
+            FontSize = 13,
+            FontWeight = FontWeight.Medium
+        };
+
+        var textBox = new TextBox
+        {
+            PlaceholderText = "AIzaSy...",
+            PasswordChar = '*',
+            Text = _secretManager.GetSecret("GeminiApiKey") ?? "",
+            Foreground = Brushes.White,
+            Background = new SolidColorBrush(Color.Parse("#2D2D2D")),
+            BorderBrush = new SolidColorBrush(Color.Parse("#3D3D3D")),
+            Height = 32,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 10
+        };
+
+        var btnSave = new Button
+        {
+            Content = "Lưu lại",
+            Width = 90,
+            Height = 30,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.Parse("#007ACC")),
+            Foreground = Brushes.White,
+            Cursor = new Cursor(StandardCursorType.Hand)
+        };
+
+        var btnCancel = new Button
+        {
+            Content = "Hủy",
+            Width = 90,
+            Height = 30,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.Parse("#3D3D3D")),
+            Foreground = Brushes.White,
+            Cursor = new Cursor(StandardCursorType.Hand)
+        };
+
+        btnSave.Click += (s, e) =>
+        {
+            var key = textBox.Text?.Trim();
+            if (!string.IsNullOrEmpty(key))
+            {
+                _secretManager.StoreSecret("GeminiApiKey", key);
+                _logger.LogInfo("[FloatingBubble] Đã cập nhật Gemini API Key mới vào Windows DPAPI.");
+            }
+            else
+            {
+                _secretManager.RemoveSecret("GeminiApiKey");
+                _logger.LogInfo("[FloatingBubble] Đã xóa Gemini API Key khỏi Secret Manager.");
+            }
+            inputWindow.Close();
+        };
+
+        btnCancel.Click += (s, e) =>
+        {
+            inputWindow.Close();
+        };
+
+        buttonPanel.Children.Add(btnSave);
+        buttonPanel.Children.Add(btnCancel);
+
+        stackPanel.Children.Add(label);
+        stackPanel.Children.Add(textBox);
+        stackPanel.Children.Add(buttonPanel);
+
+        inputWindow.Content = stackPanel;
+
+        await inputWindow.ShowDialog(this);
     }
 }

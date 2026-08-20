@@ -47,6 +47,9 @@
   - [x] **Dịch gộp câu (MergeLines)**: Triển khai thuật toán gom nhóm dòng (line grouping) dựa trên khoảng cách hình học để hợp nhất các dòng chữ trong bóng thoại, dịch toàn bộ câu mượt mà và vẽ đè một khung dịch duy nhất.
   - [x] **Chỉnh thời gian hiển thị & Dịch liên tục**: Cho phép chỉnh thời gian hiển thị bản dịch (5s, 8s, 15s, 30s, 60s, Vô hạn) và thêm chế độ tự động dịch liên tục (Continuous mode) sau mỗi 1s mà không làm nhấp nháy nút nổi.
   - [x] **Đồng bộ cấu hình**: Mở rộng [IConfigurationService](file:///f:/mydata/myproject/ComicReaderAI/src/Crai.Application/Contracts/Infrastructure/IConfigurationService.cs) hỗ trợ cập nhật và lưu động các tuỳ chọn người dùng xuống file `appsettings.json`.
+  - [x] **Đa dạng hoá Kiểu hiển thị bản dịch**: Thêm 3 chế độ: Dịch đè che 100%, Dịch đè mờ (nhìn xuyên nền để tránh mất hình ảnh/artwork bên dưới), và Bảng phụ bên cạnh (Side Panel) song song. Tự động chuyển đổi và đóng/mở các Window tương ứng.
+  - [x] **Dịch đè xuyên thấu (Click-Through)**: Thiết lập thuộc tính cửa sổ `WS_EX_TRANSPARENT` cho `TranslationOverlayWindow` ở tầng Win32, cho phép cuộn trang, di chuột, click và tương tác 100% xuyên qua bản dịch xuống trình duyệt/ứng dụng đọc truyện phía dưới.
+  - [x] **Fix lỗi dịch tự động lặp lại (Continuous Translation)**: Tự động ẩn cửa sổ overlay cũ trước khi chụp màn hình và khôi phục sau khi chụp để tránh việc OCR chụp đè chính chữ đã dịch ở lượt trước.
 
 ---
 

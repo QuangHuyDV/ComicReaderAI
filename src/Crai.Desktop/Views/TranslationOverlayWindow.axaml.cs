@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -38,11 +39,25 @@ public partial class TranslationOverlayWindow : Window
 
     public void RenderTranslations(List<OcrLineInfo> lines)
     {
+        RenderTranslations(lines, false);
+    }
+
+    public void RenderTranslations(List<OcrLineInfo> lines, bool isTranslucent)
+    {
         OverlayCanvas.Children.Clear();
 
         // Lấy thông số DPI Scaling của màn hình chính để sửa lỗi lệch tọa độ
         var screen = Screens.Primary ?? Screens.All[0];
         double scaling = screen.Scaling;
+
+        // Chọn màu nền và viền dựa trên độ mờ mong muốn
+        var bgBrush = isTranslucent
+            ? new SolidColorBrush(Color.Parse("#A6121212")) // ~65% opacity để nhìn xuyên nền
+            : new SolidColorBrush(Color.Parse("#FF181818")); // 100% opacity đen đặc che hoàn toàn
+
+        var borderBrush = isTranslucent
+            ? new SolidColorBrush(Color.Parse("#882A2A2A")) // Viền mờ hơn
+            : new SolidColorBrush(Color.Parse("#FF2A2A2A"));
 
         foreach (var line in lines)
         {
@@ -59,13 +74,13 @@ public partial class TranslationOverlayWindow : Window
             double logicalHeight = line.Height / scaling;
 
             // Thiết kế nhãn dịch tự nhiên:
-            // - Nền đen đặc hoàn toàn (Opacity 100%) che chữ gốc phía sau tuyệt đối.
+            // - Nền đen đặc hoặc mờ để che chữ gốc
             // - Không dùng viền màu chói mắt, dùng viền mờ tối giản trùng màu nền.
             // - Padding khít giúp gọn gàng, tránh làm mất diện tích game/truyện.
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.Parse("#FF181818")), // Đen đặc che chữ gốc 100%
-                BorderBrush = new SolidColorBrush(Color.Parse("#FF2A2A2A")),  // Viền tối giản mờ trùng màu nền
+                Background = bgBrush,
+                BorderBrush = borderBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(6, 3),
@@ -94,16 +109,55 @@ public partial class TranslationOverlayWindow : Window
             OverlayCanvas.Children.Add(border);
         }
     }
-
-    private void OnBackgroundClicked(object? sender, PointerPressedEventArgs e)
+    protected override void OnOpened(EventArgs e)
     {
-        _autoDismissTimer.Stop();
-        Close();
+        base.OnOpened(e);
+
+        var platformHandle = TryGetPlatformHandle();
+        var hwnd = platformHandle?.Handle ?? IntPtr.Zero;
+        if (hwnd != IntPtr.Zero)
+        {
+            try
+            {
+                int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+                SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_TRANSPARENT | WS_EX_LAYERED);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Overlay] Lỗi thiết lập click-through: {ex.Message}");
+            }
+        }
     }
 
-    private void CloseButton_Click(object? sender, RoutedEventArgs e)
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+    private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+    private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    private static int GetWindowLong(IntPtr hWnd, int nIndex)
     {
-        _autoDismissTimer.Stop();
-        Close();
+        if (IntPtr.Size == 8)
+            return (int)GetWindowLongPtr64(hWnd, nIndex).ToInt64();
+        else
+            return GetWindowLong32(hWnd, nIndex);
     }
+
+    private static void SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong)
+    {
+        if (IntPtr.Size == 8)
+            SetWindowLongPtr64(hWnd, nIndex, new IntPtr(dwNewLong));
+        else
+            SetWindowLong32(hWnd, nIndex, dwNewLong);
+    }
+
+    private const int GWL_EXSTYLE = -20;
+    private const int WS_EX_TRANSPARENT = 0x00000020;
+    private const int WS_EX_LAYERED = 0x00080000;
 }

@@ -11,16 +11,23 @@ public partial class MainWindow : Window
 {
     private GlobalHotkeyProto? _hotkeyProto;
 
-    public MainWindow()
+    public MainWindow() : this(true)
+    {
+    }
+
+    public MainWindow(bool registerHotkey)
     {
         InitializeComponent();
 
         // Tự động Dock vào cạnh phải màn hình khi mở
         Opened += MainWindow_Opened;
 
-        // Đăng ký Global Hotkey Ctrl+Shift+T
-        _hotkeyProto = new GlobalHotkeyProto(this);
-        _hotkeyProto.HotkeyTriggered += OnHotkeyTriggered;
+        if (registerHotkey)
+        {
+            // Đăng ký Global Hotkey Ctrl+Shift+T
+            _hotkeyProto = new GlobalHotkeyProto(this);
+            _hotkeyProto.HotkeyTriggered += OnHotkeyTriggered;
+        }
 
         // Dọn dẹp hotkey khi đóng window
         Closed += MainWindow_Closed;

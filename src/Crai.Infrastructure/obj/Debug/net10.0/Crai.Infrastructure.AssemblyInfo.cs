@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Crai.Infrastructure")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0df346f118d18d4dabe0f6bebc4105ea0f48f107")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6de7d1fe9e3f97eaad8df29e5e98a935d4954bcb")]
 [assembly: System.Reflection.AssemblyProductAttribute("Crai.Infrastructure")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Crai.Infrastructure")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

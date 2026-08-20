@@ -141,7 +141,8 @@ public class ConfigurationService : IConfigurationService
     ""MergeLines"": true,
     ""OverlayDuration"": 8,
     ""Continuous"": false,
-    ""ContinuousDelayMs"": 1000
+    ""ContinuousDelayMs"": 1000,
+    ""PresentationMode"": ""Overlay""
   }
 }";
         try
