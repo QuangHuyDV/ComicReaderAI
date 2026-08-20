@@ -38,3 +38,9 @@ run-debug:
 
 run-release:
 	@dotnet run -p $(PROJECT_DIR) -c Release
+
+# Publish
+publish:
+	@dotnet publish $(PROJECT_DIR) -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -o ./app
+	@echo "Ung dung da duoc dong goi thanh cong tai thu muc ./app"
+

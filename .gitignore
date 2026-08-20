@@ -1,0 +1,34 @@
+# --- .NET Build Output ---
+[Bb]in/
+[Oo]bj/
+*.pdb
+*.suo
+*.user
+*.sln.docstates
+*.userosscache
+
+# --- CRAI Local App Assets & DB ---
+*.db
+*.db-journal
+*.log
+logs/
+secrets.dat
+appsettings.json
+/app/Crai.Desktop.exe
+/app/Crai.Desktop.pdb
+/app/*.pdb
+/app/appsettings.json
+/app/secrets.dat
+
+# --- IDEs / Editors ---
+.vs/
+.idea/
+.vscode/
+.agents/
+.gemini/
+*TestResults*
+
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+desktop.ini
