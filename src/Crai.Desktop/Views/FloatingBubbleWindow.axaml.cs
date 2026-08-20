@@ -44,6 +44,8 @@ public partial class FloatingBubbleWindow : Window
     private MainWindow? _sidePanel;
     private TranslationOverlayWindow? _activeOverlay;
     private CancellationTokenSource? _continuousCts;
+    private MenuItem? _itemDrawZones;
+    private MenuItem? _itemClearZones;
 
     // Các biến phục vụ drag-and-drop
     private bool _isDragging;
@@ -213,10 +215,14 @@ public partial class FloatingBubbleWindow : Window
         }
 
         // 2. Tạm ẩn overlay đang hiển thị để tránh tự chụp đè bản dịch cũ
-        _activeOverlay?.Hide();
+        if (_activeOverlay != null)
+        {
+            _activeOverlay.Opacity = 0;
+            _activeOverlay.Hide();
+        }
 
-        // Chờ 120ms để hệ thống render cập nhật ẩn các window trên desktop
-        await Task.Delay(120);
+        // Chờ 350ms để hệ thống render cập nhật ẩn các window trên desktop
+        await Task.Delay(350);
 
         try
         {
@@ -244,6 +250,7 @@ public partial class FloatingBubbleWindow : Window
                     // Mở cửa sổ Overlay hiển thị chữ đè lên màn hình
                     _activeOverlay = new TranslationOverlayWindow(duration);
                     _activeOverlay.RenderTranslations(ocrResult.Lines, mode.Equals("OverlayTranslucent", StringComparison.OrdinalIgnoreCase));
+                    _activeOverlay.Opacity = 1;
                     _activeOverlay.Show();
                 }
             }
@@ -257,14 +264,22 @@ public partial class FloatingBubbleWindow : Window
             else
             {
                 // Nếu pipeline thất bại, khôi phục hiển thị overlay cũ
-                _activeOverlay?.Show();
+                if (_activeOverlay != null)
+                {
+                    _activeOverlay.Opacity = 1;
+                    _activeOverlay.Show();
+                }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError($"[FloatingBubble] Lỗi dịch màn hình: {ex.Message}", ex);
             // Khôi phục hiển thị overlay cũ nếu gặp lỗi
-            _activeOverlay?.Show();
+            if (_activeOverlay != null)
+            {
+                _activeOverlay.Opacity = 1;
+                _activeOverlay.Show();
+            }
         }
         finally
         {
@@ -518,6 +533,34 @@ public partial class FloatingBubbleWindow : Window
         }
         menu.Items.Add(itemPresentation);
         UpdatePresentationModeMenuHeaders();
+
+        // 1.9.5 Vùng dịch thuật chỉ định (Submenu)
+        var itemZoneSettings = new MenuItem { Header = "🎯 Vùng dịch chỉ định" };
+
+        _itemDrawZones = new MenuItem { Header = "✏️ Vẽ vùng dịch trên màn hình..." };
+        _itemDrawZones.Click += (s, e) =>
+        {
+            var zoneWindow = new ZoneSelectionWindow();
+            zoneWindow.Show();
+        };
+        itemZoneSettings.Items.Add(_itemDrawZones);
+
+        _itemClearZones = new MenuItem();
+        UpdateClearZonesHeader();
+        _itemClearZones.Click += (s, e) =>
+        {
+            TranslationZoneManager.ActiveZones.Clear();
+            UpdateClearZonesHeader();
+            _logger.LogInfo("[FloatingBubble] Đã xóa toàn bộ vùng dịch chỉ định.");
+        };
+        itemZoneSettings.Items.Add(_itemClearZones);
+
+        menu.Items.Add(itemZoneSettings);
+
+        menu.Opened += (s, e) =>
+        {
+            UpdateClearZonesHeader();
+        };
 
         menu.Items.Add(new Separator());
 
@@ -1172,5 +1215,20 @@ public partial class FloatingBubbleWindow : Window
         inputWindow.Content = stackPanel;
 
         await inputWindow.ShowDialog(this);
+    }
+
+    private void UpdateClearZonesHeader()
+    {
+        if (_itemClearZones == null) return;
+        if (TranslationZoneManager.HasActiveZones)
+        {
+            _itemClearZones.Header = $"❌ Xóa vùng chỉ định ({TranslationZoneManager.ActiveZones.Count})";
+            _itemClearZones.IsEnabled = true;
+        }
+        else
+        {
+            _itemClearZones.Header = "❌ Xóa vùng chỉ định (Trống)";
+            _itemClearZones.IsEnabled = false;
+        }
     }
 }

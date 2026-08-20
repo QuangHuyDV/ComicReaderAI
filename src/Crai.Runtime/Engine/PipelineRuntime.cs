@@ -105,6 +105,33 @@ public class PipelineRuntime : IPipelineRuntime
             }
             UpdateStatus(workItem, WorkItemStatus.Recognized);
 
+            // Lọc các dòng nằm ngoài vùng chọn (nếu có cấu hình vùng dịch)
+            if (TranslationZoneManager.HasActiveZones)
+            {
+                var filteredLines = new List<OcrLineInfo>();
+                foreach (var line in ocrResult.Lines)
+                {
+                    double cx = line.X + line.Width / 2;
+                    double cy = line.Y + line.Height / 2;
+                    
+                    bool isInside = false;
+                    foreach (var zone in TranslationZoneManager.ActiveZones)
+                    {
+                        if (zone.Contains(cx, cy))
+                        {
+                            isInside = true;
+                            break;
+                        }
+                    }
+                    if (isInside)
+                    {
+                        filteredLines.Add(line);
+                    }
+                }
+                ocrResult.Lines = filteredLines;
+                ocrResult.FullText = string.Join("\n", filteredLines.Select(l => l.Text));
+            }
+
             // Xử lý chuẩn hóa text (Text Processing) trước khi dịch thuật
             var normalizedText = _textProcessorService.NormalizeText(ocrResult.FullText);
             workItem.RawText = normalizedText;

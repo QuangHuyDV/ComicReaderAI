@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Crai.Platform.Windows")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e8130efe56d1b7d54e00bfe4ed0bae476dd4f754")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+72b91e5ef88d195d5bd2ff9c708d653de1e483e1")]
 [assembly: System.Reflection.AssemblyProductAttribute("Crai.Platform.Windows")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Crai.Platform.Windows")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

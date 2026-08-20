@@ -1,0 +1,38 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        x:Class="Crai.Desktop.Views.ZoneSelectionWindow"
+        Title="Thiết lập vùng dịch thuật"
+        WindowState="Maximized"
+        WindowDecorations="None"
+        Topmost="True"
+        Background="#80000000"
+        TransparencyLevelHint="Transparent"
+        ShowInTaskbar="False"
+        PointerPressed="OnPointerPressed"
+        PointerMoved="OnPointerMoved"
+        PointerReleased="OnPointerReleased">
+
+    <Grid RowDefinitions="Auto, *">
+        <!-- Panel điều khiển phía trên -->
+        <Border Grid.Row="0" Background="#FF1A1A1A" BorderBrush="#FF2D2D2D" BorderThickness="0,0,0,1" Padding="15,10">
+            <Grid ColumnDefinitions="*, Auto">
+                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <TextBlock Text="🎯 CHE DO VE VUNG DICH" Foreground="#FF007ACC" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Text="|" Foreground="#FF3D3D3D" FontSize="14" VerticalAlignment="Center"/>
+                    <TextBlock Text="Hay keo chuot tren man hinh de ve cac khung chon. Chi dich chu nam trong khung." Foreground="#FFE0E0E0" FontSize="13" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                    <Button Content="💾 Luu &amp; Ap dung" Click="OnSaveClick" Background="#FF007ACC" Foreground="White" Padding="15,6" CornerRadius="4" Cursor="Hand"/>
+                    <Button Content="🗑️ Xoa tat ca" Click="OnClearClick" Background="#FF7A1A1A" Foreground="White" Padding="15,6" CornerRadius="4" Cursor="Hand"/>
+                    <Button Content="❌ Huy bo" Click="OnCancelClick" Background="#FF3D3D3D" Foreground="White" Padding="15,6" CornerRadius="4" Cursor="Hand"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Canvas hiển thị và vẽ các khung -->
+        <Canvas Grid.Row="1" Name="SelectionCanvas" Background="Transparent" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+    </Grid>
+</Window>
